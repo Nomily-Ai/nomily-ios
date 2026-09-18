@@ -1,0 +1,587 @@
+/* 简体中文本地化 */
+
+/* 通用 */
+"common.done" = "完成";
+"common.cancel" = "取消";
+"common.ok" = "好";
+"common.delete" = "删除";
+"common.save" = "保存";
+"common.retry" = "重试";
+"common.close" = "关闭";
+"common.open_settings" = "打开设置";
+"common.try_again" = "再试一次";
+"common.none" = "无";
+"common.recording" = "录音中";
+"common.keep_foreground" = "请保持此页面在前台 — 切换到其他 App 将中断传输（无法断点续传）";
+
+/* 标签栏 */
+"tab.recordings" = "录音";
+"tab.live" = "实时";
+"tab.settings" = "设置";
+
+/* 设置 */
+"settings.asr_providers" = "语音识别服务";
+"settings.llm_providers" = "大语言模型服务";
+"settings.recordings" = "录音与传输";
+"settings.summarize_templates" = "摘要模板";
+"settings.devices_library" = "设备与资料库";
+"settings.about" = "关于";
+"settings.version" = "版本";
+
+/* 语音识别 */
+"asr.transcription" = "语音转文字";
+"asr.active_provider" = "当前服务";
+"asr.auto_transcribe_after_download" = "下载后自动转录";
+"asr.auto_transcribe_min" = "最短时长：%d 秒";
+"asr.auto_transcribe_footer" = "下载完成后自动运行转录。短于最小时长的片段将被跳过。如已配置，另一个服务会作为备用方案自动启用。";
+"asr.local_vad" = "上传前去除静音";
+"asr.local_vad_footer" = "在本机上检测人声活动，将静音段去掉后再发送到转录服务，可降低上传量和转录费用。";
+"asr.azure_speech" = "Azure Speech";
+"asr.azure_purpose_footer" = "Azure Speech 用于录音转文字、实时转录和实时翻译。需使用你自己的 Azure 密钥，音频会发送至 Microsoft 处理，可能产生费用。AI 摘要不由它生成，摘要使用另行配置的 LLM 服务。";
+"asr.local_server" = "本地语音识别服务器";
+"asr.subscription_key" = "订阅密钥";
+"asr.region" = "区域";
+"asr.host" = "主机";
+"asr.port" = "端口";
+"asr.no_provider" = "未配置语音识别服务";
+"asr.no_provider_message" = "请在设置中配置语音识别服务（Azure 或本地服务器）。";
+"asr.azure" = "Azure";
+"asr.local_server_label" = "本地服务器";
+"asr.transcribe_auto" = "自动检测语言";
+"asr.specify_languages" = "指定语言…";
+"asr.languages_footer" = "Azure 会对每一句单独识别语言，而非整段音频——特别适合多语种混合的会议。";
+"asr.max_languages_hint" = "最多 %d 种语言";
+
+/* 大语言模型 */
+"llm.active_provider_footer" = "主要服务用于摘要生成及其他大语言模型任务。";
+"llm.api_key" = "API 密钥";
+"llm.model" = "模型";
+"llm.select_model" = "选择模型";
+"llm.model_placeholder" = "模型 — 例如 %@";
+"llm.endpoint_url" = "接口地址";
+"llm.provider_placeholder" = "服务 — 例如 %@";
+"llm.api_key_optional" = "API 密钥（可选）";
+"llm.no_provider" = "未配置大语言模型服务";
+"llm.no_provider_message" = "请先配置大语言模型服务并选择当前使用的服务。";
+
+/* Azure 设置指南 */
+"azure_guide.title" = "Azure Speech 设置";
+"azure_guide.step" = "第 %d 步：%@";
+"azure_guide.step1_title" = "创建 Azure 帐户";
+"azure_guide.step1_item1" = "前往 portal.azure.com";
+"azure_guide.step1_item2" = "如果没有帐户，可注册免费帐户（含 30 天 200 美元额度）";
+"azure_guide.step2_title" = "创建语音资源";
+"azure_guide.step2_item1" = "在 Azure 门户中，点击\"创建资源\"";
+"azure_guide.step2_item2" = "搜索\"Speech\"并选择 Speech（由 Microsoft 提供）";
+"azure_guide.step2_item3" = "点击\"创建\"";
+"azure_guide.step2_item4" = "选择支持快速转录的区域（如 westus3、eastus、eastasia）";
+"azure_guide.step2_item5" = "定价层：F0（免费）适合测试，S0（标准）适合生产环境";
+"azure_guide.step2_item6" = "点击\"审阅 + 创建\"，然后点击\"创建\"";
+"azure_guide.step3_title" = "获取 API 密钥和区域";
+"azure_guide.step3_item1" = "在门户中找到您的语音资源";
+"azure_guide.step3_item2" = "点击侧边栏中的\"密钥和终结点\"";
+"azure_guide.step3_item3" = "复制密钥 1（或密钥 2）和区域（如 westus3）";
+"azure_guide.free_tier_title" = "免费层限制 (F0)";
+"azure_guide.fast_transcription" = "快速转录";
+"azure_guide.fast_transcription_value" = "每月 5 小时";
+"azure_guide.realtime_transcription" = "实时转录";
+"azure_guide.realtime_transcription_value" = "1 个并发请求";
+"azure_guide.speaker_diarization" = "说话人分离";
+"azure_guide.speaker_diarization_value" = "已包含";
+"azure_guide.audio_formats" = "音频格式";
+"azure_guide.audio_formats_value" = "WAV、OGG/Opus、MP3、FLAC";
+
+/* 录音设置 */
+"rec_settings.delete_after_transfer" = "传输后从设备删除";
+"rec_settings.delete_after_transfer_footer" = "开启后，BLE 传输和解密完成后将自动从设备删除文件。";
+"rec_settings.decryption" = "解密";
+"rec_settings.chacha_key" = "ChaCha20 密钥（十六进制）";
+"rec_settings.chacha_key_footer" = "64 个十六进制字符（32 字节）。如设备未启用加密，请留空。";
+"rec_settings.wifi_ap" = "Wi-Fi AP（快速传输）";
+"rec_settings.ssid" = "SSID";
+"rec_settings.password" = "密码";
+"rec_settings.wifi_credentials_footer" = "启动快速传输时设备广播的连接凭据。";
+"rec_settings.wifi_generated" = "Wi-Fi 凭据已生成";
+"rec_settings.wifi_generated_message" = "SSID 和密码已自动生成，您可以在上方修改。";
+"rec_settings.fast_transfer_threshold" = "Wi-Fi 快传阈值";
+"rec_settings.fast_transfer_threshold_footer" = "当设备上未下载录音的总大小超过该阈值时，显示 Wi-Fi 快传入口。设为 0 KB 则只要有待下载文件就始终提示。";
+
+/* 设备与资料库设置 */
+"devices.known_devices" = "已知设备";
+"devices.no_devices_yet" = "暂无已记录的设备。";
+"devices.last_seen" = "最后连接于 %@";
+"devices.library" = "资料库";
+"devices.files" = "文件";
+"devices.total_size" = "总大小";
+"devices.library_footer" = "本设备上存储的音频片段、转录文本和摘要。删除应用后所有数据将丢失——请定期导出备份。";
+
+/* 录音标签页 */
+"recordings.device" = "设备";
+"recordings.library" = "资料库";
+"recordings.no_device" = "未连接设备";
+"recordings.no_device_message" = "点击上方胶囊按钮扫描您的 D·NOTE。";
+"recordings.no_clips" = "暂无片段";
+"recordings.no_clips_message" = "从\"设备\"标签页下载录音即可添加到资料库。";
+"recordings.clip_count_one" = "%d 个片段 · %@";
+"recordings.clip_count_other" = "%d 个片段 · %@";
+"library.import_audio" = "导入音频";
+"library.import_failed" = "导入失败";
+"library.merge" = "合并相邻";
+"library.merging" = "正在合并…";
+"library.merge_failed" = "合并失败";
+"library.merge_confirm_title" = "合并相邻的两段？";
+"library.merge_confirm_message" = "将把 %1$@ 与 %2$@ 合并为一段新的录音（M4A 格式）。两段原始录音及其转录、摘要、翻译会一并删除，无法撤销。";
+
+/* 设备文件 */
+"device_files.delete_recording" = "删除录音？";
+"device_files.delete_recording_message" = "将从设备中永久删除 %@，此操作无法撤销。";
+"device_files.operation_failed" = "操作失败";
+"device_files.reading_file_list" = "正在读取文件列表…";
+"device_files.device_is_recording" = "设备正在录音";
+"device_files.recording_unavailable_message" = "录音过程中无法查看文件列表。请停止录音后再浏览文件。";
+"device_files.stop_recording" = "停止录音";
+"device_files.couldnt_read_device" = "无法读取设备";
+"device_files.no_recordings" = "设备上没有录音";
+"device_files.no_recordings_message" = "在设备上录音后，点击刷新按钮。";
+"device_files.fast_transfer_wifi" = "Wi-Fi 快速传输";
+"device_files.pending" = "%@ 等待中";
+"device_files.transcribing" = "正在转录…";
+"device_files.transcript_done" = "转录完成 → %@";
+"device_files.transfer_in_progress" = "传输进行中";
+"device_files.cancel_transfer_to_switch" = "取消所有传输以切换到其他页面？";
+"device_files.cancel_and_switch" = "取消并切换";
+
+/* 文件保存状态 */
+"file_save.saved_plain" = "已保存 → %@（明文，无需解密）";
+"file_save.decrypted" = "已解密 → %@";
+"file_save.wrapped_frames" = "已封装原始帧 → %@";
+"file_save.decrypted_wrapped" = "已解密并封装 → %@";
+"file_save.saved" = "已保存 → %@";
+"file_save.decrypt_failed" = "解密失败：%@";
+"file_save.wav_without_header" = "WAV 缺少 RIFF 头——如果固件启用了加密，请在设置中填写 ChaCha20 密钥。";
+
+/* 片段详情 */
+"clip_detail.opus_playback_unsupported" = "当前系统版本无法播放 Opus 录音，播放需要 iOS 17 及以上（转写不受影响）。如需现在收听，可通过 隔空投送/文件 App 导出后播放。";
+"clip_detail.transcript" = "转录文本";
+"clip_detail.transcribing" = "正在转录...";
+"clip_detail.provider_fallback" = "转录服务降级";
+"clip_detail.view_full_transcript" = "查看完整转录";
+"clip_detail.transcribe" = "转录";
+"clip_detail.retranscribe" = "重新转录？";
+"clip_detail.retranscribe_message" = "这将替换现有的转录文本。";
+"clip_detail.summary" = "摘要";
+"clip_detail.view_full_summary" = "查看完整摘要";
+"clip_detail.summarize" = "生成摘要";
+"clip_detail.transcribe_first" = "请先完成转录以启用摘要功能。";
+"clip_detail.translation" = "翻译";
+"clip_detail.view_full_translation" = "查看完整翻译";
+"clip_detail.translate" = "翻译";
+"clip_detail.translating" = "翻译中…";
+"clip_detail.translated_summary" = "翻译后的摘要";
+"clip_detail.view_full_translated_summary" = "查看完整翻译";
+"clip_detail.export" = "导出";
+"clip_detail.export_as_m4a" = "导出为 M4A (AAC)";
+"clip_detail.exporting" = "导出中…";
+"clip_detail.speaker" = "说话人 %@";
+
+/* 设备面板 */
+"device.couldnt_update" = "无法更新";
+"device.erase_all_recordings" = "清除所有录音？";
+"device.erase_message" = "这将删除设备上的所有录音。开关设置和 Bluetooth 名称将保留。此操作无法撤销。";
+"device.format_storage" = "格式化存储";
+"device.formatting" = "正在格式化…";
+"device.restore_factory" = "恢复出厂设置？";
+"device.restore_message" = "将重置开关设置和 Bluetooth 名称，录音将保留。";
+"device.factory_reset" = "恢复出厂设置";
+"device.resetting" = "正在重置…";
+"device.power_off" = "关闭设备？";
+"device.power_off_message" = "设备将立即断开连接。按物理按键可重新开机。";
+"device.shut_down" = "关机";
+"device.shutting_down" = "正在关机…";
+"device.connected_mtu" = "已连接 · MTU %d";
+"device.storage_used" = "%@ / %@ 已使用";
+"device.identity" = "设备信息";
+"device.bluetooth_name" = "Bluetooth 名称";
+"device.serial" = "序列号";
+"device.firmware" = "固件";
+"device.bt_mac" = "BT MAC";
+"device.device_time" = "设备时间";
+"device.audio" = "音频";
+"device.noise_cancel" = "降噪";
+"device.noise_cancel_hint" = "设备端降噪开关。关闭后录到的环境声更完整；开启后人声更突出。与下方的「噪音抑制」是两个独立的设置项。";
+"device.save_raw_wav" = "保存原始 WAV";
+"device.save_raw_wav_hint" = "录音时在设备上额外保存一份未压缩的 WAV 原始音频。音质最好，但占用的存储空间大得多。";
+"device.vad" = "语音活动检测";
+"device.vad_hint" = "设备录音时自动跳过静音段，只录有人说话的部分，可以省存储和电量；说话声太轻时开头可能被切掉。这与「设置 → 语音识别 → 上传前去除静音」不是同一项：那个在手机上、上传前生效，这个在设备上、录音时生效。";
+"device.mic_gain" = "麦克风增益";
+"device.mic_gain_hint" = "麦克风灵敏度，1 最低、9 最高。调高能录清较远或较小的说话声，同时也会放大环境噪声，遇到大声时更容易爆音。";
+"device.noise_reduction" = "噪音抑制";
+"device.noise_reduction_hint" = "噪音抑制强度，1 最弱、9 最强。档位越高环境噪声越少，但人声也可能被一起削弱、听起来发闷。";
+"device.behavior" = "行为";
+"device.led_indicator" = "LED 指示灯";
+"device.vibration" = "振动";
+"device.usb_drive_mode" = "USB 存储模式";
+"device.usb_drive_mode_hint" = "开启后，设备连接电脑时将显示为可移动磁盘。";
+"device.auto_power_off" = "自动关机";
+"device.saving_idle_off" = "正在保存空闲关机设置…";
+"device.saving_name" = "正在保存名称…";
+"device.unbind_and_remove" = "解绑并移除设备";
+"device.unbind_and_remove_message" = "将关闭设备加密、删除设备上存储的录音文件、解除绑定，并把该设备从已配对设备列表中移除。此操作不可撤销。";
+"device.unbinding_and_removing" = "正在解绑并移除设备…";
+"device.danger_zone" = "危险操作";
+"device.danger_zone_footer" = "格式化会清除所有录音；恢复出厂设置仅重置开关和 BT 名称。关机会断开连接。";
+"device.unavailable_while_recording" = "录音期间请勿进行危险操作，请先结束录音再操作。";
+"device.connection" = "连接";
+"device.disconnect" = "断开连接";
+"device.never" = "从不";
+"device.custom_idle_off" = "自定义（%d 秒）";
+
+/* 实时转录 */
+"live.no_device" = "未连接设备";
+"live.no_device_message" = "连接您的 D·NOTE 以开始实时转录和翻译。";
+"live.view_in_library" = "在资料库中查看";
+"live.source_language" = "源语言";
+"live.target_language" = "目标语言";
+"live.same_as_source" = "与源语言相同";
+"live.setup_azure" = "设置 Azure";
+"live.switch_language" = "切换语言？";
+"live.continue" = "继续";
+"live.listening" = "正在收听...";
+"live.tap_mic_to_start" = "点击麦克风开始";
+"live.search_languages" = "搜索语言";
+"live.transcribe_only" = "仅转录 %@";
+"live.translate_pair" = "%@ → %@";
+"live.streaming" = "传输中";
+"live.ready" = "就绪";
+"live.paused" = "已暂停";
+"live.repair_title" = "设备上有完整录音";
+"live.repair_message" = "本次录音中途有暂停，部分音频未被捕获。是否从 Nomi 下载完整录音进行替换？";
+"live.repair_message_attached" = "本次会话是接入了设备上已经开始的录音，开头部分没有捕获到。是否从 Nomi 下载完整录音进行替换？";
+"live.repair_not_playable" = "取回的文件是加密的，本机没有对应口令，没能生成可播放的音频。完整录音仍保留在 Nomi 上。";
+"live.repair_replace" = "替换";
+"live.repair_keep" = "保留当前";
+"live.repair_downloading" = "正在下载完整音频…";
+"live.repair_succeeded" = "已替换为完整音频";
+"live.repair_failed" = "下载失败：%@";
+"live.repair_manual_transfer" = "完整录音仍保存在 Nomi 上，请从「录音」标签页传输。";
+"live.start_unknown_title" = "无法确认 Nomi 是否正在录音";
+"live.start_unknown_message" = "设备没有回应状态查询。此时开始实时会话，可能会切断你用设备按键开始的那段录音。可以重试；确定设备没在录音再选择「仍然开始」。";
+"live.start_anyway" = "仍然开始";
+"live.attach_no_upload" = "Nomi 正在录音，但这段录音是在 App 连接之前用设备按键开始的，设备不会推送音频。请先在设备上结束录音，再从 App 开始实时会话。";
+
+/* 扫描 */
+"scanner.scan" = "扫描";
+"scanner.scan_again" = "重新扫描";
+"scanner.connection_failed" = "连接失败";
+"scanner.bluetooth_unavailable" = "Bluetooth 不可用";
+"scanner.looking_for_devices" = "正在搜索 D·NOTE 设备…";
+"scanner.looking_message" = "请确保您的 D·NOTE 已开机且在数米范围内。";
+"scanner.wake_and_retry" = "未找到设备。请长按设备按键 1 秒唤醒后重试。";
+
+/* 连接胶囊 */
+"pill.add_device" = "添加设备";
+
+/* 快速传输 */
+"fast_transfer.title" = "快速传输";
+"fast_transfer.status" = "状态";
+"fast_transfer.ap_credentials" = "AP 凭据";
+"fast_transfer.files_count" = "文件（%d）";
+"fast_transfer.pending" = "等待中…";
+"fast_transfer.saved" = "已保存";
+"fast_transfer.cancelled" = "已取消";
+"fast_transfer.background_interrupted" = "App 进入后台，传输已中止。请保持 App 打开后重试。";
+"fast_transfer.stage_ready" = "就绪";
+"fast_transfer.stage_stopping" = "正在停止录音…";
+"fast_transfer.stage_starting_ap" = "正在启动设备 Wi-Fi AP…";
+"fast_transfer.stage_polling_ap" = "正在等待设备热点启动…（第 %d 次尝试 / 共 %d 次）";
+"fast_transfer.stage_joining_wifi" = "正在加入 Wi-Fi…";
+"fast_transfer.stage_join_failed" = "Wi-Fi 连接失败";
+"fast_transfer.stage_connecting" = "正在连接设备…";
+"fast_transfer.stage_listing" = "正在列出文件…";
+"fast_transfer.stage_downloading" = "正在下载…";
+"fast_transfer.stage_cleanup" = "正在清理…";
+"fast_transfer.stage_done" = "完成";
+"fast_transfer.stage_stopped" = "已停止";
+"fast_transfer.hint_polling" = "设备启动 AP 可能需要 30-45 秒（使用电池时更久）。";
+"fast_transfer.hint_joining" = "iOS 可能会显示加入提示——请接受以继续。";
+"fast_transfer.hint_join_failed" = "点击\"重试\"再次尝试加入设备的 Wi-Fi。";
+"fast_transfer.tcp_unreachable" = "无法连接到设备，可能没有成功加入它的 Wi-Fi。";
+"fast_transfer.ap_still_on" = "设备仍报告热点处于开启状态。若下次快传无法加入热点，请将设备关机再开机。";
+"fast_transfer.hint_connecting" = "正在 192.168.88.1:6718 上协商 TCP 会话。";
+"fast_transfer.ap_not_broadcasting" = "设备已接受开启热点的命令，但热点始终没有出现。请重试；若仍然失败，重启设备后再试。";
+"fast_transfer.invalid_psk" = "设备热点密码必须为 8–63 个字符。请到「设置 → 录音与传输 → Wi-Fi AP」修改后重试。";
+"fast_transfer.decode_failed" = "%@：已下载，但无法解析为可播放的音频。设备上的原件已保留。";
+
+/* 摘要 */
+"summarize.choose_template" = "选择模板";
+"summarize.summarizing" = "正在生成摘要...";
+"summarize.error" = "错误";
+"summarize.summarizing_with" = "正在使用 %@ 生成摘要...";
+"summarize.search_templates" = "搜索模板";
+"summarize.truncated_warning" = "模型达到了输出上限，这段结果是被截断的。可以换更短的转写内容或输出更少的模板再试。";
+"summarize.add_template" = "添加模板";
+"summarize.clone" = "复制";
+"summarize.category" = "分类";
+"summarize.pick_existing" = "选择已有分类";
+"summarize.new" = "新建";
+"summarize.name" = "名称";
+"summarize.template_name" = "模板名称";
+"summarize.prompt" = "提示词";
+"summarize.new_template" = "新建模板";
+"summarize.edit_template" = "编辑模板";
+"summarize.copy_name" = "%@（副本）";
+"summarize.new_category_name" = "新分类名称";
+"summarize.output_language" = "输出语言";
+"summarize.same_as_transcript" = "与转写一致";
+"summarize.restore_defaults" = "恢复默认模板";
+"summarize.restore_defaults_title" = "恢复默认模板？";
+"summarize.restore_defaults_message" = "这会用内置默认模板替换当前的模板列表，您的自定义模板将会丢失。随应用提供的内置模板会重新出现。";
+
+/* 模板分类 */
+"template_cat.meeting_notes" = "会议记录";
+"template_cat.action_items" = "待办事项";
+"template_cat.general_summary" = "通用摘要";
+"template_cat.professional" = "职业";
+"template_cat.academic" = "学术";
+"template_cat.creative" = "创意";
+
+/* 模板名称 */
+"template.formal_minutes" = "正式会议纪要";
+"template.structured_minutes" = "结构化会议纪要";
+"template.executive_brief" = "高管简报";
+"template.key_takeaways" = "核心要点";
+"template.task_extraction" = "任务提取";
+"template.decision_log" = "决策记录";
+"template.concise_summary" = "简明摘要";
+"template.detailed_notes" = "详细笔记";
+"template.qa_format" = "问答格式";
+"template.client_meeting_recap" = "客户会议回顾";
+"template.one_on_one_summary" = "一对一会议摘要";
+"template.status_update" = "状态更新";
+"template.lecture_notes" = "课堂笔记";
+"template.research_discussion" = "研究讨论";
+"template.brainstorm_synthesis" = "头脑风暴总结";
+"template.interview_summary" = "访谈摘要";
+"devices.danger_zone" = "危险操作";
+"devices.clear_audio" = "清理媒体文件";
+"devices.clear_audio_message" = "将删除本机存储的所有音频片段。转录文本、摘要和标题将予以保留。";
+"devices.clear_all_data" = "清除资料库数据";
+"devices.clear_all_data_message" = "将删除本机存储的所有音频片段、转录文本、摘要与标题。此操作不可撤销。\n\n不在清除范围内：应用设置、各服务的 API Key、Wi-Fi 热点名与密码、已配对设备、录音加密口令。要一并清除请卸载 App。";
+"devices.cleanup_partial_title" = "有文件没能删除";
+"devices.cleanup_partial_message" = "有 %d 个文件未能删除，仍留在本机。可以重试，或清出空间后再试。";
+"asr.azure_how_to_get_key" = "如何获得密钥";
+"library.import_confirm_title" = "导入音频文件";
+"library.import_confirm_message" = "从您的 iPhone、iCloud 云盘或已连接的 USB 驱动器中选取音频文件。\n\n此操作导入本地文件，不会从 Nomi 录音笔下载录音。如需从录音笔获取录音，请使用「设备」标签页。";
+"library.import_choose_file" = "选择文件…";
+
+/* 设备加密 (v1.47) */
+"device_encryption.section_header" = "设备加密";
+"device_encryption.toggle_label" = "在设备上加密录音";
+"device_encryption.footer" = "启用后，设备会用 ChaCha20 密钥对每段录音加密，本应用也会保存该密钥。关闭加密需要提供匹配的密钥。";
+"device_encryption.missing_key_error" = "无法关闭 —— 本地未保存可与设备匹配的 ChaCha20 密钥。";
+"device_encryption.state_row" = "设备端加密";
+"device_encryption.state_on" = "已开启";
+"device_encryption.state_off" = "已关闭";
+"device_encryption.firmware_footer" = "此固件（v1.50）会在绑定时自动开启加密且拒绝关闭。录音使用最近一次通过 0xA2 写入的 32 字节密钥加密。请使用上方的「验证设备口令」让本应用能够解密。";
+
+/* 开发者模式（点击版本号触发） */
+"developer_mode.status_on" = "开发者模式已开启";
+"developer_mode.toast_enabled" = "已开启开发者模式";
+"developer_mode.toast_disabled" = "已关闭开发者模式";
+"developer_mode.taps_to_enable" = "再点击 %d 次开启开发者模式";
+"developer_mode.taps_to_disable" = "再点击 %d 次关闭开发者模式";
+
+/* 加密口令 / 引导 (v1.50) */
+"encryption.section_header" = "加密口令";
+"encryption.section_footer" = "通过 Argon2id 派生密钥，使用设备序列号作为盐。密钥保存在 iOS 钥匙串中，仅限本机使用。遗失口令将导致加密录音无法恢复。换机恢复方法：在新手机上输入相同口令。";
+"encryption.local_key" = "本地密钥";
+"encryption.configured" = "已配置";
+"encryption.missing" = "未设置";
+"encryption.set_button" = "设置口令…";
+"encryption.verify_button" = "验证设备口令…";
+"encryption.rotate_button" = "轮换（覆盖设备密钥）…";
+"encryption.clear_button" = "清除本地密钥";
+"encryption.sheet.title_set" = "设置口令";
+"encryption.sheet.title_verify" = "验证口令";
+"encryption.sheet.title_rotate" = "轮换密钥";
+"encryption.field.passphrase" = "口令";
+"encryption.field.confirm" = "确认";
+"encryption.action.save" = "保存";
+"encryption.action.verify_save" = "验证并保存";
+"encryption.action.rotate" = "轮换";
+"encryption.action.cancel" = "取消";
+"encryption.progress.working" = "处理中…";
+"encryption.footer.rotate" = "轮换会向设备写入一个全新的密钥。设备上现有的所有加密录音将永久无法解密。仅在接管二手设备或已遗忘旧口令时使用。";
+"encryption.footer.set_encrypted" = "此设备已加密。我们会录制一段简短的探测片段并下载，使用您输入的口令尝试解密。探测片段验证后会自动删除。";
+"encryption.footer.set_unencrypted" = "将本地派生的密钥保存到 iOS 钥匙串。设备本身不受影响 —— 请选择强口令，准备好后在设备页启用加密。";
+"encryption.progress.deriving" = "正在派生密钥…";
+"encryption.progress.recording" = "正在录制探测片段…";
+"encryption.progress.stopping" = "正在停止录制…";
+"encryption.progress.locating" = "正在定位探测片段…";
+"encryption.progress.downloading" = "正在下载探测片段…";
+"encryption.progress.verifying" = "正在验证…";
+"encryption.progress.writing_key" = "正在将密钥写入设备…";
+"encryption.progress.checking_device" = "正在检查设备上的录音…";
+"encryption.rotate_confirm.title" = "确定轮换设备密钥？";
+"encryption.rotate_confirm.message_empty" = "设备上已没有录音，不会丢失任何内容。请记好新口令——今后录制的内容只能用它打开，且无法找回。";
+"encryption.rotate_confirm.message" = "设备上还有 %d 条录音，它们用旧密钥录制，轮换后将永久无法解密。要保留请先下载。另请记好新口令：今后录制的内容只能用它打开，且无法找回。";
+"encryption.progress.probe_subtitle" = "正在录制一小段探测片段以验证口令，验证后会自动删除。";
+"encryption.mismatch.title" = "口令不匹配";
+"encryption.mismatch.message" = "无法使用该口令解密探测片段。请仔细确认后再试。如果您确实已遗忘口令，可使用「轮换」覆盖设备密钥 —— 但这会永久销毁设备上现有的所有加密录音。";
+"encryption.mismatch.try_again" = "重试";
+"encryption.error.device_not_connected" = "设备未连接。";
+"encryption.error.connect_first" = "请先连接设备 —— 需要用真实录音来验证口令。";
+"encryption.error.probe_not_found" = "在设备上找不到刚录制的探测片段。";
+"encryption.error.device_busy" = "设备无法开始录音：%@";
+"encryption.banner.title" = "设备已加密";
+"encryption.banner.message" = "输入这台设备已设的口令，即可在本手机上解锁录音。若已遗忘口令，可轮换密钥（这会清除设备上现有的加密录音）。";
+"encryption.banner.cta" = "验证口令…";
+"encryption.download.key_missing" = "%@：此录音已加密，但本手机尚未设置口令。请打开 设置 → 加密口令 → 验证设备口令… 以解锁。";
+"encryption.download.wrong_key" = "%1$@：无法解密 —— 口令与该录音不匹配。请打开 设置 → 加密口令，清除当前口令，再设置正确的口令。（详情：%2$@）";
+
+/* 配对 (v1.47 绑定) */
+"pairing.title" = "配对此 Nomi？";
+"pairing.message" = "%@ 需要先与本应用配对才能录音。您可以随时从设备页面取消配对。";
+"pairing.pair" = "配对";
+"pairing.paired" = "已配对";
+"pairing.not_paired" = "未配对";
+"pairing.unpair" = "取消配对此 Nomi";
+"pairing.unpair_message" = "取消配对会解除设备与本应用的关联。再次录音前需要重新配对。";
+"pairing.unpairing" = "正在取消配对…";
+"pairing.pairing_now" = "正在配对…";
+"pairing.status" = "配对";
+"devices.connection" = "连接";
+"devices.auto_reconnect" = "自动重连";
+"devices.auto_reconnect_footer" = "开启后，设备意外断开（例如关机后再开机）时，App 会自动重连最近使用的设备。关闭后需手动点击顶部的连接标识重连。";
+"clip_detail.delete_audio" = "删除音频";
+"clip_detail.delete_audio_message" = "仅删除音频文件，转录与摘要会保留。此操作不可撤销。";
+"clip_detail.delete_transcript" = "删除转录";
+"clip_detail.delete_transcript_message" = "删除转录文本及其翻译，音频与摘要会保留。此操作不可撤销。";
+"clip_detail.delete_summary" = "删除摘要";
+"clip_detail.delete_summary_message" = "删除摘要及其翻译，音频与转录会保留。此操作不可撤销。";
+"clip_detail.delete_independent_footer" = "音频、转录、摘要各自独立删除——删除其中一项不会影响其余两项。";
+"devices.clear_transcripts" = "清除转录";
+"devices.clear_transcripts_message" = "删除所有转录文本及其翻译，音频与摘要会保留。此操作不可撤销。";
+"devices.clear_summaries" = "清除摘要";
+"devices.clear_summaries_message" = "删除所有摘要及其翻译，音频与转录会保留。此操作不可撤销。";
+"asr.transcript_empty" = "这段音频未检测到语音，没有可转写的内容。请尝试更长或更清晰的录音。";
+"privacy.cloud_title" = "数据将离开你的设备";
+"privacy.cloud_message" = "你配置了云端转写或 AI 服务（如 Azure、OpenAI）。你的音频和文本会被发送到该第三方服务进行处理。数据不经过 Nomily 服务器，但确实会离开你的设备。若要完全在设备本地处理，请使用本地 ASR 服务器 + 本地(Ollama)或不使用 AI 模型。";
+"privacy.cloud_agree" = "我已了解，继续";
+"privacy.cloud_go_local" = "服务设置";
+
+"asr.multi_language_warning" = "选择多种语言后，Azure 会逐句判定语种。音频其实只有一种语言时，这正是转录结果错乱的原因——请只勾选音频里实际使用的那一种。";
+"encryption.banner.setup_title" = "输入这台设备的口令";
+"encryption.banner.setup_message" = "这台设备已开启加密。输入它当初设定的口令，本机会先验证再保存，之后录的内容都能在这里打开。设备上还没有录音，不会有任何损失。";
+"encryption.adopt.title" = "用这个口令初始化设备？";
+"encryption.adopt.message" = "设备当前使用的密钥本机没有——刚绑定的新设备都是这样。设备上没有任何录音，写入你的口令不会丢失内容。请记下这个口令：之后录制的内容只能靠它打开，且无法找回。";
+"encryption.adopt.action" = "使用这个口令";
+"encryption.cannot_reveal_note" = "App 只保存由口令派生出的密钥，不保存口令本身，因此无法在这里显示。忘记了就用「轮换」重新设置。";
+"encryption.first_bind_note" = "这台 Nomi 的固件强制加密所有录音，必须设置口令。口令不会被保存，也无法找回，请自行记下。设置完成前，App 不会开始录音。";
+
+/* Language picker */
+"settings.language" = "语言";
+"language.follow_system" = "跟随系统";
+"language.footer" = "默认跟随系统语言；系统语言不在支持范围内时使用英语。";
+
+/* Apple Watch */
+"library.recorded_on_watch" = "录自 Apple Watch";
+"watch.recorder_title" = "手表";
+"watch.ready" = "准备就绪";
+"watch.record" = "开始录音";
+"watch.stop" = "停止录音";
+"watch.mic_denied" = "请在设置中允许使用麦克风。";
+"watch.record_failed" = "无法开始录音：%@";
+"watch.pending_header" = "等待同步到 iPhone";
+"watch.sending" = "正在发送…";
+"watch.waiting" = "尚未发送";
+"watch.settings_title" = "Apple Watch";
+"watch.status_installed" = "已安装";
+"watch.status_not_installed" = "未安装";
+"watch.status_no_watch" = "未配对手表";
+"watch.status_unsupported" = "需要 iOS 17";
+"watch.status_checking" = "检测中…";
+"watch.hint_installed" = "未随身携带 Nomi 时，可直接用手表录音。录音会自动同步到资料库。";
+"watch.hint_not_installed" = "手表 App 已包含在本 App 中，无需另行下载。请在 iPhone 上打开「Watch」App，滚动到「可安装的 App」，点按 Nomily AI 旁边的「安装」。若已开启「自动安装 App」，本 App 更新几分钟后手表 App 会自动出现。";
+"watch.hint_no_watch" = "将 Apple Watch（watchOS 10 或更高版本）与此 iPhone 配对，即可用手表录音，录音会自动同步到资料库。";
+"watch.hint_unsupported" = "用 Apple Watch 录音需要此 iPhone 运行 iOS 17 或更高版本：手表 App 要求 watchOS 10，而 watchOS 10 只能与 iOS 17 配对。升级 iOS 后即可使用。";
+"watch.hint_checking" = "正在查找已配对的 Apple Watch。App 刚启动或刚更新时需要一小会儿。";
+"watch.intent_toggle_title" = "开始或停止录音";
+"watch.intent_toggle_short_title" = "录音";
+"watch.intent_toggle_description" = "在 Apple Watch 上开始录制语音笔记，或停止正在进行的录音。";
+"watch.status_connected" = "已连接";
+"watch.intent_toggle_description_ios" = "开始或停止已连接 Nomi 的录音。";
+"watch.intent_no_nomi" = "Nomi 未连接。请打开 Nomily AI 并连接录音设备后重试。";
+"watch.status_recording" = "Apple Watch 正在录音";
+"watch.status_transferring" = "正在从 Apple Watch 传输…";
+"watch.status_out_of_range" = "超出范围";
+
+"summarize.delete_title" = "删除模板？";
+"summarize.delete_message" = "删除“%@”？此操作无法撤销。";
+"summarize.prompt_count" = "%d / %d 个字符";
+"summarize.prompt_context_hint" = "提示词会与转写正文共同占用模型上下文。请保持精炼，为原文和输出预留空间。";
+"template_prompt.formal_minutes" = "你将会议记录、访谈记录和讨论材料转换为正式的、可归档的会议纪要。\n\n核心原则\n- 遵循麦肯锡式结构：结论先行、高度结构化、分层拆解、MECE（相互独立，完全穷尽）。\n- 语言必须专业、清晰、克制、具体且可操作。\n- 对于任何缺失或不确定且会对正式纪要产生实质性影响的信息，请标记为【To Be Confirmed】。\n- 在整个文档中统一人员、公司、工具、项目和术语的名称；持续应用更正。\n- 删除空章节——不要保留没有内容的占位标题。\n- 若源材料明确说明某些信息不应包含，则完全排除（不要将其移至“待确认事项”、备注、背景或附录）。\n\n工作流程\n1. 仔细阅读源材料。\n2. 提取：主题、日期、时间、形式、参与者、相关公司/项目、关键议题、核心结论、讨论要点、争议、行动项和待确认事项。\n3. 总结核心结论、讨论流程、主要共识点、行动项，以及真正重要的待确认事项。\n\n输出以下结构（如无内容则省略相应章节）：\n\n# [Meeting Title]\n\n## 0. 基本会议信息\n\n| 项目 | 详情 |\n|---|---|\n| 会议主题 |  |\n| 会议日期 |  |\n| 会议时间 |  |\n| 会议形式 |  |\n| 参与者 |  |\n| 会议目的 |  |\n| 相关公司/项目 |  |\n| 源材料 |  |\n\n## 1. 核心会议结论\n会议的3-5个最重要结论，结论先行。\n\n## 2. 主要讨论议题\n对于每个议题：\n### 2.x [Topic]\n- 当前问题\n- 讨论摘要\n- 初步方向\n\n## 3. 关键共识\n达成一致的事项。\n\n## 4. 后续建议\n根据业务/产品/技术/运营/协作等情况组织。\n\n## 5. 行动项\n\n| 序号 | 行动项 | 优先级 | 建议负责人 |\n|---|---|---|---|\n\n## 6. 待确认事项\n仅列出确实需要确认且对正式记录有实质性影响的事项。\n\n## 7. 总结\n简要总结会议的价值和下一步方向。\n\n如果会议涉及上述未涵盖的其他内容类型，请添加必要的章节。";
+"template_prompt.structured_minutes" = "你是一位专业的会议记录助手。分析这份记录，并用 Markdown 生成结构化的会议纪要：\n\n## 会议摘要\n用一段话概述会议目的和成果。\n\n## 参会人员\n列出所有提到的发言者/参与者。\n\n## 已讨论的议程议题\n对于每个讨论的议题：\n### [Topic]\n- 提出的关键要点\n- 表达的不同观点\n- 达成的结果或结论\n\n## 行动项\n| 负责人 | 任务 | 截止日期（如提到） |\n|-------|------|------------------------|\n\n## 做出的决定\n用项目符号列出具体决定。\n\n## 未决问题\n需要跟进解决的事项。\n\n保持简洁。为准确起见，尽量使用发言者的原话。如果记录中有不清楚的地方，请标注为 [unclear]。";
+"template_prompt.executive_brief" = "将这份会议记录总结为一份简短的执行摘要（最多3-5段）。重点关注：\n1. 召开会议的原因\n2. 做出的最重要决定\n3. 关键行动项及其负责人\n4. 提出的任何风险或阻碍\n5. 后续步骤\n\n使用专业、直接的语言。跳过客套和填充内容。忙碌的高管应能在2分钟内读完。";
+"template_prompt.key_takeaways" = "从这份会议记录中提取关键要点。格式如下：\n\n## 关键要点\n- 用编号列表列出本次会议5-10个最重要的要点\n- 每个要点应为一句独立、完整的话\n- 优先关注决定、承诺和新信息，而非讨论过程\n\n## 重要引言\n包含2-3条直接引用，体现关键时刻或承诺，并注明发言人。\n\n## 整体氛围\n简要说明整体基调——是富有成效、存在争议、探索性的，还是其他？";
+"template_prompt.task_extraction" = "仔细审阅这份记录，提取所有承诺、任务分配和后续待办事项。对于每一项：\n\n- **谁**：做出承诺或被指派的人\n- **什么**：具体任务或交付物\n- **何时**：如提到截止日期则填写，否则用“TBD”\n- **背景**：用一句话说明其重要性\n\n以编号列表形式输出。包含隐性承诺（例如“我会研究一下”即视为任务）。对于所有者不明确的任务，请标注 [OWNER UNCLEAR]。";
+"template_prompt.decision_log" = "提取这份记录中做出的每个决定。对于每个决定：\n\n1. **决定**：决定了什么\n2. **理由**：为什么（促成该决定的关键论点）\n3. **考虑过的替代方案**：讨论过的其他选项及其被否决原因\n4. **影响**：谁或什么受到影响\n5. **负责人**：谁负责执行\n\n如果讨论了某个议题但未达成明确决定，请将其列在“待定决定”下，并注明讨论的当前状态。";
+"template_prompt.concise_summary" = "用3-5段话对这份记录进行简明总结。涵盖讨论的主要议题、提出的关键观点以及得出的任何结论。使用清晰、专业的文风。不要使用项目符号或标题——只需条理分明的段落。";
+"template_prompt.detailed_notes" = "根据这份记录创建全面、条理清晰的笔记。使用 Markdown 格式：\n\n## 概述\n简短铺垫背景的段落。\n\n## 讨论\n按主题组织（而非按时间顺序）。对于每个主题，记录：\n- 主要观点和论据\n- 提到的支持性细节或数据\n- 任何分歧或不同观点\n\n## 结论\n已解决或达成一致的内容。\n\n## 后续跟进\n需要进一步讨论或采取行动的事项。\n\n保留重要细节。当发言者意见不一致时，公正地呈现双方观点。";
+"template_prompt.qa_format" = "将这份记录重新组织为清晰的问答格式。识别问题（显性或隐性），并与给出的答案配对。格式：\n\n**问：[Question]**\n答：[Answer, synthesized from the discussion]\n\n将相关的问答组合在主题标题下。如果一个问题被提出但没有得到完整回答，请将其标注为 [Partially answered] 或 [Unanswered]。";
+"template_prompt.client_meeting_recap" = "根据这份记录创建一份可直接发送给客户的会议回顾。格式：\n\n**主题：**[Meeting topic]\n**日期：**[Extract if mentioned]\n**参与者：**[List]\n\n**摘要：**\n专业概述讨论和达成一致的内容。\n\n**商定的后续步骤：**\n双方承诺的编号列表。\n\n**时间线：**\n讨论到的任何日期或里程碑。\n\n保持专业和积极的语气。避免内部术语。专注于双方的承诺和已交付的价值。";
+"template_prompt.one_on_one_summary" = "总结这次一对一交谈。内容包括：\n\n## 讨论的议题\n简要列出涵盖的内容。\n\n## 给出的反馈\n交流的任何反馈（正面或建设性的），并说明背景。\n\n## 阻碍与所需支持\n提出的需要帮助或升级的问题。\n\n## 目标与承诺\n每次下次检查前各人所承诺的事项。\n\n## 职业/成长\n讨论到的任何职业发展、学习或成长话题。\n\n保持私密且建设性的语气。";
+"template_prompt.status_update" = "将这份记录转换为项目状态更新：\n\n## 状态：[绿色/黄色/红色，根据讨论氛围判断]\n\n## 自上次更新以来的进展\n- 已完成的成果\n\n## 当前重点\n- 正在推进的工作\n\n## 阻碍\n- 阻碍进展的问题\n\n## 即将到来的里程碑\n- 接下来是什么及何时\n\n## 风险\n- 任何可能影响时间线的因素\n\n要基于事实且具体。如提到日期和指标，请使用它们。";
+"template_prompt.lecture_notes" = "将这份讲座/演讲记录转换为条理清晰的学习笔记：\n\n## 主题\n主要主题和背景。\n\n## 核心概念\n对于介绍的每个主要概念：\n- **术语/概念**：清晰的定义或解释\n- 演讲者使用的支持性例子或类比\n\n## 重要细节\n提到的事实、数据、日期或公式。\n\n## 联系\n概念之间或与更广泛主题的联系。\n\n## 复习问题\n生成3-5个学生可用来自测的问题。\n\n使用清晰、教育性的语言。突出可能出现在考试中的术语。";
+"template_prompt.research_discussion" = "总结这份研究讨论或期刊俱乐部记录：\n\n## 讨论的论文/主题\n如提到，注明标题和作者。\n\n## 主要发现\n呈现的关键结果或主张。\n\n## 研究方法\n研究如何进行（如讨论到）。\n\n## 优势\n小组认为有说服力的方面。\n\n## 批评与局限性\n对该工作提出的担忧。\n\n## 意义\n为什么重要，讨论到的应用。\n\n## 未决问题\n出现而未解决的科学问题。";
+"template_prompt.brainstorm_synthesis" = "将这次头脑风暴会议综合为有条理的输出：\n\n## 问题陈述\n正在探索的问题或机会。\n\n## 产生的想法\n将相似想法归为不同主题。对于每个主题：\n### [Theme]\n- 提出的具体想法\n- 谁提出的（如能识别）\n- 讨论的优缺点\n\n## 最佳候选\n从小组获得最多关注或支持的想法。\n\n## 异想天开的想法\n值得进一步探索的非常规或有风险的想法。\n\n## 建议的后续步骤\n如何评估或验证最有前景的想法。";
+"template_prompt.interview_summary" = "总结这份访谈记录：\n\n## 受访者\n如提到，注明姓名和背景。\n\n## 关键见解\n分享的最有价值或最令人惊讶的内容，按主题组织。\n\n## 重要引言\n3-5条能很好体现其观点的直接引用。\n\n## 主题\n整个对话中反复出现的主意或关注点。\n\n## 后续问题\n未提出但值得探询的问题。\n\n保留受访者的语气和视角。不要发表评论。";
+
+/* field-level ASR validation, device-file transcribe guidance, pairing shortcut */
+"asr.key_required" = "请输入订阅密钥";
+"asr.region_required" = "请输入服务区域";
+"asr.verify_failed" = "验证失败";
+"device_files.download_before_transcribe" = "请先下载并解密 %@，然后再转录。";
+"device_files.transcribe_failed" = "转录 %1$@ 失败：%2$@";
+"device_files.delete_failed" = "删除录音失败：%@";
+"pairing.go_pair" = "去配对";
+"dnote_error.not_bound" = "此 Nomi 尚未与本应用配对。";
+"dnote_error.not_connected" = "尚未连接设备。";
+"dnote_error.timeout" = "设备未在规定时间内响应。";
+"wifi_error.timeout" = "Wi-Fi 传输超时，设备没有返回数据。";
+"wifi_error.not_connected" = "尚未连接到设备热点。";
+"wifi_error.malformed" = "设备返回了 App 无法解析的数据。";
+"wifi_error.no_response" = "设备 %1$@:%2$d 没有响应。";
+"wifi_error.cancelled" = "快速传输已取消。";
+"hotspot_error.user_denied" = "你在系统弹窗里拒绝了加入 Wi-Fi。重新点击「快速传输」即可再试。";
+"hotspot_error.join_failed" = "无法加入设备热点。点右上角「重试」，App 会让设备重开热点后再试一次。";
+"dnote_error.stream_no_audio" = "设备没有推送这段录音的音频。请先在设备上结束录音，再从 App 开始实时会话。";
+"dnote_error.passphrase_setup_incomplete" = "请先设置加密口令再录音。这台 Nomi 会加密所有录音，没设口令时录下的文件，这台 iPhone 永远打不开。";
+"scanner.section_available" = "可添加";
+"scanner.section_added" = "已添加的设备";
+"scanner.added_badge" = "已添加";
+"asr.no_provider_configured" = "尚未配置语音识别服务，请在设置中添加。";
+"asr.all_providers_unreachable" = "配置的语音识别服务都连不上。";
+"asr.azure_required_for_translation" = "实时翻译需要 Azure，请在设置中填写 Azure 密钥和区域。";
+"asr.missing_credentials" = "%@ 尚未配置，请在设置中完成配置。";
+"asr.open_provider_settings" = "去配置语音识别服务";
+"azure_verify.bad_credentials" = "订阅密钥无效，或该密钥在这个区域没有权限。请检查密钥与区域是否配套。";
+"azure_verify.region_not_found" = "区域名称不存在，请检查区域拼写（如 eastus、westeurope）。";
+"azure_verify.rate_limited" = "请求过于频繁，请稍后再试。";
+"azure_verify.service_unavailable" = "Azure 服务暂时不可用，请稍后再试。";
+"azure_verify.network" = "无法连接到 Azure，请检查网络。";
+"azure_verify.unexpected" = "Azure 返回了意外的响应。";
+"common.edit" = "编辑";
+"live.clip_not_in_library" = "这条录音已不在资料库中，可能已被改名、合并或删除。";
+"azure_verify.host_unresolved" = "无法解析该区域的 Azure 地址。请检查区域拼写（如 eastus、westeurope）以及网络连接。";
+"asr.last_verify_failed" = "上次验证未通过，请重新验证";
+"asr.status_verified" = "已验证，可以使用";
+"asr.status_verifying" = "正在测试连接…";
+"asr.status_unverified" = "已保存，尚未验证";
+"asr.autosave_note" = "改动会自动保存。保存不等于可用——点右侧的对勾验证这组凭据。";
+"asr.leave_title" = "还没验证就离开？";
+"asr.leave_anyway" = "仍要离开";
+"asr.leave_incomplete_message" = "还有必填项没填，这个服务无法用于转写。";
+"asr.leave_unverified_message" = "这组凭据还没验证通过，转写时仍可能失败。建议先点对勾测试一次。";
+"asr.host_required" = "请输入服务器地址";
+"asr.port_invalid" = "端口需在 1–65535 之间";

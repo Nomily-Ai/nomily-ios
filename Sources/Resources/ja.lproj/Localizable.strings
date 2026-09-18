@@ -1,0 +1,587 @@
+/* 日本語ローカライズ */
+
+/* 共通 */
+"common.done" = "完了";
+"common.cancel" = "キャンセル";
+"common.ok" = "OK";
+"common.delete" = "削除";
+"common.save" = "保存";
+"common.retry" = "再試行";
+"common.close" = "閉じる";
+"common.open_settings" = "設定を開く";
+"common.try_again" = "もう一度試す";
+"common.none" = "なし";
+"common.recording" = "録音中";
+"common.keep_foreground" = "この画面をフォアグラウンドに保ってください — バックグラウンドに移動すると転送が中断されます（再開不可）";
+
+/* タブ */
+"tab.recordings" = "録音";
+"tab.live" = "ライブ";
+"tab.settings" = "設定";
+
+/* 設定 */
+"settings.asr_providers" = "音声認識サービス";
+"settings.llm_providers" = "LLM サービス";
+"settings.recordings" = "録音と転送";
+"settings.summarize_templates" = "要約テンプレート";
+"settings.devices_library" = "デバイスとライブラリ";
+"settings.about" = "このアプリについて";
+"settings.version" = "バージョン";
+
+/* 音声認識 */
+"asr.transcription" = "文字起こし";
+"asr.active_provider" = "使用中のサービス";
+"asr.auto_transcribe_after_download" = "ダウンロード後に自動で文字起こし";
+"asr.auto_transcribe_min" = "最小時間：%d 秒";
+"asr.auto_transcribe_footer" = "ダウンロードのたびに文字起こしを実行します。最小時間より短いクリップはスキップされます。もう一方のサービスが設定されていれば、自動的にフォールバックとして使用されます。";
+"asr.local_vad" = "「アップロード前に無音を除去」";
+"asr.local_vad_footer" = "音声活動検知をデバイス上で実行し、転写プロバイダーへ送信する前に無音部分を取り除きます。アップロードサイズと文字起こしコストを削減できます。";
+"asr.azure_speech" = "Azure Speech";
+"asr.azure_purpose_footer" = "Azure Speech は文字起こし、リアルタイム文字起こし、リアルタイム翻訳に使われます。ご自身の Azure キーが必要で、音声は処理のため Microsoft に送信され、料金が発生する場合があります。AI 要約はこれではなく、別途設定する LLM サービスが生成します。";
+"asr.local_server" = "ローカル音声認識サーバー";
+"asr.subscription_key" = "サブスクリプションキー";
+"asr.region" = "リージョン";
+"asr.host" = "ホスト";
+"asr.port" = "ポート";
+"asr.no_provider" = "音声認識サービス未設定";
+"asr.no_provider_message" = "設定で文字起こしサービス（Azure またはローカルサーバー）を設定してください。";
+"asr.azure" = "Azure";
+"asr.local_server_label" = "ローカルサーバー";
+"asr.transcribe_auto" = "言語を自動検出";
+"asr.specify_languages" = "言語を指定…";
+"asr.languages_footer" = "Azure はクリップ全体ではなく、フレーズごとに言語を識別します。複数の言語が混在する会議に便利です。";
+"asr.max_languages_hint" = "最大 %d 言語";
+
+/* LLM */
+"llm.active_provider_footer" = "メインのサービスが要約やその他の LLM タスクに使用されます。";
+"llm.api_key" = "API キー";
+"llm.model" = "モデル";
+"llm.select_model" = "モデルを選択";
+"llm.model_placeholder" = "モデル — 例: %@";
+"llm.endpoint_url" = "エンドポイント URL";
+"llm.provider_placeholder" = "サービス — 例: %@";
+"llm.api_key_optional" = "API キー（任意）";
+"llm.no_provider" = "LLM サービス未設定";
+"llm.no_provider_message" = "LLM サービスを設定し、使用するサービスを選択してください。";
+
+/* Azure セットアップガイド */
+"azure_guide.title" = "Azure Speech セットアップ";
+"azure_guide.step" = "ステップ %d：%@";
+"azure_guide.step1_title" = "Azure アカウントを作成";
+"azure_guide.step1_item1" = "portal.azure.com にアクセス";
+"azure_guide.step1_item2" = "アカウントをお持ちでない場合は無料アカウントに登録（30 日間 200 ドルのクレジット付き）";
+"azure_guide.step2_title" = "Speech リソースを作成";
+"azure_guide.step2_item1" = "Azure ポータルで「リソースの作成」をタップ";
+"azure_guide.step2_item2" = "「Speech」を検索し、Speech（Microsoft 製）を選択";
+"azure_guide.step2_item3" = "「作成」をタップ";
+"azure_guide.step2_item4" = "高速文字起こし対応のリージョンを選択（例: westus3、eastus、eastasia）";
+"azure_guide.step2_item5" = "価格レベル：テスト用は F0（無料）、本番用は S0（標準）";
+"azure_guide.step2_item6" = "「確認および作成」をタップし、「作成」をタップ";
+"azure_guide.step3_title" = "API キーとリージョンを取得";
+"azure_guide.step3_item1" = "ポータルで Speech リソースに移動";
+"azure_guide.step3_item2" = "サイドバーの「キーとエンドポイント」をタップ";
+"azure_guide.step3_item3" = "キー 1（またはキー 2）とリージョン（例: westus3）をコピー";
+"azure_guide.free_tier_title" = "無料レベルの制限 (F0)";
+"azure_guide.fast_transcription" = "高速文字起こし";
+"azure_guide.fast_transcription_value" = "月 5 時間";
+"azure_guide.realtime_transcription" = "リアルタイム文字起こし";
+"azure_guide.realtime_transcription_value" = "同時リクエスト 1 件";
+"azure_guide.speaker_diarization" = "話者分離";
+"azure_guide.speaker_diarization_value" = "含まれています";
+"azure_guide.audio_formats" = "音声フォーマット";
+"azure_guide.audio_formats_value" = "WAV、OGG/Opus、MP3、FLAC";
+
+/* 録音設定 */
+"rec_settings.delete_after_transfer" = "転送後にデバイスから削除";
+"rec_settings.delete_after_transfer_footer" = "オンにすると、BLE 転送と復号が完了した時点でデバイスからファイルが削除されます。";
+"rec_settings.decryption" = "復号";
+"rec_settings.chacha_key" = "ChaCha20 キー（16進数）";
+"rec_settings.chacha_key_footer" = "16 進数 64 文字（32 バイト）。デバイスが暗号化を使用していない場合は空欄のままにしてください。";
+"rec_settings.wifi_ap" = "Wi-Fi AP（高速転送）";
+"rec_settings.ssid" = "SSID";
+"rec_settings.password" = "パスワード";
+"rec_settings.wifi_credentials_footer" = "高速転送を開始する際にデバイスがブロードキャストする接続情報。";
+"rec_settings.wifi_generated" = "Wi-Fi 接続情報を生成しました";
+"rec_settings.wifi_generated_message" = "SSID とパスワードが自動生成されました。上で変更できます。";
+"rec_settings.fast_transfer_threshold" = "高速転送のしきい値";
+"rec_settings.fast_transfer_threshold_footer" = "デバイス上の未ダウンロード録音の合計サイズがこのしきい値を超えたとき、Wi-Fi 高速転送ボタンを表示します。0 KB に設定すると、未ダウンロードのファイルがある限り常に表示されます。";
+
+/* デバイスとライブラリの設定 */
+"devices.known_devices" = "登録済みデバイス";
+"devices.no_devices_yet" = "まだデバイスが登録されていません。";
+"devices.last_seen" = "最終接続 %@";
+"devices.library" = "ライブラリ";
+"devices.files" = "ファイル";
+"devices.total_size" = "合計サイズ";
+"devices.library_footer" = "このデバイスに保存されている音声クリップ、文字起こし、要約です。アプリを削除するとすべてのデータが失われます — 定期的にエクスポートしてバックアップしてください。";
+
+/* 録音タブ */
+"recordings.device" = "デバイス";
+"recordings.library" = "ライブラリ";
+"recordings.no_device" = "デバイス未接続";
+"recordings.no_device_message" = "上のピルをタップして D·NOTE をスキャンしてください。";
+"recordings.no_clips" = "クリップがありません";
+"recordings.no_clips_message" = "「デバイス」タブから録音をダウンロードしてライブラリに追加します。";
+"recordings.clip_count_one" = "%d クリップ · %@";
+"recordings.clip_count_other" = "%d クリップ · %@";
+"library.import_audio" = "音声を読み込む";
+"library.import_failed" = "読み込みに失敗しました";
+"library.merge" = "隣接を結合";
+"library.merging" = "結合中…";
+"library.merge_failed" = "結合に失敗しました";
+"library.merge_confirm_title" = "隣接するクリップを結合しますか？";
+"library.merge_confirm_message" = "%1$@ と %2$@ を 1 つの新しい録音（M4A）に結合します。元のクリップおよびそれらの文字起こし・要約・翻訳は削除され、取り消せません。";
+
+/* デバイスファイル */
+"device_files.delete_recording" = "録音を削除しますか？";
+"device_files.delete_recording_message" = "%@ をデバイスから完全に削除します。この操作は取り消せません。";
+"device_files.operation_failed" = "操作に失敗しました";
+"device_files.reading_file_list" = "ファイルリストを読み込み中…";
+"device_files.device_is_recording" = "デバイスが録音中です";
+"device_files.recording_unavailable_message" = "録音中はファイルリストを表示できません。録音を停止してからファイルを参照してください。";
+"device_files.stop_recording" = "録音を停止";
+"device_files.couldnt_read_device" = "デバイスを読み取れませんでした";
+"device_files.no_recordings" = "デバイスに録音がありません";
+"device_files.no_recordings_message" = "デバイスで録音後、更新ボタンをタップしてください。";
+"device_files.fast_transfer_wifi" = "Wi-Fi 高速転送";
+"device_files.pending" = "%@ 待機中";
+"device_files.transcribing" = "文字起こし中…";
+"device_files.transcript_done" = "文字起こし完了 → %@";
+"device_files.transfer_in_progress" = "転送中";
+"device_files.cancel_transfer_to_switch" = "すべての転送をキャンセルしてタブを切り替えますか？";
+"device_files.cancel_and_switch" = "キャンセルして切り替え";
+
+/* ファイル保存状態 */
+"file_save.saved_plain" = "保存済み → %@（プレーン、復号不要）";
+"file_save.decrypted" = "復号済み → %@";
+"file_save.wrapped_frames" = "生フレームをラップ済み → %@";
+"file_save.decrypted_wrapped" = "復号 + ラップ済み → %@";
+"file_save.saved" = "保存済み → %@";
+"file_save.decrypt_failed" = "復号に失敗：%@";
+"file_save.wav_without_header" = "RIFF ヘッダーのない WAV です。ファームウェアが暗号化を使用している場合は、設定で ChaCha20 キーを入力してください。";
+
+/* クリップ詳細 */
+"clip_detail.transcript" = "文字起こし";
+"clip_detail.transcribing" = "文字起こし中...";
+"clip_detail.provider_fallback" = "プロバイダーのフォールバックが発生しました";
+"clip_detail.view_full_transcript" = "全文を表示";
+"clip_detail.transcribe" = "文字起こし";
+"clip_detail.retranscribe" = "再度文字起こしを行いますか？";
+"clip_detail.retranscribe_message" = "既存の文字起こしが置き換えられます。";
+"clip_detail.summary" = "要約";
+"clip_detail.view_full_summary" = "全文を表示";
+"clip_detail.summarize" = "要約する";
+"clip_detail.transcribe_first" = "要約するには、先に文字起こしを完了してください。";
+"clip_detail.translation" = "翻訳";
+"clip_detail.view_full_translation" = "全文を表示";
+"clip_detail.translate" = "翻訳";
+"clip_detail.translating" = "翻訳中…";
+"clip_detail.translated_summary" = "翻訳された要約";
+"clip_detail.view_full_translated_summary" = "翻訳全文を表示";
+"clip_detail.export" = "書き出し";
+"clip_detail.export_as_m4a" = "M4A (AAC) として書き出し";
+"clip_detail.exporting" = "書き出し中…";
+"clip_detail.speaker" = "話者 %@";
+
+/* デバイスシート */
+"device.couldnt_update" = "更新できませんでした";
+"device.erase_all_recordings" = "すべての録音を消去しますか？";
+"device.erase_message" = "デバイス上のすべての録音が削除されます。スイッチ設定と Bluetooth 名は保持されます。この操作は取り消せません。";
+"device.format_storage" = "ストレージを初期化";
+"device.formatting" = "初期化中…";
+"device.restore_factory" = "工場出荷時の設定に戻しますか？";
+"device.restore_message" = "スイッチ設定と Bluetooth 名をリセットします。録音は保持されます。";
+"device.factory_reset" = "工場出荷時リセット";
+"device.resetting" = "リセット中…";
+"device.power_off" = "デバイスの電源を切りますか？";
+"device.power_off_message" = "デバイスは直ちに切断されます。本体のボタンを押すと再び電源が入ります。";
+"device.shut_down" = "シャットダウン";
+"device.shutting_down" = "シャットダウン中…";
+"device.connected_mtu" = "接続中 · MTU %d";
+"device.storage_used" = "%@ / %@ 使用中";
+"device.identity" = "デバイス情報";
+"device.bluetooth_name" = "Bluetooth 名";
+"device.serial" = "シリアル番号";
+"device.firmware" = "ファームウェア";
+"device.bt_mac" = "BT MAC";
+"device.device_time" = "デバイス時刻";
+"device.audio" = "音声";
+"device.noise_cancel" = "ノイズキャンセル";
+"device.noise_cancel_hint" = "デバイス側のノイズキャンセルです。オフにすると環境音がより多く残り、オンにすると声が際立ちます。下の「ノイズ抑制」とは別の設定です。";
+"device.save_raw_wav" = "生の WAV を保存";
+"device.save_raw_wav_hint" = "録音のたびに、非圧縮の WAV もデバイスに保存します。音質は最高ですが、ストレージを大幅に消費します。";
+"device.vad" = "音声アクティビティ検出";
+"device.vad_hint" = "録音中にデバイスが無音部分を飛ばし、話している部分だけを残します。ストレージとバッテリーを節約できますが、声が非常に小さいと冒頭が切れることがあります。「設定 → 音声認識 → アップロード前に無音を除去」とは別物で、そちらは iPhone 側でアップロード前に、こちらはデバイス側で録音中に動作します。";
+"device.mic_gain" = "マイクゲイン";
+"device.mic_gain_hint" = "マイクの感度で、1 が最小、9 が最大です。上げると遠くの声や小さな声も拾えますが、環境音も大きくなり、大きな音では音割れしやすくなります。";
+"device.noise_reduction" = "ノイズリダクション";
+"device.noise_reduction_hint" = "ノイズ抑制の強さで、1 が最弱、9 が最強です。強くするほど環境音は減りますが、声まで削られてこもって聞こえることがあります。";
+"device.behavior" = "動作";
+"device.led_indicator" = "LED インジケーター";
+"device.vibration" = "バイブレーション";
+"device.usb_drive_mode" = "USB ドライブモード";
+"device.usb_drive_mode_hint" = "有効にすると、コンピューターに接続した際にリムーバブルドライブとして認識されます。";
+"device.auto_power_off" = "自動電源オフ";
+"device.saving_idle_off" = "アイドル時オフを保存中…";
+"device.danger_zone" = "危険な操作";
+"device.danger_zone_footer" = "初期化はすべての録音を消去します。工場出荷時リセットはスイッチと BT 名のみリセットします。シャットダウンは接続を切断します。";
+"device.unavailable_while_recording" = "録音中は機器操作を行えません。先に録音を終了してください。";
+"device.connection" = "接続";
+"device.disconnect" = "切断";
+"device.never" = "しない";
+"device.custom_idle_off" = "カスタム（%d 秒）";
+
+/* ライブ */
+"live.no_device" = "デバイス未接続";
+"live.no_device_message" = "D·NOTE を接続してリアルタイム文字起こしと翻訳を開始します。";
+"live.view_in_library" = "ライブラリで表示";
+"live.source_language" = "ソース言語";
+"live.target_language" = "ターゲット言語";
+"live.same_as_source" = "ソースと同じ";
+"live.setup_azure" = "Azure を設定";
+"live.switch_language" = "言語を切り替えますか？";
+"live.continue" = "続ける";
+"live.listening" = "聴取中...";
+"live.tap_mic_to_start" = "マイクをタップして開始";
+"live.search_languages" = "言語を検索";
+"live.transcribe_only" = "%@ のみ文字起こし";
+"live.translate_pair" = "%@ → %@";
+"live.streaming" = "ストリーミング中";
+"live.ready" = "準備完了";
+"live.paused" = "一時停止中";
+"live.repair_title" = "デバイスに完全な録音があります";
+"live.repair_message" = "この録音には一時停止があり、一部の音声が取得できていません。Nomi から完全な録音をダウンロードして置き換えますか？";
+"live.repair_message_attached" = "このセッションは既に進行中だった録音に接続したため、冒頭が欠けています。Nomi の完全な録音で置き換えますか？";
+"live.repair_not_playable" = "取得したファイルは暗号化されており、この iPhone に対応するパスフレーズがないため再生可能な音声を作成できませんでした。録音は Nomi に残っています。";
+"live.repair_replace" = "置き換え";
+"live.repair_keep" = "このまま";
+"live.repair_downloading" = "完全な音声をダウンロード中…";
+"live.repair_succeeded" = "完全な音声に置き換えました";
+"live.repair_failed" = "ダウンロードに失敗：%@";
+"live.repair_manual_transfer" = "完全な録音は Nomi に残っています。「録音」タブから転送してください。";
+"live.start_unknown_title" = "Nomi が録音中かどうか確認できません";
+"live.start_unknown_message" = "デバイスがステータス応答を返しませんでした。このままライブを開始すると、本体ボタンで開始した録音が中断される可能性があります。再試行するか、録音していないと確信できる場合のみ開始してください。";
+"live.start_anyway" = "それでも開始";
+"live.attach_no_upload" = "Nomi は録音中ですが、この録音はアプリ接続前に本体ボタンで開始されたため、音声は送信されません。本体で録音を停止してから、アプリでライブを開始してください。";
+
+/* スキャナー */
+"scanner.scan" = "スキャン";
+"scanner.scan_again" = "再スキャン";
+"scanner.connection_failed" = "接続に失敗しました";
+"scanner.bluetooth_unavailable" = "Bluetooth を利用できません";
+"scanner.looking_for_devices" = "D·NOTE デバイスを検索中…";
+"scanner.looking_message" = "D·NOTE の電源が入っていて、数メートル以内にあることを確認してください。";
+"scanner.wake_and_retry" = "デバイスが見つかりません。デバイスのボタンを1秒間長押しして起動し、もう一度お試しください。";
+
+/* 接続ピル */
+"pill.add_device" = "デバイスを追加";
+
+/* 高速転送 */
+"fast_transfer.title" = "高速転送";
+"fast_transfer.status" = "ステータス";
+"fast_transfer.ap_credentials" = "AP 接続情報";
+"fast_transfer.files_count" = "ファイル（%d）";
+"fast_transfer.pending" = "待機中…";
+"fast_transfer.saved" = "保存済み";
+"fast_transfer.cancelled" = "キャンセル済み";
+"fast_transfer.background_interrupted" = "Appがバックグラウンドに移動したため、転送を中止しました。Appを開いたまま再試行してください。";
+"fast_transfer.stage_ready" = "準備完了";
+"fast_transfer.stage_stopping" = "録音を停止中…";
+"fast_transfer.stage_starting_ap" = "デバイスの Wi-Fi AP を起動中…";
+"fast_transfer.stage_polling_ap" = "デバイスのホットスポットの起動を待っています…（%d/%d 回目）";
+"fast_transfer.stage_joining_wifi" = "Wi-Fi に接続中…";
+"fast_transfer.stage_join_failed" = "Wi-Fi 接続に失敗";
+"fast_transfer.stage_connecting" = "デバイスに接続中…";
+"fast_transfer.stage_listing" = "ファイルを一覧取得中…";
+"fast_transfer.stage_downloading" = "ダウンロード中…";
+"fast_transfer.stage_cleanup" = "クリーンアップ中…";
+"fast_transfer.stage_done" = "完了";
+"fast_transfer.stage_stopped" = "停止済み";
+"fast_transfer.hint_polling" = "AP の起動に 30〜45 秒かかることがあります（バッテリー駆動時はさらに長くなります）。";
+"fast_transfer.hint_joining" = "iOS が接続確認を表示することがあります — 承認して続行してください。";
+"fast_transfer.hint_join_failed" = "「再試行」をタップしてデバイスの Wi-Fi に再接続してください。";
+"fast_transfer.tcp_unreachable" = "デバイスに接続できません。デバイスの Wi-Fi への参加に失敗した可能性があります。";
+"fast_transfer.ap_still_on" = "デバイスはホットスポットがまだオンだと報告しています。次回の高速転送で参加できない場合は、デバイスの電源を入れ直してください。";
+"fast_transfer.hint_connecting" = "192.168.88.1:6718 で TCP セッションをネゴシエーション中。";
+"fast_transfer.ap_not_broadcasting" = "デバイスはホットスポットの起動コマンドを受け付けましたが、ホットスポットが表示されませんでした。もう一度お試しください。それでも失敗する場合は、デバイスを再起動してください。";
+"fast_transfer.invalid_psk" = "デバイスのホットスポットのパスワードは 8〜63 文字である必要があります。「設定 → 録音と転送 → Wi-Fi AP」で変更してから再試行してください。";
+"fast_transfer.decode_failed" = "%@：ダウンロードは完了しましたが、再生可能な音声に変換できませんでした。デバイス上の元ファイルは保持されています。";
+
+/* 要約 */
+"summarize.choose_template" = "テンプレートを選択";
+"summarize.summarizing" = "要約中...";
+"summarize.error" = "エラー";
+"summarize.summarizing_with" = "%@ で要約中...";
+"summarize.search_templates" = "テンプレートを検索";
+"summarize.truncated_warning" = "モデルが出力上限に達したため、この結果は途中で切れています。より短い文字起こし、または出力量の少ないテンプレートでお試しください。";
+"summarize.add_template" = "テンプレートを追加";
+"summarize.clone" = "複製";
+"summarize.category" = "カテゴリ";
+"summarize.pick_existing" = "既存から選択";
+"summarize.new" = "新規";
+"summarize.name" = "名前";
+"summarize.template_name" = "テンプレート名";
+"summarize.prompt" = "プロンプト";
+"summarize.new_template" = "新規テンプレート";
+"summarize.edit_template" = "テンプレートを編集";
+"summarize.copy_name" = "%@（コピー）";
+"summarize.new_category_name" = "新しいカテゴリ名";
+"summarize.output_language" = "出力言語";
+"summarize.same_as_transcript" = "文字起こしと同じ";
+"summarize.restore_defaults" = "デフォルトのテンプレートを復元";
+"summarize.restore_defaults_title" = "デフォルトのテンプレートを復元しますか？";
+"summarize.restore_defaults_message" = "現在のテンプレート一覧を組み込みのデフォルトに置き換えます。カスタムテンプレートは失われます。アプリに同梱されている組み込みテンプレートは再表示されます。";
+
+/* テンプレートカテゴリ */
+"template_cat.meeting_notes" = "議事録";
+"template_cat.action_items" = "アクションアイテム";
+"template_cat.general_summary" = "一般的な要約";
+"template_cat.professional" = "ビジネス";
+"template_cat.academic" = "学術";
+"template_cat.creative" = "クリエイティブ";
+
+/* テンプレート名 */
+"template.formal_minutes" = "正式議事録";
+"template.structured_minutes" = "構造化議事録";
+"template.executive_brief" = "エグゼクティブブリーフ";
+"template.key_takeaways" = "重要なポイント";
+"template.task_extraction" = "タスク抽出";
+"template.decision_log" = "意思決定ログ";
+"template.concise_summary" = "簡潔な要約";
+"template.detailed_notes" = "詳細なノート";
+"template.qa_format" = "Q&A 形式";
+"template.client_meeting_recap" = "クライアント会議まとめ";
+"template.one_on_one_summary" = "1 on 1 要約";
+"template.status_update" = "ステータス報告";
+"template.lecture_notes" = "講義ノート";
+"template.research_discussion" = "研究ディスカッション";
+"template.brainstorm_synthesis" = "ブレスト整理";
+"template.interview_summary" = "面談要約";
+"devices.danger_zone" = "危険な操作";
+"devices.clear_audio" = "メディアを削除";
+"devices.clear_audio_message" = "このデバイスに保存されているすべての音声クリップが削除されます。文字起こし、要約、タイトルは保持されます。";
+"devices.clear_all_data" = "ライブラリのデータを消去";
+"devices.clear_all_data_message" = "この iPhone に保存された音声・文字起こし・要約・タイトルをすべて削除します。取り消せません。\n\n対象外：アプリ設定、各サービスの API キー、Wi-Fi ホットスポットの名前とパスワード、ペアリング済みデバイス、録音のパスフレーズ。これらも消すにはアプリを削除してください。";
+"devices.cleanup_partial_title" = "削除できないファイルがあります";
+"devices.cleanup_partial_message" = "%d 件のファイルを削除できず、端末に残っています。もう一度お試しください。";
+"asr.azure_how_to_get_key" = "キーの取得方法";
+"library.import_confirm_title" = "音声ファイルを読み込む";
+"library.import_confirm_message" = "iPhone、iCloud Drive、または接続済みの USB ドライブから音声ファイルを選択します。\n\nこの操作はローカルファイルを読み込みます。Nomi レコーダーからのダウンロードではありません。録音をデバイスから取得するには「デバイス」タブを使用してください。";
+"library.import_choose_file" = "ファイルを選択…";
+
+/* デバイス暗号化 (v1.47) */
+"device_encryption.section_header" = "デバイス暗号化";
+"device_encryption.toggle_label" = "デバイスで録音を暗号化";
+"device_encryption.footer" = "有効にすると、デバイスは各録音をこのアプリも保存する ChaCha20 鍵で暗号化します。無効化には一致する鍵が必要です。";
+"device_encryption.missing_key_error" = "無効化できません — デバイスと一致する ChaCha20 鍵が保存されていません。";
+"device_encryption.state_row" = "デバイス側の暗号化";
+"device_encryption.state_on" = "オン";
+"device_encryption.state_off" = "オフ";
+"device_encryption.firmware_footer" = "このファームウェア (v1.50) はバインド時に暗号化を自動有効化し、無効化を拒否します。録音は 0xA2 で最後に書き込まれた 32 バイトの鍵で暗号化されます。本アプリで復号するには上の「デバイスのパスフレーズを確認」をご利用ください。";
+
+/* 開発者モード (バージョンタップの隠し機能) */
+"developer_mode.status_on" = "開発者モードはオンです";
+"developer_mode.toast_enabled" = "開発者モードを有効にしました";
+"developer_mode.toast_disabled" = "開発者モードを無効にしました";
+"developer_mode.taps_to_enable" = "あと %d 回タップで開発者モードを有効化";
+"developer_mode.taps_to_disable" = "あと %d 回タップで開発者モードを無効化";
+
+/* 暗号化パスフレーズ / オンボーディング (v1.50) */
+"encryption.section_header" = "暗号化パスフレーズ";
+"encryption.section_footer" = "デバイスのシリアル番号をソルトとして Argon2id で鍵を導出します。iOS キーチェーンに本機限定で保存されます。パスフレーズを失うと暗号化された録音は復元できません。機種変更時はパスフレーズを新しい iPhone で再入力してください。";
+"encryption.local_key" = "ローカル鍵";
+"encryption.configured" = "設定済み";
+"encryption.missing" = "未設定";
+"encryption.set_button" = "パスフレーズを設定…";
+"encryption.verify_button" = "デバイスのパスフレーズを確認…";
+"encryption.rotate_button" = "ローテーション(デバイス鍵を上書き)…";
+"encryption.clear_button" = "ローカル鍵を消去";
+"encryption.sheet.title_set" = "パスフレーズを設定";
+"encryption.sheet.title_verify" = "パスフレーズを確認";
+"encryption.sheet.title_rotate" = "鍵をローテーション";
+"encryption.field.passphrase" = "パスフレーズ";
+"encryption.field.confirm" = "確認";
+"encryption.action.save" = "保存";
+"encryption.action.verify_save" = "検証して保存";
+"encryption.action.rotate" = "ローテーション";
+"encryption.action.cancel" = "キャンセル";
+"encryption.progress.working" = "処理中…";
+"encryption.footer.rotate" = "ローテーションはデバイスに新しい鍵を書き込みます。デバイス上の既存の暗号化録音はすべて永久に復号不可能になります。中古デバイスを引き継ぐ場合や旧パスフレーズを忘れた場合のみ使用してください。";
+"encryption.footer.set_encrypted" = "このデバイスは暗号化されています。短いテスト録音を行い、ダウンロードして、入力したパスフレーズで復号を試します。テスト録音はその後自動的に削除されます。";
+"encryption.footer.set_unencrypted" = "ローカルで導出した鍵を iOS キーチェーンに保存します。デバイスには影響しません — 強いパスフレーズを選び、準備ができたらデバイス画面で暗号化を有効にしてください。";
+"encryption.progress.deriving" = "鍵を導出中…";
+"encryption.progress.recording" = "テスト録音中…";
+"encryption.progress.stopping" = "録音を停止中…";
+"encryption.progress.locating" = "テスト録音を検索中…";
+"encryption.progress.downloading" = "テスト録音をダウンロード中…";
+"encryption.progress.verifying" = "検証中…";
+"encryption.progress.writing_key" = "鍵をデバイスに書き込み中…";
+"encryption.progress.checking_device" = "デバイス内の録音を確認しています…";
+"encryption.rotate_confirm.title" = "デバイスの鍵を更新しますか？";
+"encryption.rotate_confirm.message_empty" = "デバイスに録音は残っていないため、失われるものはありません。新しいパスフレーズは必ず控えてください。今後の録音を開ける唯一の手段で、復旧はできません。";
+"encryption.rotate_confirm.message" = "デバイスにはまだ %d 件の録音があります。旧鍵で作成されたため、更新後は永久に開けなくなります。残したい場合は先に転送してください。新しいパスフレーズは必ず控えてください。復旧はできません。";
+"encryption.progress.probe_subtitle" = "パスフレーズを検証するため短いテスト録音を行っています。検証後に自動削除されます。";
+"encryption.mismatch.title" = "パスフレーズが一致しません";
+"encryption.mismatch.message" = "そのパスフレーズではテスト録音を復号できませんでした。もう一度ご確認ください。本当に忘れてしまった場合は「ローテーション」でデバイスの鍵を上書きできます — ただしデバイス上の既存の暗号化録音はすべて永久に消失します。";
+"encryption.mismatch.try_again" = "再試行";
+"encryption.error.device_not_connected" = "デバイスが接続されていません。";
+"encryption.error.connect_first" = "先にデバイスを接続してください — 実際の録音を使ってパスフレーズを検証する必要があります。";
+"encryption.error.probe_not_found" = "デバイス上にテスト録音が見つかりませんでした。";
+"encryption.error.device_busy" = "デバイスが録音を開始できませんでした: %@";
+"encryption.banner.title" = "デバイスは暗号化されています";
+"encryption.banner.message" = "このデバイスに設定済みのパスフレーズを入力すると、この iPhone で録音を解錠できます。忘れた場合は鍵をローテーションできます(デバイス上の既存の暗号化録音は消去されます)。";
+"encryption.banner.cta" = "パスフレーズを確認…";
+"encryption.download.key_missing" = "%@: この録音は暗号化されていますが、この iPhone にパスフレーズが設定されていません。設定 → 暗号化パスフレーズ → デバイスのパスフレーズを確認… を開いて解錠してください。";
+"encryption.download.wrong_key" = "%1$@: 復号できませんでした — パスフレーズがこの録音と一致しません。設定 → 暗号化パスフレーズ で現在のものを消去し、正しいパスフレーズを設定してください。(詳細: %2$@)";
+
+/* ペアリング (v1.47 バインド) */
+"pairing.title" = "この Nomi をペアリングしますか？";
+"pairing.message" = "録音するには、まず %@ をこのアプリとペアリングする必要があります。デバイス画面からいつでもペアリングを解除できます。";
+"pairing.pair" = "ペアリング";
+"pairing.paired" = "ペアリング済み";
+"pairing.not_paired" = "未ペアリング";
+"pairing.unpair" = "この Nomi のペアリングを解除";
+"pairing.unpair_message" = "ペアリングを解除すると、デバイスとこのアプリの関連付けが取り消されます。録音前に再度ペアリングが必要です。";
+"pairing.unpairing" = "ペアリング解除中…";
+"pairing.pairing_now" = "ペアリング中…";
+"pairing.status" = "ペアリング";
+"device.unbind_and_remove" = "デバイスの登録解除と削除";
+"device.unbind_and_remove_message" = "デバイスの暗号化を解除し、デバイス上に保存された録音を削除し、登録を解除して、ペアリング済みデバイスから取り除きます。この操作は取り消せません。";
+"device.unbinding_and_removing" = "デバイスを削除中…";
+"device.saving_name" = "名前を保存中…";
+"clip_detail.opus_playback_unsupported" = "このシステムバージョンでは Opus 録音を再生できません。再生には iOS 17 以降が必要です（文字起こしには影響しません）。今すぐ聴くには、AirDrop や ファイル アプリで書き出してください。";
+"devices.connection" = "接続";
+"devices.auto_reconnect" = "自動再接続";
+"devices.auto_reconnect_footer" = "オンにすると、予期しない切断（デバイスの電源を入れ直した場合など）のあと、最後に使用したデバイスに自動で再接続します。オフの場合は、上部の接続表示をタップして手動で再接続してください。";
+"clip_detail.delete_audio" = "音声を削除";
+"clip_detail.delete_audio_message" = "音声ファイルのみを削除します。文字起こしと要約は保持されます。この操作は取り消せません。";
+"clip_detail.delete_transcript" = "文字起こしを削除";
+"clip_detail.delete_transcript_message" = "文字起こしとその翻訳を削除します。音声と要約は保持されます。この操作は取り消せません。";
+"clip_detail.delete_summary" = "要約を削除";
+"clip_detail.delete_summary_message" = "要約とその翻訳を削除します。音声と文字起こしは保持されます。この操作は取り消せません。";
+"clip_detail.delete_independent_footer" = "音声・文字起こし・要約はそれぞれ独立して削除されます。一つを削除しても他は残ります。";
+"devices.clear_transcripts" = "文字起こしを消去";
+"devices.clear_transcripts_message" = "すべての文字起こしとその翻訳を削除します。音声と要約は保持されます。この操作は取り消せません。";
+"devices.clear_summaries" = "要約を消去";
+"devices.clear_summaries_message" = "すべての要約とその翻訳を削除します。音声と文字起こしは保持されます。この操作は取り消せません。";
+"asr.transcript_empty" = "このクリップから音声が検出されませんでした。文字起こしする内容がありません。もっと長く、はっきりした録音をお試しください。";
+"privacy.cloud_title" = "データが端末外に送信されます";
+"privacy.cloud_message" = "クラウドの文字起こしまたは AI プロバイダ（Azure、OpenAI など）を設定しています。音声とテキストは処理のためにその第三者サービスへ送信されます。Nomily のサーバーには送られませんが、データは端末外へ出ます。完全に端末内で処理するには、ローカル ASR サーバーとローカル(Ollama)または AI モデルなしをご利用ください。";
+"privacy.cloud_agree" = "了解して続ける";
+"privacy.cloud_go_local" = "プロバイダ設定";
+
+"asr.multi_language_warning" = "複数の言語を選ぶと、Azure はフレーズごとに言語を判定します。実際には 1 言語だけの音声では、これが文字起こしの乱れの原因になります。実際に話されている言語だけを選んでください。";
+"encryption.banner.setup_title" = "このデバイスのパスフレーズを入力";
+"encryption.banner.setup_message" = "このデバイスはすでに暗号化されています。設定済みのパスフレーズを入力すると、この iPhone が確認したうえで保存し、以後の録音をここで開けます。デバイスにはまだ録音がないため、失われるものはありません。";
+"encryption.adopt.title" = "このパスフレーズをデバイスに設定しますか？";
+"encryption.adopt.message" = "デバイスはこの iPhone が持っていない鍵を使っています。バインドしたばかりのデバイスでは正常な状態です。録音は 1 件もないため、パスフレーズを書き込んでも失われるものはありません。パスフレーズは必ず控えてください。今後の録音を開く唯一の手段で、復旧はできません。";
+"encryption.adopt.action" = "このパスフレーズを使う";
+"encryption.cannot_reveal_note" = "パスフレーズ自体は保存されず、そこから導出した鍵だけが保存されるため、ここには表示できません。忘れた場合はローテーションで設定し直してください。";
+"encryption.first_bind_note" = "この Nomi のファームウェアは録音をすべて暗号化するため、パスフレーズの設定が必要です。パスフレーズは保存されず復元もできませんので、必ず控えてください。設定が完了するまで App は録音を開始しません。";
+
+/* Language picker */
+"settings.language" = "言語";
+"language.follow_system" = "システムに従う";
+"language.footer" = "既定ではシステムの言語に従います。対応していない言語の場合は英語を使用します。";
+
+/* Apple Watch */
+"library.recorded_on_watch" = "Apple Watch で録音";
+"watch.recorder_title" = "ウォッチ";
+"watch.ready" = "準備完了";
+"watch.record" = "録音";
+"watch.stop" = "停止";
+"watch.mic_denied" = "設定でマイクへのアクセスを許可してください。";
+"watch.record_failed" = "録音を開始できませんでした：%@";
+"watch.pending_header" = "iPhone を待機中";
+"watch.sending" = "送信中…";
+"watch.waiting" = "未送信";
+"watch.settings_title" = "Apple Watch";
+"watch.status_installed" = "インストール済み";
+"watch.status_not_installed" = "未インストール";
+"watch.status_no_watch" = "ペアリングされた Watch なし";
+"watch.status_unsupported" = "iOS 17 が必要";
+"watch.status_checking" = "確認中…";
+"watch.hint_installed" = "Nomi が手元にないときは手首から録音できます。録音は自動的にライブラリへ同期されます。";
+"watch.hint_not_installed" = "Watch App は本 App に含まれているため、ダウンロードは不要です。iPhone で「Watch」App を開き、「使用可能な App」までスクロールして Nomily AI の横の「インストール」をタップしてください。「App の自動インストール」がオンなら、本 App の更新から数分後に自動で表示されます。";
+"watch.hint_no_watch" = "Apple Watch（watchOS 10 以降）をこの iPhone とペアリングすると、手首から録音できます。録音は自動的にライブラリへ同期されます。";
+"watch.hint_unsupported" = "Apple Watch からの録音には、この iPhone で iOS 17 以降が必要です。Watch App が必要とする watchOS 10 は iOS 17 とのみペアリングできます。iOS をアップデートしてご利用ください。";
+"watch.hint_checking" = "ペアリング済みの Apple Watch を確認しています。App の起動直後やアップデート直後は少し時間がかかります。";
+"watch.intent_toggle_title" = "録音を開始／停止";
+"watch.intent_toggle_short_title" = "録音";
+"watch.intent_toggle_description" = "Apple Watch でボイスメモの録音を開始、または進行中の録音を停止します。";
+"watch.status_connected" = "接続済み";
+"watch.intent_toggle_description_ios" = "接続中の Nomi の録音を開始または停止します。";
+"watch.intent_no_nomi" = "Nomi が接続されていません。Nomily AI を開いてレコーダーを接続してから、もう一度お試しください。";
+"watch.status_recording" = "Apple Watch で録音中";
+"watch.status_transferring" = "Apple Watch から転送中…";
+"watch.status_out_of_range" = "圏外";
+
+"summarize.delete_title" = "テンプレートを削除しますか？";
+"summarize.delete_message" = "「%@」を削除しますか？この操作は元に戻せません。";
+"summarize.prompt_count" = "%d / %d 文字";
+"summarize.prompt_context_hint" = "プロンプトは文字起こしとモデルのコンテキストを共有します。入力と出力の余地を残すため、簡潔にしてください。";
+"template_prompt.formal_minutes" = "あなたは、会議の文字起こし、インタビュー記録、議論資料を、正式でアーカイブに適した議事録に変換します。\n\n基本原則\n- McKinseyスタイルの構造に従う：結論ファースト、高度に構造化、階層的分解、MECE（相互排他的かつ集合的に網羅的）。\n- 言葉遣いは専門的で、明確で、抑制が効き、具体的で、実行可能であること。\n- 正式な議事録に実質的な影響を与える欠落情報や不確実な情報がある場合は、【要確認】とマークする。\n- 文書全体で人物、会社、ツール、プロジェクト、用語の名前を統一し、修正を一貫して引き継ぐ。\n- 空のセクションを削除する — 内容のないプレースホルダーの見出しを残さない。\n- 情報源が特定の情報を含めるべきではないと明確に示している場合は、完全に除外する（「保留中の確認事項」、注記、背景、付録に移動しない）。\n\nワークフロー\n1. 情報源を注意深く読む。\n2. 以下を抽出する：トピック、日付、時間、形式、参加者、関連会社/プロジェクト、主要トピック、中核となる結論、議論のポイント、論点、アクションアイテム、保留中の確認事項。\n3. 中核となる結論、議論の流れ、主要な合意点、アクションアイテム、そして本当に重要な保留中の確認事項のみを要約する。\n\n以下の構造を出力する（内容のないセクションは省略）：\n\n# [会議タイトル]\n\n## 0. 基本会議情報\n\n| 項目 | 詳細 |\n|---|---|\n| 会議トピック |  |\n| 会議日 |  |\n| 会議時間 |  |\n| 会議形式 |  |\n| 参加者 |  |\n| 会議目的 |  |\n| 関連会社/プロジェクト |  |\n| ソース資料 |  |\n\n## 1. 中核となる会議の結論\n会議で最も重要な結論を3～5件、結論ファーストで記載。\n\n## 2. 主要な議論トピック\n各トピックについて：\n### 2.x [トピック]\n- 現在の問題\n- 議論の要約\n- 初期の方向性\n\n## 3. 主要な合意事項\n合意に達した項目。\n\n## 4. フォローアップの推奨事項\nビジネス/製品/技術/運用/コラボレーションの観点で整理する。\n\n## 5. アクションアイテム\n\n| No. | アクション項目 | 優先度 | 提案された担当者 |\n|---|---|---|---|\n\n## 6. 保留中の確認事項\n正式な記録に実質的な影響を与える、本当に確認が必要な項目のみ。\n\n## 7. 概要\n会議の価値と次のステップの方向性を簡潔にまとめる。\n\n会議に上記のカバー範囲外の追加コンテンツタイプが含まれる場合は、必要なセクションを追加する。";
+"template_prompt.structured_minutes" = "あなたは経験豊富な会議メモのアシスタントです。この文字起こしを分析し、Markdownで構造化された議事録を作成してください：\n\n## 会議の要約\n会議の目的と成果を概説する1段落。\n\n## 参加者\n言及されたすべての話者/参加者をリストする。\n\n## 議論された議題\n議論された各トピックについて：\n### [トピック]\n- 提起された主要なポイント\n- 表明された異なる視点\n- 到達した成果または結論\n\n## アクションアイテム\n| 担当者 | タスク | 期限（言及されている場合） |\n|-------|------|------------------------|\n\n## 下された決定\n具体的な決定の箇条書きリスト。\n\n## 未解決の質問\nフォローアップが必要な未解決項目。\n\n簡潔にしてください。正確さのために話者の実際の言葉を使用してください。文字起こしに不明確な点がある場合は、[不明]と注記してください。";
+"template_prompt.executive_brief" = "この会議の文字起こしを簡潔なエグゼクティブサマリー（最大3〜5段落）に要約してください。以下に焦点を当ててください：\n1. 会議が開かれた理由\n2. 下された最も重要な決定\n3. 重要なアクションアイテムとその担当者\n4. 提起されたリスクや障害\n5. 次のステップ\n\n専門的で直接的な言葉で書いてください。社交辞令や冗長な部分は省略してください。忙しい経営幹部が2分以内に読めるようにしてください。";
+"template_prompt.key_takeaways" = "この会議の文字起こしから重要なポイントを抽出してください。形式は以下の通り：\n\n## 重要なポイント\n- この会議で最も重要なポイントを5〜10件の番号付きリストで示す\n- 各ポイントは、単一の自己完結した文にする\n- 議論よりも、決定、コミットメント、新しい情報を優先する\n\n## 注目すべき引用\n重要な瞬間やコミットメントを捉えた直接引用を2〜3件、話者の属性付きで含める。\n\n## 感情\n全体的なトーンについての短いメモ — これは生産的だったか、対立的だったか、探索的だったかなど。";
+"template_prompt.task_extraction" = "この文字起こしを注意深くレビューし、すべてのコミットメント、割り当て、フォローアップタスクを抽出してください。各項目について：\n\n- **誰が**：コミットした人物または割り当てられた人物\n- **何を**：具体的なタスクまたは成果物\n- **いつ**：期限が言及されている場合はその期限、それ以外は「TBD」\n- **文脈**：これがなぜ重要かについての一文\n\n番号付きリストとしてフォーマットしてください。暗黙のコミットメント（例：「調べてみます」＝タスク）を含めてください。所有権が曖昧なタスクには[オーナー不明]とフラグを付けてください。";
+"template_prompt.decision_log" = "この文字起こしで下されたすべての決定を抽出してください。各決定について：\n\n1. **決定**：何が決定されたか\n2. **根拠**：なぜか（それに至った主な議論）\n3. **検討された代替案**：議論された他の選択肢と、それらが却下された理由\n4. **影響**：誰または何が影響を受けるか\n5. **担当者**：実行責任者\n\nトピックが議論されたが明確な決定に達しなかった場合は、「保留中の決定」に現在の議論の状況とともにリストしてください。";
+"template_prompt.concise_summary" = "この文字起こしの簡潔な要約を3〜5段落で提供してください。議論された主要なトピック、述べられた重要なポイント、到達した結論をカバーしてください。明確で専門的な散文で書いてください。箇条書きや見出しは使用せず、よく構成された段落のみを使用してください。";
+"template_prompt.detailed_notes" = "この文字起こしから包括的でよく整理されたノートを作成してください。Markdown形式を使用してください：\n\n## 概要\n状況を設定する短い段落。\n\n## 議論\nトピックごとに整理（時系列ではなく）。各トピックについて、以下を記録：\n- 主要なポイントと議論\n- 言及された裏付けとなる詳細やデータ\n- 不一致や代替の視点\n\n## 結論\n解決または合意されたこと。\n\n## フォローアップ\nさらなる議論や行動が必要な項目。\n\n重要なニュアンスを保持してください。話者が意見を異にする場合、両方を公平に代表してください。";
+"template_prompt.qa_format" = "この文字起こしを整理されたQ&A形式に再構築してください。質問（明示的または暗黙的）を特定し、それらに与えられた回答とペアにしてください。形式：\n\n**Q: [質問]**\nA: [回答、議論から総合したもの]\n\n関連するQ&Aをトピック見出しの下にグループ化してください。質問がされたが完全には回答されなかった場合は、[部分的に回答]または[未回答]と注記してください。";
+"template_prompt.client_meeting_recap" = "この文字起こしからクライアント向けの会議要約を作成してください。形式：\n\n**件名：** [会議トピック]\n**日付：** [言及されている場合抽出]\n**参加者：** [リスト]\n\n**要約：**\n議論され合意された内容の専門的な概要。\n\n**合意された次のステップ：**\n両側からのコミットメントの番号付きリスト。\n\n**タイムライン：**\n議論された日付やマイルストーン。\n\nトーンは専門的で前向きに保ち、内部の専門用語を避けてください。相互のコミットメントと提供された価値に焦点を当ててください。";
+"template_prompt.one_on_one_summary" = "この1対1の会話を要約してください。次の項目を記録：\n\n## 議論されたトピック\n取り上げられた内容の簡潔なリスト。\n\n## 与えられたフィードバック\n交換されたフィードバック（肯定的または建設的）とその文脈。\n\n## 障害と必要なサポート\n助けやエスカレーションが必要な問題。\n\n## 目標とコミットメント\n次回のチェックインまでに各人がコミットしたこと。\n\n## キャリア/成長\n議論されたキャリア開発、学習、成長に関するトピック。\n\nこれはプライベートで建設的なトーンに保ってください。";
+"template_prompt.status_update" = "この文字起こしをプロジェクトのステータスアップデートに変換してください：\n\n## ステータス： [議論のトーンに基づいてグリーン/イエロー/レッド]\n\n## 前回のアップデートからの進捗\n- 達成されたこと\n\n## 現在の焦点\n- 現在取り組んでいること\n\n## 障害\n- 進捗を妨げている問題\n\n## 今後のマイルストーン\n- 次に何があり、いつか\n\n## リスク\n- タイムラインを狂わせる可能性のあるもの\n\n事実に基づき具体的にしてください。言及されている場合は日付と指標を使用してください。";
+"template_prompt.lecture_notes" = "この講義/トークの文字起こしをよく整理された学習ノートに変換してください：\n\n## トピック\n主要な主題と文脈。\n\n## 主要な概念\n導入された各主要概念について：\n- **用語/概念**：明確な定義または説明\n- 話者が使用した裏付けとなる例や類推\n\n## 重要な詳細\n言及された事実、数字、日付、または公式。\n\n## 関連性\n概念が互いに、またはより広いテーマとどのように関連するか。\n\n## 復習問題\n学生が自己テストに使用できる質問を3〜5つ生成してください。\n\n明確で教育的な言葉を使用してください。試験に出そうな用語を強調してください。";
+"template_prompt.research_discussion" = "この研究ディスカッションまたはジャーナルクラブの文字起こしを要約してください：\n\n## 議論された論文/トピック\nタイトルと著者（言及されている場合）。\n\n## 主な発見\n提示された主要な結果または主張。\n\n## 方法論\n研究がどのように実施されたか（議論された場合）。\n\n## 長所\nグループが説得力があると感じた点。\n\n## 批判と限界\n研究について提起された懸念。\n\n## 含意\nこれがなぜ重要か、議論された応用。\n\n## 未解決の質問\n浮上した未解決の科学的質問。";
+"template_prompt.brainstorm_synthesis" = "このブレインストーミングセッションを整理された出力に統合してください：\n\n## 問題ステートメント\n探求されていた問題または機会は何か。\n\n## 生成されたアイデア\n類似したアイデアをテーマごとにグループ化してください。各テーマについて：\n### [テーマ]\n- 提案された具体的なアイデア\n- 誰が提案したか（識別できる場合）\n- 議論された長所/短所\n\n## 有力な候補\nグループから最もエネルギーや支持を得たアイデア。\n\n## ワイルドカード\nさらに探求する価値のある型破りまたはリスクのあるアイデア。\n\n## 推奨される次のステップ\n最も有望なアイデアを評価またはプロトタイプする方法。";
+"template_prompt.interview_summary" = "このインタビューの文字起こしを要約してください：\n\n## インタビュー対象者\n名前と背景（言及されている場合）。\n\n## 重要な洞察\n共有された最も価値がある、または驚くべき事柄をテーマごとに整理。\n\n## 注目すべき引用\n彼らの視点をよく捉えた直接引用を3〜5件。\n\n## テーマ\n会話全体を通じて繰り返されるアイデアや懸念。\n\n## フォローアップの質問\nされなかったが探求する価値がある質問。\n\nインタビュー対象者の声と視点を保持してください。編集者の意見を加えないでください。";
+
+/* field-level ASR validation, device-file transcribe guidance, pairing shortcut */
+"asr.key_required" = "サブスクリプションキーを入力してください";
+"asr.region_required" = "サービスリージョンを入力してください";
+"asr.verify_failed" = "検証に失敗しました";
+"device_files.download_before_transcribe" = "%@ を文字起こしする前にダウンロードして復号してください。";
+"device_files.transcribe_failed" = "%1$@ の文字起こしに失敗しました：%2$@";
+"device_files.delete_failed" = "録音の削除に失敗しました：%@";
+"pairing.go_pair" = "ペアリングする";
+"dnote_error.not_bound" = "この Nomi はまだこのアプリとペアリングされていません。";
+"dnote_error.not_connected" = "デバイスに接続されていません。";
+"dnote_error.timeout" = "デバイスから時間内に応答がありませんでした。";
+"wifi_error.timeout" = "Wi-Fi 転送がタイムアウトしました。デバイスからデータがありません。";
+"wifi_error.not_connected" = "デバイスの Wi-Fi ホットスポットに接続していません。";
+"wifi_error.malformed" = "デバイスから App が解釈できないデータが返されました。";
+"wifi_error.no_response" = "デバイス %1$@:%2$d から応答がありません。";
+"wifi_error.cancelled" = "高速転送をキャンセルしました。";
+"hotspot_error.user_denied" = "Wi-Fi への接続を拒否しました。もう一度「高速転送」をタップすると再試行できます。";
+"hotspot_error.join_failed" = "デバイスのホットスポットに接続できません。「再試行」をタップすると、ホットスポットを開き直してもう一度試します。";
+"dnote_error.stream_no_audio" = "この録音の音声がデバイスから送られてきません。本体で録音を停止してから、アプリでライブを開始してください。";
+"dnote_error.passphrase_setup_incomplete" = "録音の前に暗号化パスフレーズを設定してください。この Nomi は録音をすべて暗号化するため、パスフレーズ未設定で録音したファイルはこの iPhone では開けません。";
+"scanner.section_available" = "追加できるデバイス";
+"scanner.section_added" = "追加済みのデバイス";
+"scanner.added_badge" = "追加済み";
+"asr.no_provider_configured" = "音声認識サービスが設定されていません。設定で追加してください。";
+"asr.all_providers_unreachable" = "設定済みの音声認識サービスにいずれも接続できませんでした。";
+"asr.azure_required_for_translation" = "リアルタイム翻訳には Azure が必要です。設定で Azure のキーとリージョンを入力してください。";
+"asr.missing_credentials" = "%@ が設定されていません。設定で構成してください。";
+"asr.open_provider_settings" = "音声認識を設定";
+"azure_verify.bad_credentials" = "サブスクリプションキーが拒否されました。このリージョンでは使えない可能性があります。キーとリージョンの組み合わせをご確認ください。";
+"azure_verify.region_not_found" = "そのリージョンは存在しません。つづりをご確認ください（例：eastus、westeurope）。";
+"azure_verify.rate_limited" = "リクエストが多すぎます。しばらくしてからもう一度お試しください。";
+"azure_verify.service_unavailable" = "Azure が一時的に利用できません。しばらくしてからお試しください。";
+"azure_verify.network" = "Azure に接続できませんでした。ネットワーク接続をご確認ください。";
+"azure_verify.unexpected" = "Azure から予期しない応答が返されました。";
+"common.edit" = "編集";
+"live.clip_not_in_library" = "この録音はライブラリにありません。名前の変更・結合・削除が行われた可能性があります。";
+"azure_verify.host_unresolved" = "そのリージョンの Azure アドレスを解決できませんでした。リージョンのつづり（例：eastus、westeurope）とネットワーク接続をご確認ください。";
+"asr.last_verify_failed" = "前回の検証に失敗しました。再度検証してください";
+"asr.status_verified" = "検証済み・利用できます";
+"asr.status_verifying" = "接続をテスト中…";
+"asr.status_unverified" = "保存済み・未検証";
+"asr.autosave_note" = "変更は自動保存されます。保存＝利用可能ではありません。チェックボタンで資格情報を検証してください。";
+"asr.leave_title" = "検証せずに戻りますか？";
+"asr.leave_anyway" = "戻る";
+"asr.leave_incomplete_message" = "必須項目が未入力のため、このサービスは文字起こしに使用できません。";
+"asr.leave_unverified_message" = "この資格情報はまだ検証されていないため、文字起こしが失敗する可能性があります。先にチェックボタンでテストしてください。";
+"asr.host_required" = "サーバーのホストを入力してください";
+"asr.port_invalid" = "ポートは 1〜65535 の範囲で入力してください";

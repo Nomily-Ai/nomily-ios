@@ -1,0 +1,587 @@
+/* English — Base localization */
+
+/* Common */
+"common.done" = "Done";
+"common.cancel" = "Cancel";
+"common.ok" = "OK";
+"common.delete" = "Delete";
+"common.save" = "Save";
+"common.retry" = "Retry";
+"common.close" = "Close";
+"common.open_settings" = "Open Settings";
+"common.try_again" = "Try Again";
+"common.none" = "None";
+"common.recording" = "Recording";
+"common.keep_foreground" = "Keep this screen in the foreground — going to the background will interrupt the transfer.";
+
+/* Tabs */
+"tab.recordings" = "Recordings";
+"tab.live" = "Live";
+"tab.settings" = "Settings";
+
+/* Settings */
+"settings.asr_providers" = "ASR Providers";
+"settings.llm_providers" = "LLM Providers";
+"settings.recordings" = "Recordings & Transfer";
+"settings.summarize_templates" = "Summarize Templates";
+"settings.devices_library" = "Devices & Library";
+"settings.about" = "About";
+"settings.version" = "Version";
+
+/* ASR */
+"asr.transcription" = "Transcription";
+"asr.active_provider" = "Active Provider";
+"asr.auto_transcribe_after_download" = "Auto-transcribe after download";
+"asr.auto_transcribe_min" = "Min duration: %ds";
+"asr.auto_transcribe_footer" = "Transcription runs after each download. Clips shorter than the minimum duration are skipped. Another provider is used as fallback when configured.";
+"asr.local_vad" = "Strip silence before upload";
+"asr.local_vad_footer" = "Voice activity detection runs on-device and removes silent stretches before sending audio to the transcription provider. Cuts upload size and ASR cost.";
+"asr.azure_speech" = "Azure Speech";
+"asr.azure_purpose_footer" = "Azure Speech powers transcription, live transcription and live translation. It uses your own Azure key; audio is sent to Microsoft for processing and may incur charges. It does not generate AI summaries — those use the LLM service you configure separately.";
+"asr.local_server" = "Local ASR Server";
+"asr.subscription_key" = "Subscription key";
+"asr.region" = "Region";
+"asr.host" = "Host";
+"asr.port" = "Port";
+"asr.no_provider" = "No ASR Provider";
+"asr.no_provider_message" = "Set up a transcription provider (Azure or Local Server) in Settings.";
+"asr.azure" = "Azure";
+"asr.local_server_label" = "Local server";
+"asr.transcribe_auto" = "Auto-detect language";
+"asr.specify_languages" = "Specify languages…";
+"asr.languages_footer" = "Azure detects the language of each phrase independently, not the clip as a whole — useful for meetings that mix several languages.";
+"asr.max_languages_hint" = "Up to %d languages";
+
+/* LLM */
+"llm.active_provider_footer" = "The primary provider is used for summarization and other LLM tasks.";
+"llm.api_key" = "API Key";
+"llm.model" = "Model";
+"llm.select_model" = "Select a model";
+"llm.model_placeholder" = "Model — e.g. %@";
+"llm.endpoint_url" = "Endpoint URL";
+"llm.provider_placeholder" = "Provider — e.g. %@";
+"llm.api_key_optional" = "API Key (optional)";
+"llm.no_provider" = "No LLM Provider";
+"llm.no_provider_message" = "Set up an LLM provider and select an Active Provider.";
+
+/* Azure Setup Guide */
+"azure_guide.title" = "Azure Speech Setup";
+"azure_guide.step" = "Step %d: %@";
+"azure_guide.step1_title" = "Create an Azure Account";
+"azure_guide.step1_item1" = "Go to portal.azure.com";
+"azure_guide.step1_item2" = "Sign up for a free account if you don't have one (includes $200 credit for 30 days)";
+"azure_guide.step2_title" = "Create a Speech Resource";
+"azure_guide.step2_item1" = "In the Azure Portal, tap Create a resource";
+"azure_guide.step2_item2" = "Search for \"Speech\" and select Speech (by Microsoft)";
+"azure_guide.step2_item3" = "Tap Create";
+"azure_guide.step2_item4" = "Pick a Region that supports Fast Transcription (e.g. westus3, eastus, eastasia)";
+"azure_guide.step2_item5" = "Pricing tier: F0 (Free) for testing, or S0 (Standard) for production";
+"azure_guide.step2_item6" = "Tap Review + create, then Create";
+"azure_guide.step3_title" = "Get Your API Key and Region";
+"azure_guide.step3_item1" = "Go to your Speech resource in the portal";
+"azure_guide.step3_item2" = "Tap Keys and Endpoint in the sidebar";
+"azure_guide.step3_item3" = "Copy Key 1 (or Key 2) and the Region (e.g. westus3)";
+"azure_guide.free_tier_title" = "Free Tier Limits (F0)";
+"azure_guide.fast_transcription" = "Fast transcription";
+"azure_guide.fast_transcription_value" = "5 hours / month";
+"azure_guide.realtime_transcription" = "Real-time transcription";
+"azure_guide.realtime_transcription_value" = "1 concurrent request";
+"azure_guide.speaker_diarization" = "Speaker diarization";
+"azure_guide.speaker_diarization_value" = "Included";
+"azure_guide.audio_formats" = "Audio formats";
+"azure_guide.audio_formats_value" = "WAV, OGG/Opus, MP3, FLAC";
+
+/* Recordings Settings */
+"rec_settings.delete_after_transfer" = "Delete from device after transfer";
+"rec_settings.delete_after_transfer_footer" = "When on, the file is removed from the device as soon as the BLE transfer + decrypt finishes.";
+"rec_settings.decryption" = "Decryption";
+"rec_settings.chacha_key" = "ChaCha20 key (hex)";
+"rec_settings.chacha_key_footer" = "64 hex characters (32 bytes). Leave blank if the device is not using encryption.";
+"rec_settings.wifi_ap" = "Wi-Fi AP (Fast Transfer)";
+"rec_settings.ssid" = "SSID";
+"rec_settings.password" = "Password";
+"rec_settings.wifi_credentials_footer" = "Credentials the device broadcasts when you start Fast Transfer.";
+"rec_settings.wifi_generated" = "Wi-Fi credentials generated";
+"rec_settings.wifi_generated_message" = "SSID and password have been auto-generated. You can change them above.";
+"rec_settings.fast_transfer_threshold" = "Fast Transfer Threshold";
+"rec_settings.fast_transfer_threshold_footer" = "Show the Wi-Fi Fast Transfer button when undownloaded recordings on the device exceed this size. Set to 0 KB to always show the suggestion whenever files are pending.";
+
+/* Devices & Library Settings */
+"devices.known_devices" = "Known Devices";
+"devices.no_devices_yet" = "No devices remembered yet.";
+"devices.last_seen" = "Last seen %@";
+"devices.library" = "Library";
+"devices.files" = "Files";
+"devices.total_size" = "Total size";
+"devices.library_footer" = "Audio clips, transcripts, and summaries stored on this device. All data will be lost if the app is deleted — export and back up regularly.";
+
+/* Recordings Tab */
+"recordings.device" = "Device";
+"recordings.library" = "Library";
+"recordings.no_device" = "No device connected";
+"recordings.no_device_message" = "Tap the pill above to scan for your D·NOTE.";
+"recordings.no_clips" = "No clips yet";
+"recordings.no_clips_message" = "Download a recording from the Device tab to add it to your library.";
+"recordings.clip_count_one" = "%d clip · %@";
+"recordings.clip_count_other" = "%d clips · %@";
+"library.import_audio" = "Import Audio";
+"library.import_failed" = "Import Failed";
+"library.merge" = "Merge Adjacent";
+"library.merging" = "Merging\u2026";
+"library.merge_failed" = "Merge Failed";
+"library.merge_confirm_title" = "Merge Adjacent Clips?";
+"library.merge_confirm_message" = "%1$@ and %2$@ will be combined into a single new recording (M4A). The original clips and their transcripts, summaries, and translations will be deleted. This can't be undone.";
+
+/* Device Files */
+"device_files.delete_recording" = "Delete recording?";
+"device_files.delete_recording_message" = "Permanently remove %@ from the device. This can't be undone.";
+"device_files.operation_failed" = "Operation failed";
+"device_files.reading_file_list" = "Reading file list…";
+"device_files.device_is_recording" = "Device is recording";
+"device_files.recording_unavailable_message" = "File list is unavailable while recording. Stop recording to browse files.";
+"device_files.stop_recording" = "Stop Recording";
+"device_files.couldnt_read_device" = "Couldn't read the device";
+"device_files.no_recordings" = "No recordings on device";
+"device_files.no_recordings_message" = "Tap the refresh button after recording on the device.";
+"device_files.fast_transfer_wifi" = "Fast Transfer over Wi-Fi";
+"device_files.pending" = "%@ pending";
+"device_files.transcribing" = "Transcribing…";
+"device_files.transcript_done" = "Transcript → %@";
+"device_files.transfer_in_progress" = "Transfer in Progress";
+"device_files.cancel_transfer_to_switch" = "Cancel all transfers to switch tabs?";
+"device_files.cancel_and_switch" = "Cancel & Switch";
+
+/* File Save States */
+"file_save.saved_plain" = "Saved → %@ (plain, no decrypt needed)";
+"file_save.decrypted" = "Decrypted → %@";
+"file_save.wrapped_frames" = "Wrapped raw frames → %@";
+"file_save.decrypted_wrapped" = "Decrypted + wrapped → %@";
+"file_save.saved" = "Saved → %@";
+"file_save.decrypt_failed" = "Decrypt failed: %@";
+"file_save.wav_without_header" = "WAV without RIFF header — set the ChaCha20 key in Settings if your firmware encrypts.";
+
+/* Clip Detail */
+"clip_detail.transcript" = "Transcript";
+"clip_detail.transcribing" = "Transcribing...";
+"clip_detail.provider_fallback" = "Provider fallback occurred";
+"clip_detail.view_full_transcript" = "View Full Transcript";
+"clip_detail.transcribe" = "Transcribe";
+"clip_detail.retranscribe" = "Re-transcribe?";
+"clip_detail.retranscribe_message" = "This will replace the existing transcript.";
+"clip_detail.summary" = "Summary";
+"clip_detail.view_full_summary" = "View Full Summary";
+"clip_detail.summarize" = "Summarize";
+"clip_detail.transcribe_first" = "Transcribe first to enable summarization.";
+"clip_detail.translation" = "Translation";
+"clip_detail.view_full_translation" = "View Full Translation";
+"clip_detail.translate" = "Translate";
+"clip_detail.translating" = "Translating...";
+"clip_detail.translated_summary" = "Translated Summary";
+"clip_detail.view_full_translated_summary" = "View Full Translated Summary";
+"clip_detail.export" = "Export";
+"clip_detail.export_as_m4a" = "Export as M4A (AAC)";
+"clip_detail.exporting" = "Exporting\u2026";
+"clip_detail.speaker" = "Speaker %@";
+
+/* Device Sheet */
+"device.couldnt_update" = "Couldn't update";
+"device.erase_all_recordings" = "Erase all recordings?";
+"device.erase_message" = "This deletes every recording on the device. Switches and Bluetooth name are preserved. Cannot be undone.";
+"device.format_storage" = "Format storage";
+"device.formatting" = "Formatting…";
+"device.restore_factory" = "Restore factory defaults?";
+"device.restore_message" = "Resets switches and Bluetooth name. Recordings are kept.";
+"device.factory_reset" = "Factory reset";
+"device.resetting" = "Resetting…";
+"device.power_off" = "Power off the device?";
+"device.power_off_message" = "The device will disconnect immediately. Press its physical button to turn it back on.";
+"device.shut_down" = "Shut down";
+"device.shutting_down" = "Shutting down…";
+"device.connected_mtu" = "Connected · MTU %d";
+"device.storage_used" = "%@ used of %@";
+"device.identity" = "Identity";
+"device.bluetooth_name" = "Bluetooth name";
+"device.serial" = "Serial";
+"device.firmware" = "Firmware";
+"device.bt_mac" = "BT MAC";
+"device.device_time" = "Device time";
+"device.audio" = "Audio";
+"device.noise_cancel" = "Noise cancel";
+"device.noise_cancel_hint" = "On-device noise cancellation. Off keeps more of the ambient sound; on makes voices stand out. It is a separate setting from “Noise reduction” below.";
+"device.save_raw_wav" = "Save raw WAV";
+"device.save_raw_wav_hint" = "Also keep an uncompressed WAV copy of each recording on the device. Best quality, but it uses far more storage.";
+"device.vad" = "Voice activity detection";
+"device.vad_hint" = "The device skips silence while recording and keeps only the parts where someone is talking, saving storage and battery; very quiet speech may get clipped at the start. This is not the same as Settings → Speech recognition → “Trim silence before upload”, which runs on the phone before uploading — this one runs on the device while recording.";
+"device.mic_gain" = "Mic gain";
+"device.mic_gain_hint" = "Microphone sensitivity, 1 lowest to 9 highest. Higher picks up distant or quiet speech, but also amplifies background noise and clips more easily on loud sounds.";
+"device.noise_reduction" = "Noise reduction";
+"device.noise_reduction_hint" = "Noise reduction strength, 1 weakest to 9 strongest. Higher removes more background noise, but can also thin out voices and make them sound muffled.";
+"device.behavior" = "Behavior";
+"device.led_indicator" = "LED indicator";
+"device.vibration" = "Vibration";
+"device.usb_drive_mode" = "USB drive mode";
+"device.usb_drive_mode_hint" = "When enabled, the device appears as a removable drive when plugged into a computer.";
+"device.auto_power_off" = "Auto power-off";
+"device.saving_idle_off" = "Saving idle-off…";
+"device.danger_zone" = "Danger zone";
+"device.danger_zone_footer" = "Format erases all recordings; factory reset only resets switches and BT name. Shut down cuts the connection.";
+"device.unavailable_while_recording" = "Stop the recording before running device operations.";
+"device.connection" = "Connection";
+"device.disconnect" = "Disconnect";
+"device.never" = "Never";
+"device.custom_idle_off" = "Custom (%ds)";
+
+/* Device Encryption (v1.47) */
+"device_encryption.section_header" = "Device encryption";
+"device_encryption.toggle_label" = "Encrypt recordings on device";
+"device_encryption.footer" = "When enabled, the device encrypts every recording with a ChaCha20 key that this app also stores. Turning off requires the matching key.";
+"device_encryption.missing_key_error" = "Can't disable — no ChaCha20 key on file to match the device's.";
+"device_encryption.state_row" = "On-device encryption";
+"device_encryption.state_on" = "ON";
+"device_encryption.state_off" = "OFF";
+"device_encryption.firmware_footer" = "This firmware (v1.50) auto-enables encryption at bind time and refuses to disable it. Recordings are encrypted under whatever 32-byte key was last written via 0xA2. Use \"Verify device passphrase\" above so this app can decrypt them.";
+
+/* Developer mode (version-tap easter egg) */
+"developer_mode.status_on" = "Developer mode is on";
+"developer_mode.toast_enabled" = "Developer mode enabled";
+"developer_mode.toast_disabled" = "Developer mode disabled";
+"developer_mode.taps_to_enable" = "%d more taps to enable developer mode";
+"developer_mode.taps_to_disable" = "%d more taps to disable developer mode";
+
+/* Encryption passphrase / onboarding (v1.50) */
+"encryption.section_header" = "Encryption passphrase";
+"encryption.section_footer" = "Derived via Argon2id with the device serial as salt. Stored in the iOS Keychain, scoped to this device. Losing the passphrase makes encrypted recordings unrecoverable. Cross-iPhone recovery: enter the same passphrase on the new phone.";
+"encryption.local_key" = "Local key";
+"encryption.configured" = "configured";
+"encryption.missing" = "missing";
+"encryption.set_button" = "Set passphrase…";
+"encryption.verify_button" = "Verify device passphrase…";
+"encryption.rotate_button" = "Rotate (overwrite device key)…";
+"encryption.clear_button" = "Clear local key";
+"encryption.sheet.title_set" = "Set passphrase";
+"encryption.sheet.title_verify" = "Verify passphrase";
+"encryption.sheet.title_rotate" = "Rotate key";
+"encryption.field.passphrase" = "Passphrase";
+"encryption.field.confirm" = "Confirm";
+"encryption.action.save" = "Save";
+"encryption.action.verify_save" = "Verify & save";
+"encryption.action.rotate" = "Rotate";
+"encryption.action.cancel" = "Cancel";
+"encryption.progress.working" = "Working…";
+"encryption.footer.rotate" = "Rotate writes a brand-new key to the device. Every existing encrypted recording on the device becomes permanently undecryptable. Use this only when you're taking ownership of a pre-owned device or have forgotten the old passphrase.";
+"encryption.footer.set_encrypted" = "This device is encrypted. We'll record a short probe clip, download it, and trial-decrypt with the passphrase you typed. The probe is auto-deleted afterwards.";
+"encryption.footer.set_unencrypted" = "Saves the locally-derived key to the iOS Keychain. The device isn't touched — pick a strong passphrase and enable encryption from the Device sheet when you're ready.";
+"encryption.progress.deriving" = "Deriving key…";
+"encryption.progress.recording" = "Recording a short probe clip…";
+"encryption.progress.stopping" = "Stopping recording…";
+"encryption.progress.locating" = "Locating probe clip…";
+"encryption.progress.downloading" = "Downloading probe…";
+"encryption.progress.verifying" = "Verifying…";
+"encryption.progress.writing_key" = "Writing key to device…";
+"encryption.progress.checking_device" = "Checking what's on the device…";
+"encryption.rotate_confirm.title" = "Rotate the device key?";
+"encryption.rotate_confirm.message_empty" = "The device has no recordings left, so nothing will be lost. Write down the new passphrase — it's the only way to open recordings made from now on, and there is no recovery.";
+"encryption.rotate_confirm.message" = "%d recording(s) are still on the device. They were made with the old key and will become permanently unreadable — download them first if you want to keep them. Write down the new passphrase: it's the only way to open recordings made from now on, and there is no recovery.";
+"encryption.progress.probe_subtitle" = "Recording a short probe to verify the passphrase. The probe is auto-deleted.";
+"encryption.mismatch.title" = "Passphrase didn't match";
+"encryption.mismatch.message" = "The probe clip didn't decrypt with that passphrase. Double-check it and try again. If you've truly forgotten it, use \"Rotate\" to overwrite the device key — but that permanently destroys every existing encrypted recording on the device.";
+"encryption.mismatch.try_again" = "Try again";
+"encryption.error.device_not_connected" = "Device not connected.";
+"encryption.error.connect_first" = "Connect the device first — the passphrase needs to be verified against a real recording.";
+"encryption.error.probe_not_found" = "Couldn't find the probe recording on the device.";
+"encryption.error.device_busy" = "Device wouldn't record: %@";
+"encryption.banner.title" = "Device is encrypted";
+"encryption.banner.message" = "Enter the passphrase this device was set up with to unlock its recordings on this iPhone. If you've forgotten it, rotate the key (this erases existing encrypted recordings on the device).";
+"encryption.banner.cta" = "Verify passphrase…";
+"encryption.download.key_missing" = "%@: this recording is encrypted, but no passphrase is set on this iPhone. Open Settings → Encryption passphrase → Verify device passphrase… to unlock it.";
+"encryption.download.wrong_key" = "%1$@: couldn't decrypt — the passphrase doesn't match this recording. Open Settings → Encryption passphrase, clear the current one, and set the correct passphrase. (Details: %2$@)";
+
+/* Pairing (v1.47 binding) */
+"pairing.title" = "Pair this Nomi?";
+"pairing.message" = "%@ needs to be paired with this app before it can record. You can unpair any time from the Device screen.";
+"pairing.pair" = "Pair";
+"pairing.paired" = "Paired";
+"pairing.not_paired" = "Not paired";
+"pairing.unpair" = "Unpair this Nomi";
+"pairing.unpair_message" = "Unpair removes the device's pairing with this app. You'll need to pair again before recording.";
+"pairing.unpairing" = "Unpairing…";
+"pairing.pairing_now" = "Pairing…";
+"pairing.status" = "Pairing";
+
+/* Live */
+"live.no_device" = "No device connected";
+"live.no_device_message" = "Connect your D·NOTE to start live transcription and translation.";
+"live.view_in_library" = "View in Library";
+"live.source_language" = "Source Language";
+"live.target_language" = "Target Language";
+"live.same_as_source" = "Same as source";
+"live.setup_azure" = "Set up Azure";
+"live.switch_language" = "Switch language?";
+"live.continue" = "Continue";
+"live.listening" = "Listening...";
+"live.tap_mic_to_start" = "Tap the mic to start";
+"live.search_languages" = "Search languages";
+"live.transcribe_only" = "Transcribe %@ only";
+"live.translate_pair" = "%@ → %@";
+"live.streaming" = "Streaming";
+"live.ready" = "Ready";
+"live.paused" = "Paused";
+"live.repair_title" = "Complete recording available";
+"live.repair_message" = "This recording had pauses, so some audio wasn't captured. Replace with the complete recording from your Nomi?";
+"live.repair_message_attached" = "This session joined a recording that was already in progress, so the start is missing. Replace with the complete recording from your Nomi?";
+"live.repair_not_playable" = "The file came back encrypted and this iPhone has no matching passphrase, so nothing playable was produced. The recording is still on your Nomi.";
+"live.repair_replace" = "Replace";
+"live.repair_keep" = "Keep current";
+"live.repair_downloading" = "Downloading complete audio…";
+"live.repair_succeeded" = "Replaced with complete audio";
+"live.repair_failed" = "Couldn't download: %@";
+"live.repair_manual_transfer" = "Complete recording is still on your Nomi. Transfer it from Recordings.";
+"live.start_unknown_title" = "Can't tell whether Nomi is recording";
+"live.start_unknown_message" = "Nomi didn't answer the status check. Starting a live session now could cut off a recording you began with the button on the device. Try again, or start anyway if you're sure it isn't recording.";
+"live.start_anyway" = "Start Anyway";
+"live.attach_no_upload" = "Nomi is recording, but this recording was started with the device button before the app connected, so it isn't sending audio. Stop the recording on the device, then start live from the app.";
+
+/* Scanner */
+"scanner.scan" = "Scan";
+"scanner.scan_again" = "Scan again";
+"scanner.connection_failed" = "Connection failed";
+"scanner.bluetooth_unavailable" = "Bluetooth unavailable";
+"scanner.looking_for_devices" = "Looking for D·NOTE devices…";
+"scanner.looking_message" = "Make sure your D·NOTE is powered on and within a few metres.";
+"scanner.wake_and_retry" = "Device not found. Press and hold the device button for 1 second to wake it, then try again.";
+
+/* Connection Pill */
+"pill.add_device" = "Add Device";
+
+/* Fast Transfer */
+"fast_transfer.title" = "Fast Transfer";
+"fast_transfer.status" = "Status";
+"fast_transfer.ap_credentials" = "AP credentials";
+"fast_transfer.files_count" = "Files (%d)";
+"fast_transfer.pending" = "Pending…";
+"fast_transfer.saved" = "Saved";
+"fast_transfer.cancelled" = "Cancelled";
+"fast_transfer.background_interrupted" = "Transfer stopped because the app moved to the background. Retry with the app open.";
+"fast_transfer.stage_ready" = "Ready";
+"fast_transfer.stage_stopping" = "Stopping recording…";
+"fast_transfer.stage_starting_ap" = "Starting device Wi-Fi AP…";
+"fast_transfer.stage_polling_ap" = "Waiting for the device hotspot to start… (attempt %d of %d)";
+"fast_transfer.stage_joining_wifi" = "Joining Wi-Fi…";
+"fast_transfer.stage_join_failed" = "Wi-Fi join failed";
+"fast_transfer.stage_connecting" = "Connecting to device…";
+"fast_transfer.stage_listing" = "Listing files…";
+"fast_transfer.stage_downloading" = "Downloading…";
+"fast_transfer.stage_cleanup" = "Cleaning up…";
+"fast_transfer.stage_done" = "Done";
+"fast_transfer.stage_stopped" = "Stopped";
+"fast_transfer.hint_polling" = "The device can take 30-45 s to bring the AP up (longer on battery).";
+"fast_transfer.hint_joining" = "iOS may show a join prompt — accept it to continue.";
+"fast_transfer.hint_join_failed" = "Tap \"Retry\" to try joining the device's Wi-Fi again.";
+"fast_transfer.tcp_unreachable" = "Could not reach the device — joining its Wi-Fi may not have succeeded.";
+"fast_transfer.ap_still_on" = "The device still reports its hotspot as on. If the next fast transfer can't join, turn the device off and on again.";
+"fast_transfer.hint_connecting" = "Negotiating a TCP session on 192.168.88.1:6718.";
+"fast_transfer.ap_not_broadcasting" = "Device accepted the AP-start command but the AP never came up. Try again; if it keeps failing, restart the device.";
+"fast_transfer.invalid_psk" = "The device hotspot password must be 8–63 characters. Change it in Settings → Recording & transfer → Wi-Fi AP, then try again.";
+"fast_transfer.decode_failed" = "%@: downloaded, but it couldn't be turned into a playable audio file. The original has been kept on the device.";
+
+/* Summarize */
+"summarize.choose_template" = "Choose Template";
+"summarize.summarizing" = "Summarizing...";
+"summarize.error" = "Error";
+"summarize.summarizing_with" = "Summarizing with %@...";
+"summarize.search_templates" = "Search templates";
+"summarize.truncated_warning" = "The model hit its output limit, so this result is cut off. Try a shorter transcript or a template that asks for less.";
+"summarize.add_template" = "Add Template";
+"summarize.clone" = "Clone";
+"summarize.category" = "Category";
+"summarize.pick_existing" = "Pick Existing";
+"summarize.new" = "New";
+"summarize.name" = "Name";
+"summarize.template_name" = "Template name";
+"summarize.prompt" = "Prompt";
+"summarize.new_template" = "New Template";
+"summarize.edit_template" = "Edit Template";
+"summarize.copy_name" = "%@ (copy)";
+"summarize.new_category_name" = "New category name";
+"summarize.output_language" = "Output Language";
+"summarize.same_as_transcript" = "Same as transcript";
+"summarize.restore_defaults" = "Restore default templates";
+"summarize.restore_defaults_title" = "Restore default templates?";
+"summarize.restore_defaults_message" = "This replaces your current template list with the built-in defaults. Your custom templates will be lost. Built-in templates that ship with the app will reappear.";
+
+/* Template Categories */
+"template_cat.meeting_notes" = "Meeting Notes";
+"template_cat.action_items" = "Action Items";
+"template_cat.general_summary" = "General Summary";
+"template_cat.professional" = "Professional";
+"template_cat.academic" = "Academic";
+"template_cat.creative" = "Creative";
+
+/* Template Names */
+"template.formal_minutes" = "Formal Meeting Minutes";
+"template.structured_minutes" = "Structured Minutes";
+"template.executive_brief" = "Executive Brief";
+"template.key_takeaways" = "Key Takeaways";
+"template.task_extraction" = "Task Extraction";
+"template.decision_log" = "Decision Log";
+"template.concise_summary" = "Concise Summary";
+"template.detailed_notes" = "Detailed Notes";
+"template.qa_format" = "Q&A Format";
+"template.client_meeting_recap" = "Client Meeting Recap";
+"template.one_on_one_summary" = "1-on-1 Summary";
+"template.status_update" = "Status Update";
+"template.lecture_notes" = "Lecture Notes";
+"template.research_discussion" = "Research Discussion";
+"template.brainstorm_synthesis" = "Brainstorm Synthesis";
+"template.interview_summary" = "Interview Summary";
+"devices.danger_zone" = "Danger Zone";
+"devices.clear_audio" = "Clear Media";
+"devices.clear_audio_message" = "All audio clips stored on this phone will be deleted. Transcripts, summaries, and titles are kept.";
+"devices.clear_all_data" = "Clear Library Data";
+"devices.clear_all_data_message" = "All audio clips, transcripts, summaries, and titles stored on this phone will be deleted. This cannot be undone.\n\nNot included: app settings, provider API keys, Wi-Fi hotspot name and password, paired devices, and the recording passphrase. To remove those, delete the app.";
+"devices.cleanup_partial_title" = "Some files couldn't be deleted";
+"devices.cleanup_partial_message" = "%d file(s) could not be removed and are still on this phone. Try again, or free up space and retry.";
+"asr.azure_how_to_get_key" = "How to get a key";
+"library.import_confirm_title" = "Import Audio File";
+"library.import_confirm_message" = "Choose audio files from your iPhone, iCloud Drive, or a connected USB drive.\n\nThis imports local files — it does not download recordings from the Nomi. To pull clips from the recorder, use the Device tab.";
+"library.import_choose_file" = "Choose File…";
+"device.unbind_and_remove" = "Unbind and Remove Device";
+"device.unbind_and_remove_message" = "This turns off the device's encryption, deletes the recordings stored on the device, unbinds it, and removes it from your paired devices. This can't be undone.";
+"device.unbinding_and_removing" = "Removing device…";
+"device.saving_name" = "Saving name…";
+"clip_detail.opus_playback_unsupported" = "This system version can't play Opus recordings — playback needs iOS 17 or later. Transcription is unaffected. To listen now, share the file out via AirDrop or the Files app.";
+"devices.connection" = "Connection";
+"devices.auto_reconnect" = "Auto-Reconnect";
+"devices.auto_reconnect_footer" = "When on, the app reconnects to your most recent device by itself after an unexpected disconnect — for example after the device is powered off and on again. When off, tap the connection pill at the top to reconnect manually.";
+"clip_detail.delete_audio" = "Delete Audio";
+"clip_detail.delete_audio_message" = "Deletes only the audio file. The transcript and summary are kept. This can't be undone.";
+"clip_detail.delete_transcript" = "Delete Transcript";
+"clip_detail.delete_transcript_message" = "Deletes the transcript and its translation. The audio and summary are kept. This can't be undone.";
+"clip_detail.delete_summary" = "Delete Summary";
+"clip_detail.delete_summary_message" = "Deletes the summary and its translation. The audio and transcript are kept. This can't be undone.";
+"clip_detail.delete_independent_footer" = "Audio, transcript and summary are deleted independently — removing one leaves the others untouched.";
+"devices.clear_transcripts" = "Clear Transcripts";
+"devices.clear_transcripts_message" = "Deletes every transcript and its translation. Audio and summaries are kept. This can't be undone.";
+"devices.clear_summaries" = "Clear Summaries";
+"devices.clear_summaries_message" = "Deletes every summary and its translation. Audio and transcripts are kept. This can't be undone.";
+"asr.transcript_empty" = "No speech detected in this clip, so there's nothing to transcribe. Try a longer or clearer recording.";
+"privacy.cloud_title" = "Data leaves your device";
+"privacy.cloud_message" = "You've set up a cloud transcription or AI provider (e.g. Azure, OpenAI). Your audio and text are sent to that third-party service to be processed. Nothing goes to a Nomily server, but the data does leave your device. For fully on-device processing, use a local ASR server and a local (Ollama) or no AI model.";
+"privacy.cloud_agree" = "I Understand, Continue";
+"privacy.cloud_go_local" = "Provider Settings";
+
+"asr.multi_language_warning" = "Picking several languages makes Azure choose a language for each phrase separately. On audio that is really in one language, that is what produces garbled output — select only the language actually spoken.";
+"encryption.banner.setup_title" = "Enter this device's passphrase";
+"encryption.banner.setup_message" = "This device is already encrypted. Enter the passphrase it was set up with — this iPhone verifies it and saves it, so everything you record opens here. There are no recordings on the device yet, so nothing is at risk.";
+"encryption.adopt.title" = "Use this passphrase for the device?";
+"encryption.adopt.message" = "The device is using a key this iPhone does not have — normal for a device you have just bound. It holds no recordings, so writing your passphrase to it loses nothing. Write the passphrase down: it is the only way to open recordings made from now on, and there is no recovery.";
+"encryption.adopt.action" = "Use this passphrase";
+"encryption.cannot_reveal_note" = "The passphrase itself is never stored — only the key derived from it — so it cannot be shown here. If you have forgotten it, use Rotate to set a new one.";
+"encryption.first_bind_note" = "This Nomi's firmware encrypts everything it records, so a passphrase is required. It is never stored and cannot be recovered — write it down. The app won't start a recording until it is set.";
+
+/* Language picker */
+"settings.language" = "Language";
+"language.follow_system" = "Follow System";
+"language.footer" = "By default the app follows your system language. If that language is not supported, English is used.";
+
+/* Apple Watch */
+"library.recorded_on_watch" = "Recorded on Apple Watch";
+"watch.recorder_title" = "Watch";
+"watch.ready" = "Ready";
+"watch.record" = "Record";
+"watch.stop" = "Stop";
+"watch.mic_denied" = "Allow microphone access in Settings.";
+"watch.record_failed" = "Couldn't start recording: %@";
+"watch.pending_header" = "Waiting for iPhone";
+"watch.sending" = "Sending…";
+"watch.waiting" = "Not sent yet";
+"watch.settings_title" = "Apple Watch";
+"watch.status_installed" = "Installed";
+"watch.status_not_installed" = "Not installed";
+"watch.status_no_watch" = "No watch paired";
+"watch.status_unsupported" = "Needs iOS 17";
+"watch.status_checking" = "Checking…";
+"watch.hint_installed" = "Record from your wrist when the Nomi isn’t with you. Clips sync to your Library automatically.";
+"watch.hint_not_installed" = "The watch app ships inside this one — there's nothing to download. Open the Watch app on your iPhone, scroll to Available Apps, and tap INSTALL next to Nomily AI. With Automatic App Install on, it appears on its own a few minutes after this app updates.";
+"watch.hint_no_watch" = "Pair an Apple Watch (watchOS 10 or later) with this iPhone to record from your wrist. Clips sync to your Library automatically.";
+"watch.hint_unsupported" = "Recording from an Apple Watch needs iOS 17 or later on this iPhone — watchOS 10, which the watch app requires, only pairs with iOS 17. Update iOS to use it.";
+"watch.hint_checking" = "Looking for a paired Apple Watch. This takes a moment right after the app starts or updates.";
+"watch.intent_toggle_title" = "Start or Stop Recording";
+"watch.intent_toggle_short_title" = "Record";
+"watch.intent_toggle_description" = "Starts a voice note on your Apple Watch, or stops the one that's running.";
+"watch.status_connected" = "Connected";
+"watch.intent_toggle_description_ios" = "Starts or stops recording on your connected Nomi.";
+"watch.intent_no_nomi" = "Nomi isn't connected. Open Nomily AI and connect your recorder, then try again.";
+"watch.status_recording" = "Recording on Apple Watch";
+"watch.status_transferring" = "Transferring from Apple Watch…";
+"watch.status_out_of_range" = "Out of range";
+
+"summarize.delete_title" = "Delete template?";
+"summarize.delete_message" = "Delete “%@”? This cannot be undone.";
+"summarize.prompt_count" = "%d / %d characters";
+"summarize.prompt_context_hint" = "The prompt shares the model context with the transcript. Keep it focused to leave room for the source and output.";
+"template_prompt.formal_minutes" = "You convert meeting transcripts, interview records, and discussion material into formal, archive-ready meeting minutes.\n\nCore principles\n- Follow a McKinsey-style structure: conclusion-first, highly structured, layered decomposition, MECE (mutually exclusive, collectively exhaustive).\n- Language must be professional, clear, restrained, specific, and actionable.\n- For any missing or uncertain information that materially affects the formal minutes, mark it as 【To Be Confirmed】.\n- Standardize names of people, companies, tools, projects, and terminology throughout the document; carry corrections forward consistently.\n- Remove empty sections — do not keep placeholder headings with no content.\n- If the source clearly says certain information should not be included, exclude it entirely (do not move it to \"pending confirmations\", notes, background, or appendix).\n\nWorkflow\n1. Read the source carefully.\n2. Extract: topic, date, time, format, participants, related company/project, key topics, core conclusions, discussion points, disputes, action items, and pending confirmations.\n3. Summarize core conclusions, discussion flow, major consensus points, action items, and only the pending confirmations that truly matter.\n\nOutput the following structure (omit sections with no content):\n\n# [Meeting Title]\n\n## 0. Basic Meeting Information\n\n| Item | Details |\n|---|---|\n| Meeting Topic |  |\n| Meeting Date |  |\n| Meeting Time |  |\n| Meeting Format |  |\n| Participants |  |\n| Meeting Purpose |  |\n| Related Company / Project |  |\n| Source Materials |  |\n\n## 1. Core Meeting Conclusions\nThe 3–5 most important conclusions from the meeting, conclusion-first.\n\n## 2. Main Discussion Topics\nFor each topic:\n### 2.x [Topic]\n- Current Issue\n- Discussion Summary\n- Initial Direction\n\n## 3. Key Consensus\nItems on which agreement was reached.\n\n## 4. Follow-up Recommendations\nOrganize by business / product / technology / operations / collaboration as appropriate.\n\n## 5. Action Items\n\n| No. | Action Item | Priority | Suggested Owner |\n|---|---|---|---|\n\n## 6. Pending Confirmations\nOnly items that genuinely require confirmation and materially affect the formal record.\n\n## 7. Summary\nA concise wrap-up of the meeting's value and next-step direction.\n\nIf the meeting involves additional content types not covered above, add the necessary sections.";
+"template_prompt.structured_minutes" = "You are an expert meeting notes assistant. Analyze this transcript and produce structured meeting minutes in Markdown:\n\n## Meeting Summary\nOne paragraph overview of the meeting purpose and outcome.\n\n## Attendees\nList all speakers/participants mentioned.\n\n## Agenda Items Discussed\nFor each topic discussed:\n### [Topic]\n- Key points raised\n- Different viewpoints expressed\n- Outcome or conclusion reached\n\n## Action Items\n| Owner | Task | Deadline (if mentioned) |\n|-------|------|------------------------|\n\n## Decisions Made\nBullet list of concrete decisions.\n\n## Open Questions\nUnresolved items that need follow-up.\n\nBe concise. Use the speakers' own words for accuracy. If something is unclear in the transcript, note it as [unclear].";
+"template_prompt.executive_brief" = "Summarize this meeting transcript into a brief executive summary (3-5 paragraphs max). Focus on:\n1. Why the meeting was held\n2. The most important decisions made\n3. Critical action items and who owns them\n4. Any risks or blockers raised\n5. Next steps\n\nWrite in professional, direct language. Skip pleasantries and filler. A busy executive should be able to read this in under 2 minutes.";
+"template_prompt.key_takeaways" = "Extract the key takeaways from this meeting transcript. Format as:\n\n## Key Takeaways\n- Numbered list of the 5-10 most important points from this meeting\n- Each point should be a single, self-contained sentence\n- Prioritize decisions, commitments, and new information over discussion\n\n## Notable Quotes\nInclude 2-3 direct quotes that capture critical moments or commitments, with speaker attribution.\n\n## Sentiment\nBrief note on the overall tone — was this productive, contentious, exploratory, etc.?";
+"template_prompt.task_extraction" = "Review this transcript carefully and extract ALL commitments, assignments, and follow-up tasks. For each item:\n\n- **Who**: The person who committed or was assigned\n- **What**: Specific task or deliverable\n- **When**: Deadline if mentioned, otherwise \"TBD\"\n- **Context**: One sentence on why this matters\n\nFormat as a numbered list. Include implicit commitments (e.g., \"I'll look into that\" = task). Flag any tasks where ownership is ambiguous with [OWNER UNCLEAR].";
+"template_prompt.decision_log" = "Extract every decision made in this transcript. For each decision:\n\n1. **Decision**: What was decided\n2. **Rationale**: Why (key arguments that led to it)\n3. **Alternatives considered**: Other options discussed and why they were rejected\n4. **Impact**: Who or what is affected\n5. **Owner**: Who is responsible for execution\n\nIf a topic was discussed but no clear decision was reached, list it under \"Pending Decisions\" with the current status of the discussion.";
+"template_prompt.concise_summary" = "Provide a concise summary of this transcript in 3-5 paragraphs. Cover the main topics discussed, key points made, and any conclusions reached. Write in clear, professional prose. Do not use bullet points or headers — just well-organized paragraphs.";
+"template_prompt.detailed_notes" = "Create comprehensive, well-organized notes from this transcript. Use Markdown formatting:\n\n## Overview\nBrief context-setting paragraph.\n\n## Discussion\nOrganize by topic (not chronologically). For each topic, capture:\n- The main points and arguments\n- Supporting details or data mentioned\n- Any disagreements or alternative viewpoints\n\n## Conclusions\nWhat was resolved or agreed upon.\n\n## Follow-up\nItems requiring further discussion or action.\n\nPreserve important nuance. When speakers disagree, represent both sides fairly.";
+"template_prompt.qa_format" = "Restructure this transcript into a clean Q&A format. Identify questions (explicit or implicit) and pair them with the answers given. Format:\n\n**Q: [Question]**\nA: [Answer, synthesized from the discussion]\n\nGroup related Q&As under topic headers. If a question was asked but not fully answered, note it as [Partially answered] or [Unanswered].";
+"template_prompt.client_meeting_recap" = "Create a client-ready meeting recap from this transcript. Format:\n\n**Subject:** [Meeting topic]\n**Date:** [Extract if mentioned]\n**Participants:** [List]\n\n**Summary:**\nProfessional overview of what was discussed and agreed upon.\n\n**Agreed Next Steps:**\nNumbered list of commitments from both sides.\n\n**Timeline:**\nAny dates or milestones discussed.\n\nKeep the tone professional and positive. Avoid internal jargon. Focus on mutual commitments and value delivered.";
+"template_prompt.one_on_one_summary" = "Summarize this 1-on-1 conversation. Capture:\n\n## Topics Discussed\nBrief list of what was covered.\n\n## Feedback Given\nAny feedback exchanged (positive or constructive), with context.\n\n## Blockers & Support Needed\nIssues raised that need help or escalation.\n\n## Goals & Commitments\nWhat each person committed to before the next check-in.\n\n## Career/Growth\nAny career development, learning, or growth topics discussed.\n\nKeep this private and constructive in tone.";
+"template_prompt.status_update" = "Convert this transcript into a project status update:\n\n## Status: [Green/Yellow/Red based on the discussion tone]\n\n## Progress Since Last Update\n- What was accomplished\n\n## Current Focus\n- What's being worked on now\n\n## Blockers\n- Issues preventing progress\n\n## Upcoming Milestones\n- What's next and when\n\n## Risks\n- Anything that could derail the timeline\n\nBe factual and specific. Use dates and metrics when mentioned.";
+"template_prompt.lecture_notes" = "Transform this lecture/talk transcript into well-organized study notes:\n\n## Topic\nMain subject and context.\n\n## Key Concepts\nFor each major concept introduced:\n- **Term/Concept**: Clear definition or explanation\n- Supporting examples or analogies used by the speaker\n\n## Important Details\nFacts, figures, dates, or formulas mentioned.\n\n## Connections\nHow concepts relate to each other or to broader themes.\n\n## Review Questions\nGenerate 3-5 questions a student could use for self-testing.\n\nUse clear, educational language. Highlight terms that would likely appear on an exam.";
+"template_prompt.research_discussion" = "Summarize this research discussion or journal club transcript:\n\n## Paper/Topic Discussed\nTitle and authors if mentioned.\n\n## Main Findings\nKey results or claims presented.\n\n## Methodology\nHow the research was conducted (if discussed).\n\n## Strengths\nWhat the group found compelling.\n\n## Criticisms & Limitations\nConcerns raised about the work.\n\n## Implications\nWhy this matters, applications discussed.\n\n## Open Questions\nUnresolved scientific questions that emerged.";
+"template_prompt.brainstorm_synthesis" = "Synthesize this brainstorming session into an organized output:\n\n## Problem Statement\nWhat problem or opportunity was being explored.\n\n## Ideas Generated\nGroup similar ideas into themes. For each theme:\n### [Theme]\n- Specific ideas proposed\n- Who suggested them (if identifiable)\n- Pros/cons discussed\n\n## Top Candidates\nIdeas that got the most energy or support from the group.\n\n## Wild Cards\nUnconventional or risky ideas worth exploring further.\n\n## Recommended Next Steps\nHow to evaluate or prototype the most promising ideas.";
+"template_prompt.interview_summary" = "Summarize this interview transcript:\n\n## Interviewee\nName and background (if mentioned).\n\n## Key Insights\nThe most valuable or surprising things shared, organized by theme.\n\n## Notable Quotes\n3-5 direct quotes that capture their perspective well.\n\n## Themes\nRecurring ideas or concerns throughout the conversation.\n\n## Follow-up Questions\nQuestions that weren't asked but would be worth exploring.\n\nPreserve the interviewee's voice and perspective. Don't editorialize.";
+
+/* field-level ASR validation, device-file transcribe guidance, pairing shortcut */
+"asr.key_required" = "Enter your subscription key";
+"asr.region_required" = "Enter the service region";
+"asr.verify_failed" = "Verification failed";
+"device_files.download_before_transcribe" = "Download and decrypt %@ before transcribing.";
+"device_files.transcribe_failed" = "Couldn't transcribe %1$@: %2$@";
+"device_files.delete_failed" = "Couldn't delete the recording: %@";
+"pairing.go_pair" = "Pair now";
+"dnote_error.not_bound" = "This Nomi isn't paired with this app yet.";
+"dnote_error.not_connected" = "Not connected to a device.";
+"dnote_error.timeout" = "The device did not reply in time.";
+"wifi_error.timeout" = "Wi-Fi transfer timed out — no data from the device.";
+"wifi_error.not_connected" = "Not connected to the device's Wi-Fi hotspot.";
+"wifi_error.malformed" = "The device sent a response the app couldn't read.";
+"wifi_error.no_response" = "No response from the device at %1$@:%2$d.";
+"wifi_error.cancelled" = "Fast Transfer was cancelled.";
+"hotspot_error.user_denied" = "You declined the Wi-Fi join prompt. Tap Fast Transfer again to retry.";
+"hotspot_error.join_failed" = "Couldn't join the device's Wi-Fi hotspot. Tap Retry — the app will restart the hotspot and try again.";
+"dnote_error.stream_no_audio" = "Nomi isn't sending audio for this recording. Stop the recording on the device, then start live from the app.";
+"dnote_error.passphrase_setup_incomplete" = "Set the encryption passphrase before recording — this Nomi encrypts everything it records, and clips made without the passphrase can't be opened on this iPhone.";
+"scanner.section_available" = "Available to add";
+"scanner.section_added" = "Already added";
+"scanner.added_badge" = "Added";
+"asr.no_provider_configured" = "No transcription service is configured. Set one up in Settings.";
+"asr.all_providers_unreachable" = "None of the configured transcription services could be reached.";
+"asr.azure_required_for_translation" = "Live translation needs Azure. Add your Azure key and region in Settings.";
+"asr.missing_credentials" = "%@ is not configured. Set it up in Settings.";
+"asr.open_provider_settings" = "Set up transcription";
+"azure_verify.bad_credentials" = "Subscription key rejected, or it isn't valid for this region. Check that the key and region match.";
+"azure_verify.region_not_found" = "That region doesn't exist. Check the spelling (for example eastus or westeurope).";
+"azure_verify.rate_limited" = "Too many requests. Try again in a moment.";
+"azure_verify.service_unavailable" = "Azure is temporarily unavailable. Try again later.";
+"azure_verify.network" = "Couldn't reach Azure. Check your network connection.";
+"azure_verify.unexpected" = "Azure returned an unexpected response.";
+"common.edit" = "Edit";
+"live.clip_not_in_library" = "That recording isn't in the library any more. It may have been renamed, merged, or deleted.";
+"azure_verify.host_unresolved" = "Couldn't resolve the Azure address for that region. Check the region spelling (for example eastus or westeurope) and your network connection.";
+"asr.last_verify_failed" = "Last verification failed — verify again";
+"asr.status_verified" = "Verified and ready to use";
+"asr.status_verifying" = "Testing connection…";
+"asr.status_unverified" = "Saved, not verified yet";
+"asr.autosave_note" = "Changes are saved automatically. Saved is not the same as working — tap the check button to verify the credentials.";
+"asr.leave_title" = "Leave without verifying?";
+"asr.leave_anyway" = "Leave";
+"asr.leave_incomplete_message" = "Some required fields are still empty, so this service can't be used for transcription.";
+"asr.leave_unverified_message" = "These credentials haven't passed verification, so transcription may still fail. Tap the check button to test them first.";
+"asr.host_required" = "Enter the server host";
+"asr.port_invalid" = "Port must be between 1 and 65535";

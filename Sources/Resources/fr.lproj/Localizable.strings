@@ -1,0 +1,587 @@
+/* Fran\u00e7ais \u2014 Localisation fran\u00e7aise (France) */
+
+/* G\u00e9n\u00e9ral */
+"common.done" = "Termin\u00e9";
+"common.cancel" = "Annuler";
+"common.ok" = "OK";
+"common.delete" = "Supprimer";
+"common.save" = "Enregistrer";
+"common.retry" = "R\u00e9essayer";
+"common.close" = "Fermer";
+"common.open_settings" = "Ouvrir les r\u00e9glages";
+"common.try_again" = "R\u00e9essayer";
+"common.none" = "Aucun";
+"common.recording" = "Enregistrement";
+"common.keep_foreground" = "Gardez cet écran au premier plan — passer en arrière-plan interrompra le transfert (reprise impossible)";
+
+/* Onglets */
+"tab.recordings" = "Enregistrements";
+"tab.live" = "En direct";
+"tab.settings" = "R\u00e9glages";
+
+/* R\u00e9glages */
+"settings.asr_providers" = "Fournisseurs ASR";
+"settings.llm_providers" = "Fournisseurs LLM";
+"settings.recordings" = "Enregistrements et transfert";
+"settings.summarize_templates" = "Mod\u00e8les de r\u00e9sum\u00e9";
+"settings.devices_library" = "Appareils et biblioth\u00e8que";
+"settings.about" = "\u00c0 propos";
+"settings.version" = "Version";
+
+/* ASR */
+"asr.transcription" = "Transcription";
+"asr.active_provider" = "Fournisseur actif";
+"asr.auto_transcribe_after_download" = "Transcrire automatiquement après téléchargement";
+"asr.auto_transcribe_min" = "Durée minimale : %ds";
+"asr.auto_transcribe_footer" = "La transcription s'exécute après chaque téléchargement. Les clips plus courts que la durée minimale sont ignorés. L'autre fournisseur est utilisé automatiquement en secours lorsqu'il est configuré.";
+"asr.local_vad" = "Supprimer le silence avant l'envoi";
+"asr.local_vad_footer" = "La détection d'activité vocale s'exécute sur l'appareil et supprime les plages silencieuses avant d'envoyer l'audio au fournisseur de transcription. Réduit la taille de l'envoi et le coût ASR.";
+"asr.azure_speech" = "Azure Speech";
+"asr.azure_purpose_footer" = "Azure Speech assure la transcription, la transcription en direct et la traduction en direct. Il utilise votre propre clé Azure ; l’audio est envoyé à Microsoft pour traitement, ce qui peut être facturé. Il ne génère pas les résumés IA : ceux-ci utilisent le service LLM configuré séparément.";
+"asr.local_server" = "Serveur ASR local";
+"asr.subscription_key" = "Cl\u00e9 d'abonnement";
+"asr.region" = "R\u00e9gion";
+"asr.host" = "H\u00f4te";
+"asr.port" = "Port";
+"asr.no_provider" = "Aucun fournisseur ASR";
+"asr.no_provider_message" = "Configurez un fournisseur de transcription (Azure ou Serveur local) dans les R\u00e9glages.";
+"asr.azure" = "Azure";
+"asr.local_server_label" = "Serveur local";
+"asr.transcribe_auto" = "Détection automatique";
+"asr.specify_languages" = "Choisir des langues…";
+"asr.languages_footer" = "Azure détecte la langue de chaque phrase indépendamment, pas de l'enregistrement entier — pratique pour les réunions mêlant plusieurs langues.";
+"asr.max_languages_hint" = "Jusqu'à %d langues";
+
+/* LLM */
+"llm.active_provider_footer" = "Le fournisseur principal est utilis\u00e9 pour le r\u00e9sum\u00e9 et les autres t\u00e2ches LLM.";
+"llm.api_key" = "Cl\u00e9 API";
+"llm.model" = "Mod\u00e8le";
+"llm.select_model" = "S\u00e9lectionner un mod\u00e8le";
+"llm.model_placeholder" = "Mod\u00e8le \u2014 ex. %@";
+"llm.endpoint_url" = "URL du point d'acc\u00e8s";
+"llm.provider_placeholder" = "Fournisseur \u2014 ex. %@";
+"llm.api_key_optional" = "Cl\u00e9 API (facultatif)";
+"llm.no_provider" = "Aucun fournisseur LLM";
+"llm.no_provider_message" = "Configurez un fournisseur LLM et s\u00e9lectionnez un fournisseur actif.";
+
+/* Guide de configuration Azure */
+"azure_guide.title" = "Configuration d'Azure Speech";
+"azure_guide.step" = "\u00c9tape %d : %@";
+"azure_guide.step1_title" = "Cr\u00e9er un compte Azure";
+"azure_guide.step1_item1" = "Allez sur portal.azure.com";
+"azure_guide.step1_item2" = "Inscrivez-vous gratuitement si vous n'avez pas de compte (200 $ de cr\u00e9dit inclus pendant 30 jours)";
+"azure_guide.step2_title" = "Cr\u00e9er une ressource Speech";
+"azure_guide.step2_item1" = "Dans le portail Azure, appuyez sur Cr\u00e9er une ressource";
+"azure_guide.step2_item2" = "Recherchez \"Speech\" et s\u00e9lectionnez Speech (par Microsoft)";
+"azure_guide.step2_item3" = "Appuyez sur Cr\u00e9er";
+"azure_guide.step2_item4" = "Choisissez une r\u00e9gion qui prend en charge Fast Transcription (ex. westus3, eastus, eastasia)";
+"azure_guide.step2_item5" = "Niveau tarifaire : F0 (Gratuit) pour les tests, ou S0 (Standard) pour la production";
+"azure_guide.step2_item6" = "Appuyez sur V\u00e9rifier + cr\u00e9er, puis Cr\u00e9er";
+"azure_guide.step3_title" = "Obtenir votre cl\u00e9 API et votre r\u00e9gion";
+"azure_guide.step3_item1" = "Allez sur votre ressource Speech dans le portail";
+"azure_guide.step3_item2" = "Appuyez sur Cl\u00e9s et point de terminaison dans la barre lat\u00e9rale";
+"azure_guide.step3_item3" = "Copiez la Cl\u00e9 1 (ou Cl\u00e9 2) et la r\u00e9gion (ex. westus3)";
+"azure_guide.free_tier_title" = "Limites du niveau gratuit (F0)";
+"azure_guide.fast_transcription" = "Transcription rapide";
+"azure_guide.fast_transcription_value" = "5 heures / mois";
+"azure_guide.realtime_transcription" = "Transcription en temps r\u00e9el";
+"azure_guide.realtime_transcription_value" = "1 requ\u00eate simultan\u00e9e";
+"azure_guide.speaker_diarization" = "Identification des locuteurs";
+"azure_guide.speaker_diarization_value" = "Incluse";
+"azure_guide.audio_formats" = "Formats audio";
+"azure_guide.audio_formats_value" = "WAV, OGG/Opus, MP3, FLAC";
+
+/* R\u00e9glages des enregistrements */
+"rec_settings.delete_after_transfer" = "Supprimer de l'appareil apr\u00e8s le transfert";
+"rec_settings.delete_after_transfer_footer" = "Lorsque cette option est activ\u00e9e, le fichier est supprim\u00e9 de l'appareil d\u00e8s que le transfert BLE + d\u00e9chiffrement est termin\u00e9.";
+"rec_settings.decryption" = "D\u00e9chiffrement";
+"rec_settings.chacha_key" = "Cl\u00e9 ChaCha20 (hex)";
+"rec_settings.chacha_key_footer" = "64 caract\u00e8res hexad\u00e9cimaux (32 octets). Laissez vide si l'appareil n'utilise pas le chiffrement.";
+"rec_settings.wifi_ap" = "Wi-Fi AP (Transfert rapide)";
+"rec_settings.ssid" = "SSID";
+"rec_settings.password" = "Mot de passe";
+"rec_settings.wifi_credentials_footer" = "Identifiants diffus\u00e9s par l'appareil lorsque vous lancez le transfert rapide.";
+"rec_settings.wifi_generated" = "Identifiants Wi-Fi g\u00e9n\u00e9r\u00e9s";
+"rec_settings.wifi_generated_message" = "Le SSID et le mot de passe ont \u00e9t\u00e9 g\u00e9n\u00e9r\u00e9s automatiquement. Vous pouvez les modifier ci-dessus.";
+"rec_settings.fast_transfer_threshold" = "Seuil de transfert rapide";
+"rec_settings.fast_transfer_threshold_footer" = "Afficher le bouton de transfert rapide Wi-Fi lorsque les enregistrements non t\u00e9l\u00e9charg\u00e9s sur l'appareil d\u00e9passent cette taille. R\u00e9glez sur 0 Ko pour toujours afficher la suggestion quand des fichiers sont en attente.";
+
+/* R\u00e9glages des appareils et de la biblioth\u00e8que */
+"devices.known_devices" = "Appareils connus";
+"devices.no_devices_yet" = "Aucun appareil m\u00e9moris\u00e9 pour l'instant.";
+"devices.last_seen" = "Vu pour la derni\u00e8re fois %@";
+"devices.library" = "Biblioth\u00e8que";
+"devices.files" = "Fichiers";
+"devices.total_size" = "Taille totale";
+"devices.library_footer" = "Clips audio, transcriptions et r\u00e9sum\u00e9s stock\u00e9s sur cet appareil. Toutes les donn\u00e9es seront perdues si l'app est supprim\u00e9e \u2014 exportez et sauvegardez r\u00e9guli\u00e8rement.";
+
+/* Onglet enregistrements */
+"recordings.device" = "Appareil";
+"recordings.library" = "Biblioth\u00e8que";
+"recordings.no_device" = "Aucun appareil connect\u00e9";
+"recordings.no_device_message" = "Appuyez sur la pastille ci-dessus pour rechercher votre D·NOTE.";
+"recordings.no_clips" = "Aucun clip";
+"recordings.no_clips_message" = "T\u00e9l\u00e9chargez un enregistrement depuis l'onglet Appareil pour l'ajouter \u00e0 votre biblioth\u00e8que.";
+"recordings.clip_count_one" = "%d clip \u00b7 %@";
+"recordings.clip_count_other" = "%d clips \u00b7 %@";
+"library.import_audio" = "Importer de l\u2019audio";
+"library.import_failed" = "\u00c9chec de l\u2019import";
+"library.merge" = "Fusionner voisins";
+"library.merging" = "Fusion\u2026";
+"library.merge_failed" = "\u00c9chec de la fusion";
+"library.merge_confirm_title" = "Fusionner les clips voisins\u202f?";
+"library.merge_confirm_message" = "%1$@ et %2$@ seront fusionn\u00e9s en un seul nouvel enregistrement (M4A). Les clips d\u2019origine, ainsi que leurs transcriptions, r\u00e9sum\u00e9s et traductions seront supprim\u00e9s. Cette action est irr\u00e9versible.";
+
+/* Fichiers de l'appareil */
+"device_files.delete_recording" = "Supprimer l'enregistrement ?";
+"device_files.delete_recording_message" = "Supprime d\u00e9finitivement %@ de l'appareil. Cette action est irr\u00e9versible.";
+"device_files.operation_failed" = "L'op\u00e9ration a \u00e9chou\u00e9";
+"device_files.reading_file_list" = "Lecture de la liste des fichiers\u2026";
+"device_files.device_is_recording" = "L'appareil enregistre";
+"device_files.recording_unavailable_message" = "La liste des fichiers n'est pas disponible pendant l'enregistrement. Arr\u00eatez l'enregistrement pour parcourir les fichiers.";
+"device_files.stop_recording" = "Arr\u00eater l'enregistrement";
+"device_files.couldnt_read_device" = "Impossible de lire l'appareil";
+"device_files.no_recordings" = "Aucun enregistrement sur l'appareil";
+"device_files.no_recordings_message" = "Appuyez sur le bouton d'actualisation apr\u00e8s avoir enregistr\u00e9 sur l'appareil.";
+"device_files.fast_transfer_wifi" = "Transfert rapide par Wi-Fi";
+"device_files.pending" = "%@ en attente";
+"device_files.transcribing" = "Transcription en cours\u2026";
+"device_files.transcript_done" = "Transcription \u2192 %@";
+"device_files.transfer_in_progress" = "Transfert en cours";
+"device_files.cancel_transfer_to_switch" = "Annuler tous les transferts pour changer d'onglet ?";
+"device_files.cancel_and_switch" = "Annuler et changer";
+
+/* \u00c9tats de sauvegarde de fichiers */
+"file_save.saved_plain" = "Enregistr\u00e9 \u2192 %@ (non chiffr\u00e9, aucun d\u00e9chiffrement n\u00e9cessaire)";
+"file_save.decrypted" = "D\u00e9chiffr\u00e9 \u2192 %@";
+"file_save.wrapped_frames" = "Trames brutes encapsul\u00e9es \u2192 %@";
+"file_save.decrypted_wrapped" = "D\u00e9chiffr\u00e9 + encapsul\u00e9 \u2192 %@";
+"file_save.saved" = "Enregistr\u00e9 \u2192 %@";
+"file_save.decrypt_failed" = "\u00c9chec du d\u00e9chiffrement : %@";
+"file_save.wav_without_header" = "WAV sans en-t\u00eate RIFF \u2014 configurez la cl\u00e9 ChaCha20 dans les R\u00e9glages si votre firmware chiffre les donn\u00e9es.";
+
+/* D\u00e9tail du clip */
+"clip_detail.transcript" = "Transcription";
+"clip_detail.transcribing" = "Transcription en cours...";
+"clip_detail.provider_fallback" = "Repli sur un autre fournisseur";
+"clip_detail.view_full_transcript" = "Voir la transcription compl\u00e8te";
+"clip_detail.transcribe" = "Transcrire";
+"clip_detail.retranscribe" = "Retranscrire ?";
+"clip_detail.retranscribe_message" = "Cela remplacera la transcription existante.";
+"clip_detail.summary" = "R\u00e9sum\u00e9";
+"clip_detail.view_full_summary" = "Voir le r\u00e9sum\u00e9 complet";
+"clip_detail.summarize" = "R\u00e9sumer";
+"clip_detail.transcribe_first" = "Transcrivez d'abord pour activer le r\u00e9sum\u00e9.";
+"clip_detail.translation" = "Traduction";
+"clip_detail.view_full_translation" = "Voir la traduction compl\u00e8te";
+"clip_detail.translate" = "Traduire";
+"clip_detail.translating" = "Traduction en cours\u2026";
+"clip_detail.translated_summary" = "R\u00e9sum\u00e9 traduit";
+"clip_detail.view_full_translated_summary" = "Voir le r\u00e9sum\u00e9 traduit complet";
+"clip_detail.export" = "Exporter";
+"clip_detail.export_as_m4a" = "Exporter en M4A (AAC)";
+"clip_detail.exporting" = "Exportation\u2026";
+"clip_detail.speaker" = "Locuteur %@";
+
+/* Fiche de l'appareil */
+"device.couldnt_update" = "Impossible de mettre \u00e0 jour";
+"device.erase_all_recordings" = "Effacer tous les enregistrements ?";
+"device.erase_message" = "Cela supprime tous les enregistrements de l'appareil. Les param\u00e8tres et le nom Bluetooth sont conserv\u00e9s. Cette action est irr\u00e9versible.";
+"device.format_storage" = "Formater le stockage";
+"device.formatting" = "Formatage en cours\u2026";
+"device.restore_factory" = "Restaurer les r\u00e9glages d'usine ?";
+"device.restore_message" = "R\u00e9initialise les param\u00e8tres et le nom Bluetooth. Les enregistrements sont conserv\u00e9s.";
+"device.factory_reset" = "R\u00e9initialisation d'usine";
+"device.resetting" = "R\u00e9initialisation en cours\u2026";
+"device.power_off" = "\u00c9teindre l'appareil ?";
+"device.power_off_message" = "L'appareil se d\u00e9connectera imm\u00e9diatement. Appuyez sur le bouton physique pour le rallumer.";
+"device.shut_down" = "\u00c9teindre";
+"device.shutting_down" = "Arr\u00eat en cours\u2026";
+"device.connected_mtu" = "Connect\u00e9 \u00b7 MTU %d";
+"device.storage_used" = "%@ utilis\u00e9s sur %@";
+"device.identity" = "Identit\u00e9";
+"device.bluetooth_name" = "Nom Bluetooth";
+"device.serial" = "N\u00b0 de s\u00e9rie";
+"device.firmware" = "Firmware";
+"device.bt_mac" = "BT MAC";
+"device.device_time" = "Heure de l'appareil";
+"device.audio" = "Audio";
+"device.noise_cancel" = "Annulation du bruit";
+"device.noise_cancel_hint" = "Réduction du bruit sur l’appareil. Désactivée, l’ambiance est mieux conservée ; activée, les voix ressortent. C’est un réglage distinct de « Atténuation du bruit » ci-dessous.";
+"device.save_raw_wav" = "Enregistrer le WAV brut";
+"device.save_raw_wav_hint" = "Conserve en plus une copie WAV non compressée de chaque enregistrement sur l’appareil. Qualité maximale, mais beaucoup plus d’espace utilisé.";
+"device.vad" = "D\u00e9tection d'activit\u00e9 vocale";
+"device.vad_hint" = "L’appareil ignore les silences pendant l’enregistrement et ne garde que les passages parlés, ce qui économise stockage et batterie ; une parole très faible peut être coupée au début. À ne pas confondre avec Réglages → Reconnaissance vocale → « Supprimer les silences avant l’envoi », qui s’exécute sur l’iPhone avant l’envoi ; celui-ci agit sur l’appareil pendant l’enregistrement.";
+"device.mic_gain" = "Gain du micro";
+"device.mic_gain_hint" = "Sensibilité du micro, de 1 (minimale) à 9 (maximale). Plus élevée, elle capte les voix lointaines ou faibles, mais amplifie aussi le bruit ambiant et sature plus vite sur les sons forts.";
+"device.noise_reduction" = "R\u00e9duction du bruit";
+"device.noise_reduction_hint" = "Intensité de l’atténuation du bruit, de 1 (faible) à 9 (forte). Plus élevée, elle supprime davantage de bruit de fond, mais peut aussi affaiblir les voix et les rendre étouffées.";
+"device.behavior" = "Comportement";
+"device.led_indicator" = "Indicateur LED";
+"device.vibration" = "Vibration";
+"device.usb_drive_mode" = "Mode cl\u00e9 USB";
+"device.usb_drive_mode_hint" = "Lorsque cette option est activ\u00e9e, l'appareil appara\u00eet comme un disque amovible lorsqu'il est branch\u00e9 \u00e0 un ordinateur.";
+"device.auto_power_off" = "Extinction automatique";
+"device.saving_idle_off" = "Enregistrement du d\u00e9lai d'extinction\u2026";
+"device.danger_zone" = "Zone dangereuse";
+"device.danger_zone_footer" = "Le formatage efface tous les enregistrements ; la r\u00e9initialisation d'usine ne r\u00e9initialise que les param\u00e8tres et le nom BT. L'arr\u00eat coupe la connexion.";
+"device.unavailable_while_recording" = "Arrêtez l'enregistrement avant d'effectuer des opérations sur l'appareil.";
+"device.connection" = "Connexion";
+"device.disconnect" = "D\u00e9connecter";
+"device.never" = "Jamais";
+"device.custom_idle_off" = "Personnalis\u00e9 (%ds)";
+
+/* En direct */
+"live.no_device" = "Aucun appareil connect\u00e9";
+"live.no_device_message" = "Connectez votre D·NOTE pour d\u00e9marrer la transcription et la traduction en direct.";
+"live.view_in_library" = "Voir dans la biblioth\u00e8que";
+"live.source_language" = "Langue source";
+"live.target_language" = "Langue cible";
+"live.same_as_source" = "Identique \u00e0 la source";
+"live.setup_azure" = "Configurer Azure";
+"live.switch_language" = "Changer de langue ?";
+"live.continue" = "Continuer";
+"live.listening" = "\u00c9coute en cours...";
+"live.tap_mic_to_start" = "Appuyez sur le micro pour commencer";
+"live.search_languages" = "Rechercher des langues";
+"live.transcribe_only" = "Transcrire %@ uniquement";
+"live.translate_pair" = "%@ \u2192 %@";
+"live.streaming" = "Diffusion en cours";
+"live.ready" = "Pr\u00eat";
+"live.paused" = "En pause";
+"live.repair_title" = "Enregistrement complet disponible";
+"live.repair_message" = "Cet enregistrement comportait des pauses, donc une partie du son n'a pas été capturée. Remplacer par l'enregistrement complet depuis votre Nomi ?";
+"live.repair_message_attached" = "Cette session s'est greffée sur un enregistrement déjà en cours : le début manque. Remplacer par l'enregistrement complet du Nomi ?";
+"live.repair_not_playable" = "Le fichier est arrivé chiffré et cet iPhone n'a pas la phrase secrète correspondante : rien de lisible n'a été produit. L'enregistrement reste sur votre Nomi.";
+"live.repair_replace" = "Remplacer";
+"live.repair_keep" = "Garder l'actuel";
+"live.repair_downloading" = "Téléchargement de l'audio complet…";
+"live.repair_succeeded" = "Remplacé par l'audio complet";
+"live.repair_failed" = "Échec du téléchargement : %@";
+"live.repair_manual_transfer" = "L'enregistrement complet est encore sur votre Nomi. Transférez-le depuis Enregistrements.";
+"live.start_unknown_title" = "Impossible de savoir si le Nomi enregistre";
+"live.start_unknown_message" = "L'appareil n'a pas répondu à la vérification d'état. Démarrer une session en direct maintenant risque d'interrompre un enregistrement lancé avec le bouton de l'appareil. Réessayez, ou démarrez quand même si vous êtes sûr qu'il n'enregistre pas.";
+"live.start_anyway" = "Démarrer quand même";
+"live.attach_no_upload" = "Nomi enregistre, mais cet enregistrement a été lancé avec le bouton de l'appareil avant la connexion de l'app : il n'envoie pas d'audio. Arrêtez l'enregistrement sur l'appareil, puis démarrez le direct depuis l'app.";
+
+/* Scanner */
+"scanner.scan" = "Rechercher";
+"scanner.scan_again" = "Rechercher \u00e0 nouveau";
+"scanner.connection_failed" = "\u00c9chec de la connexion";
+"scanner.bluetooth_unavailable" = "Bluetooth indisponible";
+"scanner.looking_for_devices" = "Recherche d'appareils D·NOTE\u2026";
+"scanner.looking_message" = "Assurez-vous que votre D·NOTE est allum\u00e9 et \u00e0 quelques m\u00e8tres de distance.";
+"scanner.wake_and_retry" = "Appareil introuvable. Maintenez le bouton de l’appareil enfoncé pendant 1 seconde pour le réveiller, puis réessayez.";
+
+/* Pastille de connexion */
+"pill.add_device" = "Ajouter un appareil";
+
+/* Transfert rapide */
+"fast_transfer.title" = "Transfert rapide";
+"fast_transfer.status" = "\u00c9tat";
+"fast_transfer.ap_credentials" = "Identifiants AP";
+"fast_transfer.files_count" = "Fichiers (%d)";
+"fast_transfer.pending" = "En attente\u2026";
+"fast_transfer.saved" = "Enregistr\u00e9";
+"fast_transfer.cancelled" = "Annul\u00e9";
+"fast_transfer.background_interrupted" = "Le transfert s’est arrêté lorsque l’app est passée en arrière-plan. Réessayez en gardant l’app ouverte.";
+"fast_transfer.stage_ready" = "Pr\u00eat";
+"fast_transfer.stage_stopping" = "Arr\u00eat de l'enregistrement\u2026";
+"fast_transfer.stage_starting_ap" = "D\u00e9marrage du Wi-Fi AP de l'appareil\u2026";
+"fast_transfer.stage_polling_ap" = "En attente du point d'accès de l'appareil… (tentative %d sur %d)";
+"fast_transfer.stage_joining_wifi" = "Connexion au Wi-Fi\u2026";
+"fast_transfer.stage_join_failed" = "\u00c9chec de la connexion Wi-Fi";
+"fast_transfer.stage_connecting" = "Connexion \u00e0 l'appareil\u2026";
+"fast_transfer.stage_listing" = "Liste des fichiers\u2026";
+"fast_transfer.stage_downloading" = "T\u00e9l\u00e9chargement\u2026";
+"fast_transfer.stage_cleanup" = "Nettoyage\u2026";
+"fast_transfer.stage_done" = "Termin\u00e9";
+"fast_transfer.stage_stopped" = "Arr\u00eat\u00e9";
+"fast_transfer.hint_polling" = "L'appareil peut mettre 30 \u00e0 45 s pour d\u00e9marrer l'AP (plus longtemps sur batterie).";
+"fast_transfer.hint_joining" = "iOS peut afficher une demande de connexion \u2014 acceptez-la pour continuer.";
+"fast_transfer.hint_join_failed" = "Appuyez sur \"R\u00e9essayer\" pour retenter la connexion au Wi-Fi de l'appareil.";
+"fast_transfer.tcp_unreachable" = "Impossible de joindre l'appareil : la connexion à son Wi-Fi a peut-être échoué.";
+"fast_transfer.ap_still_on" = "L'appareil indique que son point d'accès est toujours actif. Si le prochain transfert rapide ne parvient pas à s'y connecter, éteignez puis rallumez l'appareil.";
+"fast_transfer.hint_connecting" = "N\u00e9gociation d'une session TCP sur 192.168.88.1:6718.";
+"fast_transfer.ap_not_broadcasting" = "L'appareil a accepté la commande de démarrage de l'AP, mais celui-ci n'est jamais apparu. Réessayez ; si l'échec persiste, redémarrez l'appareil.";
+"fast_transfer.invalid_psk" = "Le mot de passe du point d'accès de l'appareil doit comporter 8 à 63 caractères. Modifiez-le dans Réglages → Enregistrement et transfert → Wi-Fi AP, puis réessayez.";
+"fast_transfer.decode_failed" = "%@ : téléchargé, mais impossible d'en faire un fichier audio lisible. L'original a été conservé sur l'appareil.";
+
+/* R\u00e9sum\u00e9 */
+"summarize.choose_template" = "Choisir un mod\u00e8le";
+"summarize.summarizing" = "R\u00e9sum\u00e9 en cours...";
+"summarize.error" = "Erreur";
+"summarize.summarizing_with" = "R\u00e9sum\u00e9 avec %@...";
+"summarize.search_templates" = "Rechercher des mod\u00e8les";
+"summarize.truncated_warning" = "Le modèle a atteint sa limite de sortie : ce résultat est tronqué. Essayez une transcription plus courte ou un modèle moins verbeux.";
+"summarize.add_template" = "Ajouter un mod\u00e8le";
+"summarize.clone" = "Dupliquer";
+"summarize.category" = "Cat\u00e9gorie";
+"summarize.pick_existing" = "Choisir un existant";
+"summarize.new" = "Nouveau";
+"summarize.name" = "Nom";
+"summarize.template_name" = "Nom du mod\u00e8le";
+"summarize.prompt" = "Prompt";
+"summarize.new_template" = "Nouveau mod\u00e8le";
+"summarize.edit_template" = "Modifier le mod\u00e8le";
+"summarize.copy_name" = "%@ (copie)";
+"summarize.new_category_name" = "Nom de la nouvelle cat\u00e9gorie";
+"summarize.output_language" = "Langue de sortie";
+"summarize.same_as_transcript" = "Identique \u00e0 la transcription";
+"summarize.restore_defaults" = "Restaurer les mod\u00e8les par d\u00e9faut";
+"summarize.restore_defaults_title" = "Restaurer les mod\u00e8les par d\u00e9faut ?";
+"summarize.restore_defaults_message" = "Cela remplace votre liste actuelle de mod\u00e8les par les mod\u00e8les par d\u00e9faut. Vos mod\u00e8les personnalis\u00e9s seront perdus. Les mod\u00e8les int\u00e9gr\u00e9s livr\u00e9s avec l'app r\u00e9appara\u00eetront.";
+
+/* Cat\u00e9gories de mod\u00e8les */
+"template_cat.meeting_notes" = "Notes de r\u00e9union";
+"template_cat.action_items" = "\u00c9l\u00e9ments d'action";
+"template_cat.general_summary" = "R\u00e9sum\u00e9 g\u00e9n\u00e9ral";
+"template_cat.professional" = "Professionnel";
+"template_cat.academic" = "Acad\u00e9mique";
+"template_cat.creative" = "Cr\u00e9atif";
+
+/* Noms des mod\u00e8les */
+"template.formal_minutes" = "Compte rendu formel de r\u00e9union";
+"template.structured_minutes" = "Compte rendu structur\u00e9";
+"template.executive_brief" = "Note de synth\u00e8se";
+"template.key_takeaways" = "Points cl\u00e9s";
+"template.task_extraction" = "Extraction des t\u00e2ches";
+"template.decision_log" = "Journal des d\u00e9cisions";
+"template.concise_summary" = "R\u00e9sum\u00e9 concis";
+"template.detailed_notes" = "Notes d\u00e9taill\u00e9es";
+"template.qa_format" = "Format questions-r\u00e9ponses";
+"template.client_meeting_recap" = "Compte rendu client";
+"template.one_on_one_summary" = "R\u00e9sum\u00e9 de t\u00eate-\u00e0-t\u00eate";
+"template.status_update" = "Mise \u00e0 jour de statut";
+"template.lecture_notes" = "Notes de cours";
+"template.research_discussion" = "Discussion de recherche";
+"template.brainstorm_synthesis" = "Synth\u00e8se de brainstorming";
+"template.interview_summary" = "R\u00e9sum\u00e9 d'entretien";
+"devices.danger_zone" = "Zone dangereuse";
+"devices.clear_audio" = "Supprimer les médias";
+"devices.clear_audio_message" = "Tous les clips audio stockés sur cet appareil seront supprimés. Les transcriptions, résumés et titres sont conservés.";
+"devices.clear_all_data" = "Effacer les données de la bibliothèque";
+"devices.clear_all_data_message" = "Tous les enregistrements, transcriptions, résumés et titres stockés sur cet iPhone seront supprimés. Action irréversible.\n\nNon inclus : réglages de l'app, clés API des fournisseurs, nom et mot de passe du point d'accès Wi-Fi, appareils appairés et phrase secrète des enregistrements. Pour les supprimer, désinstallez l'app.";
+"devices.cleanup_partial_title" = "Certains fichiers n'ont pas pu être supprimés";
+"devices.cleanup_partial_message" = "%d fichier(s) n'ont pas pu être supprimés et restent sur l'appareil. Réessayez.";
+"asr.azure_how_to_get_key" = "Obtenir une clé";
+"library.import_confirm_title" = "Importer un fichier audio";
+"library.import_confirm_message" = "Sélectionnez des fichiers audio depuis votre iPhone, iCloud Drive ou un lecteur USB connecté.\n\nCette action importe des fichiers locaux — elle ne télécharge pas les enregistrements depuis le Nomi. Pour récupérer des clips depuis l'enregistreur, utilisez l'onglet Appareil.";
+"library.import_choose_file" = "Choisir un fichier…";
+
+/* Chiffrement de l'appareil (v1.47) */
+"device_encryption.section_header" = "Chiffrement de l'appareil";
+"device_encryption.toggle_label" = "Chiffrer les enregistrements sur l'appareil";
+"device_encryption.footer" = "Lorsqu'il est activé, l'appareil chiffre chaque enregistrement avec une clé ChaCha20 que cette application stocke également. La désactivation nécessite la clé correspondante.";
+"device_encryption.missing_key_error" = "Désactivation impossible — aucune clé ChaCha20 enregistrée correspondant à celle de l'appareil.";
+"device_encryption.state_row" = "Chiffrement sur l'appareil";
+"device_encryption.state_on" = "ACTIVÉ";
+"device_encryption.state_off" = "DÉSACTIVÉ";
+"device_encryption.firmware_footer" = "Ce micrologiciel (v1.50) active le chiffrement automatiquement lors de l'association et refuse de le désactiver. Les enregistrements sont chiffrés avec la clé de 32 octets écrite en dernier via 0xA2. Utilisez « Vérifier la phrase de l'appareil » ci-dessus pour que cette app puisse les déchiffrer.";
+
+/* Mode développeur (easter egg au tap version) */
+"developer_mode.status_on" = "Mode développeur activé";
+"developer_mode.toast_enabled" = "Mode développeur activé";
+"developer_mode.toast_disabled" = "Mode développeur désactivé";
+"developer_mode.taps_to_enable" = "Encore %d tapotements pour activer le mode développeur";
+"developer_mode.taps_to_disable" = "Encore %d tapotements pour désactiver le mode développeur";
+
+/* Phrase de chiffrement / intégration (v1.50) */
+"encryption.section_header" = "Phrase de chiffrement";
+"encryption.section_footer" = "Dérivée via Argon2id avec le numéro de série de l'appareil comme sel. Stockée dans le trousseau iOS, restreinte à cet iPhone. Perdre la phrase rend les enregistrements chiffrés irrécupérables. Récupération sur un autre iPhone : saisissez la même phrase sur le nouveau téléphone.";
+"encryption.local_key" = "Clé locale";
+"encryption.configured" = "configurée";
+"encryption.missing" = "absente";
+"encryption.set_button" = "Définir la phrase…";
+"encryption.verify_button" = "Vérifier la phrase de l'appareil…";
+"encryption.rotate_button" = "Renouveler (écraser la clé de l'appareil)…";
+"encryption.clear_button" = "Effacer la clé locale";
+"encryption.sheet.title_set" = "Définir la phrase";
+"encryption.sheet.title_verify" = "Vérifier la phrase";
+"encryption.sheet.title_rotate" = "Renouveler la clé";
+"encryption.field.passphrase" = "Phrase";
+"encryption.field.confirm" = "Confirmer";
+"encryption.action.save" = "Enregistrer";
+"encryption.action.verify_save" = "Vérifier et enregistrer";
+"encryption.action.rotate" = "Renouveler";
+"encryption.action.cancel" = "Annuler";
+"encryption.progress.working" = "Traitement…";
+"encryption.footer.rotate" = "Le renouvellement écrit une clé totalement nouvelle sur l'appareil. Tous les enregistrements chiffrés déjà présents deviennent définitivement indéchiffrables. À utiliser uniquement pour reprendre un appareil d'occasion ou si vous avez oublié l'ancienne phrase.";
+"encryption.footer.set_encrypted" = "Cet appareil est chiffré. Nous allons enregistrer un court extrait de test, le télécharger et tenter de le déchiffrer avec la phrase que vous avez saisie. L'extrait de test est supprimé automatiquement ensuite.";
+"encryption.footer.set_unencrypted" = "Enregistre la clé dérivée localement dans le trousseau iOS. L'appareil n'est pas modifié — choisissez une phrase robuste et activez le chiffrement depuis l'écran de l'appareil quand vous serez prêt·e.";
+"encryption.progress.deriving" = "Dérivation de la clé…";
+"encryption.progress.recording" = "Enregistrement d'un court extrait de test…";
+"encryption.progress.stopping" = "Arrêt de l'enregistrement…";
+"encryption.progress.locating" = "Recherche de l'extrait de test…";
+"encryption.progress.downloading" = "Téléchargement de l'extrait de test…";
+"encryption.progress.verifying" = "Vérification…";
+"encryption.progress.writing_key" = "Écriture de la clé sur l'appareil…";
+"encryption.progress.checking_device" = "Vérification des enregistrements sur l'appareil…";
+"encryption.rotate_confirm.title" = "Renouveler la clé de l'appareil ?";
+"encryption.rotate_confirm.message_empty" = "L'appareil ne contient plus d'enregistrements, rien ne sera perdu. Notez la nouvelle phrase secrète : c'est le seul moyen d'ouvrir les futurs enregistrements, aucune récupération n'est possible.";
+"encryption.rotate_confirm.message" = "%d enregistrement(s) sont encore sur l'appareil. Créés avec l'ancienne clé, ils deviendront définitivement illisibles — transférez-les d'abord si vous y tenez. Notez la nouvelle phrase secrète : aucune récupération n'est possible.";
+"encryption.progress.probe_subtitle" = "Un court extrait de test est en cours d'enregistrement pour vérifier la phrase. Il sera supprimé automatiquement.";
+"encryption.mismatch.title" = "La phrase ne correspond pas";
+"encryption.mismatch.message" = "Impossible de déchiffrer l'extrait de test avec cette phrase. Vérifiez-la et réessayez. Si vous l'avez vraiment oubliée, utilisez « Renouveler » pour écraser la clé de l'appareil — mais cela détruit définitivement tous les enregistrements chiffrés déjà présents.";
+"encryption.mismatch.try_again" = "Réessayer";
+"encryption.error.device_not_connected" = "Appareil non connecté.";
+"encryption.error.connect_first" = "Connectez d'abord l'appareil — la phrase doit être vérifiée à partir d'un véritable enregistrement.";
+"encryption.error.probe_not_found" = "Impossible de trouver l'extrait de test sur l'appareil.";
+"encryption.error.device_busy" = "L'appareil n'a pas pu enregistrer : %@";
+"encryption.banner.title" = "Appareil chiffré";
+"encryption.banner.message" = "Saisissez la phrase secrète configurée sur cet appareil pour déverrouiller ses enregistrements sur cet iPhone. Si vous l'avez oubliée, vous pouvez renouveler la clé (cela efface les enregistrements chiffrés déjà présents sur l'appareil).";
+"encryption.banner.cta" = "Vérifier la phrase…";
+"encryption.download.key_missing" = "%@ : cet enregistrement est chiffré, mais aucune phrase n'est définie sur cet iPhone. Ouvrez Réglages → Phrase de chiffrement → Vérifier la phrase de l'appareil… pour le déverrouiller.";
+"encryption.download.wrong_key" = "%1$@ : déchiffrement impossible — la phrase ne correspond pas à cet enregistrement. Ouvrez Réglages → Phrase de chiffrement, effacez la phrase actuelle et définissez la bonne. (Détails : %2$@)";
+
+/* Association (binding v1.47) */
+"pairing.title" = "Associer ce Nomi ?";
+"pairing.message" = "%@ doit être associé à cette application avant de pouvoir enregistrer. Vous pouvez le dissocier à tout moment depuis l'écran de l'appareil.";
+"pairing.pair" = "Associer";
+"pairing.paired" = "Associé";
+"pairing.not_paired" = "Non associé";
+"pairing.unpair" = "Dissocier ce Nomi";
+"pairing.unpair_message" = "Dissocier supprime l'association de l'appareil avec cette application. Vous devrez l'associer à nouveau avant d'enregistrer.";
+"pairing.unpairing" = "Dissociation en cours…";
+"pairing.pairing_now" = "Association en cours…";
+"pairing.status" = "Association";
+"device.unbind_and_remove" = "Dissocier et supprimer l'appareil";
+"device.unbind_and_remove_message" = "Cette action désactive le chiffrement de l'appareil, supprime les enregistrements stockés dessus, le dissocie et le retire de vos appareils associés. Cette action est irréversible.";
+"device.unbinding_and_removing" = "Suppression de l'appareil…";
+"device.saving_name" = "Enregistrement du nom…";
+"clip_detail.opus_playback_unsupported" = "Cette version du système ne peut pas lire les enregistrements Opus : la lecture nécessite iOS 17 ou une version ultérieure. La transcription n'est pas affectée. Pour l'écouter, exportez le fichier via AirDrop ou l'app Fichiers.";
+"devices.connection" = "Connexion";
+"devices.auto_reconnect" = "Reconnexion automatique";
+"devices.auto_reconnect_footer" = "Lorsque cette option est activée, l'app se reconnecte d'elle-même à votre appareil le plus récent après une déconnexion inattendue, par exemple après avoir éteint puis rallumé l'appareil. Lorsqu'elle est désactivée, touchez l'indicateur de connexion en haut pour vous reconnecter manuellement.";
+"clip_detail.delete_audio" = "Supprimer l'audio";
+"clip_detail.delete_audio_message" = "Supprime uniquement le fichier audio. La transcription et le résumé sont conservés. Cette action est irréversible.";
+"clip_detail.delete_transcript" = "Supprimer la transcription";
+"clip_detail.delete_transcript_message" = "Supprime la transcription et sa traduction. L'audio et le résumé sont conservés. Cette action est irréversible.";
+"clip_detail.delete_summary" = "Supprimer le résumé";
+"clip_detail.delete_summary_message" = "Supprime le résumé et sa traduction. L'audio et la transcription sont conservés. Cette action est irréversible.";
+"clip_detail.delete_independent_footer" = "L'audio, la transcription et le résumé se suppriment indépendamment : en retirer un laisse les autres intacts.";
+"devices.clear_transcripts" = "Effacer les transcriptions";
+"devices.clear_transcripts_message" = "Supprime toutes les transcriptions et leurs traductions. L'audio et les résumés sont conservés. Cette action est irréversible.";
+"devices.clear_summaries" = "Effacer les résumés";
+"devices.clear_summaries_message" = "Supprime tous les résumés et leurs traductions. L'audio et les transcriptions sont conservés. Cette action est irréversible.";
+"asr.transcript_empty" = "Aucune parole détectée dans cet extrait, il n'y a donc rien à transcrire. Essayez un enregistrement plus long ou plus clair.";
+"privacy.cloud_title" = "Les données quittent votre appareil";
+"privacy.cloud_message" = "Vous avez configuré un fournisseur de transcription ou d'IA dans le cloud (p. ex. Azure, OpenAI). Votre audio et votre texte sont envoyés à ce service tiers pour traitement. Rien ne va vers un serveur Nomily, mais les données quittent votre appareil. Pour un traitement entièrement local, utilisez un serveur ASR local et un modèle d'IA local (Ollama) ou aucun.";
+"privacy.cloud_agree" = "J'ai compris, continuer";
+"privacy.cloud_go_local" = "Réglages du fournisseur";
+
+"asr.multi_language_warning" = "Avec plusieurs langues, Azure détermine la langue phrase par phrase. Sur un audio réellement monolingue, c'est précisément ce qui produit une transcription incorrecte — ne sélectionnez que la langue réellement parlée.";
+"encryption.banner.setup_title" = "Saisir la phrase secrète de cet appareil";
+"encryption.banner.setup_message" = "Cet appareil est déjà chiffré. Saisissez la phrase secrète avec laquelle il a été configuré : cet iPhone la vérifie puis l'enregistre, et tout ce que vous enregistrerez s'ouvrira ici. L'appareil ne contient encore aucun enregistrement, rien n'est en jeu.";
+"encryption.adopt.title" = "Utiliser cette phrase secrète pour l'appareil ?";
+"encryption.adopt.message" = "L'appareil utilise une clé que cet iPhone ne possède pas — c'est normal pour un appareil que vous venez d'associer. Il ne contient aucun enregistrement : y écrire votre phrase secrète ne fait rien perdre. Notez-la : c'est le seul moyen d'ouvrir les enregistrements à venir, et il n'existe aucune récupération.";
+"encryption.adopt.action" = "Utiliser cette phrase secrète";
+"encryption.cannot_reveal_note" = "La phrase secrète elle-même n'est jamais stockée, seulement la clé qui en dérive — elle ne peut donc pas être affichée ici. Si vous l'avez oubliée, utilisez Rotation pour en définir une nouvelle.";
+"encryption.first_bind_note" = "Le firmware de ce Nomi chiffre tous les enregistrements : une phrase secrète est obligatoire. Elle n'est jamais stockée et ne peut pas être récupérée — notez-la. L'app ne lancera aucun enregistrement tant qu'elle n'est pas définie.";
+
+/* Language picker */
+"settings.language" = "Langue";
+"language.follow_system" = "Suivre le système";
+"language.footer" = "Par défaut, l’application suit la langue du système. Si celle-ci n’est pas prise en charge, l’anglais est utilisé.";
+
+/* Apple Watch */
+"library.recorded_on_watch" = "Enregistré sur l'Apple Watch";
+"watch.recorder_title" = "Watch";
+"watch.ready" = "Prêt";
+"watch.record" = "Enregistrer";
+"watch.stop" = "Arrêter";
+"watch.mic_denied" = "Autorisez l'accès au micro dans les Réglages.";
+"watch.record_failed" = "Impossible de démarrer l'enregistrement : %@";
+"watch.pending_header" = "En attente de l'iPhone";
+"watch.sending" = "Envoi…";
+"watch.waiting" = "Pas encore envoyé";
+"watch.settings_title" = "Apple Watch";
+"watch.status_installed" = "Installée";
+"watch.status_not_installed" = "Non installée";
+"watch.status_no_watch" = "Aucune montre jumelée";
+"watch.status_unsupported" = "Nécessite iOS 17";
+"watch.status_checking" = "Vérification…";
+"watch.hint_installed" = "Enregistrez depuis votre poignet quand le Nomi n’est pas avec vous. Les enregistrements se synchronisent automatiquement avec la bibliothèque.";
+"watch.hint_not_installed" = "L'app Watch est incluse dans celle-ci — il n'y a rien à télécharger. Ouvrez l'app Watch sur votre iPhone, faites défiler jusqu'à « Apps disponibles » et touchez « Installer » à côté de Nomily AI. Si l'installation automatique est activée, elle apparaît d'elle-même quelques minutes après la mise à jour.";
+"watch.hint_no_watch" = "Jumelez une Apple Watch (watchOS 10 ou ultérieur) avec cet iPhone pour enregistrer depuis votre poignet. Les enregistrements se synchronisent automatiquement avec la bibliothèque.";
+"watch.hint_unsupported" = "L’enregistrement depuis une Apple Watch nécessite iOS 17 ou ultérieur sur cet iPhone : watchOS 10, requis par l’app Watch, ne se jumelle qu’avec iOS 17. Mettez iOS à jour pour l’utiliser.";
+"watch.hint_checking" = "Recherche d’une Apple Watch jumelée. Juste après le lancement ou une mise à jour, cela prend un instant.";
+"watch.intent_toggle_title" = "Démarrer ou arrêter l'enregistrement";
+"watch.intent_toggle_short_title" = "Enregistrer";
+"watch.intent_toggle_description" = "Démarre une note vocale sur l'Apple Watch, ou arrête celle en cours.";
+"watch.status_connected" = "Connecté";
+"watch.intent_toggle_description_ios" = "Démarre ou arrête l'enregistrement sur votre Nomi connecté.";
+"watch.intent_no_nomi" = "Nomi n'est pas connecté. Ouvrez Nomily AI, connectez votre enregistreur, puis réessayez.";
+"watch.status_recording" = "Enregistrement sur l'Apple Watch";
+"watch.status_transferring" = "Transfert depuis l'Apple Watch…";
+"watch.status_out_of_range" = "Hors de portée";
+
+"summarize.delete_title" = "Supprimer le modèle ?";
+"summarize.delete_message" = "Supprimer « %@ » ? Cette action est irréversible.";
+"summarize.prompt_count" = "%d / %d caractères";
+"summarize.prompt_context_hint" = "L’invite partage le contexte du modèle avec la transcription. Restez concis pour laisser de la place à la source et au résultat.";
+"template_prompt.formal_minutes" = "Vous convertissez des transcriptions de réunions, des enregistrements d'entretiens et des documents de discussion en un procès-verbal formel, prêt à être archivé.\n\nPrincipes fondamentaux\n- Suivre une structure de style McKinsey : conclusion d'abord, très structuré, décomposition en couches, MECE (mutuellement exclusif, collectivement exhaustif).\n- Le langage doit être professionnel, clair, sobre, précis et actionnable.\n- Pour toute information manquante ou incertaine qui affecte matériellement le procès-verbal, marquez-la comme 【À confirmer】.\n- Normaliser les noms des personnes, entreprises, outils, projets et terminologie dans tout le document; appliquez les corrections de manière cohérente.\n- Supprimer les sections vides — ne conservez pas de titres de section vides avec aucun contenu.\n- Si la source indique clairement que certaines informations ne doivent pas être incluses, excluez-les entièrement (ne les déplacez pas vers les « confirmations en attente », les notes, le contexte ou l'annexe).\n\nDéroulement\n1. Lisez attentivement la source.\n2. Extrayez : sujet, date, heure, format, participants, entreprise/projet connexe, sujets clés, conclusions principales, points de discussion, litiges, actions à entreprendre et confirmations en attente.\n3. Résumez les conclusions principales, le déroulement de la discussion, les principaux points de consensus, les actions à entreprendre et uniquement les confirmations en attente qui comptent réellement.\n\nRédigez la structure suivante (omettez les sections sans contenu) :\n\n# [Meeting Title]\n\n## 0. Informations de base sur la réunion\n\n| Élément | Détails |\n|---|---|\n| Sujet de la réunion |  |\n| Date de la réunion |  |\n| Heure de la réunion |  |\n| Format de la réunion |  |\n| Participants |  |\n| Objectif de la réunion |  |\n| Entreprise / Projet connexe |  |\n| Documents sources |  |\n\n## 1. Conclusions principales de la réunion\nLes 3 à 5 conclusions les plus importantes de la réunion, conclusion d'abord.\n\n## 2. Principaux sujets de discussion\nPour chaque sujet :\n### 2.x [Topic]\n- Problème actuel\n- Résumé de la discussion\n- Orientation initiale\n\n## 3. Consensus clé\nÉléments sur lesquels un accord a été trouvé.\n\n## 4. Recommandations de suivi\nOrganisez par business / produit / technologie / opérations / collaboration selon le cas.\n\n## 5. Actions à entreprendre\n\n| N° | Action | Priorité | Responsable suggéré |\n|---|---|---|---|\n\n## 6. Confirmations en attente\nUniquement les éléments qui nécessitent réellement une confirmation et qui affectent matériellement le compte rendu officiel.\n\n## 7. Résumé\nUn récapitulatif concis de la valeur de la réunion et de la prochaine étape.\n\nSi la réunion implique des types de contenu supplémentaires non couverts ci-dessus, ajoutez les sections nécessaires.";
+"template_prompt.structured_minutes" = "Vous êtes un assistant expert en notes de réunion. Analysez cette transcription et produisez un procès-verbal structuré en Markdown :\n\n## Résumé de la réunion\nUn paragraphe de vue d'ensemble de l'objectif et du résultat de la réunion.\n\n## Participants\nListez tous les intervenants/participants mentionnés.\n\n## Points de l'ordre du jour discutés\nPour chaque sujet discuté :\n### [Topic]\n- Points clés soulevés\n- Différents points de vue exprimés\n- Résultat ou conclusion obtenue\n\n## Actions à entreprendre\n| Responsable | Tâche | Échéance (si mentionnée) |\n|-------|------|------------------------|\n\n## Décisions prises\nListe à puces des décisions concrètes.\n\n## Questions ouvertes\nÉléments non résolus nécessitant un suivi.\n\nSoyez concis. Utilisez les propres mots des intervenants pour plus de précision. Si quelque chose n'est pas clair dans la transcription, notez-le comme [peu clair].";
+"template_prompt.executive_brief" = "Résumez cette transcription de réunion en un bref résumé pour la direction (3 à 5 paragraphes maximum). Concentrez-vous sur :\n1. Pourquoi la réunion a eu lieu\n2. Les décisions les plus importantes prises\n3. Les actions critiques et leurs responsables\n4. Les risques ou obstacles soulevés\n5. Les prochaines étapes\n\nRédigez dans un langage professionnel et direct. Évitez les formules de politesse et le remplissage. Un dirigeant occupé devrait pouvoir lire ceci en moins de 2 minutes.";
+"template_prompt.key_takeaways" = "Extrayez les points clés à retenir de cette transcription de réunion. Formatez comme suit :\n\n## Points clés à retenir\n- Liste numérotée des 5 à 10 points les plus importants de cette réunion\n- Chaque point doit être une phrase unique et autonome\n- Privilégiez les décisions, les engagements et les nouvelles informations par rapport à la discussion\n\n## Citations notables\nIncluez 2 à 3 citations directes qui capturent des moments critiques ou des engagements, avec l'attribution à l'intervenant.\n\n## Sentiment\nBrève note sur le ton général — était-ce productif, contentieux, exploratoire, etc. ?";
+"template_prompt.task_extraction" = "Examinez attentivement cette transcription et extrayez TOUS les engagements, affectations et tâches de suivi. Pour chaque élément :\n\n- **Qui** : La personne qui s'est engagée ou à qui la tâche a été assignée\n- **Quoi** : Tâche ou livrable spécifique\n- **Quand** : Échéance si mentionnée, sinon « TBD »\n- **Contexte** : Une phrase sur pourquoi cela compte\n\nFormatez sous forme de liste numérotée. Incluez les engagements implicites (par exemple, « Je vais regarder ça » = tâche). Signalez toute tâche dont la propriété est ambiguë avec [RESPONSABLE INCERTAIN].";
+"template_prompt.decision_log" = "Extrayez chaque décision prise dans cette transcription. Pour chaque décision :\n\n1. **Décision** : Ce qui a été décidé\n2. **Justification** : Pourquoi (les arguments clés qui y ont conduit)\n3. **Alternatives envisagées** : Les autres options discutées et pourquoi elles ont été rejetées\n4. **Impact** : Qui ou quoi est affecté\n5. **Responsable** : Qui est en charge de l'exécution\n\nSi un sujet a été discuté mais qu'aucune décision claire n'a été prise, listez-le sous « Décisions en attente » avec le statut actuel de la discussion.";
+"template_prompt.concise_summary" = "Fournissez un résumé concis de cette transcription en 3 à 5 paragraphes. Couvrez les principaux sujets discutés, les points clés soulevés et les conclusions éventuelles. Rédigez dans un style professionnel clair. N'utilisez pas de puces ni de titres — seulement des paragraphes bien organisés.";
+"template_prompt.detailed_notes" = "Créez des notes complètes et bien organisées à partir de cette transcription. Utilisez le format Markdown :\n\n## Vue d'ensemble\nBrève mise en contexte.\n\n## Discussion\nOrganisez par sujet (pas chronologiquement). Pour chaque sujet, capturez :\n- Les points principaux et arguments\n- Les détails de soutien ou les données mentionnées\n- Les désaccords ou points de vue alternatifs\n\n## Conclusions\nCe qui a été résolu ou convenu.\n\n## Suivi\nÉléments nécessitant une discussion ou une action supplémentaire.\n\nPréservez les nuances importantes. Lorsque les intervenants sont en désaccord, représentez équitablement les deux côtés.";
+"template_prompt.qa_format" = "Reformatez cette transcription dans un format Q&R propre. Identifiez les questions (explicites ou implicites) et associez-les aux réponses données. Format :\n\n**Q : [Question]**\nR : [Réponse, synthétisée à partir de la discussion]\n\nRegroupez les Q&R connexes sous des titres thématiques. Si une question a été posée mais pas entièrement répondue, notez-la comme [Partiellement répondu] ou [Sans réponse].";
+"template_prompt.client_meeting_recap" = "Créez un récapitulatif de réunion prêt pour le client à partir de cette transcription. Format :\n\n**Objet :** [Meeting topic]\n**Date :** [Extract if mentioned]\n**Participants :** [List]\n\n**Résumé :**\nVue d'ensemble professionnelle de ce qui a été discuté et convenu.\n\n**Prochaines étapes convenues :**\nListe numérotée des engagements des deux côtés.\n\n**Calendrier :**\nToutes les dates ou jalons discutés.\n\nGardez un ton professionnel et positif. Évitez le jargon interne. Concentrez-vous sur les engagements mutuels et la valeur livrée.";
+"template_prompt.one_on_one_summary" = "Résumez cette conversation en tête-à-tête. Capturez :\n\n## Sujets discutés\nBrève liste de ce qui a été couvert.\n\n## Retour donné\nTout retour échangé (positif ou constructif), avec contexte.\n\n## Blocages et soutien nécessaire\nProblèmes soulevés qui nécessitent de l'aide ou une escalade.\n\n## Objectifs et engagements\nCe à quoi chaque personne s'est engagée avant la prochaine vérification.\n\n## Carrière / Croissance\nTout sujet de développement de carrière, d'apprentissage ou de croissance discuté.\n\nGardez un ton privé et constructif.";
+"template_prompt.status_update" = "Convertissez cette transcription en une mise à jour de statut de projet :\n\n## Statut : [Vert/Jaune/Rouge selon le ton de la discussion]\n\n## Progrès depuis la dernière mise à jour\n- Ce qui a été accompli\n\n## Focus actuel\n- Sur quoi on travaille actuellement\n\n## Blocages\n- Problèmes empêchant la progression\n\n## Jalons à venir\n- Ce qui vient ensuite et quand\n\n## Risques\n- Tout ce qui pourrait faire dérailler le calendrier\n\nSoyez factuel et précis. Utilisez les dates et les mesures lorsqu'elles sont mentionnées.";
+"template_prompt.lecture_notes" = "Transformez cette transcription de cours/exposé en notes d'étude bien organisées :\n\n## Sujet\nSujet principal et contexte.\n\n## Concepts clés\nPour chaque concept majeur introduit :\n- **Terme/Concept** : Définition ou explication claire\n- Exemples de soutien ou analogies utilisés par l'intervenant\n\n## Détails importants\nFaits, chiffres, dates ou formules mentionnés.\n\n## Connexions\nComment les concepts se rapportent les uns aux autres ou à des thèmes plus larges.\n\n## Questions de révision\nGénérez 3 à 5 questions qu'un étudiant pourrait utiliser pour s'auto-évaluer.\n\nUtilisez un langage éducatif clair. Mettez en évidence les termes qui apparaîtraient probablement dans un examen.";
+"template_prompt.research_discussion" = "Résumez cette discussion de recherche ou transcription de journal club :\n\n## Article/Sujet discuté\nTitre et auteurs si mentionnés.\n\n## Principaux résultats\nRésultats ou affirmations clés présentés.\n\n## Méthodologie\nComment la recherche a été menée (si discuté).\n\n## Forces\nCe que le groupe a trouvé convaincant.\n\n## Critiques et limites\nPréoccupations soulevées concernant le travail.\n\n## Implications\nPourquoi cela importe, applications discutées.\n\n## Questions ouvertes\nQuestions scientifiques non résolues qui ont émergé.";
+"template_prompt.brainstorm_synthesis" = "Synthétisez cette session de brainstorming en une sortie organisée :\n\n## Énoncé du problème\nQuel problème ou opportunité était exploré.\n\n## Idées générées\nRegroupez les idées similaires en thèmes. Pour chaque thème :\n### [Theme]\n- Idées spécifiques proposées\n- Qui les a suggérées (si identifiable)\n- Avantages/inconvénients discutés\n\n## Meilleures candidates\nLes idées qui ont reçu le plus d'énergie ou de soutien du groupe.\n\n## Jokers\nIdées non conventionnelles ou risquées qui méritent d'être explorées davantage.\n\n## Prochaines étapes recommandées\nComment évaluer ou prototyper les idées les plus prometteuses.";
+"template_prompt.interview_summary" = "Résumez cette transcription d'entretien :\n\n## Personne interrogée\nNom et parcours (si mentionnés).\n\n## Informations clés\nLes choses les plus précieuses ou surprenantes partagées, organisées par thème.\n\n## Citations notables\n3 à 5 citations directes qui capturent bien leur perspective.\n\n## Thèmes\nIdées ou préoccupations récurrentes tout au long de la conversation.\n\n## Questions de suivi\nQuestions qui n'ont pas été posées mais qui mériteraient d'être explorées.\n\nPréservez la voix et la perspective de la personne interrogée. Ne commentez pas.";
+
+/* field-level ASR validation, device-file transcribe guidance, pairing shortcut */
+"asr.key_required" = "Saisissez la clé d'abonnement";
+"asr.region_required" = "Saisissez la région du service";
+"asr.verify_failed" = "Échec de la vérification";
+"device_files.download_before_transcribe" = "Téléchargez et déchiffrez %@ avant la transcription.";
+"device_files.transcribe_failed" = "Impossible de transcrire %1$@ : %2$@";
+"device_files.delete_failed" = "Impossible de supprimer l'enregistrement : %@";
+"pairing.go_pair" = "Associer maintenant";
+"dnote_error.not_bound" = "Ce Nomi n'est pas encore associé à cette app.";
+"dnote_error.not_connected" = "Aucun appareil connecté.";
+"dnote_error.timeout" = "L'appareil n'a pas répondu à temps.";
+"wifi_error.timeout" = "Transfert Wi-Fi expiré : aucune donnée reçue de l'appareil.";
+"wifi_error.not_connected" = "Non connecté au point d'accès Wi-Fi de l'appareil.";
+"wifi_error.malformed" = "L'appareil a renvoyé une réponse illisible pour l'app.";
+"wifi_error.no_response" = "Aucune réponse de l'appareil à %1$@:%2$d.";
+"wifi_error.cancelled" = "Le transfert rapide a été annulé.";
+"hotspot_error.user_denied" = "Vous avez refusé la demande de connexion Wi-Fi. Touchez à nouveau « Transfert rapide » pour réessayer.";
+"hotspot_error.join_failed" = "Impossible de rejoindre le point d'accès de l'appareil. Touchez « Réessayer » : l'app relancera le point d'accès et fera une nouvelle tentative.";
+"dnote_error.stream_no_audio" = "L'appareil n'envoie pas d'audio pour cet enregistrement. Arrêtez l'enregistrement sur l'appareil, puis démarrez le direct depuis l'app.";
+"dnote_error.passphrase_setup_incomplete" = "Définissez la phrase secrète avant d'enregistrer. Ce Nomi chiffre tous les enregistrements ; les clips créés sans phrase secrète ne pourront pas être ouverts sur cet iPhone.";
+"scanner.section_available" = "À ajouter";
+"scanner.section_added" = "Déjà ajoutés";
+"scanner.added_badge" = "Ajouté";
+"asr.no_provider_configured" = "Aucun service de transcription n'est configuré. Configurez-en un dans les réglages.";
+"asr.all_providers_unreachable" = "Aucun des services de transcription configurés n'est joignable.";
+"asr.azure_required_for_translation" = "La traduction en direct nécessite Azure. Saisissez votre clé et votre région Azure dans les réglages.";
+"asr.missing_credentials" = "%@ n'est pas configuré. Configurez-le dans les réglages.";
+"asr.open_provider_settings" = "Configurer la transcription";
+"azure_verify.bad_credentials" = "Clé d'abonnement refusée ou non valide pour cette région. Vérifiez que la clé et la région correspondent.";
+"azure_verify.region_not_found" = "Cette région n'existe pas. Vérifiez l'orthographe (par exemple eastus ou westeurope).";
+"azure_verify.rate_limited" = "Trop de requêtes. Réessayez dans un instant.";
+"azure_verify.service_unavailable" = "Azure est temporairement indisponible. Réessayez plus tard.";
+"azure_verify.network" = "Impossible de joindre Azure. Vérifiez votre connexion réseau.";
+"azure_verify.unexpected" = "Azure a renvoyé une réponse inattendue.";
+"common.edit" = "Modifier";
+"live.clip_not_in_library" = "Cet enregistrement n'est plus dans la bibliothèque. Il a peut-être été renommé, fusionné ou supprimé.";
+"azure_verify.host_unresolved" = "Impossible de résoudre l'adresse Azure de cette région. Vérifiez l'orthographe de la région (par exemple eastus ou westeurope) et votre connexion réseau.";
+"asr.last_verify_failed" = "Échec de la dernière vérification – vérifiez à nouveau";
+"asr.status_verified" = "Vérifié et prêt à l'emploi";
+"asr.status_verifying" = "Test de la connexion…";
+"asr.status_unverified" = "Enregistré, pas encore vérifié";
+"asr.autosave_note" = "Les modifications sont enregistrées automatiquement. Enregistré ne veut pas dire fonctionnel : touchez la coche pour vérifier les identifiants.";
+"asr.leave_title" = "Quitter sans vérifier ?";
+"asr.leave_anyway" = "Quitter";
+"asr.leave_incomplete_message" = "Des champs obligatoires sont vides, ce service ne peut pas être utilisé pour la transcription.";
+"asr.leave_unverified_message" = "Ces identifiants n'ont pas été vérifiés, la transcription peut encore échouer. Testez-les d'abord avec la coche.";
+"asr.host_required" = "Saisissez l'hôte du serveur";
+"asr.port_invalid" = "Le port doit être compris entre 1 et 65535";

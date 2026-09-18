@@ -1,0 +1,8 @@
+/* 系统权限弹窗文案（简体中文）。iOS 会按系统语言从对应 .lproj/InfoPlist.strings
+   覆盖 Info.plist 中同名键；未提供翻译的语言回退到 Info.plist 的英文基线。 */
+
+"NSBluetoothAlwaysUsageDescription" = "Nomily AI 通过蓝牙连接你的 D·NOTE 录音设备，以浏览、传输并转写录音。";
+
+"NSLocalNetworkUsageDescription" = "快速传输时，Nomily AI 会通过设备的 Wi-Fi 热点与其建立直连的 TCP 连接。";
+
+"NSMicrophoneUsageDescription" = "实时转写时需要监测麦克风状态，以便与设备的音频流协同工作。";

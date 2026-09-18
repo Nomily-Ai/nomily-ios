@@ -1,0 +1,587 @@
+/* العربية — الترجمة */
+
+/* عام */
+"common.done" = "تم";
+"common.cancel" = "إلغاء";
+"common.ok" = "حسنًا";
+"common.delete" = "حذف";
+"common.save" = "حفظ";
+"common.retry" = "إعادة المحاولة";
+"common.close" = "إغلاق";
+"common.open_settings" = "فتح الإعدادات";
+"common.try_again" = "حاول مجددًا";
+"common.none" = "لا شيء";
+"common.recording" = "جارٍ التسجيل";
+"common.keep_foreground" = "احتفظ بهذه الشاشة في المقدمة — الانتقال إلى الخلفية سيقطع النقل ولا يمكن استئنافه";
+
+/* علامات التبويب */
+"tab.recordings" = "التسجيلات";
+"tab.live" = "مباشر";
+"tab.settings" = "الإعدادات";
+
+/* الإعدادات */
+"settings.asr_providers" = "مزوّدو ASR";
+"settings.llm_providers" = "مزوّدو LLM";
+"settings.recordings" = "التسجيلات والنقل";
+"settings.summarize_templates" = "قوالب التلخيص";
+"settings.devices_library" = "الأجهزة والمكتبة";
+"settings.about" = "حول التطبيق";
+"settings.version" = "الإصدار";
+
+/* ASR */
+"asr.transcription" = "النسخ الصوتي";
+"asr.active_provider" = "المزوّد النشط";
+"asr.auto_transcribe_after_download" = "النسخ التلقائي بعد التنزيل";
+"asr.auto_transcribe_min" = "الحد الأدنى للمدة: %d ثانية";
+"asr.auto_transcribe_footer" = "يتم تشغيل النسخ بعد كل تنزيل. تتم تجاوز المقاطع الأقصر من الحد الأدنى للمدة. يُستخدم المزوّد الآخر كبديل احتياطي تلقائيًا عند ضبطه.";
+"asr.local_vad" = "إزالة الصمت قبل الرفع";
+"asr.local_vad_footer" = "يعمل كشف نشاط الصوت على الجهاز ويزيل المقاطع الصامتة قبل إرسال الصوت إلى مزوّد النسخ. يقلل من حجم الرفع وتكلفة ASR.";
+"asr.azure_speech" = "Azure Speech";
+"asr.azure_purpose_footer" = "تُستخدم Azure Speech لتحويل التسجيلات إلى نص وللنسخ والترجمة الفوريين. تحتاج إلى مفتاح Azure الخاص بك، ويُرسَل الصوت إلى Microsoft للمعالجة وقد تترتب عليه رسوم. وهي لا تنشئ ملخصات الذكاء الاصطناعي؛ فتلك يولّدها خادم LLM الذي تضبطه بشكل منفصل.";
+"asr.local_server" = "خادم ASR محلي";
+"asr.subscription_key" = "مفتاح الاشتراك";
+"asr.region" = "المنطقة";
+"asr.host" = "المضيف";
+"asr.port" = "المنفذ";
+"asr.no_provider" = "لا يوجد مزوّد ASR";
+"asr.no_provider_message" = "قم بإعداد مزوّد النسخ الصوتي (Azure أو خادم محلي) في الإعدادات.";
+"asr.azure" = "Azure";
+"asr.local_server_label" = "خادم محلي";
+"asr.transcribe_auto" = "اكتشاف اللغة تلقائيًا";
+"asr.specify_languages" = "تحديد اللغات…";
+"asr.languages_footer" = "يكتشف Azure لغة كل عبارة على حدة، وليس التسجيل بأكمله — مفيد للاجتماعات التي تمزج عدة لغات.";
+"asr.max_languages_hint" = "حتى %d لغات";
+
+/* LLM */
+"llm.active_provider_footer" = "يُستخدم المزوّد الأساسي للتلخيص ومهام LLM الأخرى.";
+"llm.api_key" = "مفتاح API";
+"llm.model" = "النموذج";
+"llm.select_model" = "اختر نموذجًا";
+"llm.model_placeholder" = "النموذج — مثلاً %@";
+"llm.endpoint_url" = "عنوان URL لنقطة النهاية";
+"llm.provider_placeholder" = "المزوّد — مثلاً %@";
+"llm.api_key_optional" = "مفتاح API (اختياري)";
+"llm.no_provider" = "لا يوجد مزوّد LLM";
+"llm.no_provider_message" = "قم بإعداد مزوّد LLM واختر مزوّدًا نشطًا.";
+
+/* دليل إعداد Azure */
+"azure_guide.title" = "إعداد Azure Speech";
+"azure_guide.step" = "الخطوة %d: %@";
+"azure_guide.step1_title" = "إنشاء حساب Azure";
+"azure_guide.step1_item1" = "انتقل إلى portal.azure.com";
+"azure_guide.step1_item2" = "أنشئ حسابًا مجانيًا إذا لم يكن لديك واحد (يتضمن رصيدًا بقيمة 200$ لمدة 30 يومًا)";
+"azure_guide.step2_title" = "إنشاء مورد الكلام";
+"azure_guide.step2_item1" = "في بوابة Azure، انقر على إنشاء مورد";
+"azure_guide.step2_item2" = "ابحث عن \"Speech\" واختر Speech (من Microsoft)";
+"azure_guide.step2_item3" = "انقر على إنشاء";
+"azure_guide.step2_item4" = "اختر منطقة تدعم النسخ السريع (مثلاً westus3 أو eastus أو eastasia)";
+"azure_guide.step2_item5" = "مستوى التسعير: F0 (مجاني) للاختبار، أو S0 (قياسي) للإنتاج";
+"azure_guide.step2_item6" = "انقر على مراجعة + إنشاء، ثم إنشاء";
+"azure_guide.step3_title" = "الحصول على مفتاح API والمنطقة";
+"azure_guide.step3_item1" = "انتقل إلى مورد الكلام الخاص بك في البوابة";
+"azure_guide.step3_item2" = "انقر على المفاتيح ونقطة النهاية في الشريط الجانبي";
+"azure_guide.step3_item3" = "انسخ المفتاح 1 (أو المفتاح 2) والمنطقة (مثلاً westus3)";
+"azure_guide.free_tier_title" = "حدود الخطة المجانية (F0)";
+"azure_guide.fast_transcription" = "النسخ السريع";
+"azure_guide.fast_transcription_value" = "5 ساعات / شهر";
+"azure_guide.realtime_transcription" = "النسخ في الوقت الفعلي";
+"azure_guide.realtime_transcription_value" = "طلب متزامن واحد";
+"azure_guide.speaker_diarization" = "تمييز المتحدثين";
+"azure_guide.speaker_diarization_value" = "مُضمّن";
+"azure_guide.audio_formats" = "صيغ الصوت";
+"azure_guide.audio_formats_value" = "WAV، OGG/Opus، MP3، FLAC";
+
+/* إعدادات التسجيلات */
+"rec_settings.delete_after_transfer" = "حذف من الجهاز بعد النقل";
+"rec_settings.delete_after_transfer_footer" = "عند التفعيل، يُحذف الملف من الجهاز فور انتهاء نقل BLE وفك التشفير.";
+"rec_settings.decryption" = "فك التشفير";
+"rec_settings.chacha_key" = "مفتاح ChaCha20 (سداسي عشري)";
+"rec_settings.chacha_key_footer" = "64 حرفًا سداسيًا عشريًا (32 بايت). اتركه فارغًا إذا كان الجهاز لا يستخدم التشفير.";
+"rec_settings.wifi_ap" = "نقطة وصول Wi-Fi (النقل السريع)";
+"rec_settings.ssid" = "SSID";
+"rec_settings.password" = "كلمة المرور";
+"rec_settings.wifi_credentials_footer" = "بيانات الاعتماد التي يبثّها الجهاز عند بدء النقل السريع.";
+"rec_settings.wifi_generated" = "تم إنشاء بيانات اعتماد Wi-Fi";
+"rec_settings.wifi_generated_message" = "تم إنشاء SSID وكلمة المرور تلقائيًا. يمكنك تغييرهما أعلاه.";
+"rec_settings.fast_transfer_threshold" = "حد النقل السريع";
+"rec_settings.fast_transfer_threshold_footer" = "يظهر زر النقل السريع عبر Wi-Fi عندما يتجاوز حجم التسجيلات غير المُنزَّلة على الجهاز هذا الحد. اضبط على 0 KB لإظهار الاقتراح دائمًا عند وجود ملفات قيد الانتظار.";
+
+/* إعدادات الأجهزة والمكتبة */
+"devices.known_devices" = "الأجهزة المعروفة";
+"devices.no_devices_yet" = "لم تُسجَّل أي أجهزة بعد.";
+"devices.last_seen" = "آخر اتصال %@";
+"devices.library" = "المكتبة";
+"devices.files" = "الملفات";
+"devices.total_size" = "الحجم الكلي";
+"devices.library_footer" = "المقاطع الصوتية والنسخ والملخصات المخزنة على هذا الجهاز. ستُفقد جميع البيانات إذا حُذف التطبيق — قم بالتصدير والنسخ الاحتياطي بانتظام.";
+
+/* علامة تبويب التسجيلات */
+"recordings.device" = "الجهاز";
+"recordings.library" = "المكتبة";
+"recordings.no_device" = "لا يوجد جهاز متصل";
+"recordings.no_device_message" = "انقر على المؤشر أعلاه للبحث عن جهاز D·NOTE الخاص بك.";
+"recordings.no_clips" = "لا توجد مقاطع بعد";
+"recordings.no_clips_message" = "قم بتنزيل تسجيل من علامة تبويب الجهاز لإضافته إلى مكتبتك.";
+"recordings.clip_count_one" = "مقطع واحد · %2$@";
+"recordings.clip_count_other" = "%d مقاطع · %@";
+"library.import_audio" = "استيراد صوت";
+"library.import_failed" = "فشل الاستيراد";
+"library.merge" = "دمج المتجاورة";
+"library.merging" = "جارٍ الدمج…";
+"library.merge_failed" = "فشل الدمج";
+"library.merge_confirm_title" = "دمج المقاطع المتجاورة؟";
+"library.merge_confirm_message" = "سيتم دمج %1$@ و%2$@ في تسجيل جديد واحد (M4A). ستُحذف المقاطع الأصلية وما يتصل بها من النصوص والملخصات والترجمات، ولا يمكن التراجع عن هذا الإجراء.";
+
+/* ملفات الجهاز */
+"device_files.delete_recording" = "حذف التسجيل؟";
+"device_files.delete_recording_message" = "حذف %@ نهائيًا من الجهاز. لا يمكن التراجع عن هذا الإجراء.";
+"device_files.operation_failed" = "فشلت العملية";
+"device_files.reading_file_list" = "جارٍ قراءة قائمة الملفات…";
+"device_files.device_is_recording" = "الجهاز يسجّل حاليًا";
+"device_files.recording_unavailable_message" = "قائمة الملفات غير متاحة أثناء التسجيل. أوقف التسجيل لتصفّح الملفات.";
+"device_files.stop_recording" = "إيقاف التسجيل";
+"device_files.couldnt_read_device" = "تعذّرت قراءة الجهاز";
+"device_files.no_recordings" = "لا توجد تسجيلات على الجهاز";
+"device_files.no_recordings_message" = "انقر على زر التحديث بعد التسجيل على الجهاز.";
+"device_files.fast_transfer_wifi" = "نقل سريع عبر Wi-Fi";
+"device_files.pending" = "%@ في الانتظار";
+"device_files.transcribing" = "جارٍ النسخ…";
+"device_files.transcript_done" = "النسخ → %@";
+"device_files.transfer_in_progress" = "جارٍ النقل";
+"device_files.cancel_transfer_to_switch" = "هل تريد إلغاء جميع عمليات النقل للتبديل إلى تبويب آخر؟";
+"device_files.cancel_and_switch" = "إلغاء والتبديل";
+
+/* حالات حفظ الملفات */
+"file_save.saved_plain" = "تم الحفظ → %@ (ملف عادي، لا حاجة لفك التشفير)";
+"file_save.decrypted" = "تم فك التشفير → %@";
+"file_save.wrapped_frames" = "تم تغليف الإطارات الخام → %@";
+"file_save.decrypted_wrapped" = "تم فك التشفير + التغليف → %@";
+"file_save.saved" = "تم الحفظ → %@";
+"file_save.decrypt_failed" = "فشل فك التشفير: %@";
+"file_save.wav_without_header" = "ملف WAV بدون ترويسة RIFF — اضبط مفتاح ChaCha20 في الإعدادات إذا كانت البرامج الثابتة تستخدم التشفير.";
+
+/* تفاصيل المقطع */
+"clip_detail.transcript" = "النسخ";
+"clip_detail.transcribing" = "جارٍ النسخ...";
+"clip_detail.provider_fallback" = "تم التبديل إلى مزوّد بديل";
+"clip_detail.view_full_transcript" = "عرض النسخ الكامل";
+"clip_detail.transcribe" = "نسخ صوتي";
+"clip_detail.retranscribe" = "إعادة النسخ؟";
+"clip_detail.retranscribe_message" = "سيؤدي هذا إلى استبدال النسخ الحالي.";
+"clip_detail.summary" = "الملخص";
+"clip_detail.view_full_summary" = "عرض الملخص الكامل";
+"clip_detail.summarize" = "تلخيص";
+"clip_detail.transcribe_first" = "قم بالنسخ الصوتي أولاً لتمكين التلخيص.";
+"clip_detail.translation" = "الترجمة";
+"clip_detail.view_full_translation" = "عرض الترجمة الكاملة";
+"clip_detail.translate" = "ترجمة";
+"clip_detail.translating" = "جارٍ الترجمة…";
+"clip_detail.translated_summary" = "الملخص المترجم";
+"clip_detail.view_full_translated_summary" = "عرض الملخص المترجم كاملًا";
+"clip_detail.export" = "تصدير";
+"clip_detail.export_as_m4a" = "تصدير بصيغة M4A (AAC)";
+"clip_detail.exporting" = "جارٍ التصدير…";
+"clip_detail.speaker" = "المتحدث %@";
+
+/* بطاقة الجهاز */
+"device.couldnt_update" = "تعذّر التحديث";
+"device.erase_all_recordings" = "مسح جميع التسجيلات؟";
+"device.erase_message" = "يؤدي هذا إلى حذف جميع التسجيلات من الجهاز. تُحفظ المفاتيح واسم Bluetooth. لا يمكن التراجع عن هذا الإجراء.";
+"device.format_storage" = "تهيئة التخزين";
+"device.formatting" = "جارٍ التهيئة…";
+"device.restore_factory" = "استعادة إعدادات المصنع؟";
+"device.restore_message" = "يُعيد ضبط المفاتيح واسم Bluetooth. تُحفظ التسجيلات.";
+"device.factory_reset" = "إعادة ضبط المصنع";
+"device.resetting" = "جارٍ إعادة الضبط…";
+"device.power_off" = "إيقاف تشغيل الجهاز؟";
+"device.power_off_message" = "سيتم قطع اتصال الجهاز فورًا. اضغط على الزر الفعلي لتشغيله مجددًا.";
+"device.shut_down" = "إيقاف التشغيل";
+"device.shutting_down" = "جارٍ إيقاف التشغيل…";
+"device.connected_mtu" = "متصل · MTU %d";
+"device.storage_used" = "%@ مستخدم من %@";
+"device.identity" = "الهوية";
+"device.bluetooth_name" = "اسم Bluetooth";
+"device.serial" = "الرقم التسلسلي";
+"device.firmware" = "البرامج الثابتة";
+"device.bt_mac" = "عنوان MAC لـ BT";
+"device.device_time" = "وقت الجهاز";
+"device.audio" = "الصوت";
+"device.noise_cancel" = "إلغاء الضوضاء";
+"device.noise_cancel_hint" = "خاصية إلغاء الضوضاء على الجهاز. عند الإيقاف يبقى المزيد من صوت المحيط، وعند التشغيل تبرز الأصوات. وهو إعداد منفصل عن «خفض الضوضاء» أدناه.";
+"device.save_raw_wav" = "حفظ WAV الخام";
+"device.save_raw_wav_hint" = "يحفظ أيضًا نسخة WAV غير مضغوطة من كل تسجيل على الجهاز. أفضل جودة، لكنه يستهلك مساحة تخزين أكبر بكثير.";
+"device.vad" = "كشف النشاط الصوتي";
+"device.vad_hint" = "يتخطى الجهاز فترات الصمت أثناء التسجيل ويحتفظ بالمقاطع التي يتحدث فيها أحد فقط، ما يوفّر مساحة التخزين والبطارية؛ وقد يُقتطع أول الكلام إذا كان الصوت خافتًا جدًا. وهذا يختلف عن «إزالة الصمت قبل الرفع» في الإعدادات ← التعرف على الكلام، فتلك تعمل على الـ iPhone قبل الرفع، وهذه تعمل على الجهاز أثناء التسجيل.";
+"device.mic_gain" = "تقوية الميكروفون";
+"device.mic_gain_hint" = "حساسية الميكروفون من 1 (الأدنى) إلى 9 (الأعلى). كلما زادت التقط الكلام البعيد أو الخافت بوضوح أكبر، لكنها تضخّم ضوضاء المحيط أيضًا ويتشوّه الصوت أسرع مع الأصوات العالية.";
+"device.noise_reduction" = "تقليل الضوضاء";
+"device.noise_reduction_hint" = "شدة خفض الضوضاء من 1 (الأضعف) إلى 9 (الأقوى). كلما زادت قلّت ضوضاء الخلفية، لكن قد تضعف الأصوات البشرية أيضًا فتبدو مكتومة.";
+"device.behavior" = "السلوك";
+"device.led_indicator" = "مؤشر LED";
+"device.vibration" = "الاهتزاز";
+"device.usb_drive_mode" = "وضع محرك USB";
+"device.usb_drive_mode_hint" = "عند التفعيل، يظهر الجهاز كمحرك أقراص قابل للإزالة عند توصيله بالكمبيوتر.";
+"device.auto_power_off" = "إيقاف التشغيل التلقائي";
+"device.saving_idle_off" = "جارٍ حفظ مهلة الخمول…";
+"device.danger_zone" = "منطقة الخطر";
+"device.danger_zone_footer" = "التهيئة تمسح جميع التسجيلات؛ إعادة ضبط المصنع تُعيد فقط المفاتيح واسم BT. إيقاف التشغيل يقطع الاتصال.";
+"device.unavailable_while_recording" = "أوقف التسجيل قبل تنفيذ أي عمليات على الجهاز.";
+"device.connection" = "الاتصال";
+"device.disconnect" = "قطع الاتصال";
+"device.never" = "أبدًا";
+"device.custom_idle_off" = "مخصص (%ds)";
+
+/* البث المباشر */
+"live.no_device" = "لا يوجد جهاز متصل";
+"live.no_device_message" = "قم بتوصيل D·NOTE لبدء النسخ والترجمة المباشرة.";
+"live.view_in_library" = "عرض في المكتبة";
+"live.source_language" = "لغة المصدر";
+"live.target_language" = "اللغة المستهدفة";
+"live.same_as_source" = "نفس لغة المصدر";
+"live.setup_azure" = "إعداد Azure";
+"live.switch_language" = "تغيير اللغة؟";
+"live.continue" = "متابعة";
+"live.listening" = "جارٍ الاستماع...";
+"live.tap_mic_to_start" = "انقر على الميكروفون للبدء";
+"live.search_languages" = "البحث عن اللغات";
+"live.transcribe_only" = "نسخ %@ فقط";
+"live.translate_pair" = "%@ → %@";
+"live.streaming" = "بث مباشر";
+"live.ready" = "جاهز";
+"live.paused" = "متوقف مؤقتاً";
+"live.repair_title" = "يتوفر تسجيل كامل";
+"live.repair_message" = "تضمّن هذا التسجيل حالات إيقاف مؤقت، لذلك لم يتم التقاط بعض الصوت. هل تريد استبداله بالتسجيل الكامل من Nomi؟";
+"live.repair_message_attached" = "انضمت هذه الجلسة إلى تسجيل كان جارياً بالفعل، لذا البداية مفقودة. هل تريد الاستبدال بالتسجيل الكامل من Nomi؟";
+"live.repair_not_playable" = "وصل الملف مشفّراً ولا يملك هذا الـ iPhone عبارة المرور المطابقة، لذا لم يُنتَج ملف قابل للتشغيل. التسجيل ما زال على Nomi.";
+"live.repair_replace" = "استبدال";
+"live.repair_keep" = "الإبقاء";
+"live.repair_downloading" = "جاري تنزيل الصوت الكامل…";
+"live.repair_succeeded" = "تم الاستبدال بالصوت الكامل";
+"live.repair_failed" = "تعذّر التنزيل: %@";
+"live.repair_manual_transfer" = "التسجيل الكامل لا يزال على Nomi. انقله من تبويب التسجيلات.";
+"live.start_unknown_title" = "تعذّر معرفة ما إذا كان Nomi يسجّل";
+"live.start_unknown_message" = "لم يستجب الجهاز لفحص الحالة. بدء جلسة مباشرة الآن قد يقطع تسجيلاً بدأته بزر الجهاز. أعد المحاولة، أو ابدأ على أي حال إذا كنت متأكداً من أنه لا يسجّل.";
+"live.start_anyway" = "ابدأ على أي حال";
+"live.attach_no_upload" = "‏Nomi يسجّل، لكن هذا التسجيل بدأ بزر الجهاز قبل اتصال التطبيق، لذا لا يرسل الصوت. أوقف التسجيل على الجهاز ثم ابدأ البث المباشر من التطبيق.";
+
+/* الماسح */
+"scanner.scan" = "بحث";
+"scanner.scan_again" = "البحث مجددًا";
+"scanner.connection_failed" = "فشل الاتصال";
+"scanner.bluetooth_unavailable" = "Bluetooth غير متاح";
+"scanner.looking_for_devices" = "جارٍ البحث عن أجهزة D·NOTE…";
+"scanner.looking_message" = "تأكد من أن جهاز D·NOTE قيد التشغيل وعلى بعد أمتار قليلة.";
+"scanner.wake_and_retry" = "لم يتم العثور على الجهاز. اضغط مطولاً على زر الجهاز لمدة ثانية واحدة لتنشيطه، ثم حاول مرة أخرى.";
+
+/* مؤشر الاتصال */
+"pill.add_device" = "إضافة جهاز";
+
+/* النقل السريع */
+"fast_transfer.title" = "النقل السريع";
+"fast_transfer.status" = "الحالة";
+"fast_transfer.ap_credentials" = "بيانات اعتماد نقطة الوصول";
+"fast_transfer.files_count" = "الملفات (%d)";
+"fast_transfer.pending" = "في الانتظار…";
+"fast_transfer.saved" = "تم الحفظ";
+"fast_transfer.cancelled" = "تم الإلغاء";
+"fast_transfer.background_interrupted" = "توقف النقل لأن التطبيق انتقل إلى الخلفية. حاول مرة أخرى مع إبقاء التطبيق مفتوحًا.";
+"fast_transfer.stage_ready" = "جاهز";
+"fast_transfer.stage_stopping" = "جارٍ إيقاف التسجيل…";
+"fast_transfer.stage_starting_ap" = "جارٍ تشغيل نقطة وصول Wi-Fi على الجهاز…";
+"fast_transfer.stage_polling_ap" = "في انتظار بدء نقطة اتصال الجهاز… (المحاولة %d من %d)";
+"fast_transfer.stage_joining_wifi" = "جارٍ الاتصال بشبكة Wi-Fi…";
+"fast_transfer.stage_join_failed" = "فشل الاتصال بشبكة Wi-Fi";
+"fast_transfer.stage_connecting" = "جارٍ الاتصال بالجهاز…";
+"fast_transfer.stage_listing" = "جارٍ عرض الملفات…";
+"fast_transfer.stage_downloading" = "جارٍ التنزيل…";
+"fast_transfer.stage_cleanup" = "جارٍ التنظيف…";
+"fast_transfer.stage_done" = "تم";
+"fast_transfer.stage_stopped" = "متوقف";
+"fast_transfer.hint_polling" = "قد يستغرق الجهاز من 30 إلى 45 ثانية لتشغيل نقطة الوصول (أطول عند العمل بالبطارية).";
+"fast_transfer.hint_joining" = "قد يعرض iOS إشعارًا بالانضمام — وافق عليه للمتابعة.";
+"fast_transfer.hint_join_failed" = "انقر على \"إعادة المحاولة\" للاتصال بشبكة Wi-Fi الخاصة بالجهاز مجددًا.";
+"fast_transfer.tcp_unreachable" = "تعذّر الوصول إلى الجهاز، ربما لم ينجح الانضمام إلى شبكة Wi-Fi الخاصة به.";
+"fast_transfer.ap_still_on" = "لا يزال الجهاز يبلغ أن نقطة الاتصال قيد التشغيل. إذا تعذّر الانضمام في النقل السريع التالي، أطفئ الجهاز ثم شغّله مجدداً.";
+"fast_transfer.hint_connecting" = "جارٍ إنشاء جلسة TCP على 192.168.88.1:6718.";
+"fast_transfer.ap_not_broadcasting" = "قَبِل الجهاز أمر تشغيل نقطة الوصول، لكنها لم تظهر. أعد المحاولة، وإذا استمر الفشل فأعد تشغيل الجهاز.";
+"fast_transfer.invalid_psk" = "يجب أن تتكون كلمة مرور نقطة اتصال الجهاز من 8 إلى 63 حرفًا. غيّرها من الإعدادات ← التسجيل والنقل ← Wi-Fi AP ثم أعد المحاولة.";
+"fast_transfer.decode_failed" = "%@: تم التنزيل، لكن تعذّر تحويله إلى ملف صوتي قابل للتشغيل. تم الاحتفاظ بالنسخة الأصلية على الجهاز.";
+
+/* التلخيص */
+"summarize.choose_template" = "اختر قالبًا";
+"summarize.summarizing" = "جارٍ التلخيص...";
+"summarize.error" = "خطأ";
+"summarize.summarizing_with" = "جارٍ التلخيص باستخدام %@...";
+"summarize.search_templates" = "البحث في القوالب";
+"summarize.truncated_warning" = "بلغ النموذج حد الإخراج، لذا هذه النتيجة مقتطعة. جرّب نصاً أقصر أو قالباً يطلب محتوى أقل.";
+"summarize.add_template" = "إضافة قالب";
+"summarize.clone" = "نسخ";
+"summarize.category" = "الفئة";
+"summarize.pick_existing" = "اختيار قالب موجود";
+"summarize.new" = "جديد";
+"summarize.name" = "الاسم";
+"summarize.template_name" = "اسم القالب";
+"summarize.prompt" = "التعليمات";
+"summarize.new_template" = "قالب جديد";
+"summarize.edit_template" = "تعديل القالب";
+"summarize.copy_name" = "%@ (نسخة)";
+"summarize.new_category_name" = "اسم الفئة الجديدة";
+"summarize.output_language" = "لغة الإخراج";
+"summarize.same_as_transcript" = "مطابقة للنص";
+"summarize.restore_defaults" = "استعادة القوالب الافتراضية";
+"summarize.restore_defaults_title" = "هل تريد استعادة القوالب الافتراضية؟";
+"summarize.restore_defaults_message" = "سيحلّ هذا قوالبك الحالية محل القوالب الافتراضية المضمَّنة. ستفقد قوالبك المخصّصة. ستعود القوالب المضمَّنة مع التطبيق إلى الظهور.";
+
+/* فئات القوالب */
+"template_cat.meeting_notes" = "ملاحظات الاجتماع";
+"template_cat.action_items" = "بنود العمل";
+"template_cat.general_summary" = "ملخص عام";
+"template_cat.professional" = "مهني";
+"template_cat.academic" = "أكاديمي";
+"template_cat.creative" = "إبداعي";
+
+/* أسماء القوالب */
+"template.formal_minutes" = "محضر اجتماع رسمي";
+"template.structured_minutes" = "محضر منظّم";
+"template.executive_brief" = "موجز تنفيذي";
+"template.key_takeaways" = "النقاط الرئيسية";
+"template.task_extraction" = "استخراج المهام";
+"template.decision_log" = "سجل القرارات";
+"template.concise_summary" = "ملخص موجز";
+"template.detailed_notes" = "ملاحظات تفصيلية";
+"template.qa_format" = "صيغة سؤال وجواب";
+"template.client_meeting_recap" = "ملخص اجتماع العميل";
+"template.one_on_one_summary" = "ملخص اجتماع فردي";
+"template.status_update" = "تحديث الحالة";
+"template.lecture_notes" = "ملاحظات المحاضرة";
+"template.research_discussion" = "مناقشة بحثية";
+"template.brainstorm_synthesis" = "تجميع العصف الذهني";
+"template.interview_summary" = "ملخص المقابلة";
+"devices.danger_zone" = "المنطقة الخطرة";
+"devices.clear_audio" = "مسح الوسائط";
+"devices.clear_audio_message" = "سيتم حذف جميع مقاطع الصوت المخزنة على هذا الجهاز. يتم الاحتفاظ بالنسخ النصية والملخصات والعناوين.";
+"devices.clear_all_data" = "مسح بيانات المكتبة";
+"devices.clear_all_data_message" = "سيتم حذف كل المقاطع الصوتية والنصوص والملخّصات والعناوين المخزَّنة على هذا الـ iPhone. لا يمكن التراجع.\n\nغير مشمول: إعدادات التطبيق، ومفاتيح API للمزوّدين، واسم نقطة اتصال Wi-Fi وكلمة مرورها، والأجهزة المقترنة، وعبارة مرور التسجيلات. لحذفها، احذف التطبيق.";
+"devices.cleanup_partial_title" = "تعذّر حذف بعض الملفات";
+"devices.cleanup_partial_message" = "تعذّر حذف %d ملف، وما زالت على الجهاز. أعد المحاولة.";
+"asr.azure_how_to_get_key" = "كيفية الحصول على مفتاح";
+"library.import_confirm_title" = "استيراد ملف صوتي";
+"library.import_confirm_message" = "اختر ملفات صوتية من iPhone أو iCloud Drive أو محرك USB متصل.\n\nيستورد هذا الإجراء ملفات محلية ولا يُنزّل تسجيلات من Nomi. لجلب مقاطع من جهاز التسجيل، استخدم علامة تبويب الجهاز.";
+"library.import_choose_file" = "اختر ملفاً…";
+
+/* تشفير الجهاز (v1.47) */
+"device_encryption.section_header" = "تشفير الجهاز";
+"device_encryption.toggle_label" = "تشفير التسجيلات على الجهاز";
+"device_encryption.footer" = "عند التفعيل، يقوم الجهاز بتشفير كل تسجيل بمفتاح ChaCha20 يحفظه هذا التطبيق أيضًا. يتطلب إيقاف التشغيل المفتاح المطابق.";
+"device_encryption.missing_key_error" = "تعذر الإيقاف — لا يوجد مفتاح ChaCha20 محفوظ يطابق مفتاح الجهاز.";
+"device_encryption.state_row" = "التشفير على الجهاز";
+"device_encryption.state_on" = "مفعل";
+"device_encryption.state_off" = "متوقف";
+"device_encryption.firmware_footer" = "تقوم هذه البرامج الثابتة (v1.50) بتفعيل التشفير تلقائيًا عند الاقتران وترفض إيقافه. تُشفَّر التسجيلات بالمفتاح المؤلف من 32 بايتًا الذي كُتب آخر مرة عبر 0xA2. استخدم \"التحقق من عبارة الجهاز\" بالأعلى ليتمكّن هذا التطبيق من فك تشفيرها.";
+
+/* وضع المطوّر (إضغاطات على الإصدار) */
+"developer_mode.status_on" = "وضع المطوّر مفعَّل";
+"developer_mode.toast_enabled" = "تم تفعيل وضع المطوّر";
+"developer_mode.toast_disabled" = "تم إيقاف وضع المطوّر";
+"developer_mode.taps_to_enable" = "تبقى %d نقرات لتفعيل وضع المطوّر";
+"developer_mode.taps_to_disable" = "تبقى %d نقرات لإيقاف وضع المطوّر";
+
+/* عبارة مرور التشفير / التهيئة (v1.50) */
+"encryption.section_header" = "عبارة مرور التشفير";
+"encryption.section_footer" = "تُشتق عبر Argon2id باستخدام الرقم التسلسلي للجهاز كمِلح. تُخزَّن في سلسلة مفاتيح iOS وتقتصر على هذا الجهاز. فقدان العبارة يجعل التسجيلات المشفّرة غير قابلة للاسترداد. الاسترداد على iPhone آخر: أدخل العبارة نفسها على الهاتف الجديد.";
+"encryption.local_key" = "المفتاح المحلي";
+"encryption.configured" = "مُعد";
+"encryption.missing" = "غير موجود";
+"encryption.set_button" = "تعيين العبارة…";
+"encryption.verify_button" = "التحقق من عبارة الجهاز…";
+"encryption.rotate_button" = "تدوير (استبدال مفتاح الجهاز)…";
+"encryption.clear_button" = "مسح المفتاح المحلي";
+"encryption.sheet.title_set" = "تعيين العبارة";
+"encryption.sheet.title_verify" = "التحقق من العبارة";
+"encryption.sheet.title_rotate" = "تدوير المفتاح";
+"encryption.field.passphrase" = "العبارة";
+"encryption.field.confirm" = "تأكيد";
+"encryption.action.save" = "حفظ";
+"encryption.action.verify_save" = "التحقق والحفظ";
+"encryption.action.rotate" = "تدوير";
+"encryption.action.cancel" = "إلغاء";
+"encryption.progress.working" = "جارٍ المعالجة…";
+"encryption.footer.rotate" = "التدوير يكتب مفتاحًا جديدًا تمامًا على الجهاز. كل التسجيلات المشفّرة الموجودة على الجهاز ستصبح غير قابلة لفك التشفير بشكل دائم. استخدمه فقط عند تسلّم جهاز مستعمل أو في حال نسيان العبارة القديمة.";
+"encryption.footer.set_encrypted" = "هذا الجهاز مُشفَّر. سنسجّل مقطعًا قصيرًا للاختبار، ونُنزّله، ونحاول فك تشفيره بالعبارة التي أدخلتها. يُحذف المقطع الاختباري تلقائيًا بعد ذلك.";
+"encryption.footer.set_unencrypted" = "يحفظ المفتاح المشتق محليًا في سلسلة مفاتيح iOS. لا يُلمس الجهاز — اختر عبارة قوية وفعِّل التشفير لاحقًا من شاشة الجهاز.";
+"encryption.progress.deriving" = "اشتقاق المفتاح…";
+"encryption.progress.recording" = "تسجيل مقطع اختبار قصير…";
+"encryption.progress.stopping" = "إيقاف التسجيل…";
+"encryption.progress.locating" = "البحث عن مقطع الاختبار…";
+"encryption.progress.downloading" = "تنزيل مقطع الاختبار…";
+"encryption.progress.verifying" = "التحقق…";
+"encryption.progress.writing_key" = "كتابة المفتاح على الجهاز…";
+"encryption.progress.checking_device" = "جارٍ فحص التسجيلات الموجودة على الجهاز…";
+"encryption.rotate_confirm.title" = "تغيير مفتاح الجهاز؟";
+"encryption.rotate_confirm.message_empty" = "لم تعد هناك تسجيلات على الجهاز، لن يُفقد شيء. دوّن عبارة المرور الجديدة: إنها الطريقة الوحيدة لفتح التسجيلات القادمة، ولا توجد استعادة.";
+"encryption.rotate_confirm.message" = "لا يزال على الجهاز %d تسجيل. أُنشئت بالمفتاح القديم وستصبح غير قابلة للقراءة نهائياً — نزّلها أولاً إن أردت الاحتفاظ بها. دوّن عبارة المرور الجديدة: لا توجد استعادة.";
+"encryption.progress.probe_subtitle" = "يجري تسجيل مقطع قصير للتحقق من العبارة. سيُحذف تلقائيًا.";
+"encryption.mismatch.title" = "العبارة غير مطابقة";
+"encryption.mismatch.message" = "تعذّر فك تشفير المقطع الاختباري بهذه العبارة. تحقّق منها وحاول مجددًا. إن نسيتها فعلًا، استخدم \"تدوير\" لاستبدال مفتاح الجهاز — لكن ذلك يدمّر بشكل دائم كل التسجيلات المشفّرة الموجودة على الجهاز.";
+"encryption.mismatch.try_again" = "إعادة المحاولة";
+"encryption.error.device_not_connected" = "الجهاز غير متصل.";
+"encryption.error.connect_first" = "اتصل بالجهاز أولًا — يجب التحقق من العبارة باستخدام تسجيل حقيقي.";
+"encryption.error.probe_not_found" = "تعذّر العثور على مقطع الاختبار على الجهاز.";
+"encryption.error.device_busy" = "لم يستطع الجهاز التسجيل: %@";
+"encryption.banner.title" = "الجهاز مُشفَّر";
+"encryption.banner.message" = "أدخل عبارة المرور المعيّنة على هذا الجهاز لفتح قفل تسجيلاته على هذا iPhone. إن نسيتها يمكنك تدوير المفتاح (سيُمحى أي تسجيل مشفّر موجود على الجهاز).";
+"encryption.banner.cta" = "التحقق من العبارة…";
+"encryption.download.key_missing" = "%@: هذا التسجيل مُشفَّر، لكن لا توجد عبارة مرور معيّنة على هذا iPhone. افتح الإعدادات ← عبارة مرور التشفير ← التحقق من عبارة الجهاز… لفتح قفله.";
+"encryption.download.wrong_key" = "%1$@: تعذّر فك التشفير — العبارة لا تطابق هذا التسجيل. افتح الإعدادات ← عبارة مرور التشفير، امسح الحالية، وعيّن العبارة الصحيحة. (تفاصيل: %2$@)";
+
+/* الإقران (ربط v1.47) */
+"pairing.title" = "هل تريد إقران Nomi هذا؟";
+"pairing.message" = "يجب إقران %@ بهذا التطبيق قبل أن يتمكن من التسجيل. يمكنك إلغاء الإقران في أي وقت من شاشة الجهاز.";
+"pairing.pair" = "إقران";
+"pairing.paired" = "مقترن";
+"pairing.not_paired" = "غير مقترن";
+"pairing.unpair" = "إلغاء إقران Nomi هذا";
+"pairing.unpair_message" = "إلغاء الإقران يزيل ارتباط الجهاز بهذا التطبيق. ستحتاج إلى إعادة الإقران قبل التسجيل.";
+"pairing.unpairing" = "جارٍ إلغاء الإقران…";
+"pairing.pairing_now" = "جارٍ الإقران…";
+"pairing.status" = "الإقران";
+"device.unbind_and_remove" = "إلغاء الاقتران وإزالة الجهاز";
+"device.unbind_and_remove_message" = "سيؤدي هذا إلى إيقاف تشفير الجهاز وحذف التسجيلات المخزَّنة عليه وإلغاء اقترانه وإزالته من أجهزتك المقترنة. لا يمكن التراجع عن هذا الإجراء.";
+"device.unbinding_and_removing" = "جارٍ إزالة الجهاز…";
+"device.saving_name" = "جارٍ حفظ الاسم…";
+"clip_detail.opus_playback_unsupported" = "لا يمكن لهذا الإصدار من النظام تشغيل تسجيلات Opus — يتطلب التشغيل iOS 17 أو أحدث. لا يتأثر التفريغ النصي. للاستماع الآن، شارك الملف عبر AirDrop أو تطبيق الملفات.";
+"devices.connection" = "الاتصال";
+"devices.auto_reconnect" = "إعادة الاتصال تلقائيًا";
+"devices.auto_reconnect_footer" = "عند التفعيل، يعيد التطبيق الاتصال تلقائيًا بآخر جهاز استخدمته بعد انقطاع غير متوقع — مثلاً بعد إيقاف تشغيل الجهاز ثم تشغيله. عند الإيقاف، انقر على مؤشر الاتصال في الأعلى لإعادة الاتصال يدويًا.";
+"clip_detail.delete_audio" = "حذف الصوت";
+"clip_detail.delete_audio_message" = "يحذف ملف الصوت فقط. يتم الاحتفاظ بالتفريغ النصي والملخص. لا يمكن التراجع عن هذا الإجراء.";
+"clip_detail.delete_transcript" = "حذف التفريغ النصي";
+"clip_detail.delete_transcript_message" = "يحذف التفريغ النصي وترجمته. يتم الاحتفاظ بالصوت والملخص. لا يمكن التراجع عن هذا الإجراء.";
+"clip_detail.delete_summary" = "حذف الملخص";
+"clip_detail.delete_summary_message" = "يحذف الملخص وترجمته. يتم الاحتفاظ بالصوت والتفريغ النصي. لا يمكن التراجع عن هذا الإجراء.";
+"clip_detail.delete_independent_footer" = "يُحذف الصوت والتفريغ النصي والملخص كل على حدة — حذف أحدها لا يؤثر على الآخرين.";
+"devices.clear_transcripts" = "مسح التفريغات النصية";
+"devices.clear_transcripts_message" = "يحذف جميع التفريغات النصية وترجماتها. يتم الاحتفاظ بالصوت والملخصات. لا يمكن التراجع عن هذا الإجراء.";
+"devices.clear_summaries" = "مسح الملخصات";
+"devices.clear_summaries_message" = "يحذف جميع الملخصات وترجماتها. يتم الاحتفاظ بالصوت والتفريغات النصية. لا يمكن التراجع عن هذا الإجراء.";
+"asr.transcript_empty" = "لم يتم اكتشاف أي كلام في هذا المقطع، لذا لا يوجد ما يمكن تفريغه. جرّب تسجيلاً أطول أو أوضح.";
+"privacy.cloud_title" = "البيانات تغادر جهازك";
+"privacy.cloud_message" = "لقد أعددت مزوّد تفريغ نصي أو ذكاء اصطناعي سحابيًا (مثل Azure أو OpenAI). يتم إرسال الصوت والنص إلى تلك الخدمة الخارجية لمعالجتها. لا شيء يُرسَل إلى خادم Nomily، لكن البيانات تغادر جهازك بالفعل. للمعالجة محليًا بالكامل، استخدم خادم ASR محليًا ونموذج ذكاء اصطناعي محلي (Ollama) أو بدون نموذج.";
+"privacy.cloud_agree" = "فهمت، متابعة";
+"privacy.cloud_go_local" = "إعدادات المزوّد";
+
+"asr.multi_language_warning" = "عند اختيار عدة لغات يحدد Azure لغة كل عبارة على حدة. في التسجيل أحادي اللغة فعليًا، هذا بالضبط ما ينتج نصًا خاطئًا — اختر اللغة المنطوقة فعلًا فقط.";
+"encryption.banner.setup_title" = "أدخل عبارة مرور هذا الجهاز";
+"encryption.banner.setup_message" = "هذا الجهاز مشفَّر بالفعل. أدخل عبارة المرور التي أُعدّ بها؛ يتحقق منها هذا الـ iPhone ثم يحفظها ليُفتح كل ما تسجّله هنا. لا توجد تسجيلات على الجهاز بعد، فلا شيء معرّض للخطر.";
+"encryption.adopt.title" = "استخدام عبارة المرور هذه للجهاز؟";
+"encryption.adopt.message" = "يستخدم الجهاز مفتاحًا لا يملكه هذا الـ iPhone، وهذا طبيعي لجهاز رُبط للتو. لا يحتوي على أي تسجيلات، لذا لن تفقد شيئًا بكتابة عبارة المرور إليه. دوّن عبارة المرور: فهي الطريقة الوحيدة لفتح التسجيلات اللاحقة، ولا توجد أي وسيلة للاسترجاع.";
+"encryption.adopt.action" = "استخدام عبارة المرور هذه";
+"encryption.cannot_reveal_note" = "لا تُخزَّن عبارة المرور نفسها إطلاقًا، بل المفتاح المشتق منها فقط، لذا لا يمكن عرضها هنا. إذا نسيتها فاستخدم التدوير لتعيين واحدة جديدة.";
+"encryption.first_bind_note" = "تُشفّر برمجية هذا الـ Nomi كل ما يسجّله، لذا يلزم تعيين عبارة مرور. لا يتم تخزينها ولا يمكن استعادتها — دوّنها لديك. لن يبدأ التطبيق أي تسجيل قبل تعيينها.";
+
+/* Language picker */
+"settings.language" = "اللغة";
+"language.follow_system" = "اتباع النظام";
+"language.footer" = "يتبع التطبيق لغة النظام افتراضيًا. وإذا كانت غير مدعومة، يتم استخدام الإنجليزية.";
+
+/* Apple Watch */
+"library.recorded_on_watch" = "مسجَّل على Apple Watch";
+"watch.recorder_title" = "الساعة";
+"watch.ready" = "جاهز";
+"watch.record" = "تسجيل";
+"watch.stop" = "إيقاف";
+"watch.mic_denied" = "اسمح بالوصول إلى الميكروفون من الإعدادات.";
+"watch.record_failed" = "تعذّر بدء التسجيل: %@";
+"watch.pending_header" = "في انتظار الـ iPhone";
+"watch.sending" = "جارٍ الإرسال…";
+"watch.waiting" = "لم يُرسل بعد";
+"watch.settings_title" = "Apple Watch";
+"watch.status_installed" = "مثبَّت";
+"watch.status_not_installed" = "غير مثبَّت";
+"watch.status_no_watch" = "لا توجد ساعة مقترنة";
+"watch.status_unsupported" = "يتطلب iOS 17";
+"watch.status_checking" = "جارٍ التحقق…";
+"watch.hint_installed" = "سجّل من معصمك عندما لا يكون Nomi معك. تتم مزامنة التسجيلات مع المكتبة تلقائيًا.";
+"watch.hint_not_installed" = "تطبيق الساعة مضمَّن داخل هذا التطبيق، ولا حاجة إلى تنزيل أي شيء. افتح تطبيق Watch على الـ iPhone، ومرّر إلى «التطبيقات المتاحة»، ثم اضغط «تثبيت» بجانب Nomily AI. وإذا كان التثبيت التلقائي مفعَّلًا فسيظهر تلقائيًا بعد دقائق من تحديث التطبيق.";
+"watch.hint_no_watch" = "اقترن بساعة Apple Watch (watchOS 10 أو أحدث) مع هذا الـ iPhone للتسجيل من معصمك. تتم مزامنة التسجيلات مع المكتبة تلقائيًا.";
+"watch.hint_unsupported" = "يتطلب التسجيل من ساعة Apple Watch نظام iOS 17 أو أحدث على هذا الـ iPhone: إذ إن watchOS 10، الذي يحتاجه تطبيق الساعة، يقترن بنظام iOS 17 فقط. حدّث iOS لاستخدام هذه الميزة.";
+"watch.hint_checking" = "جارٍ البحث عن ساعة Apple Watch مقترنة. يستغرق ذلك لحظة بعد تشغيل التطبيق أو تحديثه مباشرة.";
+"watch.intent_toggle_title" = "بدء التسجيل أو إيقافه";
+"watch.intent_toggle_short_title" = "تسجيل";
+"watch.intent_toggle_description" = "يبدأ ملاحظة صوتية على Apple Watch أو يوقف التسجيل الجاري.";
+"watch.status_connected" = "متصل";
+"watch.intent_toggle_description_ios" = "يبدأ التسجيل على جهاز Nomi المتصل أو يوقفه.";
+"watch.intent_no_nomi" = "‏Nomi غير متصل. افتح Nomily AI ووصّل جهاز التسجيل، ثم أعد المحاولة.";
+"watch.status_recording" = "جارٍ التسجيل على Apple Watch";
+"watch.status_transferring" = "جارٍ النقل من Apple Watch…";
+"watch.status_out_of_range" = "خارج النطاق";
+
+"summarize.delete_title" = "حذف القالب؟";
+"summarize.delete_message" = "هل تريد حذف «%@»؟ لا يمكن التراجع عن ذلك.";
+"summarize.prompt_count" = "%d / %d حرفًا";
+"summarize.prompt_context_hint" = "تشارك المطالبة سياق النموذج مع النص المنسوخ. اجعلها مركزة لترك مساحة للمصدر والنتيجة.";
+"template_prompt.formal_minutes" = "أنت تحوّل نصوص الاجتماعات، وسجلات المقابلات، والمواد النقاشية إلى محاضر رسمية جاهزة للأرشفة.\n\nالمبادئ الأساسية\n- اتبع بنية بأسلوب ماكنزي: الخلاصة أولاً، تنظيماً عالياً، تحليلاً متعدد المستويات، MECE (حصري بشكل متبادل، شامل بشكل جماعي).\n- يجب أن تكون اللغة مهنية، واضحة، منضبطة، محددة، وقابلة للتنفيذ.\n- بالنسبة لأي معلومات مفقودة أو غير مؤكدة تؤثر بشكل جوهري على المحضر الرسمي، ضع عليها علامة 【To Be Confirmed】.\n- وحدّد أسماء الأشخاص والشركات والأدوات والمشاريع والمصطلحات في جميع أنحاء المستند؛ وتابع التصحيحات باستمرار.\n- احذف الأقسام الفارغة — لا تُبقِ عناوين مؤقتة بدون محتوى.\n- إذا كان المصدر يذكر بوضوح عدم تضمين معلومة معينة، فاستبعدها تماماً (لا تنقلها إلى \"التأكيدات المعلقة\" أو الملاحظات أو الخلفية أو الملحق).\n\nسير العمل\n1. اقرأ المصدر بعناية.\n2. استخرج: الموضوع، التاريخ، الوقت، الصيغة، المشاركين، الشركة/المشروع ذي الصلة، المواضيع الرئيسية، الاستنتاجات الأساسية، نقاط النقاش، الخلافات، بنود العمل، والتأكيدات المعلقة.\n3. لخّص الاستنتاجات الأساسية، وتسلسل النقاش، ونقاط الإجماع الرئيسية، وبنود العمل، والتأكيدات المعلقة المهمة فعلاً فقط.\n\nأخرج البنية التالية (احذف الأقسام التي لا تحتوي على محتوى):\n\n# [Meeting Title]\n\n## 0. معلومات الاجتماع الأساسية\n\n| البند | التفاصيل |\n|---|---|\n| موضوع الاجتماع |  |\n| تاريخ الاجتماع |  |\n| وقت الاجتماع |  |\n| صيغة الاجتماع |  |\n| المشاركون |  |\n| الغرض من الاجتماع |  |\n| الشركة / المشروع ذو الصلة |  |\n| المواد المصدرية |  |\n\n## 1. استنتاجات الاجتماع الأساسية\nأهم 3-5 استنتاجات من الاجتماع، مع البدء بالخلاصة.\n\n## 2. مواضيع النقاش الرئيسية\nلكل موضوع:\n### 2.x [Topic]\n- المشكلة الحالية\n- ملخص النقاش\n- التوجه الأولي\n\n## 3. الإجماع الرئيسي\nالبنود التي تم التوصل إلى اتفاق بشأنها.\n\n## 4. توصيات المتابعة\nنظّم حسب العمل / المنتج / التقنية / العمليات / التعاون حسب الاقتضاء.\n\n## 5. بنود العمل\n\n| الرقم | بند العمل | الأولوية | المالك المقترح |\n|---|---|---|---|\n\n## 6. التأكيدات المعلقة\nفقط البنود التي تتطلب تأكيداً حقيقياً وتؤثر بشكل جوهري على السجل الرسمي.\n\n## 7. الملخص\nخلاصة موجزة لقيمة الاجتماع واتجاه الخطوات التالية.\n\nإذا كان الاجتماع يتضمن أنواع محتوى إضافية غير مغطاة أعلاه، أضف الأقسام اللازمة.";
+"template_prompt.structured_minutes" = "أنت مساعد خبير لتدوين ملاحظات الاجتماعات. حلّل هذا النص وأنتج محاضر اجتماع منظمة بتنسيق Markdown:\n\n## ملخص الاجتماع\nفقرة واحدة تعطي نظرة عامة على الغرض من الاجتماع ونتيجته.\n\n## الحضور\nاذكر جميع المتحدثين/المشاركين المذكورين.\n\n## بنود جدول الأعمال التي تمت مناقشتها\nلكل موضوع تمت مناقشته:\n### [Topic]\n- النقاط الرئيسية المطروحة\n- وجهات النظر المختلفة المعبر عنها\n- النتيجة أو الاستنتاج الذي تم التوصل إليه\n\n## بنود العمل\n| المالك | المهمة | الموعد النهائي (إن ذُكر) |\n|-------|------|------------------------|\n\n## القرارات المتخذة\nقائمة نقطية بالقرارات الملموسة.\n\n## أسئلة مفتوحة\nالبنود غير المحلولة التي تحتاج إلى متابعة.\n\nكن موجزاً. استخدم كلمات المتحدثين بنفسها للدقة. إذا كان هناك شيء غير واضح في النص، فذكّره على أنه [unclear].";
+"template_prompt.executive_brief" = "لخّص هذا النص إلى ملخص تنفيذي موجز (3-5 فقرات كحد أقصى). ركّز على:\n1. سبب عقد الاجتماع\n2. أهم القرارات المتخذة\n3. بنود العمل الحرجة ومن يمتلكها\n4. أي مخاطر أو عوائق أُثيرت\n5. الخطوات التالية\n\nاكتب بلغة مهنية ومباشرة. تجنب المجاملات والحشو. يجب أن يتمكن مدير مشغول من قراءة هذا في أقل من دقيقتين.";
+"template_prompt.key_takeaways" = "استخرج الخلاصات الرئيسية من نص هذا الاجتماع. الصيغة كالتالي:\n\n## الخلاصات الرئيسية\n- قائمة مرقمة من 5 إلى 10 من أهم النقاط في هذا الاجتماع\n- كل نقطة يجب أن تكون جملة واحدة مكتفية بذاتها\n- أعطِ الأولوية للقرارات والالتزامات والمعلومات الجديدة على المناقشة\n\n## اقتباسات بارزة\nضمّن 2-3 اقتباسات مباشرة تلتقط اللحظات أو الالتزامات الحاسمة، مع نسبها إلى المتحدث.\n\n## النبرة العامة\nملاحظة موجزة عن النبرة العامة — هل كانت مثمرة، خلافية، استكشافية، إلخ؟";
+"template_prompt.task_extraction" = "راجع هذا النص بعناية واستخرج جميع الالتزامات والمهام الموكلة ومهام المتابعة. لكل عنصر:\n\n- **من**: الشخص الذي التزم أو تم تكليفه\n- **ماذا**: المهمة المحددة أو الناتج\n- **متى**: الموعد النهائي إذا ذُكر، وإلا \"TBD\"\n- **السياق**: جملة واحدة عن سبب أهمية ذلك\n\nقم بالتنسيق كقائمة مرقمة. تضمّن الالتزامات الضمنية (مثل: \"سأبحث في ذلك\" = مهمة). علّم على أي مهمة يكون فيها الملكية غامضة بواسطة [OWNER UNCLEAR].";
+"template_prompt.decision_log" = "استخرج كل قرار تم اتخاذه في هذا النص. لكل قرار:\n\n1. **القرار**: ما الذي تم تحديده\n2. **الأساس المنطقي**: لماذا (الحجج الرئيسية التي أدت إليه)\n3. **البدائل المدروسة**: الخيارات الأخرى التي تمت مناقشتها ولماذا تم رفضها\n4. **الأثر**: من أو ما الذي يتأثر\n5. **المالك**: من المسؤول عن التنفيذ\n\nإذا تمت مناقشة موضوع ولم يتم التوصل إلى قرار واضح، فاذكره تحت \"قرارات معلقة\" مع الوضع الحالي للنقاش.";
+"template_prompt.concise_summary" = "قدم ملخصاً موجزاً لهذا النص في 3-5 فقرات. غطِّ المواضيع الرئيسية التي تمت مناقشتها، والنقاط الرئيسية المطروحة، وأي استنتاجات تم التوصل إليها. اكتب بنثر واضح ومهني. لا تستخدم النقاط أو العناوين — فقط فقرات منظمة جيداً.";
+"template_prompt.detailed_notes" = "أنشئ ملاحظات شاملة ومنظمة من هذا النص. استخدم تنسيق Markdown:\n\n## نظرة عامة\nفقرة موجزة تحدد السياق.\n\n## المناقشة\nنظّم حسب الموضوع (وليس زمنياً). لكل موضوع، قم بالتقاط:\n- النقاط والحجج الرئيسية\n- التفاصيل أو البيانات الداعمة المذكورة\n- أي خلافات أو وجهات نظر بديلة\n\n## الاستنتاجات\nما تم حله أو الاتفاق عليه.\n\n## المتابعة\nالبنود التي تتطلب مزيداً من المناقشة أو الإجراء.\n\nحافظ على الفروق الدقيقة المهمة. عندما يختلف المتحدثون، مثل كلا الجانبين بإنصاف.";
+"template_prompt.qa_format" = "أعد هيكلة هذا النص إلى تنسيق أسئلة وأجوبة واضح. حدد الأسئلة (الصريحة أو الضمنية) واقرنها بالإجابات المقدمة. الصيغة:\n\n**س: [Question]**\nج: [Answer, synthesized from the discussion]\n\nجمّع الأسئلة والأجوبة ذات الصلة تحت عناوين مواضيع. إذا تم طرح سؤال دون إجابة كاملة، فذكّره على أنه [Partially answered] أو [Unanswered].";
+"template_prompt.client_meeting_recap" = "أنشئ ملخص اجتماع جاهز للعميل من هذا النص. الصيغة:\n\n**الموضوع:** [Meeting topic]\n**التاريخ:** [Extract if mentioned]\n**المشاركون:** [List]\n\n**الملخص:**\nنظرة عامة مهنية عما تمت مناقشته والاتفاق عليه.\n\n**الخطوات التالية المتفق عليها:**\nقائمة مرقمة بالالتزامات من الجانبين.\n\n**الجدول الزمني:**\nأي تواريخ أو معالم تمت مناقشتها.\n\nحافظ على نبرة مهنية وإيجابية. تجنب المصطلحات الداخلية. ركّز على الالتزامات المتبادلة والقيمة المقدمة.";
+"template_prompt.one_on_one_summary" = "لخّص هذه المحادثة الفردية. قم بالتقاط:\n\n## المواضيع التي تمت مناقشتها\nقائمة موجزة بما تم تناوله.\n\n## الملاحظات المقدمة\nأي ملاحظات تم تبادلها (إيجابية أو بناءة)، مع السياق.\n\n## العوائق والدعم المطلوب\nالقضايا التي أُثيرت وتحتاج إلى مساعدة أو تصعيد.\n\n## الأهداف والالتزامات\nما التزم به كل شخص قبل المراجعة التالية.\n\n## المسار/النمو\nأي مواضيع تتعلق بالتطوير المهني أو التعلم أو النمو تمت مناقشتها.\n\nحافظ على هذا الأمر خاصاً وبنّاءً في النبرة.";
+"template_prompt.status_update" = "حوّل هذا النص إلى تحديث لحالة المشروع:\n\n## الحالة: [Green/Yellow/Red بناءً على نبرة النقاش]\n\n## التقدم منذ آخر تحديث\n- ما تم إنجازه\n\n## التركيز الحالي\n- ما يتم العمل عليه الآن\n\n## العوائق\n- المشكلات التي تمنع التقدم\n\n## المعالم القادمة\n- ما هو التالي ومتى\n\n## المخاطر\n- أي شيء قد يعرقل الجدول الزمني\n\nكن واقعياً ومحدداً. استخدم التواريخ والمقاييس عند ذكرها.";
+"template_prompt.lecture_notes" = "حوّل هذا النص لمحاضرة/حديث إلى ملاحظات دراسية منظمة:\n\n## الموضوع\nالموضوع الرئيسي والسياق.\n\n## المفاهيم الرئيسية\nلكل مفهوم رئيسي تم تقديمه:\n- **المصطلح/المفهوم**: تعريف أو شرح واضح\n- أمثلة أو تشبيهات داعمة استخدمها المتحدث\n\n## التفاصيل المهمة\nحقائق، أرقام، تواريخ، أو معادلات تم ذكرها.\n\n## الروابط\nكيف ترتبط المفاهيم ببعضها البعض أو بموضوعات أوسع.\n\n## أسئلة المراجعة\nقم بتوليد 3-5 أسئلة يمكن للطالب استخدامها للاختبار الذاتي.\n\nاستخدم لغة تعليمية واضحة. سلط الضوء على المصطلحات التي قد تظهر في الامتحان.";
+"template_prompt.research_discussion" = "لخّص هذا النص الخاص بمناقشة بحثية أو نادي مجلة:\n\n## الورقة/الموضوع الذي تمت مناقشته\nالعنوان والمؤلفون إذا ذُكروا.\n\n## النتائج الرئيسية\nالنتائج أو الادعاءات الأساسية المقدمة.\n\n## المنهجية\nكيف تم إجراء البحث (إذا تمت مناقشته).\n\n## نقاط القوة\nما وجده المجموعة مقنعاً.\n\n## الانتقادات والقيود\nالمخاوف التي أُثيرت حول العمل.\n\n## الآثار\nلماذا هذا مهم، التطبيقات التي تمت مناقشتها.\n\n## أسئلة مفتوحة\nالأسئلة العلمية غير المحلولة التي ظهرت.";
+"template_prompt.brainstorm_synthesis" = "قم بتجميع جلسة العصف الذهني هذه في مخرجات منظمة:\n\n## بيان المشكلة\nما المشكلة أو الفرصة التي تم استكشافها.\n\n## الأفكار المولدة\nجمّع الأفكار المتشابهة في مواضيع. لكل موضوع:\n### [Theme]\n- أفكار محددة مقترحة\n- من اقترحها (إذا كان يمكن تحديده)\n- الإيجابيات/السلبيات التي تمت مناقشتها\n\n## أفضل المرشحين\nالأفكار التي حصلت على أكبر قدر من الطاقة أو الدعم من المجموعة.\n\n## الخيارات غير التقليدية\nأفكار غير تقليدية أو محفوفة بالمخاطر تستحق الاستكشاف أكثر.\n\n## الخطوات التالية الموصى بها\nكيفية تقييم أو بناء نموذج أولي للأفكار الواعدة.";
+"template_prompt.interview_summary" = "لخّص نص هذه المقابلة:\n\n## الشخص الذي تمت مقابلته\nالاسم والخلفية (إذا ذُكر).\n\n## الرؤى الرئيسية\nأكثر الأشياء قيمة أو مفاجأة التي تم مشاركتها، منظمة حسب الموضوع.\n\n## اقتباسات بارزة\n3-5 اقتباسات مباشرة تلتقط وجهة نظرهم جيداً.\n\n## المواضيع\nالأفكار أو المخاوف المتكررة خلال المحادثة.\n\n## أسئلة متابعة\nأسئلة لم تُطرح ولكن سيكون من المفيد استكشافها.\n\nحافظ على صوت ووجهة نظر الشخص الذي تمت مقابلته. لا تحرر أو تعلق.";
+
+/* field-level ASR validation, device-file transcribe guidance, pairing shortcut */
+"asr.key_required" = "أدخل مفتاح الاشتراك";
+"asr.region_required" = "أدخل منطقة الخدمة";
+"asr.verify_failed" = "فشل التحقق";
+"device_files.download_before_transcribe" = "قم بتنزيل %@ وفك تشفيره قبل التحويل إلى نص.";
+"device_files.transcribe_failed" = "تعذّر تحويل %1$@ إلى نص: %2$@";
+"device_files.delete_failed" = "تعذّر حذف التسجيل: %@";
+"pairing.go_pair" = "الاقتران الآن";
+"dnote_error.not_bound" = "لم يتم إقران هذا الـ Nomi بهذا التطبيق بعد.";
+"dnote_error.not_connected" = "لا يوجد اتصال بأي جهاز.";
+"dnote_error.timeout" = "لم يستجب الجهاز في الوقت المحدد.";
+"wifi_error.timeout" = "انتهت مهلة النقل عبر Wi-Fi، لم تصل بيانات من الجهاز.";
+"wifi_error.not_connected" = "غير متصل بنقطة اتصال Wi-Fi الخاصة بالجهاز.";
+"wifi_error.malformed" = "أرسل الجهاز رداً لم يتمكن التطبيق من قراءته.";
+"wifi_error.no_response" = "لا يوجد رد من الجهاز على %1$@:%2$d.";
+"wifi_error.cancelled" = "تم إلغاء النقل السريع.";
+"hotspot_error.user_denied" = "لقد رفضت طلب الانضمام إلى Wi-Fi. اضغط على «النقل السريع» مرة أخرى للمحاولة من جديد.";
+"hotspot_error.join_failed" = "تعذّر الانضمام إلى نقطة اتصال الجهاز. اضغط «إعادة المحاولة» — سيعيد التطبيق تشغيل نقطة الاتصال ثم يحاول مرة أخرى.";
+"dnote_error.stream_no_audio" = "الجهاز لا يرسل صوت هذا التسجيل. أوقف التسجيل على الجهاز ثم ابدأ البث المباشر من التطبيق.";
+"dnote_error.passphrase_setup_incomplete" = "عيّن عبارة مرور التشفير قبل التسجيل. يشفّر هذا الـ Nomi كل ما يسجّله، والمقاطع المسجّلة دون عبارة المرور لا يمكن فتحها على هذا الـ iPhone.";
+"scanner.section_available" = "متاح للإضافة";
+"scanner.section_added" = "مضاف بالفعل";
+"scanner.added_badge" = "مضاف";
+"asr.no_provider_configured" = "لم يتم إعداد أي خدمة تحويل كلام إلى نص. أضف واحدة من الإعدادات.";
+"asr.all_providers_unreachable" = "تعذّر الوصول إلى أي من خدمات تحويل الكلام إلى نص المُعدّة.";
+"asr.azure_required_for_translation" = "تتطلب الترجمة الفورية خدمة Azure. أدخل مفتاح Azure والمنطقة من الإعدادات.";
+"asr.missing_credentials" = "لم يتم إعداد %@. قم بإعداده من الإعدادات.";
+"asr.open_provider_settings" = "إعداد تحويل الكلام إلى نص";
+"azure_verify.bad_credentials" = "تم رفض مفتاح الاشتراك أو أنه غير صالح لهذه المنطقة. تأكد من تطابق المفتاح والمنطقة.";
+"azure_verify.region_not_found" = "هذه المنطقة غير موجودة. تحقّق من التهجئة (مثل eastus أو westeurope).";
+"azure_verify.rate_limited" = "عدد الطلبات كبير جدًا. أعد المحاولة بعد قليل.";
+"azure_verify.service_unavailable" = "خدمة Azure غير متاحة مؤقتًا. أعد المحاولة لاحقًا.";
+"azure_verify.network" = "تعذّر الوصول إلى Azure. تحقّق من اتصال الشبكة.";
+"azure_verify.unexpected" = "أعادت Azure استجابة غير متوقّعة.";
+"common.edit" = "تحرير";
+"live.clip_not_in_library" = "لم يعد هذا التسجيل موجودًا في المكتبة. ربما تمت إعادة تسميته أو دمجه أو حذفه.";
+"azure_verify.host_unresolved" = "تعذّر تحليل عنوان Azure لهذه المنطقة. تحقّق من تهجئة المنطقة (مثل eastus أو westeurope) ومن اتصال الشبكة.";
+"asr.last_verify_failed" = "فشل التحقق السابق — أعد المحاولة";
+"asr.status_verified" = "تم التحقق وجاهز للاستخدام";
+"asr.status_verifying" = "جارٍ اختبار الاتصال…";
+"asr.status_unverified" = "تم الحفظ ولم يتم التحقق بعد";
+"asr.autosave_note" = "يتم حفظ التغييرات تلقائيًا. الحفظ لا يعني أنها تعمل — اضغط على علامة الصح للتحقق من البيانات.";
+"asr.leave_title" = "المغادرة دون تحقق؟";
+"asr.leave_anyway" = "مغادرة";
+"asr.leave_incomplete_message" = "لا تزال هناك حقول مطلوبة فارغة، لذلك لا يمكن استخدام هذه الخدمة في التفريغ النصي.";
+"asr.leave_unverified_message" = "لم يتم التحقق من هذه البيانات، وقد يفشل التفريغ النصي. جرّبها أولًا بالضغط على علامة الصح.";
+"asr.host_required" = "أدخل عنوان الخادم";
+"asr.port_invalid" = "يجب أن يكون المنفذ بين 1 و65535";

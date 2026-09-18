@@ -1,0 +1,54 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# XcodeGen output (regenerated locally)
+nomily_ios.xcodeproj/
+nowatch_check.xcodeproj/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+# CocoaPods (not used here, but defensive)
+Pods/
+
+# Signing material and per-developer build settings. Set your own team in
+# Xcode (Signing & Capabilities); nothing team-specific belongs in the repo.
+*.mobileprovision
+*.p12
+*.cer
+*.certSigningRequest
+ExportOptions.plist
+Local.xcconfig
+
+# macOS
+.DS_Store
+
+# others
+.logs/
+# macOS resource forks (metadata files that rsync/tar drags over from a Mac, not source)
+._*
+
+# Local-only and internal material. Anchor these to the repository root: a bare
+# `resources/` would also swallow Sources/Resources/.
+.claude/
+/docs/
+/resources/
+/reference/
+/audio_clips/
+/config.json
+
+# Internal development notes, not published with the source
+CLAUDE.md
+HANDOFF.md
