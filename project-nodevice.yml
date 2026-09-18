@@ -1,0 +1,108 @@
+name: nomily_nodevice
+options:
+  bundleIdPrefix: com.nomily.app
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  developmentLanguage: en
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    SWIFT_STRICT_CONCURRENCY: minimal
+
+packages:
+  # Pinned to branch because Argon2Swift's transitive dep on
+  # phc-winner-argon2 is itself branch-pinned, and SPM refuses to mix
+  # version-pinned roots with branch-pinned transitive deps. The package
+  # maintainer's own README uses `.branch("main")` for the same reason.
+  Argon2Swift:
+    url: https://github.com/tmthecoder/Argon2Swift.git
+    branch: main
+
+targets:
+  nomily_ios:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: Sources
+    resources:
+      - path: Sources/Resources
+    dependencies:
+      - package: Argon2Swift
+      # Embeds the watch app inside the iPhone app bundle, which is how a
+      # watchOS companion ships — it can't be installed on its own.
+    info:
+      path: Sources/App/Info.plist
+      properties:
+        CFBundleDisplayName: Nomily AI
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "3"
+        # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
+        # appropriate when the app's crypto use is exempt from US export
+        # documentation requirements:
+        #   - HTTPS via URLSession (Azure / OpenAI / etc.) — built-in to iOS
+        #   - Keychain storage — built-in to iOS
+        #   - ChaCha20 + Argon2id used solely to encrypt/decrypt the user's
+        #     own audio recordings (digital media content) at rest on a
+        #     paired device the user owns — covered by the "ancillary"
+        #     mass-market exemption and the EAR digital-media-protection
+        #     carve-out.
+        # If your legal review concludes the use is non-exempt, flip this
+        # to `true` and file an annual self-classification (ERN) at
+        # https://snap.bis.doc.gov.
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: AccentColor
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSBluetoothAlwaysUsageDescription: Nomily AI connects to your D·NOTE recorder over Bluetooth to list, transfer and transcribe recordings.
+        NSLocalNetworkUsageDescription: Nomily AI opens a direct TCP connection to your D·NOTE over its Wi-Fi access point during Fast Transfer.
+        NSMicrophoneUsageDescription: Live transcription monitors microphone state to coordinate with the device's stream.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        UIBackgroundModes:
+          - audio
+          - bluetooth-central
+    entitlements:
+      path: Sources/App/nomily_ios.entitlements
+      properties:
+        com.apple.developer.networking.HotspotConfiguration: true
+        # ⚠️ **Deliberately NOT including** `com.apple.security.application-groups` here.
+        #
+        # Reason (measured in a GUI build on 2026-10-09):
+        #   `error: Communication with Apple failed. An Application Group with
+        #    Identifier 'group.com.nomily.app' is not available.`
+        # App Group IDs are **globally unique across teams**; `group.com.nomily.app` is already
+        # taken by another team (most likely the earlier personal team YW24F9VMC9 on the same machine).
+        # Without registration Xcode falls back to a wildcard profile as a whole -- Hotspot cannot be signed either,
+        # and the error also shows "doesn't include the Hotspot capability", which is a **side symptom**.
+        #
+        # Is it safe to drop: `StorageLocations.root` already has the fallback "no group available → use the sandbox"
+        # (see the comment in that file); the App Group is only for a future share/notification extension to share
+        # a container, and the current app does not need it.
+        #
+        # If an App Group is really needed later: switch to a team-unique ID (e.g.
+        # `group.96S46YT5TP.nomily`) and register it; **do not** use `group.com.nomily.app`.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nomily.app
+        TARGETED_DEVICE_FAMILY: "1"
+        ENABLE_PREVIEWS: YES
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        # ★ Automatic signing (round 17): the team is hardcoded, so neither GUI nor CLI needs to pick one by hand.
+        # Team 96S46YT5TP = "Li Xingrui" (paid Individual, Role Admin, 2 registered devices).
+        # After running one Archive with this config in the GUI, Xcode registers the App ID
+        # com.nomily.app (with Hotspot + App Groups) on the portal and generates the profile;
+        # the CLI manual-signing chain afterwards reuses that profile directly and no longer depends on the account.
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 96S46YT5TP
+

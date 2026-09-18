@@ -1,0 +1,286 @@
+/* Styling for rendered summaries.
+ *
+ * Lives in a resource file rather than inline in MarkdownView.swift so the
+ * rules can use the backslashes and escapes CSS actually needs — inside a
+ * Swift multi-line string literal every one of them would have to be
+ * doubled, which is a reliable way to ship a stylesheet that silently does
+ * nothing.
+ *
+ * Dark mode is handled entirely by the media query below, so switching
+ * appearance never needs the page to reload. */
+
+:root {
+  color-scheme: light dark;
+
+  --text: #1c1c1e;
+  --text-2: #6c6c72;
+  --card: #ffffff;
+  --card-border: rgba(0, 0, 0, 0.07);
+  --chip: rgba(0, 0, 0, 0.055);
+  --chip-strong: rgba(0, 0, 0, 0.09);
+  --accent: #c66b4e;
+  --accent-soft: rgba(198, 107, 78, 0.12);
+  --rule: rgba(0, 0, 0, 0.1);
+  --code-bg: rgba(0, 0, 0, 0.055);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #e9e9ed;
+    --text-2: #9c9ca3;
+    --card: rgba(255, 255, 255, 0.055);
+    --card-border: rgba(255, 255, 255, 0.09);
+    --chip: rgba(255, 255, 255, 0.09);
+    --chip-strong: rgba(255, 255, 255, 0.15);
+    --accent: #d98a6d;
+    --accent-soft: rgba(217, 138, 109, 0.16);
+    --rule: rgba(255, 255, 255, 0.12);
+    --code-bg: rgba(255, 255, 255, 0.08);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 16px;
+  line-height: 1.62;
+  padding: 2px 14px 30px;
+  margin: 0;
+  color: var(--text);
+  background: transparent;
+  -webkit-text-size-adjust: 100%;
+  overflow-wrap: break-word;
+}
+
+/* CJK has no inter-word space, so default leading reads as a solid block.
+   `summary.js` adds this class when the document is mostly CJK. */
+body.cjk { line-height: 1.78; letter-spacing: 0.012em; }
+
+/* ---- headings ------------------------------------------------------- */
+
+h1 {
+  font-size: 1.42em;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 2px 0 12px;
+}
+
+h2, h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  line-height: 1.4;
+  margin: 0 0 8px;
+}
+
+h2 { font-size: 1.16em; }
+h3 { font-size: 1.02em; }
+
+h4, h5, h6 {
+  font-size: 0.96em;
+  font-weight: 650;
+  margin: 12px 0 4px;
+  color: var(--text);
+}
+
+h4::before, h5::before, h6::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 0.85em;
+  margin-right: 7px;
+  border-radius: 2px;
+  background: var(--accent);
+  vertical-align: -0.08em;
+}
+
+/* Ordinal badge for "### 2. Key Discussion Topics" — added by summary.js. */
+.num {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5em;
+  height: 1.5em;
+  padding: 0 0.34em;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.74em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- section cards -------------------------------------------------- */
+
+section.card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 13px 14px 5px;
+  margin: 0 0 11px;
+}
+
+section.card > :last-child { margin-bottom: 8px; }
+
+/* ---- text ----------------------------------------------------------- */
+
+p { margin: 0.45em 0; }
+
+/* The one-line takeaway ("▲ …"). Pulled out of the flow so the reader
+   lands on it first. */
+p.lead {
+  position: relative;
+  margin: 8px 0 12px;
+  padding: 10px 12px 10px 30px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+p.lead::before {
+  content: "\25B2";
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  font-size: 0.8em;
+  color: var(--accent);
+}
+
+ul, ol { padding-left: 1.35em; margin: 0.35em 0; }
+li { margin: 0.22em 0; }
+li > ul, li > ol { margin: 0.2em 0; }
+
+/* "**Discussion Focus**：…" reads far better as a labelled pill than as a bold
+   run glued to a colon. */
+li > strong:first-child {
+  display: inline-block;
+  padding: 1px 7px;
+  margin-right: 2px;
+  border-radius: 6px;
+  background: var(--chip);
+  font-size: 0.87em;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+/* Weight tags on topic lists ("Issues of intelligence loss in communication [30%]"). */
+.pct {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--chip-strong);
+  color: var(--text-2);
+  font-size: 0.76em;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  vertical-align: 1px;
+}
+
+strong { font-weight: 650; }
+em { font-style: italic; }
+del { color: var(--text-2); }
+
+a { color: var(--accent); text-decoration: none; }
+
+/* ---- task items ----------------------------------------------------- */
+
+li.task { list-style: none; margin-left: -1.4em; }
+
+li.task > input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0 8px 0 0;
+  border: 1.6px solid var(--rule);
+  border-radius: 5px;
+  background: transparent;
+  vertical-align: -3px;
+}
+
+li.task > input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+li.task > input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 4.6px;
+  top: 1.4px;
+  width: 4.6px;
+  height: 8.6px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(43deg);
+}
+
+.task-body { display: inline; }
+
+.meta {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--text-2);
+  font-size: 0.78em;
+  white-space: nowrap;
+}
+
+.meta b { color: var(--text); font-weight: 650; margin-right: 3px; }
+
+/* ---- quotes, code, rules, tables ------------------------------------ */
+
+blockquote {
+  margin: 0.55em 0;
+  padding: 7px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+blockquote p { margin: 0.2em 0; }
+
+code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.88em;
+  padding: 1.5px 5px;
+  border-radius: 5px;
+  background: var(--code-bg);
+}
+
+pre {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--code-bg);
+  overflow-x: auto;
+}
+
+pre code { background: none; padding: 0; }
+
+hr { border: none; border-top: 1px solid var(--rule); margin: 14px 0; }
+
+.table-wrap { overflow-x: auto; margin: 0.6em 0; -webkit-overflow-scrolling: touch; }
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9em;
+}
+
+th, td {
+  border: 1px solid var(--rule);
+  padding: 6px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+
+th { font-weight: 650; background: var(--chip); }

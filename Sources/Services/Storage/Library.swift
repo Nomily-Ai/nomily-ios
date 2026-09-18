@@ -1,0 +1,236 @@
+import Foundation
+import os.log
+
+private let log = Logger(subsystem: "com.nomily.app.ios", category: "library")
+
+/// Tracks files the app has pulled off the device. Source of truth is
+/// `audio_clips/.manifest.json`; a mirror is kept
+/// in-memory and @Published so the Recordings tab can render without
+/// re-reading the directory on every refresh.
+@MainActor
+final class Library: ObservableObject {
+    @Published private(set) var entries: [String: Entry] = [:]
+
+    struct Entry: Codable, Equatable {
+        /// Raw (still-encrypted) byte count.
+        var size: Int
+        var downloadedAt: String
+        /// `"ble"` or `"wifi"`; informational, surfaced in the UI.
+        var transport: String
+        /// On-disk filename. It differs from the recorder filename only when
+        /// another device already owns that timestamp-based name.
+        var localName: String?
+
+        /// ★ 2026-10-15: **which card** recorded this clip.
+        ///
+        /// Previously the SN was encoded only in the **key** (`serial::name`), not in the value —— so the list
+        /// couldn't get "who recorded this one". This also explains why the old `isFromWatch` only recognized
+        /// transport: when `entry(for:)` is called without a serial it only looks up the bare key, so not a single
+        /// device-downloaded item could be hit.
+        var deviceSerial: String?
+        /// The **human-recognizable name** readable at the time of recording to the library (the card's displayName / etc.).
+        ///
+        /// Deliberately separate from `deviceSerial`: the SN is the **identity** (stable, can be reverse-looked-up to the user's alias,
+        /// survives a device switch), while the name is only for **display**. Mixing the two into one field would make "if the user renames the alias,
+        /// do old records follow" an ill-defined question —— the current answer is "they follow",
+        /// because at display time the SN is first looked up once in `RecorderAliasStore`.
+        var deviceName: String?
+
+        enum CodingKeys: String, CodingKey {
+            case size
+            case downloadedAt = "downloaded_at"
+            case transport
+            case localName = "local_name"
+            case deviceSerial = "device_serial"
+            case deviceName = "device_name"
+        }
+    }
+
+    private struct Manifest: Codable {
+        var downloaded: [String: Entry]
+    }
+
+    init() {
+        self.entries = Self.loadFromDisk()
+        rebuildSourceIndex()
+    }
+
+    // MARK: queries
+
+    /// Device downloads are scoped by serial number. Recorder filenames are
+    /// timestamps, so two devices can legitimately produce the same name; a
+    /// global name-only key made the second device look already downloaded.
+    /// Legacy/unscoped entries remain readable for local/watch/stream clips,
+    /// but are deliberately not used to suppress a device download.
+    func isDownloaded(_ name: String, deviceSerial: String? = nil) -> Bool {
+        entries[Self.key(name: name, deviceSerial: deviceSerial)] != nil
+    }
+
+    func entry(for name: String, deviceSerial: String? = nil) -> Entry? {
+        entries[Self.key(name: name, deviceSerial: deviceSerial)]
+    }
+
+    // MARK: mutations
+
+    /// Record a successful transfer. The raw bytes should already be on disk
+    /// under `StorageLocations.audioDir`.
+    func recordDownload(
+        name: String,
+        size: Int,
+        transport: String = "ble",
+        deviceSerial: String? = nil,
+        deviceName: String? = nil,
+        localName: String? = nil
+    ) {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let k = Self.key(name: name, deviceSerial: deviceSerial)
+        // Source fields are **set-only, never cleared**: the same clip may first be recorded via BLE and
+        // then recorded again via the Wi-Fi path, and that path doesn't necessarily carry the SN / name. If we don't keep them,
+        // the second record would wipe the source —— showing up as "the badge vanished halfway through the transfer".
+        let previous = entries[k]
+        entries[k] = Entry(
+            size: size,
+            downloadedAt: iso.string(from: Date()),
+            transport: transport,
+            localName: localName ?? name,
+            deviceSerial: deviceSerial ?? previous?.deviceSerial,
+            deviceName: deviceName ?? previous?.deviceName
+        )
+        rebuildSourceIndex()
+        saveNow()
+    }
+
+    /// Forget a file. Caller is responsible for deleting the on-disk payload
+    /// if they also want the bytes gone.
+    func forget(_ name: String) {
+        entries.removeValue(forKey: name)
+        entries = entries.filter { $0.value.localName != name }
+        rebuildSourceIndex()
+        saveNow()
+    }
+
+    func clearAll() {
+        entries = [:]
+        rebuildSourceIndex()
+        saveNow()
+    }
+
+    // MARK: Source —— "who recorded this one" in the list
+
+    /// The source of a clip. List rows render that badge based on it.
+    struct ClipSource: Equatable {
+        enum Kind: String {
+            /// Came down from a recorder card (TicNote / D·NOTE, both `ble` and `wifi` count).
+            case card
+            /// Apple Watch.
+            case watch
+            /// Fragments left by on-device live transcription.
+            case phone
+            /// A file imported by the user —— no record at all in the manifest.
+            case imported
+        }
+
+        var kind: Kind
+        /// The card's identity (TicNote = the ASCII SN in the advertisement). Empty when not `.card`.
+        var serial: String?
+        /// The readable name recorded at library time (may be nil; fall back at display time).
+        var storedName: String?
+    }
+
+    /// `on-disk file name -> ClipSource`. **Must be prebuilt**: the list has reached ~1900 entries on a real device,
+    /// and scanning `entries` per row would degrade to O(n²).
+    @Published private(set) var sourcesByLocalName: [String: ClipSource] = [:]
+
+    /// Look up the source by **on-disk file name**; not found ⇒ treat as an imported file.
+    ///
+    /// Why not just query `entry(for:)`: manifest keys have two shapes ——
+    /// device downloads are `serial::name`, watch / live streams are bare `name`, while the list has only one
+    /// on-disk name. The reverse index pulls the two shapes into the same coordinate system.
+    func source(forLocalName localName: String) -> ClipSource {
+        sourcesByLocalName[localName]
+            ?? ClipSource(kind: .imported, serial: nil, storedName: nil)
+    }
+
+    private func rebuildSourceIndex() {
+        var index: [String: ClipSource] = [:]
+        index.reserveCapacity(entries.count)
+        for entry in entries.values {
+            // Go by `localName` rather than the manifest key: when file names collide,
+            // `localNameForDeviceFile` appends an `_SN` suffix to the on-disk name, and then
+            // the key and the on-disk name are **not** the same string, while the list gets the latter.
+            let diskName = entry.localName ?? ""
+            guard !diskName.isEmpty else { continue }
+            index[diskName] = Self.classify(entry)
+        }
+        sourcesByLocalName = index
+    }
+
+    private static func classify(_ entry: Entry) -> ClipSource {
+        switch entry.transport {
+        case "watch":
+            return ClipSource(kind: .watch, serial: nil, storedName: entry.deviceName)
+        case "stream":
+            return ClipSource(kind: .phone, serial: nil, storedName: entry.deviceName)
+        default:
+            // ble / wifi: both came down from a recorder card, only the link differs.
+            return ClipSource(kind: .card, serial: entry.deviceSerial, storedName: entry.deviceName)
+        }
+    }
+
+    /// Choose a collision-safe local filename while preserving the recorder's
+    /// original name for the common single-device case.
+    func localNameForDeviceFile(_ name: String, deviceSerial: String?) -> String {
+        if let existing = entry(for: name, deviceSerial: deviceSerial)?.localName {
+            return existing
+        }
+        let fm = FileManager.default
+        let rawExists = fm.fileExists(atPath: StorageLocations.audioDir.appendingPathComponent(name).path)
+        let readyExists = fm.fileExists(atPath: StorageLocations.decryptedDir.appendingPathComponent(name).path)
+        guard rawExists || readyExists else { return name }
+
+        let serial = (deviceSerial ?? "device")
+            .replacingOccurrences(of: "[^A-Za-z0-9_-]", with: "_", options: .regularExpression)
+        let stem = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
+        return ext.isEmpty ? "\(stem)_\(serial)" : "\(stem)_\(serial).\(ext)"
+    }
+
+    // MARK: disk
+
+    private static func key(name: String, deviceSerial: String?) -> String {
+        guard let serial = deviceSerial?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !serial.isEmpty else { return name }
+        return "\(serial)::\(name)"
+    }
+
+    private static func loadFromDisk() -> [String: Entry] {
+        let url = StorageLocations.manifestURL
+        guard FileManager.default.fileExists(atPath: url.path) else { return [:] }
+        do {
+            let data = try Data(contentsOf: url)
+            let manifest = try JSONDecoder().decode(Manifest.self, from: data)
+            return manifest.downloaded
+        } catch {
+            log.error("Manifest load failed: \(String(describing: error), privacy: .public)")
+            return [:]
+        }
+    }
+
+    private func saveNow() {
+        let url = StorageLocations.manifestURL
+        do {
+            try FileManager.default.createDirectory(
+                at: StorageLocations.audioDir,
+                withIntermediateDirectories: true
+            )
+            let manifest = Manifest(downloaded: entries)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(manifest)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            log.error("Manifest save failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+}

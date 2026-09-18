@@ -1,0 +1,163 @@
+import SwiftUI
+
+// MARK: - The watch ring "appearance"
+//
+// ## Why a **watch-local** preference rather than config synced with the iPhone
+// The user's own words: "adjust it directly on the watch, takes effect immediately" (confirmed 2026-10-15). So it lives in the watch's
+// own `UserDefaults`:
+//   · changing a color on the watch face should not cost a WatchConnectivity round trip;
+//   · it must work even when the iPhone is not nearby;
+//   · it is purely "what my watch looks like" and unrelated to recording data -- putting it in `AppConfig` would only add one more dimension on which
+//     the two sides' configs can drift apart.
+//
+// ## Three dimensions: color / gradient / breathing -- deliberately not subdivided further
+// These are the three items the user asked for by name. No color wheel, brightness or gradient angle: on a 40mm face they are neither tappable precisely
+// nor visibly different, which would only turn "can change" into "changed it wrong".
+//
+// ## ⚠️ Only swap the **color choice and the center disc**; never touch the animation semantics
+// `WatchRingControl`'s "outer ring one turn per minute / inner ring one turn per hour / comet one turn per 2.4 s"
+// carry the "is it still recording?" information (see the top of that file). Skins must not alter them --
+// they are not styling, they are function.
+
+/// Which color set the center disc (and the ring while recording) uses.
+enum WatchRingPalette: String, CaseIterable, Identifiable, Codable {
+    case green, teal, blue, indigo, purple, pink, orange, red, graphite
+
+    var id: String { rawValue }
+
+    /// The two gradient endpoints; solid mode uses only `[0]`.
+    ///
+    /// ⚠️ All of them are **dark** (not light): the center icon and timer are white text,
+    /// and a light base color would smear the "stop" icon into a blob while recording. `graphite` follows the same rule.
+    var colors: [Color] {
+        switch self {
+        case .green:    return [Color(red: 0.24, green: 0.78, blue: 0.38), Color(red: 0.05, green: 0.48, blue: 0.24)]
+        case .teal:     return [Color(red: 0.20, green: 0.76, blue: 0.72), Color(red: 0.02, green: 0.42, blue: 0.46)]
+        case .blue:     return [Color(red: 0.26, green: 0.56, blue: 0.94), Color(red: 0.04, green: 0.26, blue: 0.68)]
+        case .indigo:   return [Color(red: 0.38, green: 0.42, blue: 0.90), Color(red: 0.18, green: 0.15, blue: 0.60)]
+        case .purple:   return [Color(red: 0.62, green: 0.36, blue: 0.88), Color(red: 0.38, green: 0.12, blue: 0.58)]
+        case .pink:     return [Color(red: 0.86, green: 0.32, blue: 0.56), Color(red: 0.62, green: 0.06, blue: 0.30)]
+        case .orange:   return [Color(red: 0.90, green: 0.52, blue: 0.16), Color(red: 0.70, green: 0.24, blue: 0.02)]
+        case .red:      return [Color(red: 0.86, green: 0.26, blue: 0.24), Color(red: 0.62, green: 0.04, blue: 0.10)]
+        case .graphite: return [Color(white: 0.52), Color(white: 0.26)]
+        }
+    }
+
+    /// Solid color (used when "gradient" is off).
+    var solid: Color { colors[0] }
+}
+
+/// The "breathing light" rhythm. `period` = seconds for one full inhale-exhale cycle.
+enum WatchBreathing: String, CaseIterable, Identifiable, Codable {
+    case off, slow, medium, fast
+
+    var id: String { rawValue }
+
+    var period: Double? {
+        switch self {
+        case .off:    return nil
+        case .slow:   return 3.4
+        case .medium: return 2.2
+        case .fast:   return 1.2
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .off:    return L10n.Watch.styleBreathingOff
+        case .slow:   return L10n.Watch.styleBreathingSlow
+        case .medium: return L10n.Watch.styleBreathingMedium
+        case .fast:   return L10n.Watch.styleBreathingFast
+        }
+    }
+}
+
+/// A persistable appearance.
+struct WatchRingStyle: Equatable, Codable {
+    var palette: WatchRingPalette = .green
+    /// Whether the center uses a gradient (off = solid color).
+    var gradient: Bool = true
+    var breathing: WatchBreathing = .off
+
+    static let `default` = WatchRingStyle()
+
+    /// Fill of the center disc.
+    var centerFill: AnyShapeStyle {
+        gradient
+            ? AnyShapeStyle(
+                LinearGradient(
+                    colors: palette.colors,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            : AnyShapeStyle(palette.solid)
+    }
+
+    /// Ring color while recording. Supplies the `AngularGradient` when gradient is on.
+    var ringColors: [Color] { gradient ? palette.colors : [palette.solid] }
+}
+
+/// Which appearance option each of the 4 dots around the ring controls.
+enum WatchRingMenu: String, CaseIterable, Identifiable {
+    case color, gradient, breathing, reset
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .color:     return L10n.Watch.styleColor
+        case .gradient:  return L10n.Watch.styleGradient
+        case .breathing: return L10n.Watch.styleBreathing
+        case .reset:     return L10n.Watch.styleReset
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .color:     return "paintpalette.fill"
+        case .gradient:  return "circle.lefthalf.filled"
+        case .breathing: return "wind"
+        case .reset:     return "arrow.counterclockwise"
+        }
+    }
+}
+
+/// Stored in the watch-local `UserDefaults`. Same approach as `RecorderAliasStore`:
+/// JSON + a rebuildable cache; if it cannot be decoded, treat it as never saved (a preference is not worth raising an error for,
+/// and must never wipe anything else that was stored along the way).
+///
+/// ⚠️ Deliberately **not** marked `@MainActor`: the read entry point is SwiftUI's `body`,
+/// the same trade-off as `RecorderAliasStore` (see the paragraph at the top of that file). All writes originate from
+/// UI actions, so in practice they only run on the main thread.
+final class WatchRingStyleStore: ObservableObject {
+    static let shared = WatchRingStyleStore()
+
+    private static let storageKey = "watch.ring_style.v1"
+
+    @Published var style: WatchRingStyle {
+        // `didSet` does not fire during init, so reading from disk at construction never writes back.
+        didSet { persist() }
+    }
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        self.style = Self.load(from: defaults)
+    }
+
+    func reset() { style = .default }
+
+    private static func load(from defaults: UserDefaults) -> WatchRingStyle {
+        guard let data = defaults.data(forKey: storageKey),
+              let decoded = try? JSONDecoder().decode(WatchRingStyle.self, from: data)
+        else { return .default }
+        return decoded
+    }
+
+    private func persist() {
+        guard let data = try? JSONEncoder().encode(style) else { return }
+        defaults.set(data, forKey: Self.storageKey)
+    }
+}
