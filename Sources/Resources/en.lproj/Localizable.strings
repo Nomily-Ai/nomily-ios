@@ -531,6 +531,16 @@
 "library.search_empty_message" = "No clip's transcript or summary contains that. Switch to All to search titles too.";
 "library.has_summary" = "Summary";
 "library.has_transcript" = "Transcript";
+"library.unread" = "Unread";
+"library.unread_count" = "%d unread";
+"library.filter_devices" = "Filter by device";
+"library.filter_all_devices" = "All devices";
+"library.short_count_one" = "%d clip";
+"library.short_count_other" = "%d clips";
+"library.bucket_today" = "Today";
+"library.bucket_yesterday" = "Yesterday";
+"library.bucket_this_week" = "This week";
+"library.bucket_this_month" = "This month";
 "watch.recorder_title" = "Watch";
 "watch.ready" = "Ready";
 "watch.record" = "Record";

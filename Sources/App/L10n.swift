@@ -486,6 +486,63 @@ enum L10n {
                               comment: "Badge: clip has a transcript")
         }
 
+        // MARK: Unread red dot / grouping by time and device (★ 2026-10-15, second round)
+        //
+        // Again always `static var` + `value:` inline English fallback; see the source-identifier note above for why.
+        /// Accessibility reading for the unread red dot.
+        static var unread: String {
+            NSLocalizedString("library.unread", value: "Unread",
+                              comment: "Accessibility label for the unread dot on a library row")
+        }
+        /// The section header's "how many clips from this device are still unopened".
+        static func unreadCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "library.unread_count", value: "%d unread",
+                    comment: "Section header: how many clips on this device are still unopened"
+                ),
+                count
+            )
+        }
+        /// Accessibility reading / menu title for the device filter menu in the toolbar.
+        static var filterDevices: String {
+            NSLocalizedString("library.filter_devices", value: "Filter by device",
+                              comment: "Toolbar menu: restrict the list to one device")
+        }
+        static var filterAllDevices: String {
+            NSLocalizedString("library.filter_all_devices", value: "All devices", comment: "")
+        }
+        /// Short count ("12 items" / "12 clips"), for section headers and the filter menu.
+        ///
+        /// Why not reuse `Recordings.clipCount(count, size)`: that one is "12 recordings · 25 GB",
+        /// too long for a section header; and the size is composed separately in the two places (the section header counts **all buckets**,
+        /// the menu counts **all devices**, and neither equals the total of a single section).
+        static func shortCount(_ count: Int) -> String {
+            let format = count == 1
+                ? NSLocalizedString("library.short_count_one", value: "%d clip",
+                                    comment: "Short clip count, singular")
+                : NSLocalizedString("library.short_count_other", value: "%d clips",
+                                    comment: "Short clip count, plural")
+            return String(format: format, count)
+        }
+        // MARK: Time section titles
+        //
+        // Older months are **not here** — that would require localised month names in 12 languages. Instead use
+        // `DateFormatter`'s template format (`setLocalizedDateFormatFromTemplate("yMMMM")`)
+        // and let the system assemble it per locale — word order and wording can then never be wrong.
+        static var bucketToday: String {
+            NSLocalizedString("library.bucket_today", value: "Today", comment: "Time section header")
+        }
+        static var bucketYesterday: String {
+            NSLocalizedString("library.bucket_yesterday", value: "Yesterday", comment: "Time section header")
+        }
+        static var bucketThisWeek: String {
+            NSLocalizedString("library.bucket_this_week", value: "This week", comment: "Time section header")
+        }
+        static var bucketThisMonth: String {
+            NSLocalizedString("library.bucket_this_month", value: "This month", comment: "Time section header")
+        }
+
         // MARK: Source Identifier — 'Who recorded this?' in the list
         //
         // ⚠️ Always use `static var` instead of `static let`: this file supports **runtime language switching**

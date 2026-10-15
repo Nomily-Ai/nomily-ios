@@ -18,6 +18,10 @@ struct LibraryView: View {
     /// it needs to redraw — the comment at the top of `RecorderAliasStore` records the same pitfall
     /// (that's exactly how `DiscoveredRecorder.displayName` fell into it).
     @ObservedObject private var recorderAliases = RecorderAliasStore.shared
+    /// The unread red dot relies on it. It must be hooked up as observed: `isUnread` is a **dictionary lookup**,
+    /// and after opening detail and writing the name in, SwiftUI won't know to redraw on its own (the same pitfall appears in
+    /// the `recorderAliases` comment above).
+    @ObservedObject private var readStore = ClipReadStore.shared
     @State private var showImportConfirm = false
     @State private var showImporter = false
     @State private var importError: String?
@@ -59,6 +63,9 @@ struct LibraryView: View {
     @State private var exportURL: URL?
     @State private var showExportSheet = false
 
+    /// Show only one device. `nil` = all. The value is the key given by `deviceKey(_:)`.
+    @State private var deviceFilter: String?
+
     private struct MergePair: Identifiable {
         let older: LibraryItem
         let newer: LibraryItem
@@ -73,45 +80,18 @@ struct LibraryView: View {
     private static let adjacentThreshold: TimeInterval = 10 * 60
 
     var body: some View {
-        Group {
-            if model.items.isEmpty {
-                EmptyStateView(
-                    L10n.Recordings.noClipsYet,
-                    systemImage: "tray",
-                    message: L10n.Recordings.noClipsMessage
-                )
-            } else if isSearchActive, displayedRows.isEmpty, isSearching {
-                // The first search has to read from disk and build the index (a brief moment when the library has hundreds of entries with bodies).
-                // During that time we **must not** report "nothing found" — that's a lie, and the user will think the search is wrong.
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if displayedRows.isEmpty {
-                // Reaching here can only mean "searching but no match" (the library itself is non-empty, see the two branches above).
-                EmptyStateView(
-                    L10n.Library.searchEmptyTitle,
-                    systemImage: "magnifyingglass",
-                    message: L10n.Library.searchEmptyMessage
-                )
-            } else {
-                List {
-                    Section {
-                        ForEach(displayedRows, id: \.element.id) { entry in
-                            row(entry.element, at: entry.offset)
-                        }
-                    } footer: {
-                        footer
-                    }
-                }
-                .environment(\.defaultMinListHeaderHeight, 0)
-                .padding(.top, -22)
-                .clipped()
-            }
+        content
+        .task {
+            await model.refresh()
+            dropStaleDeviceFilter()
         }
-        .task { await model.refresh() }
         // A watch recording can land while this list is on screen; the file
         // arrives outside any SwiftUI lifecycle, so it has to say so.
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidChange)) { _ in
-            Task { await model.refresh() }
+            Task {
+                await model.refresh()
+                dropStaleDeviceFilter()
+            }
         }
         // Knowledge-base search. `.task(id:)` is the key: change the query or the scope and SwiftUI will
         // **cancel the previous run entirely**, so fast typing doesn't have several rounds of disk reading running at once.
@@ -141,6 +121,8 @@ struct LibraryView: View {
                     Button(L10n.Common.cancel) { exitSelection() }
                 } else {
                     HStack(spacing: 16) {
+                        deviceFilterMenu
+
                         Button(L10n.Library.select) {
                             selectedIDs = []
                             isSelecting = true
@@ -361,7 +343,63 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: - List rows / footer
+    // MARK: - List / empty state
+
+    /// Four choices: empty library / searching / filtered with no match / the actual content.
+    ///
+    /// Split out separately not for looks: `body` has `.searchable` + scopes + 5
+    /// `.alert`s + a sheet + an overlay hanging off it, and cramming these four branches in makes the type checker
+    /// time out (observed: "unable to type-check this expression in reasonable time").
+    @ViewBuilder
+    private var content: some View {
+        if model.items.isEmpty {
+            EmptyStateView(
+                L10n.Recordings.noClipsYet,
+                systemImage: "tray",
+                message: L10n.Recordings.noClipsMessage
+            )
+        } else if isSearchActive, sections.isEmpty, isSearching {
+            // The first search has to read from disk and build the index (a brief moment when the library has hundreds of entries with bodies).
+            // During that time we **must not** report "nothing found" — that's a lie, and the user will think the search is wrong.
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if sections.isEmpty {
+            // Reaching here can only mean "filtered/searched with no match" (the library itself is non-empty, see the two branches above).
+            EmptyStateView(
+                L10n.Library.searchEmptyTitle,
+                systemImage: "magnifyingglass",
+                message: L10n.Library.searchEmptyMessage
+            )
+        } else {
+            listContent
+        }
+    }
+
+    /// One `Section` = one (time × device). The bucket title appears only on the first section header in its bucket
+    /// (see `LibrarySection.showsBucketTitle`), so reading down you get
+    /// a two-level "Today → three devices → Yesterday → …" structure, rather than repeating
+    /// "Today" once for every device.
+    private var listContent: some View {
+        List {
+            ForEach(sections) { section in
+                Section {
+                    rows(of: section)
+                } header: {
+                    sectionHeader(section)
+                }
+            }
+        }
+        .environment(\.defaultMinListHeaderHeight, 0)
+    }
+
+    @ViewBuilder
+    private func rows(of section: LibrarySection) -> some View {
+        ForEach(section.entries) { entry in
+            row(entry.item, at: entry.modelIndex, unread: entry.unread)
+        }
+    }
+
+    // MARK: - List rows
 
     /// One row. Tap to open detail, long-press to enter multi-select, swipe right to merge.
     ///
@@ -369,7 +407,10 @@ struct LibraryView: View {
     /// "Button + onLongPressGesture": in the latter the two gestures are recognised **independently**,
     /// so when you release a long press the Button's action may still fire once — which shows as "long-pressed to select,
     /// and it jumped into the detail page along the way". `exclusively` hard-codes the priority: if the long press wins, the tap isn't recognised.
-    private func row(_ item: LibraryItem, at index: Int) -> some View {
+    ///
+    /// `unread` is **computed along the way** while sectioning and passed in; rows don't go back to the ledger:
+    /// one `isUnread` is a dictionary lookup, and 1900 rows querying it on every redraw is unnecessary.
+    private func row(_ item: LibraryItem, at index: Int, unread: Bool) -> some View {
         let isSelected = selectedIDs.contains(item.name)
         return HStack(spacing: 10) {
             if isSelecting {
@@ -381,7 +422,8 @@ struct LibraryView: View {
             LibraryRow(
                 item: item,
                 source: library.source(forLocalName: item.name),
-                snippet: snippets[item.base]
+                snippet: snippets[item.base],
+                isUnread: unread
             )
             if !isSelecting {
                 Image(systemName: "chevron.right")
@@ -423,43 +465,280 @@ struct LibraryView: View {
         }
     }
 
+    /// Section header: the first line is the time bucket, the second the device.
+    ///
+    /// The bucket title appears once, on the first section of its bucket (the later devices in the same bucket don't repeat
+    /// "Today") — that's what two-level grouping looks like. The right side of the bucket row carries the **whole bucket**'s
+    /// count and size, not a single section's, or under "Today" three devices each write the numbers once,
+    /// and you can't tell how many there were today in total.
     @ViewBuilder
-    private var footer: some View {
-        // No count in search mode: the screen shows a filtered subset, and reporting the library total makes it look "wrongly displayed",
-        // while reporting the subset count looks like the same thing as the bottom "N selected" line.
-        if !isSearchActive {
-            Text(L10n.Recordings.clipCount(model.items.count, formatBytes(model.totalBytes)))
+    private func sectionHeader(_ section: LibrarySection) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if section.showsBucketTitle {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(section.bucketTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text("\(L10n.Library.shortCount(section.bucketCount)) · \(formatBytes(section.bucketBytes))")
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                Text(section.deviceName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                if section.unreadCount > 0 {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 6, height: 6)
+                    Text(L10n.Library.unreadCount(section.unreadCount))
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
+        // The list uppercases and greys these by default; we want our own hierarchy.
+        .textCase(nil)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Derived state
 
-    /// The entries to show on screen: `(index into model.items, entry)`.
+    private var isSearchActive: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The entries actually visible in the list (after device filtering + search), before sectioning.
+    /// "Whole screen" judgements like select-all and counts use it, not `model.items`.
+    private var visibleEntries: [LibraryEntry] {
+        sections.flatMap(\.entries)
+    }
+
+    /// Group the currently visible entries into two levels: **time → device**.
     ///
-    /// The index is there for `adjacentOlder(at:)` — it finds the adjacent previous clip by the **whole library**'s time order,
-    /// and that index is exactly its position in `model.items`. In search mode every body evaluation has to re-filter,
-    /// so here we run `enumerated()` just once, rather than looking the index up again inside ForEach
-    /// (which would be O(n²): the library has reached 1900 entries).
-    private var displayedRows: [(offset: Int, element: LibraryItem)] {
+    /// One pass does three things at once: filter (device + search), record each entry's index in the **whole library**
+    /// (`adjacentOlder` needs the whole library's time order to find neighbours), and slot them by bucket and device.
+    /// Written separately it'd be three 1900-entry passes, and "what's displayed" would be scattered across two places,
+    /// so adding one more filter later would inevitably miss one of them.
+    private var sections: [LibrarySection] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !needle.isEmpty else { return Array(model.items.enumerated()) }
-        var out: [(offset: Int, element: LibraryItem)] = []
+        let searching = !needle.isEmpty
+        let filter = effectiveDeviceFilter
+
+        let cal = Calendar.current
+        let now = Date()
+        let startOfToday = cal.startOfDay(for: now)
+        let startOfYesterday = cal.date(byAdding: .day, value: -1, to: startOfToday) ?? startOfToday
+        // "This week" = the first day of the current calendar week. Use `dateInterval`, not "minus 7 days":
+        // that follows the system locale's first day of the week (usually Monday in Chinese), and "this week" should be
+        // this week, not "the last seven days".
+        let weekStart = cal.dateInterval(of: .weekOfYear, for: now)?.start ?? startOfToday
+        let monthStart = cal.dateInterval(of: .month, for: now)?.start ?? startOfToday
+
+        func bucket(of date: Date) -> LibraryTimeBucket {
+            // When a device's RTC isn't set it may give a **future** time; those always join "Today",
+            // otherwise a month nobody has seen before pops up at the top of the list.
+            if date >= startOfToday { return .today }
+            if date >= startOfYesterday { return .yesterday }
+            if date >= weekStart { return .thisWeek }
+            if date >= monthStart { return .thisMonth }
+            let c = cal.dateComponents([.year, .month], from: date)
+            return .month((c.year ?? 1970) * 100 + (c.month ?? 1))
+        }
+
+        // 1) Filter + slot. `model.items` is already newest-first, so appending in order to each
+        //    (bucket, device) keeps buckets and groups naturally newest-first too; the device groups' order = that device's
+        //    newest clip's order, with no extra sorting needed.
+        var perBucket: [LibraryTimeBucket: [String: [LibraryEntry]]] = [:]
+        var deviceOrder: [LibraryTimeBucket: [String]] = [:]
+        var deviceNames: [String: String] = [:]
+
         for (index, item) in model.items.enumerated() {
-            let inBody = snippets[item.base] != nil
-            switch scope {
-            case .knowledge:
-                if inBody { out.append((index, item)) }
-            case .all:
-                // This is the one thing "All" has that "Knowledge base" doesn't: recordings not yet transcribed, with only a name.
-                if inBody || item.matchesName(needle) { out.append((index, item)) }
+            let key = deviceKey(for: item)
+            if let filter, key != filter { continue }
+            if searching {
+                let inBody = snippets[item.base] != nil
+                switch scope {
+                case .knowledge:
+                    if !inBody { continue }
+                case .all:
+                    // This is the one thing "All" has that "Knowledge base" doesn't: recordings not yet transcribed, with only a name.
+                    if !inBody, !item.matchesName(needle) { continue }
+                }
+            }
+            let b = bucket(of: item.recordedAt)
+            if perBucket[b]?[key] == nil {
+                deviceNames[key] = deviceName(for: item)
+                deviceOrder[b, default: []].append(key)
+            }
+            perBucket[b, default: [:]][key, default: []].append(LibraryEntry(
+                item: item,
+                modelIndex: index,
+                unread: readStore.isUnread(name: item.name, arrivedAt: item.modifiedAt)
+            ))
+        }
+
+        // 2) Output newest-first (Today → Yesterday → This week → This month → months newest to oldest).
+        var monthCache: [Int: String] = [:]
+        func title(of b: LibraryTimeBucket) -> String {
+            switch b {
+            case .today: return L10n.Library.bucketToday
+            case .yesterday: return L10n.Library.bucketYesterday
+            case .thisWeek: return L10n.Library.bucketThisWeek
+            case .thisMonth: return L10n.Library.bucketThisMonth
+            case let .month(key):
+                if let cached = monthCache[key] { return cached }
+                let comps = DateComponents(year: key / 100, month: key % 100, day: 1)
+                let text = Self.monthFormatter.string(from: cal.date(from: comps) ?? now)
+                monthCache[key] = text
+                return text
+            }
+        }
+
+        let ordered = perBucket.keys.sorted {
+            ($0.rank, $0.tiebreak) < ($1.rank, $1.tiebreak)
+        }
+
+        var out: [LibrarySection] = []
+        for b in ordered {
+            let groups = deviceOrder[b] ?? []
+            let all = groups.flatMap { perBucket[b]?[$0] ?? [] }
+            let bucketBytes = all.reduce(Int64(0)) { $0 + $1.item.size }
+            for (i, key) in groups.enumerated() {
+                let entries = perBucket[b]?[key] ?? []
+                out.append(LibrarySection(
+                    id: "\(b.id)|\(key)",
+                    showsBucketTitle: i == 0,
+                    bucketTitle: title(of: b),
+                    deviceName: deviceNames[key] ?? key,
+                    bucketCount: all.count,
+                    bucketBytes: bucketBytes,
+                    unreadCount: entries.reduce(0) { $0 + ($1.unread ? 1 : 0) },
+                    entries: entries
+                ))
             }
         }
         return out
     }
 
-    private var isSearchActive: Bool {
-        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    /// "2026年8月" / "August 2026". Assemble it per locale from the system's template format;
+    /// gluing on the words "year" and "month" yourself is wrong in all 10 other languages.
+    private static let monthFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("yMMMM")
+        return f
+    }()
+
+    // MARK: - Device filter
+
+    /// The device key used for grouping / filtering. **Two cards must be two groups**, so the SN goes into the key;
+    /// the display name can be a user-changed alias — and the two must never be mixed up (aliases change,
+    /// and the grouping falls apart the moment they do).
+    private func deviceKey(for item: LibraryItem) -> String {
+        let source = library.source(forLocalName: item.name)
+        switch source.kind {
+        case .card: return "card|\(source.serial ?? "")"
+        default: return source.kind.rawValue
+        }
     }
+
+    private func deviceName(for item: LibraryItem) -> String {
+        library.source(forLocalName: item.name).displayName
+    }
+
+    /// The devices that have appeared in the library, by count, most to least. Used for the filter items.
+    private var availableDevices: [(key: String, name: String, count: Int, bytes: Int64)] {
+        var order: [String] = []
+        var names: [String: String] = [:]
+        var counts: [String: Int] = [:]
+        var sizes: [String: Int64] = [:]
+        for item in model.items {
+            let key = deviceKey(for: item)
+            if counts[key] == nil {
+                order.append(key)
+                names[key] = deviceName(for: item)
+            }
+            counts[key, default: 0] += 1
+            sizes[key, default: 0] += item.size
+        }
+        return order
+            .map { (key: $0, name: names[$0] ?? $0, count: counts[$0] ?? 0, bytes: sizes[$0] ?? 0) }
+            .sorted { $0.count > $1.count }
+    }
+
+    /// Whether the selected device is **still in the library right now**. If not, treat it as "All".
+    ///
+    /// Why this layer rather than clearing `deviceFilter` after a refresh: after deleting the last recording of a
+    /// device, the list must return to "All" immediately, rather than being stuck on an empty list waiting for
+    /// the user to change it back in the menu themselves.
+    private var effectiveDeviceFilter: String? {
+        guard let deviceFilter else { return nil }
+        return availableDevices.contains { $0.key == deviceFilter } ? deviceFilter : nil
+    }
+
+    /// Clear the selection once the device is no longer in the library. The pure computation layer already covers the display; this
+    /// just makes the tick in the menu disappear too.
+    private func dropStaleDeviceFilter() {
+        guard let deviceFilter else { return }
+        if !availableDevices.contains(where: { $0.key == deviceFilter }) {
+            self.deviceFilter = nil
+        }
+    }
+
+    /// The device filter menu on the toolbar.
+    ///
+    /// Each item is suffixed with count and size — which also takes over the old "N clips · X GB" line at the bottom of the list:
+    /// the total now lives on the "All devices" item, while the list itself now sections by time and device
+    /// and no longer summarises with one total line.
+    private var deviceFilterMenu: some View {
+        Menu {
+            Button {
+                deviceFilter = nil
+            } label: {
+                filterLabel(
+                    "\(L10n.Library.filterAllDevices) · \(L10n.Library.shortCount(model.items.count)) · \(formatBytes(model.totalBytes))",
+                    selected: deviceFilter == nil
+                )
+            }
+            if !availableDevices.isEmpty { Divider() }
+            ForEach(availableDevices, id: \.key) { device in
+                Button {
+                    deviceFilter = device.key
+                } label: {
+                    filterLabel(
+                        "\(device.name) · \(L10n.Library.shortCount(device.count)) · \(formatBytes(device.bytes))",
+                        selected: deviceFilter == device.key
+                    )
+                }
+            }
+        } label: {
+            Image(systemName: deviceFilter == nil
+                  ? "line.3.horizontal.decrease.circle"
+                  : "line.3.horizontal.decrease.circle.fill")
+        }
+        .accessibilityLabel(L10n.Library.filterDevices)
+    }
+
+    /// Menu item: use a **transparent placeholder** for the tick rather than omitting it, because omitting it indents the selected item's text by one step,
+    /// and the menu looks like it jumps each time it opens and closes.
+    private func filterLabel(_ text: String, selected: Bool) -> some View {
+        Label {
+            Text(text)
+        } icon: {
+            Image(systemName: "checkmark").opacity(selected ? 1 : 0)
+        }
+    }
+
+    // MARK: - Select all / derived
 
     /// The `.task(id:)` key: scope + directory fingerprint + query term.
     ///
@@ -477,13 +756,20 @@ struct LibraryView: View {
     ///
     /// In `model.items` order, not `selectedIDs`' hash order: the ordering in the export directory
     /// and the error order on a failed delete both follow the screen, so when something goes wrong you can match them up at a glance.
+    /// And not by `visibleEntries` either: changing the filter after ticking shouldn't quietly drop what's ticked.
     private var selectedItems: [LibraryItem] {
         model.items.filter { selectedIDs.contains($0.name) }
     }
 
+    /// "Select all" = select **what's on this screen** (which may be a searched subset, or a filtered
+    /// single device), not the whole library.
     private var allItemsSelected: Bool {
-        let names = Set(displayedRows.map(\.element.name))
+        let names = Set(visibleEntries.map(\.item.name))
         return !names.isEmpty && names.isSubset(of: selectedIDs)
+    }
+
+    private func selectAllVisible() {
+        selectedIDs = Set(visibleEntries.map(\.item.name))
     }
 
     // MARK: - Multi-select
@@ -515,11 +801,11 @@ struct LibraryView: View {
                     if allItemsSelected {
                         selectedIDs.removeAll()
                     } else {
-                        selectedIDs = Set(displayedRows.map(\.element.name))
+                        selectAllVisible()
                     }
                 }
                 .font(.subheadline)
-                .disabled(displayedRows.isEmpty)
+                .disabled(visibleEntries.isEmpty)
 
                 Spacer()
 
@@ -747,6 +1033,9 @@ struct LibraryView: View {
         // Clear orphan `.title`s: the delete above removes the "selected entry's own", but duplicate-name persistence
         // and the like can leave other orphans.
         ClipArtefact.sweepOrphanTitles()
+        // The read ledger has to be cleared too — otherwise the table grows forever with "delete then download again", and a same-named
+        // file downloaded again comes back mysteriously marked "read", and the user never sees that red dot again.
+        readStore.forget(names: items.map(\.name))
         exitSelection()
         await model.refresh(force: true)
         NotificationCenter.default.post(name: .libraryDidChange, object: nil)
@@ -760,6 +1049,78 @@ struct LibraryView: View {
     }
 }
 
+// MARK: - The three grouping models
+
+/// Time bucket. **`rank` is the display order**: Today → Yesterday → This week → This month → months newest to oldest.
+///
+/// Why two sort keys rather than mashing them into one integer: months must be ordered by year-and-month, and between them and
+/// the first four ranks the only question is "which is on top". Written separately the sort is one tuple comparison, and a reader can see at a glance
+/// that the months "sit at the very back, in reverse order internally".
+private enum LibraryTimeBucket: Hashable {
+    case today
+    case yesterday
+    case thisWeek
+    case thisMonth
+    /// Anything earlier, by month. The value is `yyyyMM` — sortable, usable as an id, and directly "year / month".
+    case month(Int)
+
+    var rank: Int {
+        switch self {
+        case .today: return 0
+        case .yesterday: return 1
+        case .thisWeek: return 2
+        case .thisMonth: return 3
+        case .month: return 4
+        }
+    }
+
+    /// Within the same rank, sort again: the newer the month the higher (hence the negation).
+    var tiebreak: Int {
+        if case let .month(key) = self { return -key }
+        return 0
+    }
+
+    var id: String {
+        switch self {
+        case .today: return "today"
+        case .yesterday: return "yesterday"
+        case .thisWeek: return "week"
+        case .thisMonth: return "month"
+        case let .month(key): return "m\(key)"
+        }
+    }
+}
+
+/// A row in the list: the entry + its index in the **whole library** (`model.items`).
+///
+/// The index is for `adjacentOlder(at:)` — it finds the adjacent previous clip by the whole library's time order.
+/// Using a post-filter index would point at someone else, and a swipe-to-merge would fuse two completely unrelated recordings.
+///
+/// `unread` is computed **in the grouping pass**: one `isUnread` is a ledger query,
+/// and 1900 rows each querying on every redraw is unnecessary — plus section headers also have to count "how many unread in this section".
+private struct LibraryEntry: Identifiable {
+    let item: LibraryItem
+    let modelIndex: Int
+    let unread: Bool
+    var id: String { item.id }
+}
+
+/// One (time × device) section.
+private struct LibrarySection: Identifiable {
+    let id: String
+    /// The first section of a given time bucket — the bucket title is written only above it, and the later devices
+    /// in the same bucket don't repeat "Today".
+    let showsBucketTitle: Bool
+    let bucketTitle: String
+    let deviceName: String
+    /// The **whole bucket**'s total (not this section's): otherwise under "Today" three devices each write the numbers once,
+    /// and you can't tell how many there were today in total.
+    let bucketCount: Int
+    let bucketBytes: Int64
+    let unreadCount: Int
+    let entries: [LibraryEntry]
+}
+
 private struct LibraryRow: View {
     let item: LibraryItem
     let source: Library.ClipSource
@@ -768,6 +1129,8 @@ private struct LibraryRow: View {
     /// The caller looks it up in `snippets` and passes it in; the row itself doesn't touch the search — the list scrolls,
     /// and a row shouldn't have the cost of "looking it up itself".
     var snippet: String? = nil
+    /// not opened yet — a red dot hangs before the title.
+    var isUnread: Bool = false
 
     private static let shortDate: DateFormatter = {
         let f = DateFormatter()
@@ -777,7 +1140,15 @@ private struct LibraryRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(spacing: 6) {
+                if isUnread {
+                    // The red dot goes **before** the title, not on the right: the right is already taken by the transcript/summary badge
+                    // and various states, and "is there anything new" has to be seen at the first glance down the list.
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                        .accessibilityLabel(L10n.Library.unread)
+                }
                 Text(item.displayTitle)
                     .font(.body)
                     .lineLimit(2)
@@ -841,7 +1212,7 @@ private struct SourceBadge: View {
     let source: Library.ClipSource
 
     var body: some View {
-        let text = Self.text(for: source)
+        let text = source.displayName
         HStack(spacing: 3) {
             Image(systemName: Self.symbol(for: source.kind))
                 .imageScale(.small)
@@ -850,7 +1221,20 @@ private struct SourceBadge: View {
         .accessibilityLabel(L10n.Library.sourceAccessibility(text))
     }
 
-    /// Display text.
+    private static func symbol(for kind: Library.ClipSource.Kind) -> String {
+        switch kind {
+        case .card: return "creditcard"
+        case .watch: return "applewatch"
+        case .phone: return "iphone"
+        case .imported: return "square.and.arrow.down"
+        }
+    }
+}
+
+extension Library.ClipSource {
+    /// This device's display name. The list row's badge and the section header use the **same one** —
+    /// write it in both places and changing the alias rules produces "the row says the new name,
+    /// the group title is still the old name".
     ///
     /// The card naming order is deliberately **user alias → name recorded at persistence → fallback word**,
     /// with the **last 4 digits of the SN** uniformly appended: two cards of the same model both labeled "Recorder Card" are indistinguishable,
@@ -858,9 +1242,9 @@ private struct SourceBadge: View {
     /// so users can match them up directly (see `protocol-notes.md` §18.1).
     ///
     /// The alias is looked up **at display time**, not frozen into storage — so when the user renames a card later,
-    /// the badge on old records changes too, without leaving a pile of stale names behind.
-    private static func text(for source: Library.ClipSource) -> String {
-        switch source.kind {
+    /// Old records' labels and group titles change too, without leaving a pile of stale names behind.
+    var displayName: String {
+        switch kind {
         case .watch:
             return L10n.Library.sourceWatch
         case .phone:
@@ -868,11 +1252,11 @@ private struct SourceBadge: View {
         case .imported:
             return L10n.Library.sourceImported
         case .card:
-            let alias = source.serial.flatMap {
+            let alias = serial.flatMap {
                 RecorderAliasStore.shared.alias(identityHex: $0)
             }
-            let unit = alias ?? source.storedName ?? L10n.Library.sourceCard
-            guard let suffix = serialSuffix(source.serial) else { return unit }
+            let unit = alias ?? storedName ?? L10n.Library.sourceCard
+            guard let suffix = Self.serialSuffix(serial) else { return unit }
             return "\(unit)-\(suffix)"
         }
     }
@@ -884,15 +1268,6 @@ private struct SourceBadge: View {
         let trimmed = serial.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count > 4 else { return nil }
         return String(trimmed.suffix(4))
-    }
-
-    private static func symbol(for kind: Library.ClipSource.Kind) -> String {
-        switch kind {
-        case .card: return "creditcard"
-        case .watch: return "applewatch"
-        case .phone: return "iphone"
-        case .imported: return "square.and.arrow.down"
-        }
     }
 }
 
@@ -1021,7 +1396,9 @@ final class LibraryListModel: ObservableObject {
 
     /// Summed once per scan instead of on every body evaluation — with ~1900
     /// items the old computed property re-reduced the whole array each time
-    /// SwiftUI asked for the footer.
+    /// SwiftUI asked for it. Now feeds the "all devices" row of the filter
+    /// menu (the old bottom-of-list footer was removed in favour of
+    /// per-section totals).
     private(set) var totalBytes: Int64 = 0
 
     /// Coalesces overlapping refreshes. `.task` on appear and the pop-back

@@ -54,6 +54,13 @@ struct ClipDetailView: View {
         .padding(.top, -20)
         .navigationTitle(item.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
+        // ★ 2026-10-15: The detail page counts as "opened" the moment it appears, and the red dot on the list row goes away with it.
+        //
+        // Hooked here rather than in the list's tap callback: the detail page has several entry points (library,
+        // recording list, live page), and a tap callback would only cover one of them —
+        // users opening it from elsewhere would find the dot still there, as if nothing happened. This is the single spot, and it will never
+        // miss a new entry point.
+        .onAppear { ClipReadStore.shared.markSeen(name: item.name) }
         .toolbar {
             if configService.config.isDeveloperMode {
                 ToolbarItem(placement: .navigationBarTrailing) {

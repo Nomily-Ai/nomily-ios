@@ -16,6 +16,13 @@ struct NomilyApp: App {
 
     init() {
         _ = Self.appInitAt  // `static let` is lazy; touch it so it stamps now
+        // ★ The unread ledger must be built **at launch**, not when the Library is opened.
+        //
+        // `origin` ("the moment this feature shipped") is taken lazily — if it waited until the user
+        // first opened the Library to be built, then on the most common path — "the app is already running, a card just finished transferring one, and only then you tap into
+        // the Library" — the arrival time would precede `origin`, and that new recording
+        // would **never get a red dot**. Touching it at launch places origin before any transfer.
+        _ = ClipReadStore.shared
         // Disk‑based diagnostic **session separator line**. Two purposes:
         //   1. Ensure `Documents/ticnote-ble.log` always exists — otherwise "user never connected a card"
         //      and "diagnostic not effective" looks identical (both lack this file), cannot be distinguished;

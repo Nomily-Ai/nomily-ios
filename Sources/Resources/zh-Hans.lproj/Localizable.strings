@@ -531,6 +531,16 @@
 "library.search_empty_message" = "没有任何一条的转录或摘要包含这个词。切到「全部」还可以按标题搜。";
 "library.has_summary" = "已生成摘要";
 "library.has_transcript" = "已转录";
+"library.unread" = "未读";
+"library.unread_count" = "%d 条未读";
+"library.filter_devices" = "筛选设备";
+"library.filter_all_devices" = "全部设备";
+"library.short_count_one" = "%d 条";
+"library.short_count_other" = "%d 条";
+"library.bucket_today" = "今天";
+"library.bucket_yesterday" = "昨天";
+"library.bucket_this_week" = "本周";
+"library.bucket_this_month" = "本月";
 "watch.recorder_title" = "手表";
 "watch.ready" = "准备就绪";
 "watch.record" = "开始录音";
