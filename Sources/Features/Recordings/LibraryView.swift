@@ -303,22 +303,29 @@ struct LibraryView: View {
         }
     }
 
-    /// Mirrors the cleanup list in `ClipDetailView.deleteFile`, minus
-    /// the in-memory player stop (we're operating from the Library,
-    /// not Detail). Kept in sync deliberately — forgetting an artefact
-    /// here leaves orphan files after a merge.
+    /// Mirrors the cleanup list in `deleteURLs(for:)`, minus the in-memory
+    /// player stop (we're operating from the Library, not Detail). Kept in
+    /// sync deliberately — that's why it now just calls `deleteURLs(for:)`
+    /// instead of listing the suffixes a second time: forgetting an artefact
+    /// in one of the two copies leaves orphan files after a merge.
+    ///
+    /// ★ 2026-10-15: the two source recordings displaced by a merge also **go to the trash**. If the merged
+    /// M4A sounds wrong (garbled, missing half), the two source recordings can still be recovered as they were —
+    /// and this is exactly the classic case of "the user can't see the files, but they're really gone".
+    ///
+    /// ⚠️ **No download credential**: deregistering the manifest would make these two show up in the device list
+    /// as "not downloaded" again, when they're actually on the user's phone (and in the trash right now).
+    /// Merging doesn't touch the manifest anyway; this stays consistent with that.
     private func deleteSourceArtefacts(for item: LibraryItem) {
-        let fm = FileManager.default
-        let urls = StorageLocations.transcriptURLs(for: item.name)
-        if let url = item.url { try? fm.removeItem(at: url) }
-        try? fm.removeItem(at: urls.txt)
-        try? fm.removeItem(at: urls.json)
-        let tr = StorageLocations.translationURLs(for: item.name)
-        try? fm.removeItem(at: tr.txt)
-        try? fm.removeItem(at: tr.json)
-        try? fm.removeItem(at: StorageLocations.summaryURL(for: item.name))
-        try? fm.removeItem(at: StorageLocations.summaryTranslatedURL(for: item.name))
-        try? fm.removeItem(at: StorageLocations.titleURL(for: item.name))
+        ClipTrash.shared.move(
+            [ClipTrash.Payload(
+                localName: item.name,
+                title: item.displayTitle,
+                urls: Self.deleteURLs(for: item),
+                download: nil
+            )],
+            library: library
+        )
     }
 
     private func handleImport(result: Result<[URL], Error>) {
@@ -998,6 +1005,11 @@ struct LibraryView: View {
     /// Delete the whole clip: audio + transcript + summary + translation + custom title, plus deregistering
     /// the record in `Library`.
     ///
+    /// ★ 2026-10-15: files are **no longer really deleted**, but moved as a whole group into the trash (`ClipTrash`),
+    /// protected for 30 days. So this pass only handles "listing everything that should come along"; the moving and accounting happen in
+    /// `ClipTrash.move` — which is also the "move the files first, then deregister the manifest" order,
+    /// for the same reason as below.
+    ///
     /// ⚠️ **The order can't be reversed** — it must be "delete the files first, then clear the manifest". Reverse it and
     /// `LibraryScanner` will, in the window where "the manifest is cleared but the files remain", rebuild this entry as an
     /// **imported file** (no manifest record = the user imported it themselves),
@@ -1008,31 +1020,24 @@ struct LibraryView: View {
         busyMessage = L10n.Library.deleting
         defer { busyMessage = nil }
 
-        let fm = FileManager.default
-        var failures: [String] = []
-        for item in items {
-            if let url = item.url, fm.fileExists(atPath: url.path) {
-                do {
-                    try fm.removeItem(at: url)
-                } catch {
-                    // If the audio can't be deleted, **keep the manifest record** (half the clip is still here),
-                    // report it to the user to retry, rather than leaving an orphan with "the files are there, the record is gone".
-                    failures.append("\(item.displayTitle): \(error.localizedDescription)")
-                    continue
-                }
-            }
-            for artefact in Self.textArtefacts(for: item) {
-                try? fm.removeItem(at: artefact.source)
-            }
-            try? fm.removeItem(at: StorageLocations.titleURL(for: item.name))
-            // The only proof that "this one was already downloaded from the device". Miss it and the same clip can never
-            // be downloaded again — in the device list it stays "downloaded" forever.
-            library.forget(localName: item.name)
+        let payloads = items.map { item in
+            ClipTrash.Payload(
+                localName: item.name,
+                title: item.displayTitle,
+                urls: Self.deleteURLs(for: item),
+                // The whole clip goes, so the "was downloaded from the device" credential must be deregistered too — miss it and
+                // the same clip can never be downloaded again (in the device list it stays "downloaded" forever).
+                download: ClipTrash.downloadRecord(forLocalName: item.name, in: library)
+            )
         }
+        let moved = ClipTrash.shared.move(payloads, library: library)
+        // Whether the cleanup action **itself reports an error** is decided here: a group that moved successfully is guaranteed to have moved all its
+        // files, and a group that failed was rolled back as-is by `move`. So "which one still has files left" is the most accurate test.
+        let stuck = moved < payloads.count
+            ? payloads.filter { $0.urls.contains { FileManager.default.fileExists(atPath: $0.path) } }
+            : []
+        let failures = stuck.map(\.title)
 
-        // Clear orphan `.title`s: the delete above removes the "selected entry's own", but duplicate-name persistence
-        // and the like can leave other orphans.
-        ClipArtefact.sweepOrphanTitles()
         // The read ledger has to be cleared too — otherwise the table grows forever with "delete then download again", and a same-named
         // file downloaded again comes back mysteriously marked "read", and the user never sees that red dot again.
         readStore.forget(names: items.map(\.name))
@@ -1042,6 +1047,30 @@ struct LibraryView: View {
         if !failures.isEmpty {
             deleteError = failures.joined(separator: "\n")
         }
+    }
+
+    /// All the files a whole-clip delete has to move.
+    ///
+    /// Derive the paths from `LibraryItem` rather than a general directory scan: `item` already carries
+    /// `url` / `base`, so appending suffixes is O(1); scanning the directory is hundreds of syscalls, and this is
+    /// an action that can be tapped on the main thread.
+    ///
+    /// Includes the two **sidecar JSONs** `.asr.json` / `.translated.json` — the old
+    /// `textArtefacts(for:)` only handled the four human-readable texts and left them out; and
+    /// `ClipArtefact.of(fileNamed:)` recognises `.asr.json` as `.transcript`,
+    /// so a leftover JSON is enough for the scanner to rebuild an entry that "has a transcript, but opens to nothing readable".
+    private static func deleteURLs(for item: LibraryItem) -> [URL] {
+        let t = StorageLocations.transcriptURLs(for: item.name)
+        let tr = StorageLocations.translationURLs(for: item.name)
+        var urls: [URL] = []
+        if let url = item.url { urls.append(url) }
+        urls.append(contentsOf: [
+            t.txt, t.json, tr.txt, tr.json,
+            StorageLocations.summaryURL(for: item.name),
+            StorageLocations.summaryTranslatedURL(for: item.name),
+            StorageLocations.titleURL(for: item.name),
+        ])
+        return urls
     }
 
     private func formatBytes(_ n: Int64) -> String {

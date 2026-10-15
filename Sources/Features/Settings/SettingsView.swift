@@ -5,6 +5,9 @@ struct SettingsView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var watch: WatchSyncService
     @EnvironmentObject private var localization: LocalizationService
+    /// The number of items sitting in the trash is shown on the right of that row, so it has to be observed — delete
+    /// one on the detail page and come back to the settings page, and the number has to follow.
+    @ObservedObject private var trash = ClipTrash.shared
     @State private var versionTapCount = 0
     @State private var versionTapResetTask: Task<Void, Never>?
     @State private var devModeToast: String?
@@ -20,6 +23,21 @@ struct SettingsView: View {
                 NavigationLink(L10n.Settings.recordings) { RecordingsSettingsView() }
                 NavigationLink(L10n.Settings.summarizeTemplates) { SummarizeTemplatesView() }
                 NavigationLink(L10n.Settings.devicesAndLibrary) { DevicesLibraryView() }
+                // Trash sits right next to "Devices & Library": what it manages is exactly those library entries,
+                // so it lives in this section, before Language. It only shows a count when there's really something in it —
+                // a permanent "0" reads as "0 things are broken here".
+                NavigationLink {
+                    TrashView()
+                } label: {
+                    HStack {
+                        Text(L10n.Trash.settingsRow)
+                        Spacer()
+                        if !trash.items.isEmpty {
+                            Text("\(trash.items.count)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 // Language sits last, right above About: it belongs to none of
                 // the four feature areas above, and slotting it among them
                 // would break their order. The row shows the current choice so

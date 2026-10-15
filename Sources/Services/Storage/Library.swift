@@ -70,6 +70,23 @@ final class Library: ObservableObject {
         entries[Self.key(name: name, deviceSerial: deviceSerial)]
     }
 
+    /// Fetch the raw record (key + value) by **on-disk file name**.
+    ///
+    /// Why it's needed: restoring from the trash has to put the "already downloaded from the device" evidence back **verbatim**,
+    /// and `source(forLocalName:)` only yields "which device", not `transport` /
+    /// `size`, nor the original file name on the device — miss any one of the three,
+    /// and `recordDownload(size:transport:…)` can't restore the same key.
+    ///
+    /// It's an O(n) linear scan: called only once on the next delete/restore, and iterating a 1900-entry dictionary
+    /// costs microseconds; to give `localName` a reverse index instead would mean keeping another copy
+    /// that can drift.
+    func rawEntry(forLocalName localName: String) -> (key: String, entry: Entry)? {
+        for (key, entry) in entries where (entry.localName ?? key) == localName {
+            return (key, entry)
+        }
+        return nil
+    }
+
     // MARK: mutations
 
     /// Record a successful transfer. The raw bytes should already be on disk

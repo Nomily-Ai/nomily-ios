@@ -23,6 +23,14 @@ struct NomilyApp: App {
         // the Library" — the arrival time would precede `origin`, and that new recording
         // would **never get a red dot**. Touching it at launch places origin before any transfer.
         _ = ClipReadStore.shared
+        // ★ The trash's "auto-delete after 30 days" gets its first run from here.
+        //
+        // There's no `BGTaskScheduler` to hang it on (that needs an extra background-mode declaration, and when the system
+        // actually schedules it is entirely beyond our control), so expiry cleanup can only hang off two points the user
+        // is bound to pass through: **launch** (here) and **opening the trash** (`TrashView`).
+        // Running it at launch has an extra benefit — cleanup happens before any screen reads the disk, so expired entries
+        // aren't first counted into that count badge on the settings page and then "lose one by themselves".
+        _ = ClipTrash.shared.purgeExpired()
         // Disk‑based diagnostic **session separator line**. Two purposes:
         //   1. Ensure `Documents/ticnote-ble.log` always exists — otherwise "user never connected a card"
         //      and "diagnostic not effective" looks identical (both lack this file), cannot be distinguished;

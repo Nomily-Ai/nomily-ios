@@ -475,11 +475,11 @@
 "devices.auto_reconnect" = "Auto-Reconnect";
 "devices.auto_reconnect_footer" = "When on, the app reconnects to your most recent device by itself after an unexpected disconnect — for example after the device is powered off and on again. When off, tap the connection pill at the top to reconnect manually.";
 "clip_detail.delete_audio" = "Delete Audio";
-"clip_detail.delete_audio_message" = "Deletes only the audio file. The transcript and summary are kept. This can't be undone.";
+"clip_detail.delete_audio_message" = "The audio file moves to Recently Deleted. The transcript and summary are kept. You can recover it for 30 days.";
 "clip_detail.delete_transcript" = "Delete Transcript";
-"clip_detail.delete_transcript_message" = "Deletes the transcript and its translation. The audio and summary are kept. This can't be undone.";
+"clip_detail.delete_transcript_message" = "The transcript and its translation move to Recently Deleted. The audio and summary are kept. You can recover them for 30 days.";
 "clip_detail.delete_summary" = "Delete Summary";
-"clip_detail.delete_summary_message" = "Deletes the summary and its translation. The audio and transcript are kept. This can't be undone.";
+"clip_detail.delete_summary_message" = "The summary and its translation move to Recently Deleted. The audio and transcript are kept. You can recover them for 30 days.";
 "clip_detail.delete_independent_footer" = "Audio, transcript and summary are deleted independently — removing one leaves the others untouched.";
 "devices.clear_transcripts" = "Clear Transcripts";
 "devices.clear_transcripts_message" = "Deletes every transcript and its translation. Audio and summaries are kept. This can't be undone.";
@@ -521,7 +521,7 @@
 "library.export_failed" = "Export Failed";
 "library.export_empty" = "Nothing to export.";
 "library.delete_selected_title" = "Delete Selected Clips?";
-"library.delete_selected_message" = "Audio, transcript and summary for %d clip(s) will be deleted. This can't be undone.";
+"library.delete_selected_message" = "Audio, transcript and summary for %d clip(s) move to Recently Deleted. You can recover them for 30 days.";
 "library.deleting" = "Deleting…";
 "library.delete_failed" = "Delete Failed";
 "library.search_prompt" = "Transcripts & summaries";
@@ -548,6 +548,9 @@
 "watch.mic_denied" = "Allow microphone access in Settings.";
 "watch.record_failed" = "Couldn't start recording: %@";
 "watch.pending_header" = "Waiting for iPhone";
+"watch.pending_count" = "%d to send";
+"watch.shake_to_record" = "Shake to Record";
+"watch.shake_to_record_hint" = "Shake your wrist to start, shake again to stop";
 "watch.sending" = "Sending…";
 "watch.waiting" = "Not sent yet";
 "watch.settings_title" = "Apple Watch";
@@ -884,3 +887,24 @@
 "template_desc.email_thread_summary" = "Quickly organizes the origin, process, and final outcome of a multi-email exchange";
 "template_desc.long_article_to_slide_deck_outline" = "Quickly generates a presentation structure outline from a long article or report";
 "template_desc.turning_scattered_notes_into_a_to_do_list" = "Organizes clear task lists from scattered, off-the-cuff notes";
+
+/* ── Recently Deleted / recycle bin (added 2026-10-15) ─────────────── */
+"trash.title" = "Recently Deleted";
+"trash.settings_row" = "Recently Deleted";
+"trash.empty_title" = "Nothing Deleted";
+"trash.empty_message" = "Recordings you delete are kept here for 30 days, so you can always put one back.";
+"trash.retention_footer" = "Items are kept for %d days, then deleted automatically.";
+"trash.days_left" = "%d days left";
+"trash.deleted_on" = "Deleted";
+"trash.restore" = "Recover";
+"trash.delete_forever" = "Delete Now";
+"trash.delete_forever_title" = "Delete Now?";
+"trash.delete_forever_message" = "This item will be removed for good. This can't be undone.";
+"trash.empty_all" = "Delete All";
+"trash.empty_all_title" = "Empty Recently Deleted?";
+"trash.empty_all_message" = "%d item(s) will be removed for good. This can't be undone.";
+"trash.restore_failed_title" = "Couldn't Recover";
+"trash.restore_failed_message" = "The files for this item are no longer in Recently Deleted.";
+"trash.artefact_audio" = "Audio";
+"trash.artefact_transcript" = "Transcript";
+"trash.artefact_summary" = "Summary";

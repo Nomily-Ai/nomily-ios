@@ -655,24 +655,58 @@ struct ClipDetailView: View {
 
     /// Removes only the audio payload. The transcript / translation / summary
     /// / title stay on disk and the clip lives on as a text-only Library entry.
+    ///
+    /// ★ 2026-10-15: Audio is no longer removed via `removeItem` outright — it's **moved to the trash** (protected for 30 days).
+    /// The on-disk name and path stay exactly the same, so once restored the scanner sees the very same item as before.
     private func deleteAudio() {
         player.stop()
-        if let url = item.url { try? FileManager.default.removeItem(at: url) }
-        ClipArtefact.sweepOrphanTitles()
+        var urls: [URL] = []
+        if let url = item.url { urls.append(url) }
+        // When the audio is this item's last remaining piece, `.title` instantly becomes an "orphaned title" — the scanner
+        // would use it to rebuild a ghost entry with neither audio nor body text. So it moves together with the audio.
+        if let title = ClipTrash.titleSidecar(
+            forLocalName: item.name,
+            hasOtherArtefacts: item.hasTranscript || item.hasSummary
+        ) {
+            urls.append(title)
+        }
+        ClipTrash.shared.move(
+            [ClipTrash.Payload(
+                localName: item.name,
+                title: item.displayTitle,
+                urls: urls,
+                // With the audio copy gone, the "already downloaded from the device" credentials must be revoked — otherwise
+                // the device list would show it as "downloaded" forever, never downloadable again. Restored back on recovery.
+                download: ClipTrash.downloadRecord(forLocalName: item.name, in: env.library)
+            )],
+            library: env.library
+        )
         dismiss()
     }
 
     /// Removes the transcript and the translation derived from it. Audio and
     /// summary are untouched.
     private func deleteTranscript() {
-        let fm = FileManager.default
         let t = StorageLocations.transcriptURLs(for: item.name)
-        try? fm.removeItem(at: t.txt)
-        try? fm.removeItem(at: t.json)
         let tr = StorageLocations.translationURLs(for: item.name)
-        try? fm.removeItem(at: tr.txt)
-        try? fm.removeItem(at: tr.json)
-        ClipArtefact.sweepOrphanTitles()
+        var urls = [t.txt, t.json, tr.txt, tr.json]
+        if let title = ClipTrash.titleSidecar(
+            forLocalName: item.name,
+            hasOtherArtefacts: item.hasAudio || item.hasSummary
+        ) {
+            urls.append(title)
+        }
+        ClipTrash.shared.move(
+            [ClipTrash.Payload(
+                localName: item.name,
+                title: item.displayTitle,
+                urls: urls,
+                // ⚠️ `download` **must not** be included here: the audio is still present, and revoking the credentials would amount to
+                // erasing a still-existing asset from the manifest.
+                download: nil
+            )],
+            library: env.library
+        )
         transcript = nil
         translation = nil
     }
@@ -680,10 +714,25 @@ struct ClipDetailView: View {
     /// Removes the summary and its translation. Audio and transcript are
     /// untouched.
     private func deleteSummary() {
-        let fm = FileManager.default
-        try? fm.removeItem(at: StorageLocations.summaryURL(for: item.name))
-        try? fm.removeItem(at: StorageLocations.summaryTranslatedURL(for: item.name))
-        ClipArtefact.sweepOrphanTitles()
+        var urls = [
+            StorageLocations.summaryURL(for: item.name),
+            StorageLocations.summaryTranslatedURL(for: item.name),
+        ]
+        if let title = ClipTrash.titleSidecar(
+            forLocalName: item.name,
+            hasOtherArtefacts: item.hasAudio || item.hasTranscript
+        ) {
+            urls.append(title)
+        }
+        ClipTrash.shared.move(
+            [ClipTrash.Payload(
+                localName: item.name,
+                title: item.displayTitle,
+                urls: urls,
+                download: nil    // Ditto: the audio is untouched, credentials kept.
+            )],
+            library: env.library
+        )
         summary = nil
         translatedSummary = nil
     }

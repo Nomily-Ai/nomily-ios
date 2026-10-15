@@ -1,43 +1,35 @@
 import SwiftUI
 import WatchKit
 
-/// Wrist recorder page: the ring control, the four corner buttons around it,
-/// and whatever is still waiting to reach the iPhone.
+/// Wrist recorder page.
 ///
-/// The elapsed time lives *inside* the ring rather than above it. It used to
-/// be the page's headline, which made a wrist recorder read like a stopwatch;
-/// the ring is the headline now — it answers "is it running?" without being
-/// read — and the digits are demoted to a caption within it.
-///
-/// ★ 2026-10-15 revision two: this page is **rebuilt entirely after the Health app's activity-ring page** (user's words
-/// "not beautiful or bold enough, just follow Apple Health's layout"). Top to bottom there are only three things:
+/// ★ 2026-10-15 revision four (user's words: "remove the time from the top of the watch, and don't have a plain 'ready
+/// to record' right in the middle; let the ring spin on its own even when you're not tapping record... it needs to be centered and not wobble,
+/// otherwise the time on top and the transfers below throw it off-center and it looks bad"):
 ///
 /// ```
-///        15:47          ← current time at the top (same as the Health app)
-///      ╭────────╮
-///   ◉  │  ring  │  ◉     ← the ring fills the screen width as much as possible
-///      ╰────────╯
-///   ◉              ◉
+///   ◉                    ◉      ← the corner buttons (gone entirely while recording)
+///        ╭────────╮
+///        │  ⌾ ring │             ← dead center of the screen, **always** here
+///        ╰────────╯
+///   ◉                    ◉
+///          2 pending ›           ← a thin bar that only appears when things are pending, pressed against the very bottom of the screen
 /// ```
 ///
-/// * **Each of the 4 corner dots leads to its own page** (color / breathing light / language / settings),
-///   no longer "tap to expand a little menu below the ring" -- the user explicitly asked for "a separate page";
-/// * The old "gradient" dot merged into the color page, and "language" moved from a bottom text link into a dot,
-///   the freed-up spot went to "settings (version + reset to default)";
-/// * **The home screen carries no text links from now on**; the two small "language · version" lines are removed as well.
+/// Three changes:
 ///
-/// ⚠️ While recording the 4 corner dots **never appear** -- the user's own words
-/// "once recording starts, the menu bar around the screen should not appear", so this is not "collapsed by default"
-/// but rather no entry point at all while recording; the freed-up space lets the ring grow one more size.
-///
-/// ★ 2026-10-15 revision three (first round of feedback on real hardware):
-/// * "the menu bar is too small right now" ⇒ the dots go from a **hard-coded 30pt** to a fraction of the screen width
-///   (0.22 × screen width, see `cornerSize`), 40mm ≈34pt / 45mm ≈42pt,
-///   so they grow on bigger watches; the ring shrinks from 0.80 to 0.74 to make room for the larger buttons;
-/// * "remove the time in the top-right and show the time in the middle" ⇒ the top-right one **is the watchOS system
-///   clock** (not one of our views, so it can only be hidden, not moved); we added
-///   `.persistentSystemOverlays(.hidden)` to hide it; the middle one is our own drawn
-///   `clock`, bumped from 20pt to 23pt at the same time.
+/// * **The top time line is gone.** It used to be a column of "time / ring / byte count"; whichever
+///   was longer or shorter pushed the ring off-center -- exactly the "off-center and it looks bad" the user described. Now the ring is the **only layout
+///   subject** (a `ZStack` filling the screen), and everything else hangs on the edges as `overlay`s,
+///   no matter how much is hung there it can't move the ring. The middle clock was originally a
+///   by-product of "moving the top-right system clock in", and now that the system clock is hidden with
+///   `.persistentSystemOverlays(.hidden)`, this line only takes up space.
+/// * **The middle no longer says "ready".** That line is redundant now: while idle the whole ring slowly rotates
+///   (see `WatchRingControl.idleRing`); "it's moving" is itself the standby signal,
+///   clearer than four characters and it takes no room. Only a microphone is left in the middle.
+/// * **The pending list shrinks from a long column to a thin hint at the bottom**, tap through to a separate page for details.
+///   That list used to be squeezed in below the ring, and the idle ring already reaches nearly to the screen edge, so the moment something
+///   is pending it shoves the ring off -- and "just finished recording" is exactly when the pending list is fullest.
 struct WatchRecorderView: View {
     @EnvironmentObject private var model: WatchRecorderModel
     /// Transfer state is read straight off the link rather than snapshotted
@@ -48,6 +40,12 @@ struct WatchRecorderView: View {
     /// the UI must update immediately, and `WatchRingControl` is a plain `View`,
     /// so SwiftUI would not know to redraw (same pitfall as the top of `RecorderAliasStore`).
     @ObservedObject private var styleStore = WatchRingStyleStore.shared
+    /// Shake toggle. It needs observing too: flip it in the settings page and this page has to start/stop sampling immediately.
+    @ObservedObject private var prefs = WatchRecordingPrefs.shared
+    /// ⚠️ It has to be `@State`, not `let`: this `View` struct is re-constructed on every redraw,
+    /// and a `let` would create a fresh detector every time (the sampler gets swapped out the moment it starts, so it never takes effect).
+    /// `@State` keeps it in SwiftUI's storage and initializes it only once.
+    @State private var shake = WatchShakeDetector()
 
     /// Usable length of one side of the watch face: the actual screen width minus a 6pt inset on each side.
     ///
@@ -69,42 +67,18 @@ struct WatchRecorderView: View {
     /// Matching the Health app rings' "almost touching the screen edge" look.
     private static let recordingRingFraction: CGFloat = 0.90
 
-    /// Diameter of the corner buttons. Scaled to the screen width, **never hard-coded**.
-    ///
-    /// ★ 2026-10-15 revision three: originally hard-coded at 30pt; the user reported "the menu bar is too small right now".
-    /// 0.22 × dialSide ⇒ 40mm ≈ 34pt / 45mm ≈ 42pt / 49mm Ultra ≈ 44pt ——
-    /// On bigger watches the buttons grow too, instead of being the same small size on all four watch sizes.
-    private static var cornerSize: CGFloat { (dialSide * 0.22).rounded() }
-
-    /// Distance from the corner buttons to the screen edge, also scaled to the screen width,
-    /// so "how far the buttons sit from the edge" looks the same on every watch.
-    private static var cornerInset: CGFloat { (dialSide * 0.035).rounded() }
-
     var body: some View {
-        ScrollView {
-            VStack(spacing: 2) {
-                clock
-                dial
-
-                if model.isRecording {
-                    Text(WatchFormat.bytes(model.currentBytes))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-
-                if !model.pending.isEmpty { pendingList }
-            }
-            .padding(.horizontal, 3)
-            .padding(.bottom, 4)
+        ZStack {
+            dial
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .bottom) { queueBar }
         // The "Watch" title line at the top is gone: the ring is this page's title.
-        // What's hidden is **this page's** navigation bar; the 4 pushed sub-pages have their own bars and back buttons.
+        // What's hidden is **this page's** navigation bar; the pushed sub-pages have their own bars and back buttons.
         //
         // ⚠️ You need both: `.toolbar(.hidden, for: .navigationBar)` hides the navigation bar itself,
         // and `.persistentSystemOverlays(.hidden)` hides **the watchOS system clock
-        // layered on top of everything** (what the user means by "the time in the top-right") -- the system clock isn't part of the navigation bar,
-        // so hiding only the navigation bar won't necessarily take it with it.
+        // clock** -- the system clock isn't part of the navigation bar; hiding only the navigation bar won't necessarily take it along.
         .toolbar(.hidden, for: .navigationBar)
         .persistentSystemOverlays(.hidden)
         .alert(
@@ -119,38 +93,20 @@ struct WatchRecorderView: View {
         } message: { message in
             Text(message)
         }
-    }
-
-    // MARK: - The time at the top
-
-    /// Current time. This is the line at the top of the Health app's activity-ring page.
-    ///
-    /// ★ 2026-10-15 revision three: the user asked to "remove the time in the top-right and show the time in the middle" --
-    /// the top-right one is the **watchOS system clock** (see the
-    /// `.persistentSystemOverlays(.hidden)` in `body`); this line is the one we draw ourselves in the middle.
-    /// The font size went from 20 to 23 too: the same order as that line in the Health app, heavy enough to hold its own below the ring.
-    ///
-    /// ⚠️ The outer `.frame(maxWidth: .infinity)` is there to **pin the centering**:
-    /// this page's `ScrollView` content width is exactly the screen width; without the frame,
-    /// the moment the content overflows, the time gets pushed off-center along with it.
-    ///
-    /// Use `TimelineView(.everyMinute)` instead of spinning up a `Timer`: it only
-    /// redraws once when the minute ticks over, a negligible cost; `Text(_:style:.time)` follows
-    /// the locale `LocalizedWatchRoot` injects, so 12/24-hour format follows the language.
-    private var clock: some View {
-        TimelineView(.everyMinute) { context in
-            Text(context.date, style: .time)
-                .font(.system(size: 23, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(Color(white: 0.92))
-        }
-        .frame(maxWidth: .infinity)
+        .onAppear { syncShakeDetector() }
+        // Stop sampling when leaving this page: keeping the accelerometer on is a big line on the battery bill,
+        // and this page only comes to the foreground when you raise your wrist.
+        .onDisappear { shake.stop() }
+        .onChange(of: prefs.shakeToRecord) { _, _ in syncShakeDetector() }
     }
 
     // MARK: - The ring + the four corners
 
     /// The ring as one piece. While recording the ring steps up a size and the corner buttons vanish entirely, all inside the same spring
     /// transition -- "recording has started" is visible in the geometry too.
+    ///
+    /// ⚠️ A fixed `side × side` box, so the four dots' relative positions don't change with screen size;
+    /// the full-screen `ZStack` outside is what pins it dead center.
     private var dial: some View {
         let side = Self.dialSide
         let fraction: CGFloat = model.isRecording
@@ -160,12 +116,17 @@ struct WatchRecorderView: View {
             WatchRingControl(
                 isRecording: model.isRecording,
                 elapsed: model.elapsed,
+                detail: model.isRecording ? WatchFormat.bytes(model.currentBytes) : nil,
                 style: styleStore.style,
                 onToggle: model.toggleRecording
             )
+            // Do the corner buttons change size with the recording state too? No -- they only exist while idle,
+            // and the idle ring is fixed at 0.74; the two were aligned at that setting to begin with.
             .frame(width: side * fraction, height: side * fraction)
 
-            if !model.isRecording { corners.transition(.opacity) }
+            if !model.isRecording {
+                corners.transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
         }
         .frame(width: side, height: side)
         .animation(.spring(response: 0.4, dampingFraction: 0.72), value: model.isRecording)
@@ -187,6 +148,17 @@ struct WatchRecorderView: View {
         }
         .padding(Self.cornerInset)
     }
+
+    /// Diameter of the corner buttons. Scaled to the screen width, **never hard-coded**.
+    ///
+    /// ★ 2026-10-15 revision three: originally hard-coded at 30pt; the user reported "the menu bar is too small right now".
+    /// 0.22 × dialSide ⇒ 40mm ≈ 34pt / 45mm ≈ 42pt / 49mm Ultra ≈ 44pt ——
+    /// On bigger watches the buttons grow too, instead of being the same small size on all four watch sizes.
+    private static var cornerSize: CGFloat { (dialSide * 0.22).rounded() }
+
+    /// Distance from the corner buttons to the screen edge, also scaled to the screen width,
+    /// so "how far the buttons sit from the edge" looks the same on every watch.
+    private static var cornerInset: CGFloat { (dialSide * 0.035).rounded() }
 
     /// A corner dot. **One tap pushes a separate page** (not an inline menu bar).
     ///
@@ -220,46 +192,103 @@ struct WatchRecorderView: View {
         return cs[index % cs.count]
     }
 
-    // MARK: - Pending list
+    // MARK: - The pending hint bar
 
-    private var pendingList: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(L10n.Watch.pendingHeader)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    /// The thin hint at the very bottom of the screen. **Only appears when something is pending**, about one line of text tall.
+    ///
+    /// Why collapse it into one bar: the idle ring takes 0.74 of the screen width, leaving only about thirty pt below it to the bottom of the screen,
+    /// which is exactly where the bottom half of the corner buttons sits. Laying the old pending list out here pushed the ring up
+    /// (user: "the transfers below aren't centered"), and covering the dots would block taps. A single hint bar,
+    /// with details on a separate page, and none of the three conflict.
+    @ViewBuilder
+    private var queueBar: some View {
+        if !model.pending.isEmpty {
+            NavigationLink {
+                WatchQueueView()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.up.circle.fill")
+                    Text(L10n.Watch.pendingCount(model.pending.count))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(styleStore.style.palette.solid)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Color.white.opacity(0.12)))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, 2)
+            .accessibilityLabel(L10n.Watch.pendingHeader)
+        }
+    }
+
+    // MARK: - Shake
+
+    /// Line the sampling state up with the current toggle. **Idempotent** -- called blindly from both `onAppear` and the toggle change.
+    private func syncShakeDetector() {
+        guard prefs.shakeToRecord else {
+            shake.stop()
+            return
+        }
+        shake.start { [model] in
+            // Fire a haptic on trigger: at that moment nobody is looking at the screen (raising the wrist is the shake),
+            // so without feedback you can't tell whether it actually started recording. Two different feels, "start/stop",
+            // let the haptic alone tell start from stop.
+            WKInterfaceDevice.current().play(model.isRecording ? .stop : .start)
+            model.toggleRecording()
+        }
+    }
+}
+
+// MARK: - The pending page
+
+/// The separate page for the pending list (reached by tapping the hint at the bottom of the home screen).
+///
+/// Splitting it off from the home screen is the price of "don't wobble": there's quite a lot to show there
+/// (each item's name, size, state, retry, delete), and cramming it into the home screen would push the ring off.
+struct WatchQueueView: View {
+    @EnvironmentObject private var model: WatchRecorderModel
+    @EnvironmentObject private var link: WatchLink
+
+    var body: some View {
+        List {
             ForEach(model.pending) { clip in
                 // Queued or delivered-but-unconfirmed both read as "in flight";
                 // only a clip with neither state needs the retry affordance.
                 let isQueued = link.queuedNames.contains(clip.name)
                     || link.deliveredNames.contains(clip.name)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(clip.displayTitle)
-                                .font(.caption2)
-                                .lineLimit(1)
-                            Text("\(isQueued ? L10n.Watch.sending : L10n.Watch.waiting) · \(WatchFormat.bytes(clip.bytes))")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(clip.displayTitle)
+                        .font(.caption2)
+                        .lineLimit(2)
+                    Text("\(isQueued ? L10n.Watch.sending : L10n.Watch.waiting) · \(WatchFormat.bytes(clip.bytes))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
                         if !isQueued {
                             Button { model.retry(clip) } label: {
-                                Image(systemName: "arrow.clockwise")
+                                Label(L10n.Common.retry, systemImage: "arrow.clockwise")
+                                    .labelStyle(.iconOnly)
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(L10n.Common.retry)
                         }
                         Button(role: .destructive) { model.delete(clip) } label: {
-                            Image(systemName: "trash")
+                            Label(L10n.Common.delete, systemImage: "trash")
+                                .labelStyle(.iconOnly)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(L10n.Common.delete)
                     }
-                    Divider()
                 }
             }
         }
+        .navigationTitle(L10n.Watch.pendingHeader)
     }
 }
 

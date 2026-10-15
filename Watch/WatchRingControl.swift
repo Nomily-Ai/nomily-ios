@@ -17,12 +17,25 @@ import SwiftUI
 /// is still running, which is the question a wrist recorder actually has to
 /// answer.
 ///
-/// ★ 2026-10-15: color selection is now driven by `style` (the user can adjust color / gradient /
-/// breathing light directly on the watch face, see `WatchRingStyle.swift`). **None of the three animation semantics above changed** --
-/// they are function, not skin; a skin may only change "which colors are used" and the look of the center disc.
+/// ★ Fourth revision, 2026-10-15 (user's words: "for now don't just have a plain 'get ready to record' in the middle, have it turn
+/// automatically with the ring even when recording isn't tapped"):
+///
+/// * **The ring turns while idle too** — the whole circle slowly rotates through the current gradient (one lap in 14 seconds). Previously the idle state
+///   was a neutral grey circle with a dead ring, and that middle "ready" line was the only source of information;
+///   now "the ring is moving" itself says it's standing by, so that line can go.
+/// * **The middle lost the "ready" text**, leaving just a microphone; while recording the same spot becomes a stop square,
+///   and the timer and byte count are demoted to a small line at the bottom of the disc. The icon is **always pinned to the disc's centre** and never
+///   moves in either state — the user explicitly asked for "it needs to be centred, don't let it wobble".
+/// * Idle vs recording is now distinguished by **brightness and moving things** (a slow-turning gradient at 0.55 opacity
+///   vs full brightness + progress arc + comet + ripples), no longer by "is there any colour".
 struct WatchRingControl: View {
     let isRecording: Bool
     let elapsed: TimeInterval
+    /// The small line at the bottom of the disc while recording (currently the bytes written). Hidden when idle.
+    ///
+    /// Passed in rather than computed here: this page's purpose is "the state of this recording", and the byte count
+    /// belongs to the recording pipeline; the skin layer shouldn't be asking for it.
+    let detail: String?
     /// The appearance the user chose. Provided by `WatchRingStyleStore`; redraws immediately on change.
     let style: WatchRingStyle
     let onToggle: () -> Void
@@ -35,6 +48,9 @@ struct WatchRingControl: View {
     /// Whether the comet is mid-lap. Flipped once, animated forever — see
     /// `startSpin()`.
     @State private var spin: Bool = false
+    /// Whether the idle whole-circle gradient is rotating. Same playbook as `spin`: one flip +
+    /// `repeatForever`, after which the render server interpolates for free, at zero cost to the app.
+    @State private var idleSpin: Bool = false
     /// One-shot ring flash fired on start. Two plain numbers rather than a
     /// repeating animation, so the reset can be made instantaneous and can't
     /// be seen.
@@ -61,6 +77,9 @@ struct WatchRingControl: View {
     private static let lapWidth: CGFloat = 6
     private static let gap: CGFloat = 6
     private static let cometDuration: Double = 2.4
+    /// How long the idle gradient takes for one lap. Deliberately **slow**: it wants "alive", not "busy".
+    /// 8 seconds looks like loading; 14 seconds looks like breathing.
+    private static let idleSpinDuration: Double = 14
     /// How long one ripple takes from birth to fading out; the three waves are offset by a 1/3 phase.
     private static let rippleDuration: Double = 1.9
 
@@ -68,10 +87,13 @@ struct WatchRingControl: View {
     private var lapInset: CGFloat { Self.progressWidth + Self.gap + Self.lapWidth / 2 }
     private var discInset: CGFloat { Self.progressWidth + Self.gap + Self.lapWidth + Self.gap + 4 }
 
-    /// When not recording it is neutral gray -- so "gray / colored" itself serves as the
-    /// first-glance indicator of "is it recording", and no color the user picks can cover it.
+    /// The accent colour used while recording (progress arc, comet, centre stroke).
+    ///
+    /// The idle state is **no longer** neutral grey (the user wanted "the ring to turn even when recording isn't tapped", and a grey ring
+    /// doesn't look like it's turning). Idle vs recording is now carried by `idleRing`'s opacity, the presence or absence of
+    /// comet/ripples, and the centre icon.
     private var accent: Color {
-        isRecording ? style.palette.solid : Color(white: 0.52)
+        isRecording ? style.palette.solid : Color(white: 0.72)
     }
 
     /// The outer ring's gradient while recording. The colour logic moved into `WatchRingStyle.ringAngularGradient`
@@ -102,6 +124,7 @@ struct WatchRingControl: View {
             ZStack {
                 ripples
                 burstRing
+                idleRing
                 progressRing
                 lapRing
                 comet
@@ -120,6 +143,7 @@ struct WatchRingControl: View {
                 startSpin()
                 startRipples()
             }
+            startIdleSpin()
             syncBreathing()
         }
         .onChange(of: isRecording) { _, recording in
@@ -127,9 +151,11 @@ struct WatchRingControl: View {
                 fireBurst()
                 startSpin()
                 startRipples()
+                stopIdleSpin()
             } else {
                 stopSpin()
                 stopRipples()
+                startIdleSpin()
             }
         }
         .onChange(of: style.breathing) { _, _ in syncBreathing() }
@@ -138,10 +164,13 @@ struct WatchRingControl: View {
                 stopSpin()
                 stopBreathing()
                 stopRipples()
+                stopIdleSpin()
             } else {
                 if isRecording {
                     startSpin()
                     startRipples()
+                } else {
+                    startIdleSpin()
                 }
                 syncBreathing()
             }
@@ -150,20 +179,40 @@ struct WatchRingControl: View {
 
     // MARK: - rings
 
+    /// The idle circle: the whole ring takes its colour from the current gradient and **slowly rotates**.
+    ///
+    /// What rotates is **the view with the gradient already painted** (the whole thing turns via `rotationEffect`), so "colours moving
+    /// around the ring" and "the colour rules" are decoupled — swapping palettes or turning the gradient off needs no change here.
+    ///
+    /// ⚠️ Only this "whole-circle stroke" layer rotates, **not** `progressRing`: that arc's position is precisely
+    /// "how much of this minute has passed", and rotating it would be a lie.
+    private var idleRing: some View {
+        Circle()
+            .inset(by: progressInset)
+            .stroke(ringGradient, style: StrokeStyle(lineWidth: Self.progressWidth, lineCap: .round))
+            .rotationEffect(.degrees(idleSpin ? 360 : 0))
+            // Dim it further when the always-on face darkens, so it doesn't grab attention while you raise your wrist to check the time.
+            .opacity(isRecording ? 0 : (dimmed ? 0.34 : 0.58))
+            .animation(.easeInOut(duration: 0.3), value: isRecording)
+    }
+
     /// The minute gauge: a faint track with a growing arc over it.
     private var progressRing: some View {
         ZStack {
+            // The track only shows while recording: the idle circle is drawn by `idleRing` (in colour),
+            // and two full circles of the same radius stacked up would muddy the colours underneath.
             Circle()
                 .inset(by: progressInset)
-                .stroke(accent.opacity(isRecording ? 0.16 : 0.12),
+                .stroke(accent.opacity(0.16),
                         style: StrokeStyle(lineWidth: Self.progressWidth, lineCap: .round))
+                .opacity(isRecording ? 1 : 0)
 
             Circle()
                 .inset(by: progressInset)
                 .trim(from: 0, to: minuteLap)
                 .stroke(ringGradient, style: StrokeStyle(lineWidth: Self.progressWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .shadow(color: accent.opacity(isRecording ? 0.55 : 0), radius: 4)
+                .shadow(color: style.palette.solid.opacity(isRecording ? 0.55 : 0), radius: 4)
         }
         // One update per second, smeared into motion: the recorder's timer
         // stays at 1 Hz instead of driving the render loop, and the hand still
@@ -321,24 +370,43 @@ struct WatchRingControl: View {
                 .inset(by: discInset)
                 .stroke(accent.opacity(isRecording ? 0.40 : 0.16), lineWidth: 1)
 
-            VStack(spacing: 1) {
-                Image(systemName: isRecording ? "stop.fill" : "mic.fill")
-                    .font(.system(size: 26, weight: .semibold))
-                    // White text + a little black shadow: the center is now colored, and using `accent` would
-                    // collide with the base color while recording (the old green collided because it was itself a green ring).
-                    .foregroundStyle(Color(white: 0.96))
-                    .shadow(color: .black.opacity(0.45), radius: 2, y: 1)
-                    .contentTransition(.symbolEffect(.replace))
+            // ★ The icon is **always pinned to the disc's centre**, not laid out in a VStack with the timer.
+            //
+            // The user's words: "when recording is tapped the icon centres itself, and when it isn't it also needs to be centred,
+            // don't let it wobble". Laid out as a VStack, idle shows only the icon (centred), while recording adds
+            // the timer line below it, pushing the icon up by about 8pt overall — and on a 40mm watch that
+            // is a visible jump. Pinned to the ZStack centre, there's no such problem.
+            Image(systemName: isRecording ? "stop.fill" : "mic.fill")
+                .font(.system(size: 28, weight: .semibold))
+                // White text + a little black shadow: the center is now colored, and using `accent` would
+                // collide with the base color while recording (the old green collided because it was itself a green ring).
+                .foregroundStyle(Color(white: 0.96))
+                .shadow(color: .black.opacity(0.45), radius: 2, y: 1)
+                .contentTransition(.symbolEffect(.replace))
 
-                Text(isRecording ? WatchFormat.compactDuration(elapsed) : L10n.Watch.ready)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(isRecording ? Color(white: 0.96) : Color(white: 0.72))
-                    .shadow(color: .black.opacity(0.45), radius: 2, y: 1)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+            // The timer and byte count are demoted to **a small line at the bottom of the disc** (where "ready" used to be).
+            // The whole block is absent when idle — the user explicitly asked not to have that "get ready to record" text in the middle,
+            // and "the ring turning + a microphone" already makes "standing by" clear.
+            if isRecording {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    Text(WatchFormat.compactDuration(elapsed))
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(Color(white: 0.96))
+                    if let detail {
+                        Text(detail)
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(Color(white: 0.72))
+                    }
+                }
+                .padding(.bottom, discInset * 0.55)
+                .shadow(color: .black.opacity(0.45), radius: 2, y: 1)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .transition(.opacity)
             }
-            .padding(.horizontal, 6)
         }
     }
 
@@ -360,6 +428,27 @@ struct WatchRingControl: View {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) { spin = false }
+    }
+
+    /// Starts the idle gradient rotating. Same reason as `startSpin`: one flip + `repeatForever`,
+    /// after which every frame is interpolated by the render server, with no further cost on the app side.
+    ///
+    /// ⚠️ It must start a new round only **after returning to 0**. Leaving `idleSpin` at true straight from true
+    /// produces no animation (the value didn't change), and when recording ends and it returns to idle it happens to be false,
+    /// so all that's needed here is re-entrancy protection.
+    private func startIdleSpin() {
+        guard !dimmed, !isRecording, !idleSpin else { return }
+        withAnimation(.linear(duration: Self.idleSpinDuration).repeatForever(autoreverses: false)) {
+            idleSpin = true
+        }
+    }
+
+    private func stopIdleSpin() {
+        // Same as `stopSpin`: with animation off, snap straight to zero, otherwise you'd see the ring spin **backwards** to its start.
+        guard idleSpin else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { idleSpin = false }
     }
 
     /// Decides from the current rhythm whether breathing runs or stops. **Idempotent** -- safe to call blindly from

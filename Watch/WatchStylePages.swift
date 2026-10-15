@@ -125,12 +125,13 @@ struct WatchBreathingStyleView: View {
 
 // MARK: - Settings
 
-/// Settings page: version + restore default appearance.
+/// Settings page: version + shake toggle + restore default appearance.
 ///
 /// The build number still doubles as "did the build I just made actually reach the watch" — watch updates are pushed opportunistically by the iPhone,
 /// lagging the iPhone's install by several minutes (see the note at the top of `WatchAboutView`).
 struct WatchSettingsView: View {
     @ObservedObject private var store = WatchRingStyleStore.shared
+    @ObservedObject private var prefs = WatchRecordingPrefs.shared
 
     var body: some View {
         List {
@@ -140,6 +141,18 @@ struct WatchSettingsView: View {
                 Text(WatchAboutView.appVersion)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+            }
+
+            // ★ Shake. Flipping the toggle notifies the home screen via `WatchRecordingPrefs`
+            // to start/stop capture (the home screen holds it as an `@ObservedObject`) —
+            // no CoreMotion gets touched here.
+            Toggle(isOn: $prefs.shakeToRecord) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(L10n.Watch.shakeToRecord)
+                    Text(L10n.Watch.shakeToRecordHint)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Button {
@@ -155,6 +168,7 @@ struct WatchSettingsView: View {
             .buttonStyle(.plain)
             // Resets only the appearance (color / gradient / breathing light), leaving language and recordings untouched —
             // so no confirmation is needed; picking the wrong color again is easy enough.
+            // (The shake toggle is therefore deliberately not in this store either; see `WatchRecordingPrefs`.)
         }
         .navigationTitle(L10n.Watch.menuSettings)
     }

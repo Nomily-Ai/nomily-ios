@@ -475,11 +475,11 @@
 "devices.auto_reconnect" = "自动重连";
 "devices.auto_reconnect_footer" = "开启后，设备意外断开（例如关机后再开机）时，App 会自动重连最近使用的设备。关闭后需手动点击顶部的连接标识重连。";
 "clip_detail.delete_audio" = "删除音频";
-"clip_detail.delete_audio_message" = "仅删除音频文件，转录与摘要会保留。此操作不可撤销。";
+"clip_detail.delete_audio_message" = "音频文件会先移到「回收站」，转录与摘要保留，30 天内可以恢复。";
 "clip_detail.delete_transcript" = "删除转录";
-"clip_detail.delete_transcript_message" = "删除转录文本及其翻译，音频与摘要会保留。此操作不可撤销。";
+"clip_detail.delete_transcript_message" = "转录文本及其翻译会先移到「回收站」，音频与摘要保留，30 天内可以恢复。";
 "clip_detail.delete_summary" = "删除摘要";
-"clip_detail.delete_summary_message" = "删除摘要及其翻译，音频与转录会保留。此操作不可撤销。";
+"clip_detail.delete_summary_message" = "摘要及其翻译会先移到「回收站」，音频与转录保留，30 天内可以恢复。";
 "clip_detail.delete_independent_footer" = "音频、转录、摘要各自独立删除——删除其中一项不会影响其余两项。";
 "devices.clear_transcripts" = "清除转录";
 "devices.clear_transcripts_message" = "删除所有转录文本及其翻译，音频与摘要会保留。此操作不可撤销。";
@@ -521,7 +521,7 @@
 "library.export_failed" = "导出失败";
 "library.export_empty" = "没有可导出的内容。";
 "library.delete_selected_title" = "删除选中的录音？";
-"library.delete_selected_message" = "将删除 %d 条录音的音频、转录与摘要，无法撤销。";
+"library.delete_selected_message" = "%d 条录音的音频、转录与摘要会先移到「回收站」，30 天内可以恢复。";
 "library.deleting" = "正在删除…";
 "library.delete_failed" = "删除失败";
 "library.search_prompt" = "搜索转录与摘要";
@@ -548,6 +548,9 @@
 "watch.mic_denied" = "请在设置中允许使用麦克风。";
 "watch.record_failed" = "无法开始录音：%@";
 "watch.pending_header" = "等待同步到 iPhone";
+"watch.pending_count" = "%d 项待传";
+"watch.shake_to_record" = "摇一摇开始录音";
+"watch.shake_to_record_hint" = "用力晃动手腕开始，再晃一下停止";
 "watch.sending" = "正在发送…";
 "watch.waiting" = "尚未发送";
 "watch.style_color" = "颜色";
@@ -895,3 +898,24 @@
 "template_desc.email_thread_summary" = "快速梳理多封邮件往来的起因、过程与最终结论";
 "template_desc.long_article_to_slide_deck_outline" = "根据长篇文章或报告，快速生成演示文稿的结构大纲";
 "template_desc.turning_scattered_notes_into_a_to_do_list" = "从零散的随手笔记中，梳理出明确的任务清单";
+
+/* ── 回收站（2026-10-15 新增）──────────────────────────────────────── */
+"trash.title" = "回收站";
+"trash.settings_row" = "回收站";
+"trash.empty_title" = "没有已删除的录音";
+"trash.empty_message" = "删除的录音会先放在这里保留 30 天，随时可以恢复。";
+"trash.retention_footer" = "这里的条目保留 %d 天，到期自动删除。";
+"trash.days_left" = "还剩 %d 天";
+"trash.deleted_on" = "删除于";
+"trash.restore" = "恢复";
+"trash.delete_forever" = "立即删除";
+"trash.delete_forever_title" = "立即删除？";
+"trash.delete_forever_message" = "这条会被彻底删除，无法恢复。";
+"trash.empty_all" = "全部删除";
+"trash.empty_all_title" = "清空回收站？";
+"trash.empty_all_message" = "这 %d 条会被彻底删除，无法恢复。";
+"trash.restore_failed_title" = "恢复失败";
+"trash.restore_failed_message" = "这条的文件已经不在回收站里了。";
+"trash.artefact_audio" = "音频";
+"trash.artefact_transcript" = "转录";
+"trash.artefact_summary" = "摘要";

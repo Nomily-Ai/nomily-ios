@@ -437,7 +437,7 @@ enum L10n {
             String(
                 format: NSLocalizedString(
                     "library.delete_selected_message",
-                    value: "Audio, transcript and summary for %d clip(s) will be deleted. This can't be undone.",
+                    value: "Audio, transcript and summary for %d clip(s) move to Recently Deleted. You can recover them for 30 days.",
                     comment: "Confirmation body for bulk delete"
                 ),
                 count
@@ -598,6 +598,110 @@ enum L10n {
         }
     }
 
+    // MARK: - Trash
+    //
+    // ★ 2026-10-15: The user asked for "a trash feature in Settings to protect against accidental deletion,
+    // with a 30-day protection period and automatic deletion after 30 days". It lives in the phone app's Settings —
+    // deletion already happens on the phone (multi-select delete in the library, delete on the detail page), and only here
+    // does it cover every entry point.
+    //
+    // ⚠️ Again always `static var` + `value:` inline English fallback.
+    enum Trash {
+        /// Title of the row in Settings, and also the trash page's navigation title.
+        static var title: String {
+            NSLocalizedString("trash.title", value: "Recently Deleted",
+                              comment: "Settings row + page title for the recycle bin")
+        }
+        /// The Settings row title. Kept separate from `title` so the Chinese can write "trash" out in full,
+        /// while the page title can be a bit longer — they currently share the same value, but the seam is kept.
+        static var settingsRow: String {
+            NSLocalizedString("trash.settings_row", value: "Recently Deleted", comment: "")
+        }
+        static var emptyTitle: String {
+            NSLocalizedString("trash.empty_title", value: "Nothing Deleted", comment: "")
+        }
+        static var emptyMessage: String {
+            NSLocalizedString("trash.empty_message",
+                              value: "Recordings you delete are kept here first.",
+                              comment: "Empty state for the recycle bin")
+        }
+        /// The protection-period note at the bottom of the page.
+        static func retentionFooter(_ days: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "trash.retention_footer",
+                    value: "Items are kept for %d days, then deleted automatically.",
+                    comment: "Recycle bin footer explaining the retention window"
+                ),
+                days
+            )
+        }
+        /// The "days remaining" on each row.
+        static func daysLeft(_ days: Int) -> String {
+            String(
+                format: NSLocalizedString("trash.days_left", value: "%d days left",
+                                          comment: "Recycle bin row: time before auto-delete"),
+                days
+            )
+        }
+        /// "Deleted on" (followed by the date).
+        static var deletedOn: String {
+            NSLocalizedString("trash.deleted_on", value: "Deleted",
+                              comment: "Prefix before the deletion date on a trash row")
+        }
+        static var restore: String {
+            NSLocalizedString("trash.restore", value: "Recover", comment: "Swipe action")
+        }
+        static var deleteForever: String {
+            NSLocalizedString("trash.delete_forever", value: "Delete Now",
+                              comment: "Swipe action: remove from the recycle bin for good")
+        }
+        static var deleteForeverTitle: String {
+            NSLocalizedString("trash.delete_forever_title", value: "Delete Now?",
+                              comment: "Confirmation title for permanently deleting one item")
+        }
+        static var deleteForeverMessage: String {
+            NSLocalizedString("trash.delete_forever_message",
+                              value: "This item will be removed for good. This can't be undone.",
+                              comment: "Confirmation body for permanently deleting one item")
+        }
+        static var emptyAll: String {
+            NSLocalizedString("trash.empty_all", value: "Delete All", comment: "")
+        }
+        static var emptyAllTitle: String {
+            NSLocalizedString("trash.empty_all_title", value: "Empty Recently Deleted?",
+                              comment: "")
+        }
+        static func emptyAllMessage(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "trash.empty_all_message",
+                    value: "%d item(s) will be removed for good. This can't be undone.",
+                    comment: "Confirmation body for emptying the whole recycle bin"
+                ),
+                count
+            )
+        }
+        static var restoreFailedTitle: String {
+            NSLocalizedString("trash.restore_failed_title", value: "Couldn't Recover", comment: "")
+        }
+        static var restoreFailedMessage: String {
+            NSLocalizedString("trash.restore_failed_message",
+                              value: "The files for this item are no longer in Recently Deleted.",
+                              comment: "")
+        }
+        // The small "what's inside" tags on each trash row.
+        static var artefactAudio: String {
+            NSLocalizedString("trash.artefact_audio", value: "Audio", comment: "")
+        }
+        static var artefactTranscript: String {
+            NSLocalizedString("trash.artefact_transcript", value: "Transcript", comment: "")
+        }
+        static var artefactSummary: String {
+            NSLocalizedString("trash.artefact_summary", value: "Summary", comment: "")
+        }
+    }
+
     // MARK: - Apple Watch
     //
     // Also compiled into the watch target — see `project.yml`.
@@ -614,6 +718,33 @@ enum L10n {
         static var pendingHeader: String { NSLocalizedString("watch.pending_header", comment: "") }
         static var sending: String { NSLocalizedString("watch.sending", comment: "") }
         static var waiting: String { NSLocalizedString("watch.waiting", comment: "") }
+        /// The "how many clips haven't been transferred yet" on the thin note at the bottom of the home screen.
+        ///
+        /// ★ Fourth revision, 2026-10-15: the pending-transfer list was collapsed from a long column on the home screen into a single strip at the bottom,
+        /// with details pushed into their own page (otherwise it would shove the ring off-centre; see the top of `WatchRecorderView`).
+        /// So this needs a **short phrase with a number**; `pendingHeader` ("Pending transfer") won't do.
+        static func pendingCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "watch.pending_count", value: "%d to send",
+                    comment: "Watch home: compact pill at the bottom showing how many clips are still uploading"
+                ),
+                count
+            )
+        }
+        /// The "shake to start recording" toggle in Settings.
+        static var shakeToRecord: String {
+            NSLocalizedString("watch.shake_to_record", value: "Shake to Record",
+                              comment: "Watch settings: shake the wrist to start/stop recording")
+        }
+        /// The explanatory line under that toggle.
+        static var shakeToRecordHint: String {
+            NSLocalizedString(
+                "watch.shake_to_record_hint",
+                value: "Shake your wrist to start, shake again to stop",
+                comment: "Watch settings: explains the shake gesture"
+            )
+        }
 
         // MARK: Ring appearance (directly called on the watch face)
         //
@@ -1294,11 +1425,11 @@ enum L10n {
         static var mindMapExpandAll: String { NSLocalizedString("clip_detail.mind_map_expand_all", value: "Expand all", comment: "Toolbar button that opens every folded branch of the mind map") }
         static var mindMapCollapseAll: String { NSLocalizedString("clip_detail.mind_map_collapse_all", value: "Collapse all", comment: "Toolbar button that folds the mind map back to its top-level branches") }
         static var deleteAudio: String { NSLocalizedString("clip_detail.delete_audio", value: "Delete Audio", comment: "Deletes only the audio file, keeping transcript and summary") }
-        static var deleteAudioMessage: String { NSLocalizedString("clip_detail.delete_audio_message", value: "Deletes only the audio file. The transcript and summary are kept. This can't be undone.", comment: "") }
+        static var deleteAudioMessage: String { NSLocalizedString("clip_detail.delete_audio_message", value: "The audio file moves to Recently Deleted. The transcript and summary are kept. You can recover it for 30 days.", comment: "") }
         static var deleteTranscript: String { NSLocalizedString("clip_detail.delete_transcript", value: "Delete Transcript", comment: "Deletes only the transcript, keeping audio and summary") }
-        static var deleteTranscriptMessage: String { NSLocalizedString("clip_detail.delete_transcript_message", value: "Deletes the transcript and its translation. The audio and summary are kept. This can't be undone.", comment: "") }
+        static var deleteTranscriptMessage: String { NSLocalizedString("clip_detail.delete_transcript_message", value: "The transcript and its translation move to Recently Deleted. The audio and summary are kept. You can recover them for 30 days.", comment: "") }
         static var deleteSummary: String { NSLocalizedString("clip_detail.delete_summary", value: "Delete Summary", comment: "Deletes only the summary, keeping audio and transcript") }
-        static var deleteSummaryMessage: String { NSLocalizedString("clip_detail.delete_summary_message", value: "Deletes the summary and its translation. The audio and transcript are kept. This can't be undone.", comment: "") }
+        static var deleteSummaryMessage: String { NSLocalizedString("clip_detail.delete_summary_message", value: "The summary and its translation move to Recently Deleted. The audio and transcript are kept. You can recover them for 30 days.", comment: "") }
         static var deleteIndependentFooter: String { NSLocalizedString("clip_detail.delete_independent_footer", value: "Audio, transcript and summary are deleted independently — removing one leaves the others untouched.", comment: "") }
         static func speaker(_ id: String) -> String {
             String(format: NSLocalizedString("clip_detail.speaker", comment: ""), id)
