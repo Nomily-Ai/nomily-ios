@@ -784,18 +784,9 @@ private struct LiveContent: View {
 private func buildLibraryItem(for name: String) -> LibraryItem? {
     let url = StorageLocations.decryptedDir.appendingPathComponent(name)
     guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-    let attrs = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-    let size = Int64(attrs?.fileSize ?? 0)
-    let mtime = attrs?.contentModificationDate ?? Date()
-    let txt = StorageLocations.transcriptURLs(for: name).txt
-    let hasTranscript = FileManager.default.fileExists(atPath: txt.path)
     let duration: Double? = url.pathExtension.lowercased() == "opus"
         ? OpusOgg.duration(ofOggOpusAt: url) : nil
-    let titleURL = StorageLocations.titleURL(for: name)
-    let customTitle: String? = (try? String(contentsOf: titleURL, encoding: .utf8))
-        .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-    return LibraryItem(name: name, url: url, size: size, modifiedAt: mtime,
-                       duration: duration, hasTranscript: hasTranscript, customTitle: customTitle)
+    return LibraryItem.readFromDisk(name: name, duration: duration)
 }
 
 // MARK: - Bilingual row

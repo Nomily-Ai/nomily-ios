@@ -386,6 +386,106 @@ enum L10n {
         }
         static let recordedOnWatch = NSLocalizedString("library.recorded_on_watch", comment: "")
 
+        // MARK: Multi-select / batch actions / knowledge base search
+        //
+        // ★ 2026-10-15: The user asked for "long-press selection in the library, with batch export or deletion;
+        // plus a knowledge-base search over items already transcribed to text or with a generated summary".
+        //
+        // ⚠️ Same as the source identifier below: always `static var` (runtime language switching) + `value:` inline
+        // English fallback (the .lproj files only cover en / zh-Hans; the other 9 languages rely on it to keep
+        // raw key literals from leaking into the UI).
+        /// The button that enters multi-select mode.
+        static var select: String {
+            NSLocalizedString("library.select", value: "Select", comment: "Toolbar button: enter multi-select")
+        }
+        static var selectAll: String {
+            NSLocalizedString("library.select_all", value: "Select All", comment: "Multi-select: select every clip")
+        }
+        static var deselectAll: String {
+            NSLocalizedString("library.deselect_all", value: "Deselect All", comment: "Multi-select: clear the selection")
+        }
+        static func selectedCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "library.selected_count", value: "%d selected",
+                    comment: "Multi-select: how many clips are ticked"
+                ),
+                count
+            )
+        }
+        static var export: String {
+            NSLocalizedString("library.export", value: "Export", comment: "Multi-select: export the ticked clips")
+        }
+        static var exportPreparing: String {
+            NSLocalizedString("library.export_preparing", value: "Preparing export…",
+                              comment: "Shown while staging files for the share sheet")
+        }
+        static var exportFailed: String {
+            NSLocalizedString("library.export_failed", value: "Export Failed", comment: "")
+        }
+        /// Select-all produced nothing to copy (every selected file happened to vanish). Should be unreachable,
+        /// but there **must** be a string for it: otherwise this branch would pop "Export failed" up as the **body**.
+        static var exportEmpty: String {
+            NSLocalizedString("library.export_empty", value: "Nothing to export.",
+                              comment: "Bulk export produced no files at all")
+        }
+        static var deleteSelectedTitle: String {
+            NSLocalizedString("library.delete_selected_title", value: "Delete Selected Clips?",
+                              comment: "Confirmation title for bulk delete")
+        }
+        static func deleteSelectedMessage(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "library.delete_selected_message",
+                    value: "Audio, transcript and summary for %d clip(s) will be deleted. This can't be undone.",
+                    comment: "Confirmation body for bulk delete"
+                ),
+                count
+            )
+        }
+        static var deleting: String {
+            NSLocalizedString("library.deleting", value: "Deleting…", comment: "Bulk delete in progress")
+        }
+        static var deleteFailed: String {
+            NSLocalizedString("library.delete_failed", value: "Delete Failed", comment: "")
+        }
+        /// Placeholder in the search field. Deliberately omits the word "search" — the prompt must say **what range is being searched**.
+        static var searchPrompt: String {
+            NSLocalizedString("library.search_prompt", value: "Transcripts & summaries",
+                              comment: "Search field placeholder — says what is searched, not just 'Search'")
+        }
+        static var searchScopeKnowledge: String {
+            NSLocalizedString("library.search_scope_knowledge", value: "Knowledge",
+                              comment: "Search scope: only clips that have a transcript or summary")
+        }
+        static var searchScopeAll: String {
+            NSLocalizedString("library.search_scope_all", value: "All",
+                              comment: "Search scope: titles/filenames as well")
+        }
+        static var searchEmptyTitle: String {
+            NSLocalizedString("library.search_empty_title", value: "No Matches", comment: "")
+        }
+        static var searchEmptyMessage: String {
+            NSLocalizedString(
+                "library.search_empty_message",
+                value: "No clip's transcript or summary contains that. Switch to All to search titles too.",
+                comment: "Empty state body for the knowledge search"
+            )
+        }
+        /// Accessibility reading for the "summary generated" badge on a list row.
+        static var hasSummary: String {
+            NSLocalizedString("library.has_summary", value: "Summary", comment: "Badge: clip has a generated summary")
+        }
+        /// Accessibility reading for the "transcription available" badge on a list row.
+        ///
+        /// ★ Added 2026-10-15: that green pill badge has always been there but never had a label —
+        /// VoiceOver read it as just "image", which is as good as unreadable. Once the summary badge was added
+        /// the two sit side by side and a missing label became all the more conspicuous.
+        static var hasTranscript: String {
+            NSLocalizedString("library.has_transcript", value: "Transcript",
+                              comment: "Badge: clip has a transcript")
+        }
+
         // MARK: Source Identifier — 'Who recorded this?' in the list
         //
         // ⚠️ Always use `static var` instead of `static let`: this file supports **runtime language switching**

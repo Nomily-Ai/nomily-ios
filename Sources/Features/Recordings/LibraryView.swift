@@ -1,5 +1,6 @@
 import AVFoundation
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// Library segment of the Recordings tab. Lists every playable clip in
@@ -21,8 +22,42 @@ struct LibraryView: View {
     @State private var showImporter = false
     @State private var importError: String?
     @State private var pendingMerge: MergePair?
-    @State private var isMerging = false
+
+    /// The caption on the overlay shown while busy; `nil` = don't show it.
+    ///
+    /// Merge / export staging / batch delete all share one overlay — each takes anywhere from a few hundred milliseconds
+    /// to tens of seconds (export copies the audio one file at a time), and during that time **taps must be blocked**:
+    /// otherwise the user can tap export again halfway through a delete.
+    @State private var busyMessage: String?
     @State private var mergeError: String?
+    /// Details of a batch-export failure (the title is always `L10n.Library.exportFailed`).
+    ///
+    /// Like `mergeError` / `importError`, this is the "one string is one alert" style:
+    /// the alert title is fixed with `.alert(_:isPresented:)`, so **export and delete must
+    /// be two separate states**, or a failure reason pops up under another action's title.
+    @State private var exportError: String?
+    @State private var deleteError: String?
+
+    // MARK: Multi-select (★ 2026-10-15, user asked for "long-press to select + batch export/delete")
+    //
+    // The structure is **deliberately identical** to `RecorderSheet`'s set (`isSelecting` + `selectedIDs`
+    // + a bottom selectionBar); the only difference is: there it's "transfer the selection", here it's "export/delete the selection".
+    // The same action looks the same on the watch/phone, so the user doesn't have to relearn it.
+    @State private var isSelecting = false
+    @State private var selectedIDs: Set<String> = []
+    @State private var showBatchDeleteConfirm = false
+    /// The target for programmatic navigation. For why **`NavigationLink` isn't used**, see `row(_:)`.
+    @State private var detailItem: LibraryItem?
+
+    // MARK: Knowledge-base search
+    @State private var query = ""
+    @State private var scope: LibrarySearchScope = .knowledge
+    /// `base -> matched snippet`. Empty = not searching, or this entry's body didn't match.
+    @State private var snippets: [String: String] = [:]
+    @State private var isSearching = false
+    /// The top-level export staging directory (the one handed to the system share sheet).
+    @State private var exportURL: URL?
+    @State private var showExportSheet = false
 
     private struct MergePair: Identifiable {
         let older: LibraryItem
@@ -45,31 +80,26 @@ struct LibraryView: View {
                     systemImage: "tray",
                     message: L10n.Recordings.noClipsMessage
                 )
+            } else if isSearchActive, displayedRows.isEmpty, isSearching {
+                // The first search has to read from disk and build the index (a brief moment when the library has hundreds of entries with bodies).
+                // During that time we **must not** report "nothing found" — that's a lie, and the user will think the search is wrong.
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if displayedRows.isEmpty {
+                // Reaching here can only mean "searching but no match" (the library itself is non-empty, see the two branches above).
+                EmptyStateView(
+                    L10n.Library.searchEmptyTitle,
+                    systemImage: "magnifyingglass",
+                    message: L10n.Library.searchEmptyMessage
+                )
             } else {
                 List {
                     Section {
-                        ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
-                            NavigationLink {
-                                ClipDetailView(item: item)
-                            } label: {
-                                LibraryRow(
-                                    item: item,
-                                    source: library.source(forLocalName: item.name)
-                                )
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                if let older = adjacentOlder(at: index) {
-                                    Button {
-                                        pendingMerge = MergePair(older: older, newer: item)
-                                    } label: {
-                                        Label(L10n.Library.merge, systemImage: "arrow.triangle.merge")
-                                    }
-                                    .tint(.indigo)
-                                }
-                            }
+                        ForEach(displayedRows, id: \.element.id) { entry in
+                            row(entry.element, at: entry.offset)
                         }
                     } footer: {
-                        Text(L10n.Recordings.clipCount(model.items.count, formatBytes(model.totalBytes)))
+                        footer
                     }
                 }
                 .environment(\.defaultMinListHeaderHeight, 0)
@@ -83,12 +113,49 @@ struct LibraryView: View {
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidChange)) { _ in
             Task { await model.refresh() }
         }
+        // Knowledge-base search. `.task(id:)` is the key: change the query or the scope and SwiftUI will
+        // **cancel the previous run entirely**, so fast typing doesn't have several rounds of disk reading running at once.
+        .task(id: searchKey) { await runSearch() }
+        .searchable(
+            text: $query,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: Text(L10n.Library.searchPrompt)
+        )
+        .searchScopes($scope) {
+            ForEach(LibrarySearchScope.allCases) { option in
+                Text(option.title).tag(option)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if isSelecting { selectionBar }
+        }
+        .navigationDestination(isPresented: Binding(
+            get: { detailItem != nil },
+            set: { if !$0 { detailItem = nil } }
+        )) {
+            if let detailItem { ClipDetailView(item: detailItem) }
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button { showImportConfirm = true } label: {
-                    Image(systemName: "square.and.arrow.down")
+                if isSelecting {
+                    Button(L10n.Common.cancel) { exitSelection() }
+                } else {
+                    HStack(spacing: 16) {
+                        Button(L10n.Library.select) {
+                            selectedIDs = []
+                            isSelecting = true
+                        }
+                        // Multi-select isn't allowed during a search: the result set changes with the input,
+                        // an already-ticked entry may vanish from the screen as you type the next character,
+                        // while the selection set still holds it — then "3 selected" won't match the screen.
+                        .disabled(model.items.isEmpty || isSearchActive)
+
+                        Button { showImportConfirm = true } label: {
+                            Image(systemName: "square.and.arrow.down")
+                        }
+                        .accessibilityLabel(L10n.Library.importAudio)
+                    }
                 }
-                .accessibilityLabel(L10n.Library.importAudio)
             }
         }
         .alert(L10n.Library.importConfirmTitle, isPresented: $showImportConfirm) {
@@ -144,13 +211,52 @@ struct LibraryView: View {
         } message: { msg in
             Text(msg)
         }
+        // The batch-delete confirmation. Uses `.alert` rather than `.confirmationDialog`:
+        // it needs a line spelling out that it "also deletes the transcript and summary, and can't be undone".
+        .alert(L10n.Library.deleteSelectedTitle, isPresented: $showBatchDeleteConfirm) {
+            Button(L10n.Common.delete, role: .destructive) {
+                Task { await runBatchDelete() }
+            }
+            Button(L10n.Common.cancel, role: .cancel) {}
+        } message: {
+            Text(L10n.Library.deleteSelectedMessage(selectedIDs.count))
+        }
+        .alert(
+            L10n.Library.exportFailed,
+            isPresented: Binding(
+                get: { exportError != nil },
+                set: { if !$0 { exportError = nil } }
+            ),
+            presenting: exportError
+        ) { _ in
+            Button(L10n.Common.ok, role: .cancel) { exportError = nil }
+        } message: { msg in
+            Text(msg)
+        }
+        .alert(
+            L10n.Library.deleteFailed,
+            isPresented: Binding(
+                get: { deleteError != nil },
+                set: { if !$0 { deleteError = nil } }
+            ),
+            presenting: deleteError
+        ) { _ in
+            Button(L10n.Common.ok, role: .cancel) { deleteError = nil }
+        } message: { msg in
+            Text(msg)
+        }
+        // Export goes through the system share sheet: saving to "Files", AirDrop, sending to someone — all of it.
+        // What's handed over is a **directory** (one subdirectory per clip), not an archive — see `runBatchExport`.
+        .sheet(isPresented: $showExportSheet, onDismiss: { exportURL = nil }) {
+            if let exportURL { ShareSheet(items: [exportURL]) }
+        }
         .overlay {
-            if isMerging {
+            if let busyMessage {
                 ZStack {
                     Color.black.opacity(0.3).ignoresSafeArea()
                     VStack(spacing: 12) {
                         ProgressView().controlSize(.large)
-                        Text(L10n.Library.merging)
+                        Text(busyMessage)
                             .foregroundStyle(.secondary)
                     }
                     .padding(24)
@@ -203,8 +309,8 @@ struct LibraryView: View {
     }
 
     private func runMerge(older: LibraryItem, newer: LibraryItem) async {
-        isMerging = true
-        defer { isMerging = false }
+        busyMessage = L10n.Library.merging
+        defer { busyMessage = nil }
         do {
             _ = try await AudioMerger.merge(older: older, newer: newer)
             deleteSourceArtefacts(for: older)
@@ -255,6 +361,400 @@ struct LibraryView: View {
         }
     }
 
+    // MARK: - List rows / footer
+
+    /// One row. Tap to open detail, long-press to enter multi-select, swipe right to merge.
+    ///
+    /// Use `LongPressGesture.exclusively(before: TapGesture())` rather than
+    /// "Button + onLongPressGesture": in the latter the two gestures are recognised **independently**,
+    /// so when you release a long press the Button's action may still fire once — which shows as "long-pressed to select,
+    /// and it jumped into the detail page along the way". `exclusively` hard-codes the priority: if the long press wins, the tap isn't recognised.
+    private func row(_ item: LibraryItem, at index: Int) -> some View {
+        let isSelected = selectedIDs.contains(item.name)
+        return HStack(spacing: 10) {
+            if isSelecting {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .transition(.scale.combined(with: .opacity))
+            }
+            LibraryRow(
+                item: item,
+                source: library.source(forLocalName: item.name),
+                snippet: snippets[item.base]
+            )
+            if !isSelecting {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        // Without a Button, the hit area no longer fills the whole row automatically — only the text is tappable.
+        .contentShape(Rectangle())
+        .accessibilityAddTraits(.isButton)
+        .gesture(
+            LongPressGesture(minimumDuration: 0.45)
+                .onEnded { _ in
+                    guard !isSelecting else { return }
+                    enterSelection(with: item)
+                }
+                .exclusively(
+                    before: TapGesture().onEnded {
+                        if isSelecting {
+                            toggleSelection(item)
+                        } else {
+                            detailItem = item
+                        }
+                    }
+                )
+        )
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            // No merging in search mode: only the matches are on screen, while "adjacent" is computed over the **whole library**'s
+            // time order — that neighbour isn't in the list at all right now, and after merging it looks like
+            // "it swallowed something else".
+            if !isSelecting, !isSearchActive, let older = adjacentOlder(at: index) {
+                Button {
+                    pendingMerge = MergePair(older: older, newer: item)
+                } label: {
+                    Label(L10n.Library.merge, systemImage: "arrow.triangle.merge")
+                }
+                .tint(.indigo)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var footer: some View {
+        // No count in search mode: the screen shows a filtered subset, and reporting the library total makes it look "wrongly displayed",
+        // while reporting the subset count looks like the same thing as the bottom "N selected" line.
+        if !isSearchActive {
+            Text(L10n.Recordings.clipCount(model.items.count, formatBytes(model.totalBytes)))
+        }
+    }
+
+    // MARK: - Derived state
+
+    /// The entries to show on screen: `(index into model.items, entry)`.
+    ///
+    /// The index is there for `adjacentOlder(at:)` — it finds the adjacent previous clip by the **whole library**'s time order,
+    /// and that index is exactly its position in `model.items`. In search mode every body evaluation has to re-filter,
+    /// so here we run `enumerated()` just once, rather than looking the index up again inside ForEach
+    /// (which would be O(n²): the library has reached 1900 entries).
+    private var displayedRows: [(offset: Int, element: LibraryItem)] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return Array(model.items.enumerated()) }
+        var out: [(offset: Int, element: LibraryItem)] = []
+        for (index, item) in model.items.enumerated() {
+            let inBody = snippets[item.base] != nil
+            switch scope {
+            case .knowledge:
+                if inBody { out.append((index, item)) }
+            case .all:
+                // This is the one thing "All" has that "Knowledge base" doesn't: recordings not yet transcribed, with only a name.
+                if inBody || item.matchesName(needle) { out.append((index, item)) }
+            }
+        }
+        return out
+    }
+
+    private var isSearchActive: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The `.task(id:)` key: scope + directory fingerprint + query term.
+    ///
+    /// Including the fingerprint is necessary: once what's in the library changes (a new recording, a summary just generated for one),
+    /// the search has to re-run. And the fingerprint is exactly `LibraryKnowledgeIndex`'s cache-invalidation key —
+    /// the same value governs both "should we re-search" and "is the body cache still valid", so you never get
+    /// "the index refreshed but the screen still shows old results".
+    private var searchKey: String {
+        let stamp = model.signature
+            .map { "\($0.entryCount)@\($0.newestEntry.timeIntervalSince1970)" } ?? "-"
+        return "\(scope.rawValue)|\(stamp)|\(query)"
+    }
+
+    /// The ticked entries, given in **list order** (newest first).
+    ///
+    /// In `model.items` order, not `selectedIDs`' hash order: the ordering in the export directory
+    /// and the error order on a failed delete both follow the screen, so when something goes wrong you can match them up at a glance.
+    private var selectedItems: [LibraryItem] {
+        model.items.filter { selectedIDs.contains($0.name) }
+    }
+
+    private var allItemsSelected: Bool {
+        let names = Set(displayedRows.map(\.element.name))
+        return !names.isEmpty && names.isSubset(of: selectedIDs)
+    }
+
+    // MARK: - Multi-select
+
+    private func enterSelection(with item: LibraryItem) {
+        selectedIDs = [item.name]
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        withAnimation(.easeInOut(duration: 0.2)) { isSelecting = true }
+    }
+
+    private func toggleSelection(_ item: LibraryItem) {
+        if selectedIDs.contains(item.name) {
+            selectedIDs.remove(item.name)
+        } else {
+            selectedIDs.insert(item.name)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+    }
+
+    private func exitSelection() {
+        selectedIDs.removeAll()
+        withAnimation(.easeInOut(duration: 0.2)) { isSelecting = false }
+    }
+
+    private var selectionBar: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Button(allItemsSelected ? L10n.Library.deselectAll : L10n.Library.selectAll) {
+                    if allItemsSelected {
+                        selectedIDs.removeAll()
+                    } else {
+                        selectedIDs = Set(displayedRows.map(\.element.name))
+                    }
+                }
+                .font(.subheadline)
+                .disabled(displayedRows.isEmpty)
+
+                Spacer()
+
+                Text(L10n.Library.selectedCount(selectedIDs.count))
+                    .font(.subheadline)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    Task { await runBatchExport() }
+                } label: {
+                    Label(L10n.Library.export, systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button(role: .destructive) {
+                    showBatchDeleteConfirm = true
+                } label: {
+                    Label(L10n.Common.delete, systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            // With nothing ticked neither action has anything to do (export an empty directory, delete 0 clips) —
+            // so grey both out together, rather than waiting for a tap and then popping "please select something".
+            .disabled(selectedItems.isEmpty)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    // MARK: - Knowledge-base search
+
+    private func runSearch() async {
+        guard isSearchActive else {
+            // Backspacing to empty = leaving search, and the match set must be cleared with it,
+            // otherwise typing one character again flashes the **previous** results first.
+            snippets = [:]
+            isSearching = false
+            return
+        }
+        // Only entries with a body are worth reading from disk (`hasText` is determined by the scanner in the directory listing,
+        // zero extra syscalls). "All" doesn't read many more either — the menu/title is an in-memory comparison.
+        let bases = model.items.filter(\.hasText).map(\.base)
+        isSearching = true
+        let hits = await LibraryKnowledgeIndex.shared.search(
+            query, bases: bases, stamp: model.signature
+        )
+        // With fast typing the previous run is cancelled entirely by `.task(id:)`; the cancelled run must not write
+        // `snippets` again — otherwise old results overwrite the new round's.
+        guard !Task.isCancelled else { return }
+        snippets = hits
+        isSearching = false
+    }
+
+    // MARK: - Batch export
+
+    /// The root export staging directory. A fixed path, **wiped entirely before every export**.
+    ///
+    /// Put in `tmp` rather than Documents: this is a way station, not user data. The system reclaims it on its own,
+    /// we don't need to account for it (and shouldn't hold the user's storage quota).
+    private static var exportStagingDir: URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("nomily-export", isDirectory: true)
+    }
+
+    /// A clip's folder name in the export directory: use the **display title** (the name the user changed) rather than
+    /// the filename — the export is for people to read.
+    ///
+    /// Stripping `:` is mandatory: on iOS the colon is HFS's old separator and gets **quietly** turned into
+    /// `/` when writing a path, so a title like "Note 10:30" would sprout an extra directory level out of nowhere.
+    /// Duplicate names (two clips both called "Meeting") go to `Meeting (2)`, never overwriting.
+    private static func exportFolderName(
+        for item: LibraryItem, taken: inout Set<String>
+    ) -> String {
+        var base = item.displayTitle
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if base.isEmpty { base = item.base }
+        if base.count > 80 { base = String(base.prefix(80)) }
+        var candidate = base
+        var n = 2
+        while taken.contains(candidate) {
+            candidate = "\(base) (\(n))"
+            n += 1
+        }
+        taken.insert(candidate)
+        return candidate
+    }
+
+    /// A clip's **text** sidecars: `(disk location, name at export time)`.
+    ///
+    /// Deliberately **excludes** `.asr.json` / `.translated.json`: those are intermediate formats for the App to
+    /// read back itself (with timeline, confidence, speaker), and are useless to a person. What the user wants is
+    /// "audio + transcript/summary **text**".
+    ///
+    /// The export name is written as readable English (`Transcript.txt`) rather than the on-disk name
+    /// (`20240101010101.txt`): the folder is already named by title, so another timestamp inside
+    /// would be a waste. One folder holds one clip, so these names never collide.
+    private static func textArtefacts(for item: LibraryItem) -> [(source: URL, name: String)] {
+        let dir = StorageLocations.decryptedDir
+        func url(_ suffix: String) -> URL {
+            dir.appendingPathComponent(item.base + suffix)
+        }
+        return [
+            (url(".txt"), "Transcript.txt"),
+            (url(".translated.txt"), "Transcript (translated).txt"),
+            (url(".summary.md"), "Summary.md"),
+            (url(".summary.translated.md"), "Summary (translated).md"),
+        ]
+    }
+
+    /// **Copy the ticked entries as-is** into a temporary directory, then hand it to the system share sheet.
+    ///
+    /// Why not zip: `UIActivityViewController` can "Save to Files" and AirDrop a directory just as well,
+    /// saving one copy of tens of GB being written again — exporting 20 meeting recordings
+    /// takes tens of seconds as it is, and during that the device's space use doubles.
+    private func runBatchExport() async {
+        let items = selectedItems
+        guard !items.isEmpty else { return }
+        busyMessage = L10n.Library.exportPreparing
+        defer { busyMessage = nil }
+
+        let fm = FileManager.default
+        let root = Self.exportStagingDir
+        // Clear the previous staging first, or "export 3 clips" gets mixed with the previous 20.
+        try? fm.removeItem(at: root)
+
+        var failures: [String] = []
+        var staged = 0
+        var taken = Set<String>()
+        do {
+            try fm.createDirectory(at: root, withIntermediateDirectories: true)
+            for item in items {
+                let dir = root.appendingPathComponent(
+                    Self.exportFolderName(for: item, taken: &taken), isDirectory: true
+                )
+                try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+                // The audio keeps its **original filename** (the .opus / .m4a / .mp3 extension is how a player
+                // recognises it, so it can't be changed).
+                if let url = item.url, fm.fileExists(atPath: url.path) {
+                    do {
+                        try fm.copyItem(at: url, to: dir.appendingPathComponent(item.name))
+                        staged += 1
+                    } catch {
+                        failures.append("\(item.displayTitle): \(error.localizedDescription)")
+                    }
+                }
+                for artefact in Self.textArtefacts(for: item)
+                where fm.fileExists(atPath: artefact.source.path) {
+                    do {
+                        try fm.copyItem(
+                            at: artefact.source,
+                            to: dir.appendingPathComponent(artefact.name)
+                        )
+                        staged += 1
+                    } catch {
+                        failures.append("\(item.displayTitle): \(error.localizedDescription)")
+                    }
+                }
+            }
+        } catch {
+            exportError = error.localizedDescription
+            return
+        }
+
+        // If there's a real I/O error, say so honestly and don't show the share sheet: making the user "Save to Files"
+        // a directory that's missing content is worse than telling them outright which clips failed to export.
+        // (A text-only entry with no audio **doesn't count as a failure** — it had no audio to export anyway.)
+        if !failures.isEmpty {
+            exportError = failures.joined(separator: "\n")
+            return
+        }
+        guard staged > 0 else {
+            exportError = L10n.Library.exportEmpty
+            return
+        }
+        exportURL = root
+        showExportSheet = true
+    }
+
+    // MARK: - Batch delete
+
+    /// Delete the whole clip: audio + transcript + summary + translation + custom title, plus deregistering
+    /// the record in `Library`.
+    ///
+    /// ⚠️ **The order can't be reversed** — it must be "delete the files first, then clear the manifest". Reverse it and
+    /// `LibraryScanner` will, in the window where "the manifest is cleared but the files remain", rebuild this entry as an
+    /// **imported file** (no manifest record = the user imported it themselves),
+    /// and what the user sees is "deleted but not deleted".
+    private func runBatchDelete() async {
+        let items = selectedItems
+        guard !items.isEmpty else { return }
+        busyMessage = L10n.Library.deleting
+        defer { busyMessage = nil }
+
+        let fm = FileManager.default
+        var failures: [String] = []
+        for item in items {
+            if let url = item.url, fm.fileExists(atPath: url.path) {
+                do {
+                    try fm.removeItem(at: url)
+                } catch {
+                    // If the audio can't be deleted, **keep the manifest record** (half the clip is still here),
+                    // report it to the user to retry, rather than leaving an orphan with "the files are there, the record is gone".
+                    failures.append("\(item.displayTitle): \(error.localizedDescription)")
+                    continue
+                }
+            }
+            for artefact in Self.textArtefacts(for: item) {
+                try? fm.removeItem(at: artefact.source)
+            }
+            try? fm.removeItem(at: StorageLocations.titleURL(for: item.name))
+            // The only proof that "this one was already downloaded from the device". Miss it and the same clip can never
+            // be downloaded again — in the device list it stays "downloaded" forever.
+            library.forget(localName: item.name)
+        }
+
+        // Clear orphan `.title`s: the delete above removes the "selected entry's own", but duplicate-name persistence
+        // and the like can leave other orphans.
+        ClipArtefact.sweepOrphanTitles()
+        exitSelection()
+        await model.refresh(force: true)
+        NotificationCenter.default.post(name: .libraryDidChange, object: nil)
+        if !failures.isEmpty {
+            deleteError = failures.joined(separator: "\n")
+        }
+    }
+
     private func formatBytes(_ n: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: n, countStyle: .file)
     }
@@ -263,6 +763,11 @@ struct LibraryView: View {
 private struct LibraryRow: View {
     let item: LibraryItem
     let source: Library.ClipSource
+    /// The body text where knowledge-base search matched (`nil` = not searching, or this entry's body didn't match).
+    ///
+    /// The caller looks it up in `snippets` and passes it in; the row itself doesn't touch the search — the list scrolls,
+    /// and a row shouldn't have the cost of "looking it up itself".
+    var snippet: String? = nil
 
     private static let shortDate: DateFormatter = {
         let f = DateFormatter()
@@ -286,7 +791,22 @@ private struct LibraryRow: View {
                     Image(systemName: "text.bubble.fill")
                         .foregroundColor(.green)
                         .imageScale(.small)
+                        .accessibilityLabel(L10n.Library.hasTranscript)
                 }
+                if item.hasSummary {
+                    Image(systemName: "doc.plaintext.fill")
+                        .foregroundColor(.orange)
+                        .imageScale(.small)
+                        .accessibilityLabel(L10n.Library.hasSummary)
+                }
+            }
+            if let snippet {
+                // The matched snippet. Newlines have been flattened (see `LibraryKnowledgeIndex.snippet`),
+                // and `lineLimit(2)` covers it here too — a transcript occasionally has a whole stretch with no punctuation.
+                Text(snippet)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
             HStack(spacing: 8) {
                 // ★ 2026-10-15: the source badge goes **first**. In a pile of recordings with nearly identical
@@ -387,9 +907,26 @@ struct LibraryItem: Identifiable, Equatable {
     let modifiedAt: Date
     let duration: Double?
     let hasTranscript: Bool
+    /// ★ 2026-10-15: a summary has been generated (`{base}.summary.md` exists).
+    ///
+    /// Like `hasTranscript`, this is determined directly by the scanner from the **existing directory listing**,
+    /// zero extra syscalls. Knowledge-base search relies on it and `hasTranscript` to decide "does this entry have a body",
+    /// and the list hangs a badge off it accordingly.
+    let hasSummary: Bool
+    /// Has a translation: the translation of the whole transcript, or of the summary.
+    let hasTranslation: Bool
     let customTitle: String?
 
     var id: String { name }
+
+    /// The filename without its extension. **Every sidecar file** (transcript / summary / translation / title)
+    /// is prefixed with it — the search index builds paths from it, so don't each call `deletingPathExtension`
+    /// again (`LibraryScanner`'s synthesised `.opus` name for text-only entries also lines up through this).
+    var base: String { (name as NSString).deletingPathExtension }
+
+    /// Whether this entry has a **searchable body** — that is, "does it count as a knowledge-base entry".
+    var hasText: Bool { hasTranscript || hasSummary }
+
     var hasAudio: Bool { url != nil }
     var displayTitle: String {
         if let customTitle { return customTitle }
@@ -406,6 +943,52 @@ struct LibraryItem: Identifiable, Equatable {
         return RecordingName.displayTitle(for: name)
     }
     var hasCustomTitle: Bool { customTitle != nil }
+
+    /// Whether this entry matches the keyword **by name** (on-disk name / display title).
+    ///
+    /// Only serves the "All" scope: an untranscribed recording's body is empty, so only the name can be searched.
+    /// Matching is case- and diacritic-insensitive — the same set of criteria as
+    /// `LibraryKnowledgeIndex`, or the same word gives different results in the two scopes.
+    func matchesName(_ needle: String) -> Bool {
+        let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+        if name.range(of: needle, options: options) != nil { return true }
+        return displayTitle.range(of: needle, options: options) != nil
+    }
+
+    /// Single-entry on-the-spot disk read: turn an **existing audio file** on disk into a `LibraryItem`.
+    ///
+    /// The whole-library path goes through `LibraryScanner` (one directory listing for a batch decision, see
+    /// `textFlags`); this is the single-entry path for "just recorded", "just navigated in", with only the filename to hand,
+    /// so it can only `fileExists` one at a time. **The decision logic must exist in only this one place** — these two paths (and
+    /// the live-page entry point) each had their own copy before, and adding `hasSummary` meant three places missed it together.
+    ///
+    /// `duration` is given by the caller: the two places compute duration differently anyway (the live page only looks at Opus,
+    /// the recording page asks `AVURLAsset` asynchronously for non-Opus), and forcing them together would only add a branch.
+    static func readFromDisk(name: String, duration: Double?) -> LibraryItem? {
+        let dir = StorageLocations.decryptedDir
+        let url = dir.appendingPathComponent(name)
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return nil }
+        let attrs = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        let base = (name as NSString).deletingPathExtension
+        func artefact(_ suffix: String) -> Bool {
+            fm.fileExists(atPath: dir.appendingPathComponent(base + suffix).path)
+        }
+        let titleURL = StorageLocations.titleURL(for: name)
+        let title = (try? String(contentsOf: titleURL, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return LibraryItem(
+            name: name,
+            url: url,
+            size: Int64(attrs?.fileSize ?? 0),
+            modifiedAt: attrs?.contentModificationDate ?? Date(),
+            duration: duration,
+            hasTranscript: artefact(".txt"),
+            hasSummary: artefact(".summary.md"),
+            hasTranslation: artefact(".translated.txt") || artefact(".summary.translated.md"),
+            customTitle: (title?.isEmpty ?? true) ? nil : title
+        )
+    }
     /// The recording's real timestamp: parsed from the device filename
     /// (device RTC at record time) when present, else the file mtime for
     /// imported clips that carry no timestamped name. Display should use
@@ -449,7 +1032,11 @@ final class LibraryListModel: ObservableObject {
     /// Signature of the last completed scan (directory mtime + entry count).
     /// Popping back from Clip Detail is by far the most common refresh and
     /// almost never changes the directory, so it can return immediately.
-    private var lastSignature: LibraryScanner.Signature?
+    ///
+    /// ★ 2026-10-15: exposed read-only to the outside. Knowledge-base search uses it as the **cache-invalidation key** —
+    /// it changes whenever any file in the directory is written (re-transcription, summary generation), so the body cache
+    /// is invalidated wholesale. Cheaper than comparing mtime file by file, and it doesn't miss anything.
+    private(set) var signature: LibraryScanner.Signature?
 
     private let scanner = LibraryScanner()
 
@@ -457,7 +1044,7 @@ final class LibraryListModel: ObservableObject {
         inFlight?.cancel()
         let task = Task { [weak self] in
             guard let self else { return }
-            let previous = force ? nil : self.lastSignature
+            let previous = force ? nil : self.signature
             let scanner = self.scanner
             // The whole scan is filesystem work: 1900 files means thousands of
             // stat calls plus a duration probe each. Running it on the main
@@ -482,7 +1069,7 @@ final class LibraryListModel: ObservableObject {
             case let .scanned(items, signature, totalBytes):
                 self.items = items
                 self.totalBytes = totalBytes
-                self.lastSignature = signature
+                self.signature = signature
             }
         }
         inFlight = task
@@ -603,13 +1190,16 @@ actor LibraryScanner {
                 cacheDirty = true
             }
 
+            let text = Self.textFlags(base: base, presentNames: presentNames)
             built.append(LibraryItem(
                 name: name,
                 url: url,
                 size: size,
                 modifiedAt: mtime,
                 duration: duration,
-                hasTranscript: presentNames.contains("\(base).txt"),
+                hasTranscript: text.transcript,
+                hasSummary: text.summary,
+                hasTranslation: text.translation,
                 customTitle: Self.readTitle(base: base, presentNames: presentNames)
             ))
         }
@@ -617,13 +1207,16 @@ actor LibraryScanner {
         for (base, mtime) in orphanMtimes {
             // Synthetic ".opus" so deletingPathExtension in the StorageLocations
             // helpers still yields `base` for these text-only entries.
+            let text = Self.textFlags(base: base, presentNames: presentNames)
             built.append(LibraryItem(
                 name: "\(base).opus",
                 url: nil,
                 size: 0,
                 modifiedAt: mtime,
                 duration: nil,
-                hasTranscript: presentNames.contains("\(base).txt"),
+                hasTranscript: text.transcript,
+                hasSummary: text.summary,
+                hasTranslation: text.translation,
                 customTitle: Self.readTitle(base: base, presentNames: presentNames)
             ))
         }
@@ -643,6 +1236,21 @@ actor LibraryScanner {
             return l > r
         }
         return .scanned(items: sorted, signature: signature, totalBytes: totalBytes)
+    }
+
+    /// A clip's text status: transcript / summary / translation.
+    ///
+    /// All three are **looked up in the already-listed directory names** — the scanner already has
+    /// `presentNames` to hand, and another `fileExists` each would be 1900 entries × 3 wasted runs.
+    private static func textFlags(
+        base: String, presentNames: Set<String>
+    ) -> (transcript: Bool, summary: Bool, translation: Bool) {
+        (
+            transcript: presentNames.contains("\(base).txt"),
+            summary: presentNames.contains("\(base).summary.md"),
+            translation: presentNames.contains("\(base).translated.txt")
+                || presentNames.contains("\(base).summary.translated.md")
+        )
     }
 
     /// Only opens the `.title` file when the listing says there is one —

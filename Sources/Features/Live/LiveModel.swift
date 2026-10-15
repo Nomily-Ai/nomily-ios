@@ -181,7 +181,7 @@ final class LiveModel: ObservableObject {
     private var eventTask: Task<Void, Never>?
     private var currentASR: ActiveASR?
 
-    // MARK: - Local real‑time translation (★ 2026-10-14 added)
+    // MARK: - Local real-time translation (★ Added 2026-10-14)
 
     /// Target language **readable name** (e.g., "Chinese (Simplified)"), used directly as LLM prompt.
     /// `nil` = this session does not perform translation (user did not select a target language, or target language == source language, or LLM not configured).
@@ -1335,7 +1335,6 @@ final class LiveModel: ObservableObject {
             }
         }
         let deviceFileName = deviceFile?.name
-        let deviceSize = deviceFile?.size ?? 0
 
         let name: String
         if attachedToExistingRecording {

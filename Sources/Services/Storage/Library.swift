@@ -110,6 +110,23 @@ final class Library: ObservableObject {
         saveNow()
     }
 
+    /// Forget an entry by its **on-disk file name**.
+    ///
+    /// The only difference from `forget(_:)` is the shape of the key: a device download's record key is
+    /// `serial::name`, while the list gets the on-disk name (`entry.localName`) — the two
+    /// are **not** the same string; using the first overload only deletes correctly by way of "incidentally filtering by localName once more"
+    /// and happening to match. Batch deletion goes through this one: the semantics are plain and it doesn't lean on that coincidence.
+    ///
+    /// ⚠️ Batch deletion **must** call it: this table is the only evidence that "this clip has already been downloaded from the device",
+    /// and leaving residue means the same recording can never be downloaded again (`isDownloaded` stays true forever).
+    func forget(localName: String) {
+        entries = entries.filter {
+            ($0.value.localName ?? $0.key) != localName
+        }
+        rebuildSourceIndex()
+        saveNow()
+    }
+
     func clearAll() {
         entries = [:]
         rebuildSourceIndex()
@@ -123,7 +140,7 @@ final class Library: ObservableObject {
         enum Kind: String {
             /// Came down from a recorder card (TicNote / D·NOTE, both `ble` and `wifi` count).
             case card
-            /// Apple Watch.
+            /// Apple Watch。
             case watch
             /// Fragments left by on-device live transcription.
             case phone
