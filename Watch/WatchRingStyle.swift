@@ -21,16 +21,26 @@ import SwiftUI
 
 /// Which color set the center disc (and the ring while recording) uses.
 enum WatchRingPalette: String, CaseIterable, Identifiable, Codable {
+    /// The three colours of the Health app activity rings (magenta / neon green / cyan).
+    /// **The default** — on 2026-10-15 the user brought a screenshot of the activity rings and called it out: "reference this colour scheme".
+    case activity
     case green, teal, blue, indigo, purple, pink, orange, red, graphite
 
     var id: String { rawValue }
 
-    /// The two gradient endpoints; solid mode uses only `[0]`.
+    /// The gradient's endpoint colours; solid mode takes only `[0]`, and three or more colours spread around the ring (see `ringGradient`).
     ///
-    /// ⚠️ All of them are **dark** (not light): the center icon and timer are white text,
-    /// and a light base color would smear the "stop" icon into a blob while recording. `graphite` follows the same rule.
+    /// ⚠️ Single/double-colour palettes are all **dark** (not light): the centre icon and timer are white text,
+    /// and a light base colour would smear the "stop" icon into a blob while recording. `activity` is the exception — it uses
+    /// three-colour ring spreading with the centre taking only the first and last colours (see `centerFill`), brightness carried by the gradient.
     var colors: [Color] {
         switch self {
+        case .activity: return [
+            // Apple's three activity-ring primaries: Move magenta / Exercise neon green / Stand cyan.
+            Color(red: 0.98, green: 0.07, blue: 0.31),
+            Color(red: 0.57, green: 0.91, blue: 0.16),
+            Color(red: 0.10, green: 0.88, blue: 1.00),
+        ]
         case .green:    return [Color(red: 0.24, green: 0.78, blue: 0.38), Color(red: 0.05, green: 0.48, blue: 0.24)]
         case .teal:     return [Color(red: 0.20, green: 0.76, blue: 0.72), Color(red: 0.02, green: 0.42, blue: 0.46)]
         case .blue:     return [Color(red: 0.26, green: 0.56, blue: 0.94), Color(red: 0.04, green: 0.26, blue: 0.68)]
@@ -45,6 +55,15 @@ enum WatchRingPalette: String, CaseIterable, Identifiable, Codable {
 
     /// Solid color (used when "gradient" is off).
     var solid: Color { colors[0] }
+
+    /// Colour of the inner ring (the hour ring); `nil` = keep the main colour `solid`.
+    ///
+    /// Only the three-colour palette (`activity`) specifies it — it takes the middle neon green, exactly reproducing the activity ring's
+    /// "outer magenta / middle neon green / inner cyan" layering. Double-colour gradient palettes **must not** do that:
+    /// their `[1]` is the gradient's dark end, and using it to draw a ring would go black on a black background.
+    var lapColor: Color? {
+        colors.count > 2 ? colors[1] : nil
+    }
 }
 
 /// The "breathing light" rhythm. `period` = seconds for one full inhale-exhale cycle.
@@ -74,7 +93,8 @@ enum WatchBreathing: String, CaseIterable, Identifiable, Codable {
 
 /// A persistable appearance.
 struct WatchRingStyle: Equatable, Codable {
-    var palette: WatchRingPalette = .green
+    /// Defaults to the Health ring's three colours (see `WatchRingPalette.activity`).
+    var palette: WatchRingPalette = .activity
     /// Whether the center uses a gradient (off = solid color).
     var gradient: Bool = true
     var breathing: WatchBreathing = .off
@@ -82,11 +102,16 @@ struct WatchRingStyle: Equatable, Codable {
     static let `default` = WatchRingStyle()
 
     /// Fill of the center disc.
+    ///
+    /// The three-colour palette uses only the **first and last colours**: squeezing a three-stop linear gradient into that small centre disc looks muddy,
+    /// and the diagonal magenta→cyan gradient is the clean look "the centre of an activity ring" should have.
     var centerFill: AnyShapeStyle {
-        gradient
+        let cs = palette.colors
+        let pair = cs.count > 2 ? [cs[0], cs[cs.count - 1]] : cs
+        return gradient
             ? AnyShapeStyle(
                 LinearGradient(
-                    colors: palette.colors,
+                    colors: pair,
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )

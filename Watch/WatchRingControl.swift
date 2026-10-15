@@ -43,13 +43,26 @@ struct WatchRingControl: View {
     /// Whether the breathing halo is mid-breath. Same one-flip trick as
     /// `spin` — see `syncBreathing()`.
     @State private var breath: Bool = false
+    /// Ripple spread: three expanding rings with offset phases. Same playbook as `spin` / `breath` —
+    /// a single `false → true` flip + `repeatForever`, with all interpolation done by the render server.
+    @State private var rippleA = false
+    @State private var rippleB = false
+    @State private var rippleC = false
+    /// Ripple batch number: +1 on stop, invalidating every delayed wave that hasn't set off yet,
+    /// so that on "stop → immediately record again" the previous batch's delayed closure doesn't pop up and run one wave on its own.
+    @State private var rippleBatch = 0
 
     // Geometry. Everything is expressed as an inset from the square's edge so
     // the rings keep their proportions at any size.
-    private static let progressWidth: CGFloat = 10
-    private static let lapWidth: CGFloat = 5
-    private static let gap: CGFloat = 7
+    //
+    // 2026-10-15 the ring was scaled up overall to approach the Health app's screen coverage, with the line width thickened a notch to match,
+    // otherwise the ring grows but the line doesn't, and it looks like a loop of thin wire.
+    private static let progressWidth: CGFloat = 12
+    private static let lapWidth: CGFloat = 6
+    private static let gap: CGFloat = 6
     private static let cometDuration: Double = 2.4
+    /// How long one ripple takes from birth to fading out; the three waves are offset by a 1/3 phase.
+    private static let rippleDuration: Double = 1.9
 
     private var progressInset: CGFloat { Self.progressWidth / 2 }
     private var lapInset: CGFloat { Self.progressWidth + Self.gap + Self.lapWidth / 2 }
@@ -66,8 +79,19 @@ struct WatchRingControl: View {
     /// ⚠️ Deliberately **not** indexing like `style.ringColors[1]`: with gradient off,
     /// `ringColors` has a single element and the subscript would go out of bounds. This uses `first` / `count`
     /// checks and, for a single color, degrades to "same color at both ends + each end's own opacity", equivalent to the original solid look.
+    ///
+    /// Three colours or more (`activity`): spread the three colours around one lap of the ring — that's the Health app
+    /// activity ring's "three colours readable in one lap" look.
     private var ringGradient: AngularGradient {
         let colors = style.ringColors
+        if colors.count > 2 {
+            return AngularGradient(
+                colors: colors,
+                center: .center,
+                startAngle: .degrees(-90),
+                endAngle: .degrees(270)
+            )
+        }
         let from = colors.first ?? style.palette.solid
         let to = colors.count > 1 ? colors[1] : from
         return AngularGradient(
@@ -76,6 +100,12 @@ struct WatchRingControl: View {
             startAngle: .degrees(-90),
             endAngle: .degrees(270)
         )
+    }
+
+    /// Colour of the inner ring (the hour ring). While recording it prefers the palette's `lapColor`
+    /// (activity's neon green); if none is specified or it isn't recording (the neutral-grey test) it falls back to `accent`.
+    private var lapAccent: Color {
+        isRecording ? (style.palette.lapColor ?? accent) : accent
     }
 
     /// Progress through the current minute. The ring laps, so the sweep never
@@ -94,6 +124,7 @@ struct WatchRingControl: View {
     var body: some View {
         Button(action: onToggle) {
             ZStack {
+                ripples
                 burstRing
                 progressRing
                 lapRing
@@ -109,15 +140,20 @@ struct WatchRingControl: View {
         .accessibilityLabel(isRecording ? L10n.Watch.stop : L10n.Watch.record)
         .accessibilityValue(isRecording ? WatchFormat.compactDuration(elapsed) : L10n.Watch.ready)
         .onAppear {
-            if isRecording { startSpin() }
+            if isRecording {
+                startSpin()
+                startRipples()
+            }
             syncBreathing()
         }
         .onChange(of: isRecording) { _, recording in
             if recording {
                 fireBurst()
                 startSpin()
+                startRipples()
             } else {
                 stopSpin()
+                stopRipples()
             }
         }
         .onChange(of: style.breathing) { _, _ in syncBreathing() }
@@ -125,8 +161,12 @@ struct WatchRingControl: View {
             if reduced {
                 stopSpin()
                 stopBreathing()
+                stopRipples()
             } else {
-                if isRecording { startSpin() }
+                if isRecording {
+                    startSpin()
+                    startRipples()
+                }
                 syncBreathing()
             }
         }
@@ -162,12 +202,12 @@ struct WatchRingControl: View {
         ZStack {
             Circle()
                 .inset(by: lapInset)
-                .stroke(accent.opacity(0.12), style: StrokeStyle(lineWidth: Self.lapWidth, lineCap: .round))
+                .stroke(lapAccent.opacity(0.12), style: StrokeStyle(lineWidth: Self.lapWidth, lineCap: .round))
 
             Circle()
                 .inset(by: lapInset)
                 .trim(from: 0, to: hourLap)
-                .stroke(accent.opacity(0.9), style: StrokeStyle(lineWidth: Self.lapWidth, lineCap: .round))
+                .stroke(lapAccent.opacity(0.9), style: StrokeStyle(lineWidth: Self.lapWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
         }
         .animation(isRecording ? .linear(duration: 1) : nil, value: hourLap)
@@ -197,6 +237,73 @@ struct WatchRingControl: View {
             .stroke(accent, lineWidth: 2.5)
             .scaleEffect(burstScale)
             .opacity(burstOpacity)
+    }
+
+    // MARK: - ripples
+
+    /// Ripple colour: the three-colour palette (activity) uses the outermost **cyan**, giving it separation from the magenta main ring;
+    /// a double-colour palette's end colour is the gradient's dark end and is invisible on a black background, so it falls back to the main colour.
+    private var rippleColor: Color {
+        let cs = style.palette.colors
+        return cs.count > 2 ? cs[cs.count - 1] : style.palette.solid
+    }
+
+    /// "Ripple spread": three thin rings expanding outward from the ring, fading as they grow, each a 1/3 cycle out of phase.
+    ///
+    /// Appears only while recording — like comet it's a signal that "it's still recording", not skin.
+    ///
+    /// ⚠️ Same performance red line as `breathHalo`: only `scaleEffect` + `opacity`,
+    /// never `.blur` / large-radius `.shadow` (offscreen-rendered every frame on watchOS; a 40mm watch drops frames).
+    /// The ripple expanding past the parent view's bounds is **deliberate**: being clipped by the screen edge looks better than shrinking inside it,
+    /// and SwiftUI doesn't clip by default, which is just right.
+    private var ripples: some View {
+        ZStack {
+            rippleRing(active: rippleC)
+            rippleRing(active: rippleB)
+            rippleRing(active: rippleA)
+        }
+        .opacity(isRecording && !dimmed ? 1 : 0)
+        .allowsHitTesting(false)
+    }
+
+    private func rippleRing(active: Bool) -> some View {
+        Circle()
+            .inset(by: progressInset)
+            .stroke(rippleColor, lineWidth: 3)
+            .scaleEffect(active ? 1.42 : 1.0)
+            .opacity(active ? 0 : 0.5)
+    }
+
+    /// The three waves start a 1/3 cycle apart. **Idempotent**: if `rippleA` is running, no second batch is scheduled.
+    private func startRipples() {
+        guard isRecording, !dimmed, !rippleA else { return }
+        rippleBatch += 1
+        let batch = rippleBatch
+        func launch(after delay: Double, _ fire: @escaping () -> Void) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                // The batch number changed (it stopped midway) or recording is no longer active ⇒ this wave doesn't set off.
+                guard batch == rippleBatch, isRecording, !dimmed else { return }
+                withAnimation(.linear(duration: Self.rippleDuration)
+                    .repeatForever(autoreverses: false)) { fire() }
+            }
+        }
+        launch(after: 0)    { rippleA = true }
+        launch(after: Self.rippleDuration / 3) { rippleB = true }
+        launch(after: Self.rippleDuration * 2 / 3) { rippleC = true }
+    }
+
+    private func stopRipples() {
+        // First invalidate the delayed waves that haven't set off, then snap the three waves to zero (animation off,
+        // otherwise you'd see the ripples suck back in — same reason as `stopSpin`).
+        rippleBatch += 1
+        guard rippleA || rippleB || rippleC else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            rippleA = false
+            rippleB = false
+            rippleC = false
+        }
     }
 
     // MARK: - breathing
@@ -240,7 +347,7 @@ struct WatchRingControl: View {
 
             VStack(spacing: 1) {
                 Image(systemName: isRecording ? "stop.fill" : "mic.fill")
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(.system(size: 26, weight: .semibold))
                     // White text + a little black shadow: the center is now colored, and using `accent` would
                     // collide with the base color while recording (the old green collided because it was itself a green ring).
                     .foregroundStyle(Color(white: 0.96))
@@ -248,7 +355,7 @@ struct WatchRingControl: View {
                     .contentTransition(.symbolEffect(.replace))
 
                 Text(isRecording ? WatchFormat.compactDuration(elapsed) : L10n.Watch.ready)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(isRecording ? Color(white: 0.96) : Color(white: 0.72))
                     .shadow(color: .black.opacity(0.45), radius: 2, y: 1)

@@ -1,4 +1,5 @@
 import SwiftUI
+import WatchKit
 
 /// Wrist recorder page: the ring control, the four style dots around it,
 /// and whatever is still waiting to reach the iPhone.
@@ -13,6 +14,14 @@ import SwiftUI
 /// ⚠️ While recording, the 4 dots and the menu **never appear** -- the user's own words:
 /// "once recording starts, the menu bar around the screen should not appear", so this is not "collapsed by default"
 /// but no entry point at all while recording (see `onChange(of: model.isRecording)`).
+///
+/// ★ 2026-10-15 revision two (the three things the user called out with a screenshot of the Health app's rings):
+/// 1. **Delete the top title ("Watch")** -- the ring is the title; another line pressed on top
+///    takes up screen space and nobody reads it anyway;
+/// 2. **Match the Health app's screen ratio** -- the ring diameter now scales with the actual screen width
+///    (0.76 idle, 0.90 recording, see `dial`). The old hard-coded 172pt box was already
+///    overflowing on the 40mm watch (162pt wide) and too small on the 45mm anyway;
+/// 3. **The ring steps up a size while recording**, the four corner menus vanish at the same time, and all the freed-up space goes to the ring.
 struct WatchRecorderView: View {
     @EnvironmentObject private var model: WatchRecorderModel
     /// Transfer state is read straight off the link rather than snapshotted
@@ -24,12 +33,20 @@ struct WatchRecorderView: View {
     /// so SwiftUI would not know to redraw (same pitfall as the top of `RecorderAliasStore`).
     @ObservedObject private var styleStore = WatchRingStyleStore.shared
 
-    /// Side length of the square occupied by the ring + 4 dots.
+    /// Usable length of one side of the watch face: the actual screen width minus a 3pt inset on each side.
     ///
-    /// Deliberately a **fixed value** rather than `maxWidth: .infinity`: this page sits in a `ScrollView`,
-    /// where the unbounded vertical proposal would send the `maxHeight: .infinity` corner dots to unpredictable
-    /// positions. The ring is a bit smaller than before (160 → 152), giving the 20pt at the edge to the 4 dots.
-    private static let controlBox: CGFloat = 172
+    /// ⚠️ Use `WKInterfaceDevice`'s **actual** screen width, never hard-code it -- the 40mm/44mm/45mm/49mm
+    /// screen widths run from 162 to 205pt, so hard-coding either end is wrong on at least one watch.
+    private static var dialSide: CGFloat {
+        max(132, WKInterfaceDevice.current().screenBounds.width - 6)
+    }
+
+    /// Fraction of `dialSide` the ring takes while idle. The gap left outside the ring is exactly what the 4 corner dots need;
+    /// any larger and it overlaps the dots (already the tightest setting on the 40mm).
+    private static let idleRingFraction: CGFloat = 0.76
+    /// Ring fraction while recording. While recording the 4 dots are gone entirely, and all the freed-up space goes to the ring --
+    /// matching the Health app rings' "almost touching the screen edge" look (about 88~90% of the screen width).
+    private static let recordingRingFraction: CGFloat = 0.90
 
     /// Which menu is currently expanded; `nil` = no menu bar.
     @State private var openMenu: WatchRingMenu?
@@ -37,18 +54,7 @@ struct WatchRecorderView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 10) {
-                ZStack {
-                    WatchRingControl(
-                        isRecording: model.isRecording,
-                        elapsed: model.elapsed,
-                        style: styleStore.style,
-                        onToggle: model.toggleRecording
-                    )
-                    .frame(maxWidth: 152)
-
-                    if !model.isRecording { menuDots }
-                }
-                .frame(width: Self.controlBox, height: Self.controlBox)
+                dial
 
                 if model.isRecording {
                     Text(WatchFormat.bytes(model.currentBytes))
@@ -68,9 +74,11 @@ struct WatchRecorderView: View {
                 // and mis-taps are very easy on the watch face.
                 if !model.isRecording, openMenu == nil { footerLinks }
             }
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 3)
         }
-        .navigationTitle(L10n.Watch.recorderTitle)
+        // The "Watch" title line at the top is gone: the ring is this page's title.
+        // What's hidden is **this page's** navigation bar; the pushed language/about pages have their own bars and back buttons.
+        .toolbar(.hidden, for: .navigationBar)
         .onChange(of: model.isRecording) { _, recording in
             // The moment recording starts, collapse the menu and never offer an entry point from then on.
             if recording { openMenu = nil }
@@ -89,10 +97,38 @@ struct WatchRecorderView: View {
         }
     }
 
+    // MARK: - The ring + the four corners
+
+    /// The ring as one piece. While recording the ring steps up a size and the corner dots vanish entirely, all inside the same spring
+    /// transition -- "recording has started" is visible in the geometry too.
+    private var dial: some View {
+        let side = Self.dialSide
+        let fraction: CGFloat = model.isRecording
+            ? Self.recordingRingFraction
+            : Self.idleRingFraction
+        return ZStack {
+            WatchRingControl(
+                isRecording: model.isRecording,
+                elapsed: model.elapsed,
+                style: styleStore.style,
+                onToggle: model.toggleRecording
+            )
+            .frame(width: side * fraction, height: side * fraction)
+
+            if !model.isRecording { menuDots.transition(.opacity) }
+        }
+        .frame(width: side, height: side)
+        .animation(.spring(response: 0.4, dampingFraction: 0.72), value: model.isRecording)
+    }
+
     // MARK: - The 4 dots around the ring
 
     /// Placed diagonally at the four corners of the ring: the corners of a circle are empty anyway, so the dots neither cover the ring
     /// nor sit close enough to the center "start recording" target to cause accidental taps.
+    ///
+    /// ⚠️ The outer circle is inset 6pt: that pushes each dot's center out to about `(side/2 - 21) × √2` from the middle,
+    /// just outside the idle ring's outer edge (0.76 × side, see `dial`) -- on the 40mm that is already
+    /// at the limit; make the ring smaller and it would overlap the dots.
     private var menuDots: some View {
         ZStack {
             dot(.color, at: .topLeading)
@@ -100,6 +136,7 @@ struct WatchRecorderView: View {
             dot(.breathing, at: .bottomLeading)
             dot(.reset, at: .bottomTrailing)
         }
+        .padding(6)
     }
 
     /// A corner dot.
@@ -116,7 +153,7 @@ struct WatchRecorderView: View {
             Image(systemName: menu.symbol)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(openMenu == menu ? Color.black : Color.white.opacity(0.72))
-                .frame(width: 30, height: 30)
+                .frame(width: 28, height: 28)
                 .background(
                     Circle().fill(
                         openMenu == menu
@@ -174,7 +211,8 @@ struct WatchRecorderView: View {
         .transition(.opacity)
     }
 
-    /// 9 color swatches. A palette only, no color wheel: on 40mm, drag-to-pick is neither precise nor visibly different.
+    /// 10 color swatches (the Health rings' three colors + the original 9 solids). Deliberately a palette and no color wheel:
+    /// on the 40mm, drag-to-pick is neither precise nor visibly different.
     private var paletteGrid: some View {
         LazyVGrid(
             columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 5),
