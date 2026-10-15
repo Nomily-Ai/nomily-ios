@@ -22,6 +22,10 @@ struct LibraryView: View {
     /// and after opening detail and writing the name in, SwiftUI won't know to redraw on its own (the same pitfall appears in
     /// the `recorderAliases` comment above).
     @ObservedObject private var readStore = ClipReadStore.shared
+    /// The ledger for "the last export is ready but not yet shared". Hooked up as observed:
+    /// the export completes in a detached `Task`, and SwiftUI won't know on its own
+    /// to redraw the banner (the same pitfall as `readStore` above).
+    @ObservedObject private var exportCenter = ExportCenter.shared
     @State private var showImportConfirm = false
     @State private var showImporter = false
     @State private var importError: String?
@@ -81,6 +85,16 @@ struct LibraryView: View {
 
     var body: some View {
         content
+        // ★ 2026-10-15 revision 7: the device filter bar is **pinned to the top of the list**, no longer hidden in a toolbar menu.
+        //
+        // Use `safeAreaInset` rather than stuffing it into `List`'s first section: stuffed in, it scrolls away with
+        // the list — and "which device is being filtered right now" is exactly the information you most need to keep in sight while scrolling.
+        //
+        // Put it one layer below `.searchable`: the search bar is for search, the filter bar for filtering, both at the top,
+        // not covering each other.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            deviceFilterBar
+        }
         .task {
             await model.refresh()
             dropStaleDeviceFilter()
@@ -121,8 +135,6 @@ struct LibraryView: View {
                     Button(L10n.Common.cancel) { exitSelection() }
                 } else {
                     HStack(spacing: 16) {
-                        deviceFilterMenu
-
                         Button(L10n.Library.select) {
                             selectedIDs = []
                             isSelecting = true
@@ -322,7 +334,8 @@ struct LibraryView: View {
                 localName: item.name,
                 title: item.displayTitle,
                 urls: Self.deleteURLs(for: item),
-                download: nil
+                download: nil,
+                source: ClipTrash.sourceLabel(forLocalName: item.name, in: library)
             )],
             library: library
         )
@@ -388,6 +401,15 @@ struct LibraryView: View {
     /// "Today" once for every device.
     private var listContent: some View {
         List {
+            // ★ 2026-10-15 revision 6: the export-ready banner, **placed at the very top**.
+            //
+            // User's words: "exporting audio for large files takes a long wait, this needs to run in the background,
+            // and also support tapping to transfer after the App finishes, so quitting doesn't mean waiting again".
+            // A large-file export can outlast the user going off to do something else or even switching out of the App; if there's
+            // no clue on the page when they come back, the only thing they can think of is to **export again**, and wait all over again.
+            if let staged = exportCenter.ready {
+                exportReadySection(staged)
+            }
             ForEach(sections) { section in
                 Section {
                     rows(of: section)
@@ -397,6 +419,55 @@ struct LibraryView: View {
             }
         }
         .environment(\.defaultMinListHeaderHeight, 0)
+    }
+
+    /// The last export is ready but not yet shared.
+    ///
+    /// Two actions: tap the whole row = share (the only forward action, so the whole row is tappable),
+    /// the trash can on the right = clear this staging file to free up space (**doesn't touch** the user's library,
+    /// it only deletes the copy made during export).
+    private func exportReadySection(_ item: ExportCenter.Ready) -> some View {
+        Section {
+            HStack(spacing: 10) {
+                Button {
+                    exportURL = ExportCenter.shared.url(for: item)
+                    showExportSheet = exportURL != nil
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.green)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L10n.Library.exportReady)
+                                .foregroundStyle(.primary)
+                            Text(Self.exportReadyDetail(item))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Button(role: .destructive) {
+                    ExportCenter.shared.discard()
+                } label: {
+                    Label(L10n.Library.clearExportStaging, systemImage: "trash")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.Library.clearExportStaging)
+            }
+            .padding(.vertical, 2)
+        } footer: {
+            Text(L10n.Library.exportReadyFooter)
+        }
+    }
+
+    private static func exportReadyDetail(_ item: ExportCenter.Ready) -> String {
+        let size = ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file)
+        return "\(item.title) · \(L10n.Library.exportReadyFiles(item.itemCount)) · \(size)"
     }
 
     @ViewBuilder
@@ -701,48 +772,88 @@ struct LibraryView: View {
         }
     }
 
-    /// The device filter menu on the toolbar.
+    // MARK: - Device filter bar (★ 2026-10-15 revision 7)
+    //
+    // It used to be a `Menu` on the toolbar. User's words: "that device filter isn't clear enough to understand,
+    // ticking all isn't convenient for choosing; optimise it". The old design had three concrete problems:
+    //   1. without entering the menu you **can't see which devices exist**, nor **which one is being filtered**;
+    //   2. in the menu "All devices" sits side by side with each device, reading like a set of checkboxes
+    //      ("All" looks like "everything is ticked") — when it's actually a **single choice**;
+    //   3. each item drags "· 12 clips · 2.3 GB" behind it, and the line is too long and gets truncated by the system.
+    // Switched to a horizontal pill bar, three things are laid out at once: what exists, how many each, and which is selected.
+
+    /// Don't show the filter bar with only one device — there's nothing to filter, and one more row just crowds the list.
     ///
-    /// Each item is suffixed with count and size — which also takes over the old "N clips · X GB" line at the bottom of the list:
-    /// the total now lives on the "All devices" item, while the list itself now sections by time and device
-    /// and no longer summarises with one total line.
-    private var deviceFilterMenu: some View {
-        Menu {
-            Button {
-                deviceFilter = nil
-            } label: {
-                filterLabel(
-                    "\(L10n.Library.filterAllDevices) · \(L10n.Library.shortCount(model.items.count)) · \(formatBytes(model.totalBytes))",
-                    selected: deviceFilter == nil
-                )
-            }
-            if !availableDevices.isEmpty { Divider() }
-            ForEach(availableDevices, id: \.key) { device in
-                Button {
-                    deviceFilter = device.key
-                } label: {
-                    filterLabel(
-                        "\(device.name) · \(L10n.Library.shortCount(device.count)) · \(formatBytes(device.bytes))",
-                        selected: deviceFilter == device.key
-                    )
+    /// The library usually has just two sources, the TicNote card and the phone; `availableDevices` being 1 means
+    /// all recordings come from the same place, and filtering is then a **no-op**.
+    private var showsDeviceBar: Bool { availableDevices.count > 1 }
+
+    @ViewBuilder
+    private var deviceFilterBar: some View {
+        if showsDeviceBar {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    deviceFilterChip(
+                        title: L10n.Library.filterAllDevices,
+                        count: model.items.count,
+                        selected: effectiveDeviceFilter == nil
+                    ) {
+                        withAnimation(.easeInOut(duration: 0.18)) { deviceFilter = nil }
+                    }
+                    ForEach(availableDevices, id: \.key) { device in
+                        deviceFilterChip(
+                            title: device.name,
+                            count: device.count,
+                            selected: effectiveDeviceFilter == device.key
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.18)) { deviceFilter = device.key }
+                        }
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
             }
-        } label: {
-            Image(systemName: deviceFilter == nil
-                  ? "line.3.horizontal.decrease.circle"
-                  : "line.3.horizontal.decrease.circle.fill")
+            .background(.bar)
+            .accessibilityLabel(L10n.Library.filterDevices)
         }
-        .accessibilityLabel(L10n.Library.filterDevices)
     }
 
-    /// Menu item: use a **transparent placeholder** for the tick rather than omitting it, because omitting it indents the selected item's text by one step,
-    /// and the menu looks like it jumps each time it opens and closes.
-    private func filterLabel(_ text: String, selected: Bool) -> some View {
-        Label {
-            Text(text)
-        } icon: {
-            Image(systemName: "checkmark").opacity(selected ? 1 : 0)
+    /// One filter pill. Selected is a **solid accent**, unselected a light grey background — strong enough contrast that
+    /// a glance tells you which one is filtered (the old menu's tick was only 14pt, nearly invisible).
+    ///
+    /// The count is a small rounded tag inside the pill rather than grey text after the name: device names vary in length
+    /// ("TicNote Card · 3F2A" can fill half the screen), and following the text the count would drift out of sight.
+    private func deviceFilterChip(
+        title: String, count: Int, selected: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.subheadline.weight(selected ? .semibold : .regular))
+                    .lineLimit(1)
+                Text("\(count)")
+                    .font(.caption2.weight(.semibold))
+                    .monospacedDigit()
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(
+                        Capsule().fill(selected
+                                       ? Color.white.opacity(0.28)
+                                       : Color.primary.opacity(0.08))
+                    )
+            }
+            .foregroundStyle(selected ? Color.white : Color.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule().fill(selected ? Color.accentColor : Color(uiColor: .secondarySystemBackground))
+            )
+            .overlay(
+                Capsule().stroke(selected ? Color.clear : Color.primary.opacity(0.08), lineWidth: 1)
+            )
         }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
     // MARK: - Select all / derived
@@ -804,14 +915,24 @@ struct LibraryView: View {
     private var selectionBar: some View {
         VStack(spacing: 10) {
             HStack {
-                Button(allItemsSelected ? L10n.Library.deselectAll : L10n.Library.selectAll) {
+                // ★ Revision 7: the button spells out "how many will be ticked".
+                //
+                // User's words: "ticking all isn't convenient for choosing". The old button only said "Select all", while select-all's scope
+                // is **what's on this screen** (possibly already device-filtered and word-searched), and before tapping the user has no
+                // idea how many will be ticked; only after tapping do they see "12 selected" below. Moving the number onto the button
+                // makes the consequence of tapping or not visible at a glance.
+                Button {
                     if allItemsSelected {
                         selectedIDs.removeAll()
                     } else {
                         selectAllVisible()
                     }
+                } label: {
+                    Text(allItemsSelected
+                         ? L10n.Library.deselectAll
+                         : L10n.Library.selectAllWithCount(visibleEntries.count))
+                        .font(.subheadline)
                 }
-                .font(.subheadline)
                 .disabled(visibleEntries.isEmpty)
 
                 Spacer()
@@ -874,14 +995,12 @@ struct LibraryView: View {
 
     // MARK: - Batch export
 
-    /// The root export staging directory. A fixed path, **wiped entirely before every export**.
-    ///
-    /// Put in `tmp` rather than Documents: this is a way station, not user data. The system reclaims it on its own,
-    /// we don't need to account for it (and shouldn't hold the user's storage quota).
-    private static var exportStagingDir: URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent("nomily-export", isDirectory: true)
-    }
+    // ⚠️ The staging directory **is no longer here**. It used to be a fixed
+    // `FileManager.default.temporaryDirectory/nomily-export`，2026-10-15
+    // one that moved wholesale to `ExportCenter` in revision 6, for two reasons:
+    //   1. `tmp` can be cleared by iOS at any time, and "export, switch away, come back and share" is exactly the path we need to support;
+    //   2. we need somewhere to remember "what the last one prepared", or the user comes back to "wait from scratch again".
+    // To get a directory use `ExportCenter.shared.beginNewStaging()`.
 
     /// A clip's folder name in the export directory: use the **display title** (the name the user changed) rather than
     /// the filename — the export is for people to read.
@@ -940,17 +1059,29 @@ struct LibraryView: View {
         guard !items.isEmpty else { return }
         busyMessage = L10n.Library.exportPreparing
         defer { busyMessage = nil }
+        // ★ 2026-10-15 revision 6: export (copying / re-encoding for large files) holds a background task alive for its whole duration.
+        // User's words: "exporting audio for large files takes a long wait, this needs to run in the background".
+        // Shares the same mechanism as transcription and summarisation; no separate one.
+        BackgroundKeeper.shared.acquire(.export)
+        defer { BackgroundKeeper.shared.release(.export) }
 
         let fm = FileManager.default
-        let root = Self.exportStagingDir
-        // Clear the previous staging first, or "export 3 clips" gets mixed with the previous 20.
-        try? fm.removeItem(at: root)
+        // ⚠️ The staging directory **no longer writes to `tmp`**. `tmp` can be cleared by iOS at any time, and "export, switch away,
+        //    come back and share" is exactly the path this round needs to support — it lives in the App container, and
+        //    "which one is prepared" is persisted to disk (`ExportCenter`). Starting a new one deletes the last one along the way.
+        let root: URL
+        do {
+            root = try ExportCenter.shared.beginNewStaging()
+        } catch {
+            exportError = error.localizedDescription
+            return
+        }
 
         var failures: [String] = []
         var staged = 0
+        var bytes: Int64 = 0
         var taken = Set<String>()
         do {
-            try fm.createDirectory(at: root, withIntermediateDirectories: true)
             for item in items {
                 let dir = root.appendingPathComponent(
                     Self.exportFolderName(for: item, taken: &taken), isDirectory: true
@@ -961,7 +1092,9 @@ struct LibraryView: View {
                 // recognises it, so it can't be changed).
                 if let url = item.url, fm.fileExists(atPath: url.path) {
                     do {
-                        try fm.copyItem(at: url, to: dir.appendingPathComponent(item.name))
+                        let dest = dir.appendingPathComponent(item.name)
+                        try fm.copyItem(at: url, to: dest)
+                        bytes += Self.fileSize(dest)
                         staged += 1
                     } catch {
                         failures.append("\(item.displayTitle): \(error.localizedDescription)")
@@ -970,10 +1103,9 @@ struct LibraryView: View {
                 for artefact in Self.textArtefacts(for: item)
                 where fm.fileExists(atPath: artefact.source.path) {
                     do {
-                        try fm.copyItem(
-                            at: artefact.source,
-                            to: dir.appendingPathComponent(artefact.name)
-                        )
+                        let dest = dir.appendingPathComponent(artefact.name)
+                        try fm.copyItem(at: artefact.source, to: dest)
+                        bytes += Self.fileSize(dest)
                         staged += 1
                     } catch {
                         failures.append("\(item.displayTitle): \(error.localizedDescription)")
@@ -996,8 +1128,19 @@ struct LibraryView: View {
             exportError = L10n.Library.exportEmpty
             return
         }
+        ExportCenter.shared.publish(
+            id: root.lastPathComponent,
+            title: L10n.Library.exportReadyTitle(items.count),
+            itemCount: items.count,
+            bytes: bytes,
+            origin: nil
+        )
         exportURL = root
         showExportSheet = true
+    }
+
+    private static func fileSize(_ url: URL) -> Int64 {
+        Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
     }
 
     // MARK: - Batch delete
@@ -1027,7 +1170,10 @@ struct LibraryView: View {
                 urls: Self.deleteURLs(for: item),
                 // The whole clip goes, so the "was downloaded from the device" credential must be deregistered too — miss it and
                 // the same clip can never be downloaded again (in the device list it stays "downloaded" forever).
-                download: ClipTrash.downloadRecord(forLocalName: item.name, in: library)
+                download: ClipTrash.downloadRecord(forLocalName: item.name, in: library),
+                // ★ 2026-10-15: the source is fixed **at the moment of deletion**. `move` deregisters the record
+                // in the manifest along the way, and after that you can no longer find out where this recording came from.
+                source: ClipTrash.sourceLabel(forLocalName: item.name, in: library)
             )
         }
         let moved = ClipTrash.shared.move(payloads, library: library)

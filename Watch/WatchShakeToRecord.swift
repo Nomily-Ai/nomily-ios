@@ -2,7 +2,7 @@ import CoreMotion
 import Foundation
 import SwiftUI
 
-/// The "shake to start recording" toggle.
+/// The two toggles: "shake to start recording" + "double tap to start/stop recording".
 ///
 /// Storing it **separately** from `WatchRingStyleStore` is deliberate: that one's `reset()` is "restore the default
 /// appearance", and having "restore default appearance" reset the recording behaviour too would be surprising — the user tapped
@@ -11,11 +11,24 @@ final class WatchRecordingPrefs: ObservableObject {
     static let shared = WatchRecordingPrefs()
 
     private static let key = "watch.shake_to_record.v1"
+    /// ★ 2026-10-15 revision six: double tap (pinching index finger and thumb). **A separate key** —
+    /// the two gestures misfire in completely different scenarios (shake is "raise and lower the wrist", pinch is "wanting to press but missing"),
+    /// and sharing one toggle would turn off one along with the other.
+    private static let pinchKey = "watch.pinch_to_record.v1"
 
     /// Defaults **on**: what the user wants is for this action to work right away; if they really think it misfires,
     /// they can turn it off on the settings page (right below the version number).
     @Published var shakeToRecord: Bool {
         didSet { defaults.set(shakeToRecord, forKey: Self.key) }
+    }
+
+    /// Defaults **on** (the user specifically asked for this capability).
+    ///
+    /// ⚠️ Only watchOS 11+ can really turn it off: on 10.1~10.x Double Tap is system behaviour,
+    /// with no API to intercept it (see `PrimaryHandGesture`). The settings page only shows this row on 11+,
+    /// so as not to offer a switch that does nothing on 10.x.
+    @Published var pinchToRecord: Bool {
+        didSet { defaults.set(pinchToRecord, forKey: Self.pinchKey) }
     }
 
     private let defaults: UserDefaults
@@ -26,6 +39,7 @@ final class WatchRecordingPrefs: ObservableObject {
         // false when the key is absent, so "default on" would silently become "default off", and the user could never
         // turn it on — every cold launch returns to false.
         self.shakeToRecord = (defaults.object(forKey: Self.key) as? Bool) ?? true
+        self.pinchToRecord = (defaults.object(forKey: Self.pinchKey) as? Bool) ?? true
     }
 }
 

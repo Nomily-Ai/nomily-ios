@@ -53,6 +53,19 @@ final class ClipTrash: ObservableObject {
         /// and a restore has to put that manifest entry back.
         var download: Download?
 
+        /// The **source display name** at the moment of deletion ("Recorder card-3N9H" / "Apple Watch" /
+        /// "Imported"…).
+        ///
+        /// ★ 2026-10-15: users ask in the trash "where did this come from, and why is there only delete".
+        /// The `download` field above can't answer that fully — it is non-nil only on **device-download** entries
+        /// (watch / live stream / imported are always nil, because they have no such thing as "downloading
+        /// it again" at all). So the source has to be pinned at **the moment of deletion**: a step later and it can't be asked for,
+        /// because by then the manifest entry has already been unregistered.
+        ///
+        /// Optional is deliberate: older `index.json` files have no such key, and `decodeIfPresent`
+        /// yields nil, so the UI falls back to "show no source" rather than the whole index failing to decode.
+        var source: String?
+
         /// The original record on the device side. Fields map one-to-one with `Library.Entry`,
         /// deliberately **not** reusing that type directly: the trash has to decode independently (that type lives in
         /// `Library`, and changing its `CodingKeys` would also make already-trashed data unreadable).
@@ -97,6 +110,9 @@ final class ClipTrash: ObservableObject {
         var urls: [URL]
         /// See `TrashedItem.download`.
         var download: TrashedItem.Download?
+        /// See `TrashedItem.source`. It has to be filled in **before deletion** (deletion unregisters
+        /// the manifest entry, after which it can't be looked up).
+        var source: String?
     }
 
     // MARK: - Location
@@ -150,7 +166,8 @@ final class ClipTrash: ObservableObject {
                     deletedAt: Date(),
                     title: payload.title,
                     bytes: bytes,
-                    download: payload.download
+                    download: payload.download,
+                    source: payload.source
                 ))
                 // ⚠️ **Only unregister the manifest once the files are moved**: the other way round, a mid-way error leaves
                 // an orphan where "the record is gone but the files remain" — that recording can neither be downloaded back
@@ -379,6 +396,20 @@ extension ClipTrash {
         guard !hasOtherArtefacts else { return nil }
         let url = StorageLocations.titleURL(for: localName)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// This item's source display name ("Recorder card-3N9H" / "Apple Watch" / …).
+    ///
+    /// Reuses `Library.ClipSource.displayName` instead of writing another set here: that one
+    /// already handles every fallback in "user alias → stored name → fallback word + last 4 of the SN",
+    /// and a second copy in the trash would sooner or later differ from the library list — and users will compare the two.
+    ///
+    /// ⚠️ **Must be called before the delete action is started**. `ClipTrash.move` will happily unregister
+    /// that manifest entry, after which the source can never be found again (a miss falls back to "Imported",
+    /// so a recording off the card gets labelled as something the user imported themselves).
+    static func sourceLabel(forLocalName localName: String, in library: Library) -> String? {
+        let name = library.source(forLocalName: localName).displayName
+        return name.isEmpty ? nil : name
     }
 
     /// This item's "already downloaded from the device" credential (nil if none).

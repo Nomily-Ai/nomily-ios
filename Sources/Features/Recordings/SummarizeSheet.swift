@@ -11,6 +11,16 @@ struct SummarizeSheet: View {
     @StateObject private var languages = LanguageService()
     @State private var search = ""
     @State private var selected: SummarizeTemplate?
+    /// ★ Seventh revision, 2026-10-15: the template currently being viewed in the **overview**.
+    ///
+    /// When non-nil, the picker page shows the overview (name / category / description / full prompt / one primary button)
+    /// instead of the grid — matching the user's "tapping in gives an overall overview".
+    ///
+    /// Why not push in with a `NavigationLink`: this page swaps wholesale via
+    /// `Group { switch summarizeState }`, so the layer pushed on top would
+    /// be **swapped out along with it** the moment the state moves to `.running`, leaving an unpredictable stack. Switching within the same layer
+    /// has none of these problems; entering and leaving stay under control.
+    @State private var previewing: SummarizeTemplate?
     @State private var summarizeState: SummarizeState = .picking
     @State private var result = ""
     @State private var outputLangCode: String = ""
@@ -195,43 +205,66 @@ struct SummarizeSheet: View {
     }
 
     private var templatePicker: some View {
-        VStack(spacing: 0) {
-            // ★ Pre-flight health check. **Shown only on this page**, because it's only useful at the
-            //   "pick a template" moment: telling the user now that "the primary has no key and Ollama will serve as fallback"
-            //   lets them decide whether to go fix the key first or just run as-is.
-            //   Previously this situation only blew up as an English error message **after the run finished**.
-            if let preflightWarning {
-                // ★ 2026-10-15: The health check can't stop at "saying something" — it also needs a **one-tap fix**.
-                //
-                // What was actually observed: "the primary points at Open Router, and that entry has no
-                // api_key". With a hint alone, the user has to find their own way to Settings → LLM Providers,
-                // scroll to Open Router, and locate the primary-channel picker — when there is exactly one correct answer.
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(preflightWarning, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                    if let fix = LLMCompletionService.suggestedPrimary(env.config.config) {
-                        Button {
-                            adoptFallbackAsPrimary(fix)
-                        } label: {
-                            Text(L10n.LLM.adoptAsPrimary(
-                                LLMCompletionService.providerLabel(fix)
-                            ))
-                            .font(.caption)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+        Group {
+            if let previewing {
+                TemplateOverviewView(
+                    template: previewing,
+                    onUse: { use(previewing) },
+                    onBack: {
+                        withAnimation(.easeInOut(duration: 0.18)) { self.previewing = nil }
                     }
+                )
+            } else {
+                VStack(spacing: 0) {
+                    // ★ Pre-flight health check. **Shown only on this page**, because it's only useful at the
+                    //   "pick a template" moment: telling the user now that "the primary has no key and Ollama will serve as fallback"
+                    //   lets them decide whether to go fix the key first or just run as-is.
+                    //   Previously this situation only blew up as an English error message **after the run finished**.
+                    if let preflightWarning {
+                        // ★ 2026-10-15: The health check can't stop at "saying something" — it also needs a **one-tap fix**.
+                        //
+                        // What was actually observed: "the primary points at Open Router, and that entry has no
+                        // api_key". With a hint alone, the user has to find their own way to Settings → LLM Providers,
+                        // scroll to Open Router, and locate the primary-channel picker — when there is exactly one correct answer.
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label(preflightWarning, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                            if let fix = LLMCompletionService.suggestedPrimary(env.config.config) {
+                                Button {
+                                    adoptFallbackAsPrimary(fix)
+                                } label: {
+                                    Text(L10n.LLM.adoptAsPrimary(
+                                        LLMCompletionService.providerLabel(fix)
+                                    ))
+                                    .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        .background(Color.orange.opacity(0.12))
+                    }
+                    languageBar
+                    templateGrid
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-                .background(Color.orange.opacity(0.12))
             }
-            languageBar
-            templateList
         }
         .onAppear { refreshPreflight() }
+    }
+
+    /// Kick off the run. **Called only from the overview page** — the tile itself only handles "open the overview".
+    ///
+    /// Clear `previewing` in the same frame: if this run fails and the user taps "Retry" back into
+    /// the picker page, they see the grid rather than the **previous template's overview**.
+    private func use(_ template: SummarizeTemplate) {
+        selected = template
+        previewing = nil
+        summarizeState = .running
+        summarizeTask = Task { await runSummarize(template) }
     }
 
     /// Promote the fallback channel to primary. Re-run the health check immediately afterwards — the warning banner must vanish on the spot,
@@ -283,37 +316,108 @@ struct SummarizeSheet: View {
         .background(Color(uiColor: .secondarySystemBackground))
     }
 
-    private var templateList: some View {
-        List {
-            ForEach(filteredCategories, id: \.self) { category in
-                Section(SummarizeTemplate.localizedCategoryName(category)) {
-                    ForEach(filtered.filter { $0.category == category }) { template in
-                        Button {
-                            selected = template
-                            summarizeTask = Task { await runSummarize(template) }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: template.isBuiltIn ? "doc.text" : "pencil.and.outline")
-                                    .font(.caption)
-                                    .foregroundColor(template.isBuiltIn ? .secondary : .accentColor)
-                                    .frame(width: 20)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(template.localizedName)
-                                        .font(.body)
-                                        .foregroundColor(.primary)
-                                    Text(template.pickerSubtitle(limit: 80))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
+    // MARK: - Template grid (★ seventh revision 2026-10-15)
+    //
+    // It used to be `List { Section { one row = icon + name + an 80-character prompt preview } }`:
+    // only three or four fit on screen, and **the names drowned in walls of text** — picking a template became line-by-line reading.
+    // Now spread into tiles by category: scan the category headers, then the names on the tiles — six to eight visible per screen.
+    // To see exactly "what a template will produce", tap through to its overview page.
+    private var templateGrid: some View {
+        Group {
+            if filtered.isEmpty {
+                // Say something when the search finds nothing. An emptied grid leaves the page blank, and users will think it's broken.
+                EmptyStateView(
+                    L10n.Summarize.noMatchingTemplates,
+                    systemImage: "magnifyingglass",
+                    message: L10n.Summarize.searchTemplates
+                )
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 20) {
+                        ForEach(filteredCategories, id: \.self) { category in
+                            VStack(alignment: .leading, spacing: 10) {
+                                categoryHeader(category)
+                                LazyVGrid(
+                                    columns: [GridItem(.adaptive(minimum: 148), spacing: 10)],
+                                    spacing: 10
+                                ) {
+                                    ForEach(templatesIn(category)) { template in
+                                        templateCard(template)
+                                    }
                                 }
                             }
-                            .padding(.vertical, 2)
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 28)
                 }
             }
         }
+        // Attached outside the Group: that way the search bar is present in both the "results" and "no results" shapes,
+        // so users can delete the typo they just made. Inside, it would have to be written twice (a Group
+        // dispatches the modifier to its single content view).
         .searchable(text: $search, prompt: L10n.Summarize.searchTemplates)
+    }
+
+    private func templatesIn(_ category: String) -> [SummarizeTemplate] {
+        filtered.filter { $0.category == category }
+    }
+
+    private func categoryHeader(_ category: String) -> some View {
+        HStack(spacing: 6) {
+            Text(SummarizeTemplate.localizedCategoryName(category))
+                .font(.subheadline.weight(.semibold))
+            Text(L10n.Summarize.templateCount(templatesIn(category).count))
+                .font(.caption2)
+                .monospacedDigit()
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// One template tile. **Name only** — the description and prompt live on the overview page; the goal here is "scannable".
+    private func templateCard(_ template: SummarizeTemplate) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) { previewing = template }
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: template.isBuiltIn ? "doc.text" : "pencil.and.outline")
+                        .font(.caption)
+                        .foregroundStyle(template.isBuiltIn ? Color.secondary : Color.accentColor)
+                    Spacer(minLength: 0)
+                    if !template.isBuiltIn {
+                        Text(L10n.Summarize.customBadge)
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.16)))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+                Text(template.localizedName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            // `maxHeight: .infinity` makes **tiles in the same row equal height** — when a one-line name sits next to
+            // a three-line name, the ragged bottom edges are extremely conspicuous.
+            .frame(maxWidth: .infinity, minHeight: 88, maxHeight: .infinity, alignment: .topLeading)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Summarize
@@ -439,5 +543,129 @@ struct SummarizeSheet: View {
         // the user knows the settings did take effect.
         let key = workingProvider ?? env.config.config.llmProviders.primary ?? ""
         return LLMCompletionService.providerLabel(key)
+    }
+}
+
+// MARK: - Template overview page (★ new in the seventh revision, 2026-10-15)
+//
+// After tapping a tile the user wants **not** to run immediately, but to "first see clearly what kind of output this
+// template produces": the name, category, a one-line description, and the **full prompt**.
+//
+// Deliberately **not** stuffing a prompt preview back into the tile: the moment that text gets squeezed in, the grid reverts to the old
+// unreadable checklist — the whole point of the overview page is to separate "scanning" from "reading".
+//
+// The description's `localizedSummary` is an optional legacy field (early built-in templates lack it). When absent, the whole section
+// is hidden rather than faked from the prompt's first 80 characters: the full prompt sits right below, so
+// a "preview" would be pure duplication.
+private struct TemplateOverviewView: View {
+    let template: SummarizeTemplate
+    let onUse: () -> Void
+    let onBack: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                if let summary = template.localizedSummary, !summary.isEmpty {
+                    labelledBlock(L10n.Summarize.templateAbout, text: summary, monospaced: false)
+                }
+                labelledBlock(
+                    L10n.Summarize.templatePromptLabel,
+                    text: template.localizedPrompt,
+                    monospaced: true
+                )
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 24)
+        }
+        .safeAreaInset(edge: .bottom) { useBar }
+        .navigationTitle(template.localizedName.isEmpty
+                         ? L10n.Summarize.templateOverviewTitle
+                         : template.localizedName)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // This page isn't pushed (see the `previewing` note), so the system won't
+            // supply a back chevron — one must be placed manually, otherwise the only way out is swiping down to close the entire
+            // picker, which looks like "quitting".
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button { onBack() } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.left")
+                            .font(.footnote.weight(.semibold))
+                        Text(L10n.Summarize.backToTemplates)
+                    }
+                }
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: template.isBuiltIn ? "doc.text" : "pencil.and.outline")
+                .font(.title3)
+                .foregroundStyle(template.isBuiltIn ? Color.secondary : Color.accentColor)
+                .frame(width: 38, height: 38)
+                .background(Circle().fill(Color(uiColor: .secondarySystemBackground)))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(template.localizedName)
+                    .font(.title3.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 6) {
+                    chip(
+                        SummarizeTemplate.localizedCategoryName(template.category),
+                        tint: .secondary
+                    )
+                    chip(
+                        template.isBuiltIn ? L10n.Summarize.builtInBadge : L10n.Summarize.customBadge,
+                        tint: template.isBuiltIn ? .secondary : .accentColor
+                    )
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func chip(_ text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.medium))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(tint.opacity(0.14)))
+            .foregroundStyle(tint)
+    }
+
+    /// A body block with a small heading. `monospaced` is for the prompt — it contains indentation and
+    /// table rules, and only a monospaced face shows the structure.
+    private func labelledBlock(_ label: String, text: String, monospaced: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(monospaced ? .system(.footnote, design: .monospaced) : .footnote)
+                .foregroundStyle(.primary)
+                // Allow long-press selection and copy: wanting to take this prompt elsewhere to tweak it is perfectly natural.
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(uiColor: .secondarySystemBackground))
+                )
+        }
+    }
+
+    private var useBar: some View {
+        Button { onUse() } label: {
+            Label(L10n.Summarize.useTemplate, systemImage: "sparkles")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 }

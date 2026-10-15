@@ -611,6 +611,48 @@ struct ClipDetailView: View {
                 }
             }
             .disabled(isExporting)
+
+            // ★ Sixth revision, 2026-10-15: if **the previously exported copy is still there**, offer the share entry directly.
+            //
+            // This row answers the user's words "so leaving doesn't mean waiting all over again": transcoding a large file takes
+            // a long time and users switch away before it's done — if all they find on return is that "Export audio"
+            // button, it means waiting all over again from scratch. This tells them "it's ready — tap here to send
+            // it out", along with the size (that's how they decide whether to clear it first).
+            //
+            // ⚠️ Only accept `origin == item.name`: the copy prepared by a batch export belongs to another item,
+            //    and offering a share entry for it on this recording's detail page would imply "this is what's being shared".
+            if !isExporting, let staged = ExportCenter.shared.ready(forOrigin: item.name) {
+                HStack(spacing: 8) {
+                    Button {
+                        // Reuse the share sheet above driven by `exportShareURL` —
+                        // attaching another `.sheet` for this entry would only add one more piece of state to keep in sync.
+                        exportShareURL = ExportCenter.shared.url(for: staged)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(L10n.ClipDetail.exportReady)
+                                Text(Self.readyDetail(staged))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(role: .destructive) {
+                        ExportCenter.shared.discard()
+                    } label: {
+                        Label(L10n.ClipDetail.clearExportStaging, systemImage: "trash")
+                            .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.ClipDetail.clearExportStaging)
+                }
+            }
         } header: {
             Text(L10n.ClipDetail.export)
         } footer: {
@@ -618,17 +660,43 @@ struct ClipDetailView: View {
         }
     }
 
+    /// "1 file · 42 MB". The size matters — it's how the user decides whether to clear it first.
+    private static func readyDetail(_ item: ExportCenter.Ready) -> String {
+        let size = ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file)
+        return "\(L10n.ClipDetail.exportReadyFiles(item.itemCount)) · \(size)"
+    }
+
     private func runExport(_ format: AudioExportFormat) async {
         guard let source = item.url else { return }
         isExporting = true
         defer { isExporting = false }
+        // ★ Keep-alive: transcoding a large file takes tens of seconds to minutes; getting suspended after switching away would waste the whole run.
+        // Shares the same mechanism as transcription and summarisation; no separate one.
+        BackgroundKeeper.shared.acquire(.export)
+        defer { BackgroundKeeper.shared.release(.export) }
         do {
+            // ★ Written to `ExportCenter`'s staging directory instead of `tmp`: iOS clears `tmp`
+            // at any time, and "export, switch away, come back and share" is exactly the flow this round must support.
+            let dir = try ExportCenter.shared.beginNewStaging()
             let stem = (item.name as NSString).deletingPathExtension
-            let url = try await AudioExporter.export(format, source: source, suggestedName: stem)
+            let url = try await AudioExporter.export(
+                format, source: source, suggestedName: stem, directory: dir
+            )
+            ExportCenter.shared.publish(
+                id: dir.lastPathComponent,
+                title: stem,
+                itemCount: 1,
+                bytes: Self.fileSize(url),
+                origin: item.name
+            )
             exportShareURL = url
         } catch {
             exportError = error.localizedDescription
         }
+    }
+
+    private static func fileSize(_ url: URL) -> Int64 {
+        Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
     }
 
     // MARK: - delete
@@ -683,7 +751,9 @@ struct ClipDetailView: View {
                 urls: urls,
                 // With the audio copy gone, the "already downloaded from the device" credentials must be revoked — otherwise
                 // the device list would show it as "downloaded" forever, never downloadable again. Restored back on recovery.
-                download: ClipTrash.downloadRecord(forLocalName: item.name, in: env.library)
+                download: ClipTrash.downloadRecord(forLocalName: item.name, in: env.library),
+                // The source is fixed at the moment of deletion; see `TrashedItem.source`.
+                source: ClipTrash.sourceLabel(forLocalName: item.name, in: env.library)
             )],
             library: env.library
         )
@@ -709,7 +779,8 @@ struct ClipDetailView: View {
                 urls: urls,
                 // ⚠️ `download` **must not** be included here: the audio is still present, and revoking the credentials would amount to
                 // erasing a still-existing asset from the manifest.
-                download: nil
+                download: nil,
+                source: ClipTrash.sourceLabel(forLocalName: item.name, in: env.library)
             )],
             library: env.library
         )
@@ -735,7 +806,8 @@ struct ClipDetailView: View {
                 localName: item.name,
                 title: item.displayTitle,
                 urls: urls,
-                download: nil    // Ditto: the audio is untouched, credentials kept.
+                download: nil,    // Ditto: the audio is untouched, credentials kept.
+                source: ClipTrash.sourceLabel(forLocalName: item.name, in: env.library)
             )],
             library: env.library
         )

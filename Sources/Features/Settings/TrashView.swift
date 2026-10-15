@@ -13,6 +13,10 @@ import SwiftUI
 ///   source label becomes "Imported").
 /// * **Delete permanently** — deletes just this one.
 /// * **Empty** — deletes everything. Both deletions carry a confirmation prompt; restore doesn't need one (it's lossless).
+///
+/// ★ Second revision, 2026-10-15: all three actions now **have buttons sitting in the row**; swiping is just a shortcut.
+/// In the first revision restore was only a left swipe and permanent delete only a right swipe, so what users saw on entering was rows and rows of "deletable"
+/// records, and they fed back "why is there only delete". The same row also gained a **source**.
 struct TrashView: View {
     @EnvironmentObject private var env: AppEnvironment
     @ObservedObject private var trash = ClipTrash.shared
@@ -89,11 +93,36 @@ struct TrashView: View {
 
     // MARK: - One row
 
+    /// One row.
+    ///
+    /// ★ Second revision, 2026-10-15 (user: "why is there only delete in the trash, and there also needs to be the source of the
+    /// audio, plus restoring the current recording"):
+    ///
+    /// * **Source** — added as a small line under the title. The data was recorded **at the moment of deletion**
+    ///   (`TrashedItem.source`), because the moment `move` runs it unregisters that
+    ///   manifest entry, and asking `Library` afterwards only yields "Imported".
+    /// * **Restore became an explicit button**. Originally only a **left swipe** offered restore, while a right swipe was permanent delete —
+    ///   and the swipe directions on either side were known only to a single comment. Users saw only rows of "deletable" records
+    ///   and naturally thought "why is there only delete here". Now both actions sit in the row:
+    ///   restore (green, outlined) on the outside, permanent delete (red) on the far right, with swiping kept as before.
     private func row(_ item: ClipTrash.TrashedItem) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(item.title)
                 .font(.body)
                 .lineLimit(2)
+
+            // The source. When an old index has no such field (`decodeIfPresent` gives nil) the whole line is hidden,
+            // rather than filling in "unknown source" — which tells the user nothing at all.
+            if let source = item.source, !source.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .imageScale(.small)
+                    Text(source)
+                        .lineLimit(1)
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
 
             // What's left inside. **It must be shown**: the trash may hold an item "with only the transcription deleted",
             // and by the title alone you'd think the whole thing is gone.
@@ -114,16 +143,37 @@ struct TrashView: View {
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
+
+            // Show both actions. Restore comes first (the primary action), permanent delete is pushed to the back —
+            // restore is lossless, permanent delete is not.
+            HStack(spacing: 8) {
+                Button {
+                    restore(item)
+                } label: {
+                    Label(L10n.Trash.restore, systemImage: "arrow.uturn.backward")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .tint(.green)
+
+                Button(role: .destructive) {
+                    pendingPurge = item
+                } label: {
+                    Label(L10n.Trash.deleteForever, systemImage: "trash")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 2)
         }
-        .padding(.vertical, 2)
-        // Swipe left to restore, swipe right to delete permanently — the same directional intuition as the system's "Recently Deleted":
-        // right means "take it back", left means "push it out".
+        .padding(.vertical, 4)
+        // The swipe actions stay as before — a gesture is a shortcut for the experienced, a button is an entry point for everyone,
+        // and the two don't conflict.
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button {
-                if !trash.restore(item, library: env.library) { restoreFailed = true }
-                // The list must reflect "this one came back" immediately. `LibraryView`'s `.task` re-runs when
-                // returning from the detail page, but the trash is another path, so it has to rely on this notification.
-                NotificationCenter.default.post(name: .libraryDidChange, object: nil)
+                restore(item)
             } label: {
                 Label(L10n.Trash.restore, systemImage: "arrow.uturn.backward")
             }
@@ -134,6 +184,16 @@ struct TrashView: View {
                 Label(L10n.Trash.deleteForever, systemImage: "trash")
             }
         }
+    }
+
+    /// Restore one item.
+    ///
+    /// Pulled out into a function because there are now **two** entry points (the in-row button + left swipe) — writing it twice
+    /// would sooner or later miss the notification from one of them. That `libraryDidChange` is essential:
+    /// `LibraryView`'s `.task` only re-runs when returning from the detail page, and the trash is another path.
+    private func restore(_ item: ClipTrash.TrashedItem) {
+        if !trash.restore(item, library: env.library) { restoreFailed = true }
+        NotificationCenter.default.post(name: .libraryDidChange, object: nil)
     }
 
     private func chip(_ text: String, _ symbol: String) -> some View {

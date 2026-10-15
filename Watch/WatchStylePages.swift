@@ -277,6 +277,23 @@ struct WatchSettingsView: View {
                 }
             }
 
+            // ★ Sixth revision: two-finger tap (index finger and thumb pinched together).
+            //
+            // ⚠️ **Shown only on watchOS 11+**. On 10.1–10.x the system itself assigns the two-finger tap
+            //   to the page's primary button, and no API can intercept it — on such watches a "can't-turn-off
+            //   the gesture" toggle is worse than none at all (the user flips it, nothing happens, and they'll conclude the whole
+            //   gesture feature is broken).
+            if #available(watchOS 11.0, *) {
+                Toggle(isOn: $prefs.pinchToRecord) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(L10n.Watch.pinchToRecord)
+                        Text(L10n.Watch.pinchToRecordHint)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Button {
                 store.reset()
             } label: {

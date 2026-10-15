@@ -35,6 +35,12 @@ final class BackgroundKeeper {
         case transcription
         /// Summary / translation and other long LLM jobs.
         case summary
+        /// Exporting audio (copying / re-encoding large files).
+        ///
+        /// ★ 2026-10-15 revision six: the user's own words were "exporting audio takes a very long time for large files
+        /// and it needs to run in the background". Export and transcription are **the same kind** of problem (suspended half-way),
+        /// so they share this one setup rather than starting another.
+        case export
     }
 
     /// Mirrors `config.backgroundKeepAliveEnabled`. When off, only the ~30 seconds of

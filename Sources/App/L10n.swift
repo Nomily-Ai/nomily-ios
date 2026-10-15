@@ -40,6 +40,10 @@ enum L10n {
         static var close: String { NSLocalizedString("common.close", comment: "") }
         static var openSettings: String { NSLocalizedString("common.open_settings", comment: "") }
         static var tryAgain: String { NSLocalizedString("common.try_again", comment: "") }
+        /// Generic back. For pages that are **not pushed** and get no system back chevron.
+        static var back: String {
+            NSLocalizedString("common.back", value: "Back", comment: "Generic back button")
+        }
         static var none: String { NSLocalizedString("common.none", comment: "") }
         static var recording: String { NSLocalizedString("common.recording", comment: "") }
         static var keepForeground: String { NSLocalizedString("common.keep_foreground", comment: "") }
@@ -516,6 +520,18 @@ enum L10n {
         static var deselectAll: String {
             NSLocalizedString("library.deselect_all", value: "Deselect All", comment: "Multi-select: clear the selection")
         }
+        /// ★ Seventh revision, 2026-10-15: the select-all button now shows the count.
+        ///
+        /// The user's own words included "select-all is inconvenient to use". The old button just said "Select All"; before tapping,
+        /// users had no idea how many rows it would check (especially after filtering by device or searching); only afterwards did they see below
+        /// "12 selected". Moving the number onto the button makes "how many will be selected" visible at a glance.
+        static func selectAllWithCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("library.select_all_count", value: "Select All (%d)",
+                                           comment: "Multi-select: select all, with how many clips that covers"),
+                count
+            )
+        }
         static func selectedCount(_ count: Int) -> String {
             String(
                 format: NSLocalizedString(
@@ -540,6 +556,39 @@ enum L10n {
         static var exportEmpty: String {
             NSLocalizedString("library.export_empty", value: "Nothing to export.",
                               comment: "Bulk export produced no files at all")
+        }
+        // ★ Sixth revision, 2026-10-15: the banner for an export that's ready (finished in the background, waiting to be shared).
+        //
+        // The wording deliberately **avoids mentioning "background"** — users don't need to know we keep the process alive with silent audio;
+        // the only two things they want confirmed are "is the last batch ready" and "what do I tap now to send it out".
+        static var exportReady: String {
+            NSLocalizedString("library.export_ready", value: "Your last export is ready",
+                              comment: "Banner: a previously started export finished and is waiting to be shared")
+        }
+        static func exportReadyTitle(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("library.export_ready_title", value: "%d clips",
+                                          comment: "Name given to a staged export: how many clips it contains"),
+                count
+            )
+        }
+        static func exportReadyFiles(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("library.export_ready_files", value: "%d files",
+                                          comment: "How many files the staged export contains"),
+                count
+            )
+        }
+        static var exportReadyFooter: String {
+            NSLocalizedString(
+                "library.export_ready_footer",
+                value: "The files are already on this phone — tap the row to share them. Starting a new export replaces this copy, and it's cleaned up automatically after 3 days.",
+                comment: "Footer explaining the staged-export banner"
+            )
+        }
+        static var clearExportStaging: String {
+            NSLocalizedString("library.clear_export_staging", value: "Delete exported files",
+                              comment: "Button: discard the staged export copies to free up space")
         }
         static var deleteSelectedTitle: String {
             NSLocalizedString("library.delete_selected_title", value: "Delete Selected Clips?",
@@ -855,6 +904,24 @@ enum L10n {
                 "watch.shake_to_record_hint",
                 value: "Shake your wrist to start, shake again to stop",
                 comment: "Watch settings: explains the shake gesture"
+            )
+        }
+
+        /// The "two-finger tap to start/stop recording" toggle in Settings (shown on watchOS 11+ only).
+        ///
+        /// ⚠️ The wording deliberately says "pinch index finger and thumb together" instead of copying Apple's "Double Tap":
+        /// that's the exact gesture the user asked for, and a literal "double tap" would be confused with "tap the screen twice" —
+        /// this is an **in-air** gesture, not a touch. Apple's own Chinese name for it is also "two-finger tap".
+        static var pinchToRecord: String {
+            NSLocalizedString("watch.pinch_to_record", value: "Double Tap to Record",
+                              comment: "Watch settings: pinch index finger and thumb to start/stop recording")
+        }
+        /// The explanatory line under that toggle.
+        static var pinchToRecordHint: String {
+            NSLocalizedString(
+                "watch.pinch_to_record_hint",
+                value: "Tap index finger and thumb together to start, again to stop",
+                comment: "Watch settings: explains the double-tap gesture"
             )
         }
 
@@ -1567,6 +1634,24 @@ enum L10n {
         static var exportAsWAV: String { NSLocalizedString("clip_detail.export_as_wav", value: "Export as WAV (PCM)", comment: "WAV export option — uncompressed audio") }
         static var exportFormatFooter: String { NSLocalizedString("clip_detail.export_format_footer", value: "M4A is compressed and plays anywhere. WAV is uncompressed — larger, but it's the format transcription and editing tools expect.", comment: "Footer explaining the two audio export formats") }
         static var exporting: String { NSLocalizedString("clip_detail.exporting", comment: "") }
+        /// ★ Sixth revision, 2026-10-15: the previous export is ready; tap this row to share it.
+        ///
+        /// The only reason this row exists is to **save a re-run** — transcoding a large file can wait until the user
+        /// switches away ("so leaving doesn't mean waiting all over again"). So the copy says "Exported" outright, not
+        /// the vague "Share audio".
+        static var exportReady: String {
+            NSLocalizedString("clip_detail.export_ready", value: "Exported — tap to share",
+                              comment: "Row shown when this clip's export already finished and is waiting to be shared")
+        }
+        static func exportReadyFiles(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("clip_detail.export_ready_files", value: "%d file(s)",
+                                          comment: "How many files the staged export contains"),
+                count
+            )
+        }
+        /// Clears the staging copy (**leaves the original in the library untouched**).
+        static var clearExportStaging: String { L10n.Library.clearExportStaging }
         static var mindMap: String { NSLocalizedString("clip_detail.mind_map", value: "Mind Map", comment: "Mind map view built from the summary's headings and lists") }
         static var mindMapLevel: String { NSLocalizedString("clip_detail.mind_map_level", value: "Branches", comment: "How many levels of the summary the mind map draws") }
         static var mindMapFit: String { NSLocalizedString("clip_detail.mind_map_fit", value: "Fit", comment: "Button that scales the mind map to fill the screen") }
@@ -2003,6 +2088,61 @@ enum L10n {
             String(format: NSLocalizedString("summarize.summarizing_with", comment: ""), provider)
         }
         static var searchTemplates: String { NSLocalizedString("summarize.search_templates", comment: "") }
+        // ★ Seventh revision, 2026-10-15: the template picker changed from "rows of text" to "a tile grid + overview page".
+        //
+        // User's words: "the summary templates shouldn't be plain text; suggest showing the current structure as blocks, and tapping
+        // one gives an overall overview". So the tile keeps only the name (to see "what's available"), while the description and
+        // the full prompt move to the overview page (to see "what it produces when tapped").
+        //
+        // ⚠️ All `static var` + inline English fallback: same reason as the `Library` batch —
+        // the .lproj files only cover en / zh-Hans; the other 9 languages rely on `value:` to keep key literals out.
+        static func templateCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("summarize.template_count", value: "%d templates",
+                                          comment: "Template grid: how many templates are in this category"),
+                count
+            )
+        }
+        static var builtInBadge: String {
+            NSLocalizedString("summarize.builtin_badge", value: "Built-in",
+                              comment: "Template card/overview: shipped with the app")
+        }
+        static var customBadge: String {
+            NSLocalizedString("summarize.custom_badge", value: "Mine",
+                              comment: "Template card/overview: created by the user")
+        }
+        /// Title of the "what this template does" section on the overview page.
+        static var templateAbout: String {
+            NSLocalizedString("summarize.template_about", value: "What it produces",
+                              comment: "Overview page: label above the template's one-line description")
+        }
+        /// Title of the full-prompt section on the overview page.
+        static var templatePromptLabel: String {
+            NSLocalizedString("summarize.template_prompt_label", value: "Prompt",
+                              comment: "Overview page: label above the template's full prompt text")
+        }
+        /// The primary button at the bottom of the overview page.
+        static var useTemplate: String {
+            NSLocalizedString("summarize.use_template", value: "Summarize with this template",
+                              comment: "Overview page: primary button that starts the summary")
+        }
+        /// The back button at the top-left of the overview page (this page isn't pushed, so the system shows no back chevron).
+        static var backToTemplates: String {
+            NSLocalizedString("summarize.back_to_templates", value: "Templates",
+                              comment: "Overview page: back button, returns to the template grid")
+        }
+        /// Overview page subtitle (an extra info slot beyond category + item count). Currently used only for accessibility.
+        static var templateOverviewTitle: String {
+            NSLocalizedString("summarize.template_overview_title", value: "Template",
+                              comment: "Overview page: navigation title when the template has no name")
+        }
+        /// Empty state when a template search finds nothing. **Must exist** — once the tile grid search comes up empty the page is blank,
+        /// and users will think the page failed to load.
+        static var noMatchingTemplates: String {
+            NSLocalizedString("summarize.no_matching_templates",
+                              value: "No templates match your search",
+                              comment: "Template grid: search returned nothing")
+        }
         static var truncatedWarning: String { NSLocalizedString("summarize.truncated_warning", comment: "Shown when the model hit its output cap") }
         /// Chunk progress: "chunk %1$d of %2$d". Numbers are monospaced so the row doesn't jitter when digit counts change.
         static func chunkProgress(_ done: Int, _ total: Int) -> String {

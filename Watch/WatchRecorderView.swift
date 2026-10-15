@@ -30,6 +30,12 @@ import WatchKit
 /// * **The pending list shrinks from a long column to a thin hint at the bottom**, tap through to a separate page for details.
 ///   That list used to be squeezed in below the ring, and the idle ring already reaches nearly to the screen edge, so the moment something
 ///   is pending it shoves the ring off -- and "just finished recording" is exactly when the pending list is fullest.
+///
+/// ★ 2026-10-15 revision six (user: "I need a gesture, pinching index finger and thumb together, to start and stop
+/// recording"): the ring, the main button, is also the target for the **double tap**; pinch once to start,
+/// pinch again to stop. For the implementation see `PrimaryHandGesture` at the bottom of `WatchRingControl` --
+/// the gesture API only exists from watchOS 11 on; on 10.1~10.x the system dispatches it to the main button on its own.
+/// The toggle is on the settings page (`WatchRecordingPrefs.pinchToRecord`) and defaults to on.
 struct WatchRecorderView: View {
     @EnvironmentObject private var model: WatchRecorderModel
     /// Transfer state is read straight off the link rather than snapshotted
@@ -118,7 +124,11 @@ struct WatchRecorderView: View {
                 elapsed: model.elapsed,
                 detail: model.isRecording ? WatchFormat.bytes(model.currentBytes) : nil,
                 style: styleStore.style,
-                onToggle: model.toggleRecording
+                onToggle: model.toggleRecording,
+                // ★ Revision six: double tap. The toggle is on the settings page and defaults to on.
+                //   On 10.x this value is ignored by `PrimaryHandGesture` -- on that version
+                //   the system dispatches the gesture to the main button itself, and there's no API to turn it off.
+                handGestureEnabled: prefs.pinchToRecord
             )
             // Do the corner buttons change size with the recording state too? No -- they only exist while idle,
             // and the idle ring is fixed at 0.74; the two were aligned at that setting to begin with.

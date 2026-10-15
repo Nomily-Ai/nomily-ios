@@ -39,6 +39,13 @@ struct WatchRingControl: View {
     /// The appearance the user chose. Provided by `WatchRingStyleStore`; redraws immediately on change.
     let style: WatchRingStyle
     let onToggle: () -> Void
+    /// ★ Sixth revision, 2026-10-15: whether the **double tap** (index finger and thumb pinch) can start/stop recording.
+    ///
+    /// Driven by `WatchRecordingPrefs.pinchToRecord`, and it can be turned off on the settings page.
+    /// When off it can't just "do nothing" — on watchOS 11 you must explicitly
+    /// `isEnabled: false` to **take this gesture back** from the system, otherwise the system still
+    /// routes it to this page's main button and it fires even with the switch off.
+    var handGestureEnabled: Bool = true
 
     /// On an always-on wrist the screen is dimmed and continuously animating
     /// is both wasteful and impossible to read. The rings stay; the motion
@@ -135,6 +142,8 @@ struct WatchRingControl: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        // ★ Double Tap (pinching index finger and thumb) = start/stop recording.
+        .modifier(PrimaryHandGesture(enabled: handGestureEnabled))
         .animation(.spring(response: 0.34, dampingFraction: 0.62), value: isRecording)
         .accessibilityLabel(isRecording ? L10n.Watch.stop : L10n.Watch.record)
         .accessibilityValue(isRecording ? WatchFormat.compactDuration(elapsed) : L10n.Watch.ready)
@@ -484,6 +493,35 @@ struct WatchRingControl: View {
         withAnimation(.easeOut(duration: 0.6)) {
             burstScale = 1.20
             burstOpacity = 0
+        }
+    }
+}
+
+// MARK: - Double Tap
+
+/// Binds the **double tap** (index finger and thumb pinch, which Apple calls Double Tap) to this page's main button.
+///
+/// ## Why a separate `ViewModifier`
+/// `.handGestureShortcut(_:isEnabled:)` is an API that appeared only in **watchOS 11.0**, while this
+/// project's `WATCHOS_DEPLOYMENT_TARGET` is **10.0**. Splitting it into a modifier lets one explicit
+/// `#available` branch spell out two things:
+///
+/// * **11 and above**: explicitly declare that this button is the gesture's landing point, and that it is **controlled by the switch**
+///   (`isEnabled`). Here you must explicitly write `isEnabled: false` rather than "leave it alone" --
+///   if you only read the switch in without touching the modifier, the system still routes Double Tap to this page's
+///   main button, so it fires even with the switch off.
+/// * **10.x**: do nothing. From watchOS 10.1 the system routes Double Tap by itself to the page's
+///   single main button (this page has only the one ring `Button`; the four corner dots are
+///   `NavigationLink` and don't take part in the primary-action decision), so on that version the
+///   gesture works anyway — no API means **no switch**, which is a system limitation, not an omission.
+private struct PrimaryHandGesture: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if #available(watchOS 11.0, *) {
+            content.handGestureShortcut(.primaryAction, isEnabled: enabled)
+        } else {
+            content
         }
     }
 }
