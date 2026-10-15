@@ -47,8 +47,15 @@ final class WatchLink: NSObject, ObservableObject {
         guard !queuedNames.contains(name) else { return }
         WCSession.default.transferFile(url, metadata: [WatchLinkMessage.fileNameKey: name])
         refreshQueue()
+        // ★ Record-keeping. The size is taken here (the file is still around); the `didFinish` step no longer can.
+        WatchTransferLog.shared.noteQueued(name: name, bytes: Self.fileSize(of: url))
         log.info("queued \(name, privacy: .public) for the iPhone")
         #endif
+    }
+
+    /// File byte count. 0 if it can't be read — showing 0 KB in the record beats the whole entry not showing up.
+    private static func fileSize(of url: URL) -> Int64 {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
     }
 
 #if targetEnvironment(simulator)
@@ -134,6 +141,7 @@ extension WatchLink: WCSessionDelegate {
         Task { @MainActor in
             log.info("iPhone stored \(name, privacy: .public)")
             self.deliveredNames.remove(name)
+            WatchTransferLog.shared.noteStored(name: name)
             self.onStored?(name)
         }
     }
@@ -146,6 +154,10 @@ extension WatchLink: WCSessionDelegate {
         let name = fileTransfer.file.fileURL.lastPathComponent
         Task { @MainActor in
             self.refreshQueue()
+            // ★ Failures get accounted too. This is the **only** moment the failure reason is visible —
+            //    `didFinish`'s `error` used to go only into os_log, and logs can't be read on the watch,
+            //    so all the user saw was "that one stuck in pending forever".
+            WatchTransferLog.shared.noteFinished(name: name, error: error)
             guard error == nil else {
                 log.error("transfer of \(name, privacy: .public) failed: \(String(describing: error), privacy: .public)")
                 return

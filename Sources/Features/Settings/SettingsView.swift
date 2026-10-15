@@ -217,6 +217,8 @@ struct SettingsView: View {
 
 struct ASRProvidersView: View {
     @EnvironmentObject private var configService: ConfigService
+    /// 2026-10-15: to read the transcription queue state (`pending` / `inFlight`).
+    @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     @State private var azureVerify: VerifyState = .idle
     /// Active connectivity test for the local server (added 2026-10-13).
@@ -336,9 +338,74 @@ struct ASRProvidersView: View {
                     InfoTip(text: L10n.ASR.localVADFooter)
                 }
             }
+
+            // ★ 2026-10-15: background keep-alive.
+            Toggle(isOn: Binding(
+                get: { configService.config.backgroundKeepAliveEnabled },
+                set: { configService.config.backgroundKeepAliveEnabled = $0; configService.scheduleSave() }
+            )) {
+                HStack(spacing: 4) {
+                    Text(L10n.ASR.backgroundKeepAlive)
+                    InfoTip(text: L10n.ASR.backgroundKeepAliveFooter)
+                }
+            }
+
+            // The queue state only appears when there's really a job queued — adding an extra row while it's empty
+            // is just noise (and makes people think "is it broken?").
+            if !env.transcription.pending.isEmpty {
+                queueStatusRow
+            }
         } header: {
             Text(L10n.ASR.transcription)
         }
+    }
+
+    /// "How many are still waiting to be transcribed".
+    ///
+    /// Why it deserves a row: this queue is **cross-launch**. Users may simply not remember that yesterday
+    /// they fed it a few recordings waiting to be transcribed, and those jobs are either quietly running or have quietly
+    /// given up after three tries — without saying so, both can only be inferred from "that recording in the library never gets transcript text",
+    /// and "not transcribed" and "transcription failed" look exactly alike in the list.
+    private var queueStatusRow: some View {
+        let pending = env.transcription.pending
+        let running = pending.filter { $0.attempts < TranscriptionService.maxAttempts }.count
+        let stuck = pending.count - running
+        let inFlight = env.transcription.inFlight.count
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                if inFlight > 0 {
+                    ProgressView().controlSize(.mini)
+                }
+                Text(L10n.ASR.queueTitle)
+                Spacer(minLength: 8)
+                Text(
+                    [
+                        inFlight > 0 ? L10n.ASR.queueRunning(inFlight) : nil,
+                        running - inFlight > 0 ? L10n.ASR.queueWaiting(running - inFlight) : nil,
+                        stuck > 0 ? L10n.ASR.queueStuck(stuck) : nil,
+                    ]
+                    .compactMap { $0 }
+                    .joined(separator: " · ")
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            }
+            // Only report the **first** one given up: reporting them all would stretch this Section to a full screen,
+            // when what the user wants right now is "to know something is stuck", not to read every error one by one.
+            if stuck > 0,
+               let first = pending.first(where: { $0.attempts >= TranscriptionService.maxAttempts }) {
+                Text(L10n.ASR.queueStuckDetail(
+                    first.name,
+                    first.attempts,
+                    first.lastError ?? ""
+                ))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     private var azureSection: some View {

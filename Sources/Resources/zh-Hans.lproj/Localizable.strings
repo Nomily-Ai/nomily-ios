@@ -36,6 +36,13 @@
 "asr.auto_transcribe_footer" = "下载完成后自动运行转录。短于最小时长的片段将被跳过。如已配置，另一个服务会作为备用方案自动启用。";
 "asr.local_vad" = "上传前去除静音";
 "asr.local_vad_footer" = "在本机上检测人声活动，将静音段去掉后再发送到转录服务，可降低上传量和转录费用。";
+"asr.background_keep_alive" = "切到后台也继续转录";
+"asr.background_keep_alive_footer" = "开着时，切走或锁屏后转录仍会继续跑完，不会停下。关掉后只保留约 30 秒的收尾时间，长录音切到后台会中断。无论开关如何，都不会发出声音。";
+"asr.queue_title" = "转录队列";
+"asr.queue_running" = "进行中 %d";
+"asr.queue_waiting" = "等待 %d";
+"asr.queue_stuck" = "已放弃 %d";
+"asr.queue_stuck_detail" = "%@ 试了 %d 次仍未成功，已停止重试：%@";
 "asr.azure_speech" = "Azure Speech";
 "asr.azure_purpose_footer" = "Azure Speech 用于录音转文字、实时转录和实时翻译。需使用你自己的 Azure 密钥，音频会发送至 Microsoft 处理，可能产生费用。AI 摘要不由它生成，摘要使用另行配置的 LLM 服务。";
 "asr.local_server" = "本地语音识别服务器";
@@ -71,6 +78,22 @@
 "llm.api_key_optional" = "API 密钥（可选）";
 "llm.no_provider" = "未配置大语言模型服务";
 "llm.no_provider_message" = "请先配置大语言模型服务并选择当前使用的服务。";
+
+/* 大模型调用失败的原因（2026-10-15 新增）。%@ 一律是通道的显示名。 */
+"llm.error.no_provider" = "没有选择大模型通道。";
+"llm.error.no_model" = "%@ 还没选模型。";
+"llm.error.no_api_key" = "%@ 没有配置 API Key。";
+"llm.error.no_endpoint" = "%@ 还没填接口地址。";
+"llm.error.http" = "HTTP %d：%@";
+"llm.error.decoding" = "返回内容无法解析：%@";
+"llm.error.empty" = "对方返回了空内容。";
+"llm.error.all_failed" = "所有大模型通道都失败了：\n%@";
+"llm.error.bad_url" = "接口地址不是合法的 URL。";
+"llm.error.missing_choices" = "返回体里没有 choices[0].message.content。";
+"llm.error.missing_content" = "返回体里没有 content[]。";
+"llm.error.missing_candidates" = "返回体里没有 candidates[0].content.parts。";
+"llm.fell_back" = "「%@」不可用，这次结果来自「%@」。";
+"llm.chunked_note" = "内容较长，已分成 %d 段分别处理后合并。";
 
 /* Azure 设置指南 */
 "azure_guide.title" = "Azure Speech 设置";
@@ -340,6 +363,8 @@
 "summarize.summarizing_with" = "正在使用 %@ 生成摘要...";
 "summarize.search_templates" = "搜索模板";
 "summarize.truncated_warning" = "模型达到了输出上限，这段结果是被截断的。可以换更短的转写内容或输出更少的模板再试。";
+"summarize.chunk_progress" = "第 %1$d/%2$d 段";
+"summarize.preflight_fallback" = "%1$@ 会自动改用 %2$@。";
 "summarize.add_template" = "添加模板";
 "summarize.clone" = "复制";
 "summarize.category" = "分类";
@@ -553,7 +578,7 @@
 "watch.shake_to_record_hint" = "用力晃动手腕开始，再晃一下停止";
 "watch.sending" = "正在发送…";
 "watch.waiting" = "尚未发送";
-"watch.style_color" = "颜色";
+"watch.style_appearance" = "外观";
 "watch.style_gradient" = "渐变";
 "watch.style_breathing" = "呼吸灯";
 "watch.style_reset" = "恢复默认";
@@ -564,6 +589,13 @@
 "watch.style_breathing_slow" = "慢";
 "watch.style_breathing_medium" = "中";
 "watch.style_breathing_fast" = "快";
+"watch.transfer_history" = "传输记录";
+"watch.transfer_empty" = "还没有传出过录音";
+"watch.transfer_clear" = "清空记录";
+"watch.transfer_queued" = "排队中";
+"watch.transfer_delivered" = "待确认";
+"watch.transfer_stored" = "已入库";
+"watch.transfer_failed" = "失败";
 "watch.settings_title" = "Apple Watch";
 "watch.status_installed" = "已安装";
 "watch.status_not_installed" = "未安装";

@@ -15,6 +15,11 @@ struct AppConfig: Codable, Equatable {
     var autoDeleteAfterTransfer: Bool
     var autoTranscribeAfterDownload: Bool
     var localVADEnabled: Bool
+    /// Background keep-alive. When on, long jobs like transcription/summary keep a loop of
+    /// silent audio going after the app moves to the background to hold the process up and stop iOS suspending it (hung off `BackgroundKeeper`).
+    /// Turning it off leaves only `beginBackgroundTask`'s ~30-second grace — short jobs still finish,
+    /// long ones get cut. There's a switch because the user should have the right to refuse "tricking the background with silent audio".
+    var backgroundKeepAliveEnabled: Bool
     /// When on, the app reconnects to the most recent device by itself after
     /// an unexpected drop (device powered off/on, out of range). When off the
     /// app stays disconnected until the user taps the connection pill.
@@ -50,6 +55,7 @@ struct AppConfig: Codable, Equatable {
         autoDeleteAfterTransfer: true,
         autoTranscribeAfterDownload: false,
         localVADEnabled: true,
+        backgroundKeepAliveEnabled: true,
         autoReconnectEnabled: true,
         cloudEgressConsented: false,
         isDeveloperMode: false
@@ -65,6 +71,7 @@ struct AppConfig: Codable, Equatable {
         case autoDeleteAfterTransfer = "auto_delete_after_transfer"
         case autoTranscribeAfterDownload = "auto_transcribe_after_download"
         case localVADEnabled = "local_vad_enabled"
+        case backgroundKeepAliveEnabled = "background_keep_alive_enabled"
         case autoReconnectEnabled = "auto_reconnect_enabled"
         case cloudEgressConsented = "cloud_egress_consented"
         case isDeveloperMode = "developer_mode"
@@ -91,6 +98,7 @@ struct AppConfig: Codable, Equatable {
         self.autoDeleteAfterTransfer = try c.decodeIfPresent(Bool.self, forKey: .autoDeleteAfterTransfer) ?? true
         self.autoTranscribeAfterDownload = try c.decodeIfPresent(Bool.self, forKey: .autoTranscribeAfterDownload) ?? false
         self.localVADEnabled = try c.decodeIfPresent(Bool.self, forKey: .localVADEnabled) ?? true
+        self.backgroundKeepAliveEnabled = try c.decodeIfPresent(Bool.self, forKey: .backgroundKeepAliveEnabled) ?? true
         self.autoReconnectEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoReconnectEnabled) ?? true
         self.cloudEgressConsented = try c.decodeIfPresent(Bool.self, forKey: .cloudEgressConsented) ?? false
         self.isDeveloperMode = try c.decodeIfPresent(Bool.self, forKey: .isDeveloperMode) ?? false
@@ -111,6 +119,7 @@ struct AppConfig: Codable, Equatable {
         autoDeleteAfterTransfer: Bool,
         autoTranscribeAfterDownload: Bool = false,
         localVADEnabled: Bool = true,
+        backgroundKeepAliveEnabled: Bool = true,
         autoReconnectEnabled: Bool = true,
         cloudEgressConsented: Bool = false,
         isDeveloperMode: Bool = false,
@@ -129,6 +138,7 @@ struct AppConfig: Codable, Equatable {
         self.autoDeleteAfterTransfer = autoDeleteAfterTransfer
         self.autoTranscribeAfterDownload = autoTranscribeAfterDownload
         self.localVADEnabled = localVADEnabled
+        self.backgroundKeepAliveEnabled = backgroundKeepAliveEnabled
         self.autoReconnectEnabled = autoReconnectEnabled
         self.cloudEgressConsented = cloudEgressConsented
         self.isDeveloperMode = isDeveloperMode

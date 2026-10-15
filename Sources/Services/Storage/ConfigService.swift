@@ -8,9 +8,24 @@ private let log = Logger(subsystem: "com.nomily.app.ios", category: "config")
 /// gated behind a debounce to avoid thrashing while a slider is dragged.
 @MainActor
 final class ConfigService: ObservableObject {
-    @Published var config: AppConfig
+    @Published var config: AppConfig {
+        didSet { syncBackgroundKeeper() }
+    }
 
     private var debounce: Task<Void, Never>?
+
+    /// Mirrors the "background keep-alive" switch to `BackgroundKeeper`.
+    ///
+    /// Hung off `didSet` rather than "after a successful disk write": this switch must take effect **immediately** —
+    /// when the user turns it off, even if a transcription is running right then, that silent audio should stop at once
+    /// (that's exactly what turning it off means). The disk-write side has a 250 ms debounce, too long to wait for.
+    ///
+    /// Note: `didSet` **doesn't** fire for the assignment in `init`, so on a cold launch
+    /// `TranscriptionService.init` syncs it once more; otherwise an "it was already off last time"
+    /// state would only take effect after the user touches a setting once.
+    private func syncBackgroundKeeper() {
+        BackgroundKeeper.shared.audioKeepAliveEnabled = config.backgroundKeepAliveEnabled
+    }
 
     init() {
         var loaded = Self.loadFromDisk() ?? .empty

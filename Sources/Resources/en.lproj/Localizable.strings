@@ -36,6 +36,13 @@
 "asr.auto_transcribe_footer" = "Transcription runs after each download. Clips shorter than the minimum duration are skipped. Another provider is used as fallback when configured.";
 "asr.local_vad" = "Strip silence before upload";
 "asr.local_vad_footer" = "Voice activity detection runs on-device and removes silent stretches before sending audio to the transcription provider. Cuts upload size and ASR cost.";
+"asr.background_keep_alive" = "Keep transcribing in the background";
+"asr.background_keep_alive_footer" = "When on, transcription keeps running to completion after you switch away or lock the screen. When off, only about 30 seconds of wrap-up time is granted and a long clip will be interrupted. Either way, no sound is played.";
+"asr.queue_title" = "Transcription queue";
+"asr.queue_running" = "%d running";
+"asr.queue_waiting" = "%d waiting";
+"asr.queue_stuck" = "%d given up";
+"asr.queue_stuck_detail" = "%@ failed %d times and stopped retrying: %@";
 "asr.azure_speech" = "Azure Speech";
 "asr.azure_purpose_footer" = "Azure Speech powers transcription, live transcription and live translation. It uses your own Azure key; audio is sent to Microsoft for processing and may incur charges. It does not generate AI summaries — those use the LLM service you configure separately.";
 "asr.local_server" = "Local ASR Server";
@@ -71,6 +78,22 @@
 "llm.api_key_optional" = "API Key (optional)";
 "llm.no_provider" = "No LLM Provider";
 "llm.no_provider_message" = "Set up an LLM provider and select an Active Provider.";
+
+/* LLM call failures (added 2026-10-15). %@ is always a provider's display name. */
+"llm.error.no_provider" = "No LLM provider is selected.";
+"llm.error.no_model" = "%@ has no model selected.";
+"llm.error.no_api_key" = "%@ has no API key configured.";
+"llm.error.no_endpoint" = "%@ has no endpoint URL.";
+"llm.error.http" = "HTTP %d: %@";
+"llm.error.decoding" = "Couldn't read the response: %@";
+"llm.error.empty" = "The model returned nothing.";
+"llm.error.all_failed" = "Every LLM provider failed:\n%@";
+"llm.error.bad_url" = "The endpoint URL isn't valid.";
+"llm.error.missing_choices" = "The response has no choices[0].message.content.";
+"llm.error.missing_content" = "The response has no content[].";
+"llm.error.missing_candidates" = "The response has no candidates[0].content.parts.";
+"llm.fell_back" = "%@ wasn't usable — this result came from %@.";
+"llm.chunked_note" = "Long transcript — processed in %d parts and merged.";
 
 /* Azure Setup Guide */
 "azure_guide.title" = "Azure Speech Setup";
@@ -412,6 +435,8 @@
 "summarize.summarizing_with" = "Summarizing with %@...";
 "summarize.search_templates" = "Search templates";
 "summarize.truncated_warning" = "The model hit its output limit, so this result is cut off. Try a shorter transcript or a template that asks for less.";
+"summarize.chunk_progress" = "Part %1$d of %2$d";
+"summarize.preflight_fallback" = "%1$@ It will fall back to %2$@.";
 "summarize.add_template" = "Add Template";
 "summarize.clone" = "Clone";
 "summarize.category" = "Category";
@@ -551,6 +576,23 @@
 "watch.pending_count" = "%d to send";
 "watch.shake_to_record" = "Shake to Record";
 "watch.shake_to_record_hint" = "Shake your wrist to start, shake again to stop";
+"watch.style_appearance" = "Appearance";
+"watch.style_gradient" = "Gradient";
+"watch.style_breathing" = "Breathing";
+"watch.style_reset" = "Reset";
+"watch.style_gradient_off" = "Solid";
+"watch.style_gradient_on" = "Gradient";
+"watch.style_breathing_off" = "Off";
+"watch.style_breathing_slow" = "Slow";
+"watch.style_breathing_medium" = "Medium";
+"watch.style_breathing_fast" = "Fast";
+"watch.transfer_history" = "Transfers";
+"watch.transfer_empty" = "No recordings sent yet";
+"watch.transfer_clear" = "Clear History";
+"watch.transfer_queued" = "Queued";
+"watch.transfer_delivered" = "Waiting";
+"watch.transfer_stored" = "Saved";
+"watch.transfer_failed" = "Failed";
 "watch.sending" = "Sending…";
 "watch.waiting" = "Not sent yet";
 "watch.settings_title" = "Apple Watch";

@@ -460,7 +460,10 @@ final class FastTransferModel: ObservableObject {
                         let decryptedURL = StorageLocations.decryptedDir.appendingPathComponent(localName)
                         if FileManager.default.fileExists(atPath: decryptedURL.path) {
                             Task.detached { @MainActor in
-                                _ = try? await transcription.transcribe(
+                                // ★ 2026-10-15: goes through the **queue** rather than running directly.
+                                //   Persist to disk before starting ⇒ after the app is killed, the next launch can carry on;
+                                //   failures also auto-retry with a 2/8/30-second backoff.
+                                transcription.enqueue(
                                     fileURL: decryptedURL,
                                     enforceMinDuration: true
                                 )

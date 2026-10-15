@@ -141,10 +141,10 @@ struct WatchRecorderView: View {
     /// ⇒ the two are 3pt apart, so tapping the ring's edge won't be stolen by the button. A bigger ring would overlap.
     private var corners: some View {
         ZStack {
-            corner(.color,     at: .topLeading,     tintIndex: 0)
-            corner(.breathing, at: .topTrailing,    tintIndex: 1)
-            corner(.language,  at: .bottomLeading,  tintIndex: 2)
-            corner(.settings,  at: .bottomTrailing, tintIndex: 3)
+            corner(.appearance, at: .topLeading,     tintIndex: 0)
+            corner(.history,    at: .topTrailing,    tintIndex: 1)
+            corner(.language,   at: .bottomLeading,  tintIndex: 2)
+            corner(.settings,   at: .bottomTrailing, tintIndex: 3)
         }
         .padding(Self.cornerInset)
     }

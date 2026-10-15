@@ -25,6 +25,16 @@ struct SummarizeSheet: View {
     /// The provider said it stopped because it hit the output cap. The text
     /// is real but cut off — say so instead of presenting it as finished.
     @State private var wasTruncated = false
+    /// ★ 2026-10-15: The channel that **actually does the work**. When the primary dies and the fallback takes over, the title generation afterwards
+    /// must go straight to it — otherwise every generated title waits out another primary-channel timeout.
+    @State private var workingProvider: String?
+    /// The user-facing note: fallback took over / chunking was used. **Must be shown** —
+    /// the user set A but B generated the result; without an explanation it becomes "is it even using my configuration?"
+    @State private var notices: [String] = []
+    /// Chunk progress. `(completed, total chunks)`; nil for a single chunk.
+    @State private var chunkProgress: (done: Int, total: Int)?
+    /// The primary channel is unusable but a fallback is available — spell it out on the page before the work starts.
+    @State private var preflightWarning: String?
 
     private enum SummarizeState {
         case picking
@@ -59,6 +69,14 @@ struct SummarizeSheet: View {
                             .controlSize(.large)
                         Text(L10n.Summarize.summarizingWith(activeProviderLabel))
                             .foregroundStyle(.secondary)
+                        // Show "which chunk" while chunking. A long transcription runs for several minutes,
+                        // and an endlessly spinning spinner vs. a number that changes feel completely different.
+                        if let chunkProgress {
+                            Text(L10n.Summarize.chunkProgress(chunkProgress.done, chunkProgress.total))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
                         if let t = selected {
                             Text(t.name)
                                 .font(.caption)
@@ -76,6 +94,22 @@ struct SummarizeSheet: View {
                                 .padding(.horizontal)
                                 .padding(.vertical, 8)
                                 .background(Color.orange.opacity(0.12))
+                        }
+                        // ★ Fallback / chunking note. Non-blocking, but **must be shown**:
+                        //   the user set Open Router, but the result was actually produced by the local Ollama
+                        //   grinding away — not saying so amounts to hiding the configuration state from the user.
+                        if !notices.isEmpty {
+                            VStack(alignment: .leading, spacing: 3) {
+                                ForEach(notices, id: \.self) { note in
+                                    Label(note, systemImage: "info.circle")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                            .padding(.vertical, 8)
+                            .background(Color.secondary.opacity(0.12))
                         }
                         MarkdownView(markdown: result)
                     }
@@ -162,9 +196,38 @@ struct SummarizeSheet: View {
 
     private var templatePicker: some View {
         VStack(spacing: 0) {
+            // ★ Pre-flight health check. **Shown only on this page**, because it's only useful at the
+            //   "pick a template" moment: telling the user now that "the primary has no key and Ollama will serve as fallback"
+            //   lets them decide whether to go fix the key first or just run as-is.
+            //   Previously this situation only blew up as an English error message **after the run finished**.
+            if let preflightWarning {
+                Label(preflightWarning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(Color.orange.opacity(0.12))
+            }
             languageBar
             templateList
         }
+        .onAppear { refreshPreflight() }
+    }
+
+    /// The pre-run notice when the primary is unavailable. With a fallback ⇒ say "who will serve as fallback";
+    /// none left ⇒ say "it can't run", rather than letting the user tap and then read an error.
+    private func refreshPreflight() {
+        let config = env.config.config
+        guard let gap = LLMCompletionService.primaryGapWithFallback(config) else {
+            preflightWarning = LLMCompletionService.candidateChain(config).isEmpty
+                ? L10n.LLM.errorNoProvider
+                : nil
+            return
+        }
+        preflightWarning = gap.fallback.map {
+            L10n.Summarize.preflightFallback(gap.gap, $0)
+        } ?? gap.gap
     }
 
     private var languageBar: some View {
@@ -251,34 +314,79 @@ struct SummarizeSheet: View {
     private func runSummarize(_ template: SummarizeTemplate) async {
         summarizeState = .running
         wasTruncated = false
+        notices = []
+        chunkProgress = nil
+        // ★ 2026-10-15: Hold the background keep-alive for the duration of a long summary.
+        //
+        // A local 3B model takes minutes per 8000-character chunk, and the whole piece chunked takes even longer. During that window
+        // the user will almost certainly switch away ("just a quick WeChat reply"); without the keep-alive the process suspends,
+        // the URLSession requests break on the spot, and all that greets them on return is a failure message.
+        //
+        // `defer` rather than releasing before each return: there are three exits here
+        // (finish / cancel / fail), and missing one would leave the silent audio playing forever.
+        BackgroundKeeper.shared.acquire(.summary)
+        defer { BackgroundKeeper.shared.release(.summary) }
         do {
-            let output = try await LLMCompletionService.complete(
+            let outcome = try await LLMCompletionService.completeResilient(
                 systemPrompt: withLanguageInstruction(template.localizedPrompt),
                 userContent: transcriptText,
-                config: env.config.config
+                config: env.config.config,
+                preferred: workingProvider,
+                onChunk: { done, total in
+                    chunkProgress = (done, total)
+                }
             )
             try Task.checkCancellation()
-            result = output.text
-            wasTruncated = output.truncated
-            await extractTitle(from: output.text)
+            workingProvider = outcome.providerKey
+            notices = Self.notices(for: outcome, config: env.config.config)
+            result = outcome.completion.text
+            wasTruncated = outcome.completion.truncated
+            await extractTitle(from: outcome.completion.text)
             try Task.checkCancellation()
+            chunkProgress = nil
             summarizeState = .done
         } catch is CancellationError {
             pendingTitle = nil
         } catch {
+            chunkProgress = nil
             summarizeState = .failed(error.localizedDescription)
         }
         summarizeTask = nil
     }
 
+    /// Translate the `Outcome` into plain words. **Both must be spelled out**:
+    /// the primary channel wasn't the one used (something's off in the configuration), and the content went through chunking (the result's structure
+    /// differs subtly from a single-shot generation; users seeing missing chunk headers will assume it's a bug).
+    private static func notices(
+        for outcome: LLMCompletionService.Outcome, config: AppConfig
+    ) -> [String] {
+        var result: [String] = []
+        let primary = config.llmProviders.primary ?? ""
+        if !primary.isEmpty, primary != outcome.providerKey {
+            result.append(L10n.LLM.fellBack(
+                LLMCompletionService.providerLabel(primary),
+                LLMCompletionService.providerLabel(outcome.providerKey)
+            ))
+        }
+        if outcome.chunked {
+            result.append(L10n.LLM.chunkedNote(outcome.chunkCount))
+        }
+        return result
+    }
+
     private func extractTitle(from summary: String) async {
         do {
-            let title = try await LLMCompletionService.complete(
+            let title = try await LLMCompletionService.completeResilient(
                 systemPrompt: withLanguageInstruction("Generate a short title (under 60 characters) for the following notes. Reply with ONLY the title text, no quotes, no punctuation at the end."),
                 userContent: String(summary.prefix(1000)),
-                config: env.config.config
+                config: env.config.config,
+                // Title generation gets only 1000 characters of input; nothing to chunk.
+                allowChunking: false,
+                // ★ Go straight to the channel that actually did the work. Without this, the primary has
+                //   already proven unusable, and this step would **wait out another timeout** on it before the fallback gets a turn.
+                preferred: workingProvider
             )
-            let clean = title.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let clean = title.completion.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !clean.isEmpty {
                 pendingTitle = clean
             }
@@ -300,9 +408,9 @@ struct SummarizeSheet: View {
     }
 
     private var activeProviderLabel: String {
-        let key = env.config.config.llmProviders.primary ?? ""
-        let map = ["openai": "OpenAI", "claude": "Claude", "gemini": "Gemini",
-                    "openRouter": "Open Router", "ollama": "Ollama", "custom": "Custom"]
-        return map[key] ?? key
+        // Once a round has run, report "the one actually doing the work" — seeing "generating with Ollama" is how
+        // the user knows the settings did take effect.
+        let key = workingProvider ?? env.config.config.llmProviders.primary ?? ""
+        return LLMCompletionService.providerLabel(key)
     }
 }

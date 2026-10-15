@@ -92,6 +92,25 @@ enum L10n {
         static var autoTranscribeFooter: String { NSLocalizedString("asr.auto_transcribe_footer", comment: "") }
         static var localVAD: String { NSLocalizedString("asr.local_vad", comment: "") }
         static var localVADFooter: String { NSLocalizedString("asr.local_vad_footer", comment: "") }
+        // ★ 2026-10-15: Background keep-alive toggle + transcription queue status.
+        //
+        // Wording rule: **never say "silent audio"**. Users don't need to know how we keep the process alive;
+        // what they need to judge is "will it keep going after I switch away" and "will it drain the battery / make strange noises".
+        static var backgroundKeepAlive: String { NSLocalizedString("asr.background_keep_alive", comment: "") }
+        static var backgroundKeepAliveFooter: String { NSLocalizedString("asr.background_keep_alive_footer", comment: "") }
+        static var queueTitle: String { NSLocalizedString("asr.queue_title", comment: "") }
+        static func queueRunning(_ n: Int) -> String {
+            String(format: NSLocalizedString("asr.queue_running", comment: ""), n)
+        }
+        static func queueWaiting(_ n: Int) -> String {
+            String(format: NSLocalizedString("asr.queue_waiting", comment: ""), n)
+        }
+        static func queueStuck(_ n: Int) -> String {
+            String(format: NSLocalizedString("asr.queue_stuck", comment: ""), n)
+        }
+        static func queueStuckDetail(_ name: String, _ attempts: Int, _ reason: String) -> String {
+            String(format: NSLocalizedString("asr.queue_stuck_detail", comment: ""), name, attempts, reason)
+        }
         static var azureSpeech: String { NSLocalizedString("asr.azure_speech", comment: "") }
         static var azurePurposeFooter: String { NSLocalizedString("asr.azure_purpose_footer", comment: "") }
         static var azureHowToGetKey: String { NSLocalizedString("asr.azure_how_to_get_key", comment: "") }
@@ -222,6 +241,80 @@ enum L10n {
     // MARK: - LLM
 
     enum LLM {
+        // MARK: Reasons a call fails (★ 2026-10-15)
+        //
+        // These used to be **hardcoded in English inside `LLMCompletionError.errorDescription`**;
+        // the Chinese UI would pop up "No API key configured for the active provider." —
+        // users could neither understand it nor tell where to fix it. Now everything is localised, and
+        // **the channel name is included**: "No API key configured for Open Router."
+        static var errorNoProvider: String {
+            NSLocalizedString("llm.error.no_provider", value: "No LLM provider is selected.",
+                              comment: "LLM error: no provider chosen")
+        }
+        static func errorNoModel(_ label: String) -> String {
+            String(format: NSLocalizedString("llm.error.no_model", value: "%@ has no model selected.",
+                                             comment: "LLM error: provider selected but no model"), label)
+        }
+        static func errorNoAPIKey(_ label: String) -> String {
+            String(format: NSLocalizedString("llm.error.no_api_key", value: "%@ has no API key configured.",
+                                             comment: "LLM error: cloud provider without a key"), label)
+        }
+        static func errorNoEndpoint(_ label: String) -> String {
+            String(format: NSLocalizedString("llm.error.no_endpoint", value: "%@ has no endpoint URL.",
+                                             comment: "LLM error: self-hosted provider without an endpoint"), label)
+        }
+        static func errorHTTP(_ code: Int, _ message: String) -> String {
+            let trimmed = message.count > 400 ? String(message.prefix(400)) + "…" : message
+            return String(format: NSLocalizedString("llm.error.http", value: "HTTP %d: %@",
+                                                    comment: "LLM error: non-2xx response"), code, trimmed)
+        }
+        static func errorDecoding(_ message: String) -> String {
+            String(format: NSLocalizedString("llm.error.decoding", value: "Couldn't read the response: %@",
+                                             comment: "LLM error: response body did not match the expected shape"), message)
+        }
+        static var errorEmptyResponse: String {
+            NSLocalizedString("llm.error.empty", value: "The model returned nothing.",
+                              comment: "LLM error: 200 OK but empty text")
+        }
+        /// The entire chain failed. **List the reason for every channel** — reporting only the last one would
+        /// send users digging into the fallback channel (local Ollama) when the real culprit is the missing key on the first channel.
+        static func errorAllProvidersFailed(_ detail: String) -> String {
+            String(format: NSLocalizedString("llm.error.all_failed",
+                                             value: "Every LLM provider failed:\n%@",
+                                             comment: "LLM error: the whole fallback chain failed; detail is one line per provider"),
+                   detail)
+        }
+        static var errorBadEndpointURL: String {
+            NSLocalizedString("llm.error.bad_url", value: "The endpoint URL isn't valid.",
+                              comment: "LLM error: URL(string:) refused the endpoint")
+        }
+        static var errorMissingChoices: String {
+            NSLocalizedString("llm.error.missing_choices", value: "The response has no choices[0].message.content.",
+                              comment: "LLM error: OpenAI-compatible body shape mismatch")
+        }
+        static var errorMissingContent: String {
+            NSLocalizedString("llm.error.missing_content", value: "The response has no content[].",
+                              comment: "LLM error: Anthropic body shape mismatch")
+        }
+        static var errorMissingCandidates: String {
+            NSLocalizedString("llm.error.missing_candidates", value: "The response has no candidates[0].content.parts.",
+                              comment: "LLM error: Gemini body shape mismatch")
+        }
+        /// The one-line explanation shown after the primary channel died and the fallback took over. **Must say it**:
+        /// the user set A but B is doing the work; without an explanation it becomes "is it even using my configuration?"
+        static func fellBack(_ primary: String, _ used: String) -> String {
+            String(format: NSLocalizedString("llm.fell_back",
+                                             value: "%@ wasn't usable — this result came from %@.",
+                                             comment: "Notice: the primary LLM provider failed and a fallback produced the result"),
+                   primary, used)
+        }
+        /// The long transcription went through "chunk → merge".
+        static func chunkedNote(_ count: Int) -> String {
+            String(format: NSLocalizedString("llm.chunked_note",
+                                             value: "Long transcript — processed in %d parts and merged.",
+                                             comment: "Notice: the transcript was too long for one request"), count)
+        }
+
         static var activeProviderFooter: String { NSLocalizedString("llm.active_provider_footer", comment: "") }
         static var apiKey: String { NSLocalizedString("llm.api_key", comment: "") }
         static var model: String { NSLocalizedString("llm.model", comment: "") }
@@ -750,9 +843,14 @@ enum L10n {
         //
         // ⚠️ Always use `static var` (switches language at runtime) + provide inline English fallback via `value:`
         // (Only en / zh-Hans .lproj files were added). Reasoning is the same as for `Library.sourceCard`.
-        /// Title for the "Color" item in the menu.
-        static var styleColor: String {
-            NSLocalizedString("watch.style_color", value: "Color", comment: "Ring style menu: solid color")
+        /// Title of the top-left page. It now holds three things — **color + gradient + breathing light** —
+        /// so it's called "Appearance" rather than "Color" — keeping the old name would make users think the breathing light was removed.
+        ///
+        /// ★ Fifth revision, 2026-10-15: the old `styleColor` ("Color") was merged in along with the breathing light;
+        /// both became this; the `watch.style_color` key has been removed from both .strings files.
+        static var styleAppearance: String {
+            NSLocalizedString("watch.style_appearance", value: "Appearance",
+                              comment: "Corner menu: colour + gradient + breathing, merged into one page")
         }
         /// The "Gradient" item in the menu.
         static var styleGradient: String {
@@ -787,6 +885,39 @@ enum L10n {
         }
         static var styleBreathingFast: String {
             NSLocalizedString("watch.style_breathing_fast", value: "Fast", comment: "Breathing speed: fast")
+        }
+
+        // MARK: Transfer history (★ fifth revision 2026-10-15, top-right corner badge)
+        //
+        // User: "the top right is the watch's transfer history". One word per status,
+        // and the words must be short — a row on the watch only fits a dozen or so characters.
+        /// Title of the top-right page.
+        static var transferHistory: String {
+            NSLocalizedString("watch.transfer_history", value: "Transfers",
+                              comment: "Corner menu: history of clips handed to the iPhone")
+        }
+        static var transferEmpty: String {
+            NSLocalizedString("watch.transfer_empty", value: "No recordings sent yet",
+                              comment: "Transfer history: empty state")
+        }
+        static var transferClear: String {
+            NSLocalizedString("watch.transfer_clear", value: "Clear History",
+                              comment: "Transfer history: toolbar button that empties the log")
+        }
+        /// Handed to the WatchConnectivity queue, not yet on its way.
+        static var transferQueued: String {
+            NSLocalizedString("watch.transfer_queued", value: "Queued", comment: "Transfer state")
+        }
+        /// Delivered by the system to the phone's daemon, but the phone app hasn't confirmed writing to disk.
+        static var transferDelivered: String {
+            NSLocalizedString("watch.transfer_delivered", value: "Waiting", comment: "Transfer state: handed to the phone, not confirmed")
+        }
+        /// The phone app has confirmed it's stored — only at this point is the local copy on the watch deleted.
+        static var transferStored: String {
+            NSLocalizedString("watch.transfer_stored", value: "Saved", comment: "Transfer state: confirmed written by the iPhone app")
+        }
+        static var transferFailed: String {
+            NSLocalizedString("watch.transfer_failed", value: "Failed", comment: "Transfer state")
         }
 
         // These must remain computed: runtime language switching swaps the
@@ -1854,6 +1985,21 @@ enum L10n {
         }
         static var searchTemplates: String { NSLocalizedString("summarize.search_templates", comment: "") }
         static var truncatedWarning: String { NSLocalizedString("summarize.truncated_warning", comment: "Shown when the model hit its output cap") }
+        /// Chunk progress: "chunk %1$d of %2$d". Numbers are monospaced so the row doesn't jitter when digit counts change.
+        static func chunkProgress(_ done: Int, _ total: Int) -> String {
+            String(format: NSLocalizedString("summarize.chunk_progress", value: "Part %1$d of %2$d",
+                                             comment: "Summarize sheet: progress while a long transcript is processed in parts"),
+                   done, total)
+        }
+        /// Pre-flight health-check notice: the primary channel is unusable, but there is a fallback.
+        ///
+        /// `gap` is already a complete sentence like "No API key configured for Open Router.",
+        /// so this only has to append "who will serve as the fallback".
+        static func preflightFallback(_ gap: String, _ fallback: String) -> String {
+            String(format: NSLocalizedString("summarize.preflight_fallback",
+                                             value: "%1$@ It will fall back to %2$@.",
+                                             comment: "Summarize sheet: the active provider is unusable, a fallback will be used"), gap, fallback)
+        }
         static var addTemplate: String { NSLocalizedString("summarize.add_template", comment: "") }
         static var clone: String { NSLocalizedString("summarize.clone", comment: "") }
         static var category: String { NSLocalizedString("summarize.category", comment: "") }

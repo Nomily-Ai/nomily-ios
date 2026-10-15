@@ -206,7 +206,11 @@ final class WatchSyncService: NSObject, ObservableObject {
         // swallowed because the user accepted the duration floor when they
         // turned the toggle on.
         Task.detached { @MainActor in
-            _ = try? await self.transcription.transcribe(fileURL: url, enforceMinDuration: true)
+            // ★ 2026-10-15: switched to going through the **queue** and waiting for it to dequeue.
+            //   Going through the queue ⇒ persist to disk then start, so after the app is killed the next launch picks up from this list;
+            //   waiting for dequeue ⇒ the `libraryDidChange` below still fires only after the transcription actually lands,
+            //   so the Library list can bring out the transcript in one pass.
+            await self.transcription.enqueueAndWait(fileURL: url, enforceMinDuration: true)
             NotificationCenter.default.post(name: .libraryDidChange, object: nil)
         }
     }

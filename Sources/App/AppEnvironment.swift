@@ -68,6 +68,16 @@ final class AppEnvironment: ObservableObject {
         // dispatched off the main thread — see `WatchSyncService.activate`.
         self.watch.activate()
         Self.shared = self
+        // ★ 2026-10-15: resume the transcription that didn't finish last time.
+        //
+        // This is the half that makes "background transcription" possible — `BackgroundKeeper` only holds out against
+        // "switching away for a bit", not the system killing the process when memory runs tight; the queue is persisted to disk,
+        // and replaying it at launch is the only way to rescue that situation.
+        //
+        // Hung off the composition root rather than a view's `.task`: when the view appears depends on what the user
+        // taps, and this shouldn't rely on the user happening to pass through the Library. It also lets the launch-timing stats
+        // count it in (it only pulls the unfinished items out and queues them; it doesn't await itself).
+        transcription.resumePending()
         let done = Date()
         log.notice("""
             environment ready in \(Self.ms(startedAt, done)) ms \

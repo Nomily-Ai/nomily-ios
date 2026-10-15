@@ -462,6 +462,12 @@ struct ClipDetailView: View {
     }
 
     private func runTranslate(target: TranslateTarget, languageName: String) async {
+        // ★ 2026-10-15: Whole-piece translation is a long job (translating a transcript of dozens of minutes in one go can run a long while),
+        // so it must stay alive in the background. Held only here — the live translation path doesn't hold one (it runs continuously,
+        // and holding it would mean never letting go; during recording `LiveModel` already holds
+        // the `.recording` token).
+        BackgroundKeeper.shared.acquire(.summary)
+        defer { BackgroundKeeper.shared.release(.summary) }
         switch target {
         case .transcript:
             guard let doc = transcript else { return }

@@ -849,7 +849,10 @@ final class DeviceFilesModel: ObservableObject {
                    case .ready(let decryptedURL, _) = saved {
                     let transcription = env.transcription
                     Task.detached { @MainActor in
-                        _ = try? await transcription.transcribe(
+                        // ★ 2026-10-15: goes through the **queue** rather than running directly. Persist to disk before starting ⇒
+                        //   after the app is killed, the next launch can carry on; failures auto-retry with a
+                        //   2/8/30-second backoff. See `TranscriptionService.enqueue`.
+                        transcription.enqueue(
                             fileURL: decryptedURL,
                             enforceMinDuration: true
                         )

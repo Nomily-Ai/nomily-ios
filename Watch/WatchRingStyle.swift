@@ -159,37 +159,41 @@ struct WatchRingStyle: Equatable, Codable {
 ///
 /// ★ Second revision, 2026-10-15: originally the 4 dots **expanded a little menu in place** on the home screen
 /// (colour / gradient / breathing light / reset). The user's own words were
-/// "clicking the 4 menus should bring up a separate page", so it became 4 separate pages:
+/// "clicking the 4 menus should bring up a separate page", so it became 4 separate pages.
+///
+/// ★ Fifth revision, 2026-10-15 (user: "put the top-right breathing-light rate into the top-left menu, and then
+/// the top-right is the watch's transfer history"): the breathing light **merged into the top-left appearance page**, and the top-right became transfer history.
 ///
 /// | Corner dot | Page |
 /// |---|---|
-/// | Top-left | Colour (**the gradient merged into it**, see `WatchColorStyleView`) |
-/// | Top-right | Breathing light |
+/// | Top-left | Appearance (colour + gradient + **breathing light**, see `WatchColorStyleView`) |
+/// | Top-right | **Transfer history** (see `WatchTransferHistoryView`) |
 /// | Bottom-left | Language (previously a text link at the bottom of the home screen; the user asked for "the language to be in the menu too") |
-/// | Bottom-right | Settings (version + restore defaults) |
+/// | Bottom-right | Settings (version + shake + restore defaults) |
 ///
-/// ⇒ the home screen therefore carries no text links at all, only "time + ring + 4 corner dots",
-/// the same structure as the Health app's activity-ring page.
+/// Why the breathing light belongs top-left: like colour and gradient it's part of "what the ring looks like", and only the three together make up
+/// the complete **appearance**; splitting it across two corner dots would make the user hop between pages to adjust it. And the slot freed up top-right
+/// went to transfer history — that's **state**, not appearance, and never belonged alongside colour tuning anyway.
 enum WatchRingCorner: String, CaseIterable, Identifiable {
-    case color, breathing, language, settings
+    case appearance, history, language, settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .color:     return L10n.Watch.styleColor
-        case .breathing: return L10n.Watch.styleBreathing
-        case .language:  return L10n.Settings.language
-        case .settings:  return L10n.Watch.menuSettings
+        case .appearance: return L10n.Watch.styleAppearance
+        case .history:    return L10n.Watch.transferHistory
+        case .language:   return L10n.Settings.language
+        case .settings:   return L10n.Watch.menuSettings
         }
     }
 
     var symbol: String {
         switch self {
-        case .color:     return "paintpalette.fill"
-        case .breathing: return "wind"
-        case .language:  return "globe"
-        case .settings:  return "gearshape.fill"
+        case .appearance: return "paintpalette.fill"
+        case .history:    return "arrow.up.arrow.down.circle.fill"
+        case .language:   return "globe"
+        case .settings:   return "gearshape.fill"
         }
     }
 
@@ -200,10 +204,10 @@ enum WatchRingCorner: String, CaseIterable, Identifiable {
     @ViewBuilder
     var destination: some View {
         switch self {
-        case .color:     WatchColorStyleView()
-        case .breathing: WatchBreathingStyleView()
-        case .language:  WatchLanguageView()
-        case .settings:  WatchSettingsView()
+        case .appearance: WatchColorStyleView()
+        case .history:    WatchTransferHistoryView()
+        case .language:   WatchLanguageView()
+        case .settings:   WatchSettingsView()
         }
     }
 }
