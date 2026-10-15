@@ -74,33 +74,9 @@ struct WatchRingControl: View {
         isRecording ? style.palette.solid : Color(white: 0.52)
     }
 
-    /// Outer-ring gradient while recording.
-    ///
-    /// ⚠️ Deliberately **not** indexing like `style.ringColors[1]`: with gradient off,
-    /// `ringColors` has a single element and the subscript would go out of bounds. This uses `first` / `count`
-    /// checks and, for a single color, degrades to "same color at both ends + each end's own opacity", equivalent to the original solid look.
-    ///
-    /// Three colours or more (`activity`): spread the three colours around one lap of the ring — that's the Health app
-    /// activity ring's "three colours readable in one lap" look.
-    private var ringGradient: AngularGradient {
-        let colors = style.ringColors
-        if colors.count > 2 {
-            return AngularGradient(
-                colors: colors,
-                center: .center,
-                startAngle: .degrees(-90),
-                endAngle: .degrees(270)
-            )
-        }
-        let from = colors.first ?? style.palette.solid
-        let to = colors.count > 1 ? colors[1] : from
-        return AngularGradient(
-            colors: [from.opacity(0.55), from, to, to.opacity(0.75)],
-            center: .center,
-            startAngle: .degrees(-90),
-            endAngle: .degrees(270)
-        )
-    }
+    /// The outer ring's gradient while recording. The colour logic moved into `WatchRingStyle.ringAngularGradient`
+    /// — the colour page's small preview needs the same copy, and two copies would drift.
+    private var ringGradient: AngularGradient { style.ringAngularGradient }
 
     /// Colour of the inner ring (the hour ring). While recording it prefers the palette's `lapColor`
     /// (activity's neon green); if none is specified or it isn't recording (the neutral-grey test) it falls back to `accent`.

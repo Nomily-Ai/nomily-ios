@@ -478,6 +478,10 @@ enum L10n {
         static var styleReset: String {
             NSLocalizedString("watch.style_reset", value: "Reset", comment: "Ring style menu: restore the default look")
         }
+        /// Title of the "Settings" page inside the corner badge (version + restore defaults).
+        static var menuSettings: String {
+            NSLocalizedString("watch.menu_settings", value: "Settings", comment: "Corner menu: settings page title")
+        }
         static var styleGradientOff: String {
             NSLocalizedString("watch.style_gradient_off", value: "Solid", comment: "Gradient menu: flat single colour")
         }

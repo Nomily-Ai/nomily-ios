@@ -525,6 +525,7 @@
 "watch.style_gradient" = "渐变";
 "watch.style_breathing" = "呼吸灯";
 "watch.style_reset" = "恢复默认";
+"watch.menu_settings" = "设置";
 "watch.style_gradient_off" = "纯色";
 "watch.style_gradient_on" = "渐变";
 "watch.style_breathing_off" = "关";

@@ -1,7 +1,7 @@
 import SwiftUI
 import WatchKit
 
-/// Wrist recorder page: the ring control, the four style dots around it,
+/// Wrist recorder page: the ring control, the four corner buttons around it,
 /// and whatever is still waiting to reach the iPhone.
 ///
 /// The elapsed time lives *inside* the ring rather than above it. It used to
@@ -9,19 +9,26 @@ import WatchKit
 /// the ring is the headline now — it answers "is it running?" without being
 /// read — and the digits are demoted to a caption within it.
 ///
-/// ★ Since 2026-10-15: the ring has **4 dots** around it (color / gradient / breathing light / reset);
-/// tapping one expands a small row of options below the ring; **tapping the center = start / stop recording**.
-/// ⚠️ While recording, the 4 dots and the menu **never appear** -- the user's own words:
-/// "once recording starts, the menu bar around the screen should not appear", so this is not "collapsed by default"
-/// but no entry point at all while recording (see `onChange(of: model.isRecording)`).
+/// ★ 2026-10-15 revision two: this page is **rebuilt entirely after the Health app's activity-ring page** (user's words
+/// "not beautiful or bold enough, just follow Apple Health's layout"). Top to bottom there are only three things:
 ///
-/// ★ 2026-10-15 revision two (the three things the user called out with a screenshot of the Health app's rings):
-/// 1. **Delete the top title ("Watch")** -- the ring is the title; another line pressed on top
-///    takes up screen space and nobody reads it anyway;
-/// 2. **Match the Health app's screen ratio** -- the ring diameter now scales with the actual screen width
-///    (0.76 idle, 0.90 recording, see `dial`). The old hard-coded 172pt box was already
-///    overflowing on the 40mm watch (162pt wide) and too small on the 45mm anyway;
-/// 3. **The ring steps up a size while recording**, the four corner menus vanish at the same time, and all the freed-up space goes to the ring.
+/// ```
+///        15:47          ← current time at the top (same as the Health app)
+///      ╭────────╮
+///   ◉  │  ring  │  ◉     ← the ring fills the screen width as much as possible
+///      ╰────────╯
+///   ◉              ◉
+/// ```
+///
+/// * **Each of the 4 corner dots leads to its own page** (color / breathing light / language / settings),
+///   no longer "tap to expand a little menu below the ring" -- the user explicitly asked for "a separate page";
+/// * The old "gradient" dot merged into the color page, and "language" moved from a bottom text link into a dot,
+///   the freed-up spot went to "settings (version + reset to default)";
+/// * **The home screen carries no text links from now on**; the two small "language · version" lines are removed as well.
+///
+/// ⚠️ While recording the 4 corner dots **never appear** -- the user's own words
+/// "once recording starts, the menu bar around the screen should not appear", so this is not "collapsed by default"
+/// but rather no entry point at all while recording; the freed-up space lets the ring grow one more size.
 struct WatchRecorderView: View {
     @EnvironmentObject private var model: WatchRecorderModel
     /// Transfer state is read straight off the link rather than snapshotted
@@ -33,27 +40,28 @@ struct WatchRecorderView: View {
     /// so SwiftUI would not know to redraw (same pitfall as the top of `RecorderAliasStore`).
     @ObservedObject private var styleStore = WatchRingStyleStore.shared
 
-    /// Usable length of one side of the watch face: the actual screen width minus a 3pt inset on each side.
+    /// Usable length of one side of the watch face: the actual screen width minus a 6pt inset on each side.
     ///
     /// ⚠️ Use `WKInterfaceDevice`'s **actual** screen width, never hard-code it -- the 40mm/44mm/45mm/49mm
-    /// screen widths run from 162 to 205pt, so hard-coding either end is wrong on at least one watch.
+    /// Screen widths run from 162 to 205pt, so hard-coding either end is wrong on at least one watch
+    /// (the old hard-coded 172pt box was already overflowing on the 40mm anyway).
     private static var dialSide: CGFloat {
         max(132, WKInterfaceDevice.current().screenBounds.width - 6)
     }
 
-    /// Fraction of `dialSide` the ring takes while idle. The gap left outside the ring is exactly what the 4 corner dots need;
-    /// any larger and it overlaps the dots (already the tightest setting on the 40mm).
-    private static let idleRingFraction: CGFloat = 0.76
-    /// Ring fraction while recording. While recording the 4 dots are gone entirely, and all the freed-up space goes to the ring --
-    /// matching the Health app rings' "almost touching the screen edge" look (about 88~90% of the screen width).
+    /// Fraction of `dialSide` the ring takes while idle.
+    ///
+    /// This is a **geometric limit**, not an aesthetic choice: the ring's outer edge has to fall inside the 4 corner dots,
+    /// and the dots can't sit too close to the edge or the case's rounded corners clip them. On the 40mm the sum works out to exactly ≈0.80.
+    private static let idleRingFraction: CGFloat = 0.80
+    /// Ring fraction while recording. While recording the 4 corner dots disappear entirely and all the freed-up space goes to the ring --
+    /// matching the Health app rings' "almost touching the screen edge" look (about 90% of the screen width).
     private static let recordingRingFraction: CGFloat = 0.90
-
-    /// Which menu is currently expanded; `nil` = no menu bar.
-    @State private var openMenu: WatchRingMenu?
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 10) {
+            VStack(spacing: 2) {
+                clock
                 dial
 
                 if model.isRecording {
@@ -63,26 +71,14 @@ struct WatchRecorderView: View {
                         .monospacedDigit()
                 }
 
-                // Menu bar: never shown while recording (see the type comment).
-                if !model.isRecording, let menu = openMenu {
-                    menuPanel(menu)
-                }
-
                 if !model.pending.isEmpty { pendingList }
-
-                // Collapse the bottom link while a menu is expanded: otherwise the options and the link crowd together,
-                // and mis-taps are very easy on the watch face.
-                if !model.isRecording, openMenu == nil { footerLinks }
             }
             .padding(.horizontal, 3)
+            .padding(.bottom, 4)
         }
         // The "Watch" title line at the top is gone: the ring is this page's title.
-        // What's hidden is **this page's** navigation bar; the pushed language/about pages have their own bars and back buttons.
+        // What's hidden is **this page's** navigation bar; the 4 pushed sub-pages have their own bars and back buttons.
         .toolbar(.hidden, for: .navigationBar)
-        .onChange(of: model.isRecording) { _, recording in
-            // The moment recording starts, collapse the menu and never offer an entry point from then on.
-            if recording { openMenu = nil }
-        }
         .alert(
             L10n.Watch.recorderTitle,
             isPresented: Binding(
@@ -97,9 +93,25 @@ struct WatchRecorderView: View {
         }
     }
 
+    // MARK: - The time at the top
+
+    /// Current time. This is the line at the top of the Health app's activity-ring page.
+    ///
+    /// Use `TimelineView(.everyMinute)` instead of spinning up a `Timer`: it only
+    /// redraws once when the minute ticks over, a negligible cost; `Text(_:style:.time)` follows
+    /// the locale `LocalizedWatchRoot` injects, so 12/24-hour format follows the language.
+    private var clock: some View {
+        TimelineView(.everyMinute) { context in
+            Text(context.date, style: .time)
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Color(white: 0.82))
+        }
+    }
+
     // MARK: - The ring + the four corners
 
-    /// The ring as one piece. While recording the ring steps up a size and the corner dots vanish entirely, all inside the same spring
+    /// The ring as one piece. While recording the ring steps up a size and the corner buttons vanish entirely, all inside the same spring
     /// transition -- "recording has started" is visible in the geometry too.
     private var dial: some View {
         let side = Self.dialSide
@@ -115,191 +127,61 @@ struct WatchRecorderView: View {
             )
             .frame(width: side * fraction, height: side * fraction)
 
-            if !model.isRecording { menuDots.transition(.opacity) }
+            if !model.isRecording { corners.transition(.opacity) }
         }
         .frame(width: side, height: side)
         .animation(.spring(response: 0.4, dampingFraction: 0.72), value: model.isRecording)
     }
 
-    // MARK: - The 4 dots around the ring
-
-    /// Placed diagonally at the four corners of the ring: the corners of a circle are empty anyway, so the dots neither cover the ring
+    /// Those 4 corner buttons. Placed diagonally: a circle's corners are empty anyway, so the buttons neither cover the ring
     /// nor sit close enough to the center "start recording" target to cause accidental taps.
     ///
-    /// ⚠️ The outer circle is inset 6pt: that pushes each dot's center out to about `(side/2 - 21) × √2` from the middle,
-    /// just outside the idle ring's outer edge (0.76 × side, see `dial`) -- on the 40mm that is already
-    /// at the limit; make the ring smaller and it would overlap the dots.
-    private var menuDots: some View {
+    /// ⚠️ The outer circle is inset 6pt: that pushes each button's center out to about `(side/2 - 21) × √2` from the middle,
+    /// just outside the idle ring's outer edge (0.80 × side, see `dial`) -- on the 40mm that is already
+    /// at the limit; a bigger ring would overlap the buttons.
+    private var corners: some View {
         ZStack {
-            dot(.color, at: .topLeading)
-            dot(.gradient, at: .topTrailing)
-            dot(.breathing, at: .bottomLeading)
-            dot(.reset, at: .bottomTrailing)
+            corner(.color,     at: .topLeading,     tintIndex: 0)
+            corner(.breathing, at: .topTrailing,    tintIndex: 1)
+            corner(.language,  at: .bottomLeading,  tintIndex: 2)
+            corner(.settings,  at: .bottomTrailing, tintIndex: 3)
         }
         .padding(6)
     }
 
-    /// A corner dot.
+    /// A corner dot. **One tap pushes a separate page** (not an inline menu bar).
     ///
-    /// ⚠️ `.frame(maxWidth:maxHeight:alignment:)` goes **outside the Button**:
-    /// inside, it would turn the whole quadrant into a tap target, and tapping the ring edge would count as tapping this dot.
-    /// Outside, the button's own hit area is still just 30×30 and the frame only handles positioning
+    /// ⚠️ `.frame(maxWidth:maxHeight:alignment:)` goes **outside the `NavigationLink`**:
+    /// inside, it would turn the whole quadrant into a tap target, and tapping the ring's edge would count as tapping this dot.
+    /// Outside, the link's own hit area is still just 30×30 and the frame only handles positioning
     /// (a transparent `.frame` container does not take part in hit testing, so taps pass through to the ring below).
-    private func dot(_ menu: WatchRingMenu, at alignment: Alignment) -> some View {
-        Button {
-            // Tapping the same dot again = collapse, so there is no need to tap elsewhere.
-            openMenu = (openMenu == menu) ? nil : menu
+    ///
+    /// The icon takes its color from the palette (cycling: for the three-color palette that's magenta/green/cyan/magenta) --
+    /// so the "four corners" are part of the current color scheme rather than four identical grays.
+    private func corner(_ item: WatchRingCorner, at alignment: Alignment, tintIndex: Int) -> some View {
+        NavigationLink {
+            item.destination
         } label: {
-            Image(systemName: menu.symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(openMenu == menu ? Color.black : Color.white.opacity(0.72))
-                .frame(width: 28, height: 28)
-                .background(
-                    Circle().fill(
-                        openMenu == menu
-                            ? styleStore.style.palette.solid
-                            : Color.white.opacity(0.14)
-                    )
-                )
+            Image(systemName: item.symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(cornerTint(tintIndex))
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(Color.white.opacity(0.12)))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
-        .accessibilityLabel(menu.title)
+        .accessibilityLabel(item.title)
     }
 
-    // MARK: - Menu panel
-
-    @ViewBuilder
-    private func menuPanel(_ menu: WatchRingMenu) -> some View {
-        VStack(spacing: 6) {
-            Text(menu.title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            switch menu {
-            case .color:
-                paletteGrid
-            case .gradient:
-                optionRow(
-                    [
-                        (label: L10n.Watch.styleGradientOff, value: false),
-                        (label: L10n.Watch.styleGradientOn, value: true),
-                    ],
-                    selected: styleStore.style.gradient
-                ) { styleStore.style.gradient = $0 }
-            case .breathing:
-                optionRow(
-                    WatchBreathing.allCases.map { (label: $0.label, value: $0) },
-                    selected: styleStore.style.breathing
-                ) { styleStore.style.breathing = $0 }
-            case .reset:
-                Button {
-                    styleStore.reset()
-                    openMenu = nil
-                } label: {
-                    Text(L10n.Watch.styleReset)
-                        .font(.system(size: 12, weight: .medium))
-                        .padding(.vertical, 5)
-                        .frame(maxWidth: .infinity)
-                        .background(Capsule().fill(Color.white.opacity(0.12)))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        // Collapse after selecting -- an extra "confirm" step on the watch face is just one more tap.
-        .transition(.opacity)
+    /// Icon color for the `index`-th corner dot. Cycles through the palette without going out of bounds.
+    private func cornerTint(_ index: Int) -> Color {
+        let cs = styleStore.style.palette.colors
+        guard !cs.isEmpty else { return Color(white: 0.75) }
+        return cs[index % cs.count]
     }
 
-    /// 10 color swatches (the Health rings' three colors + the original 9 solids). Deliberately a palette and no color wheel:
-    /// on the 40mm, drag-to-pick is neither precise nor visibly different.
-    private var paletteGrid: some View {
-        LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 5),
-            spacing: 6
-        ) {
-            ForEach(WatchRingPalette.allCases) { palette in
-                Button {
-                    styleStore.style.palette = palette
-                    openMenu = nil
-                } label: {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: palette.colors,
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: 26, height: 26)
-                        .overlay(
-                            Circle().strokeBorder(
-                                Color.white,
-                                lineWidth: styleStore.style.palette == palette ? 2 : 0
-                            )
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(palette.rawValue)
-            }
-        }
-    }
-
-    /// A row of equal-width options (gradient off/on, breathing off/slow/medium/fast).
-    private func optionRow<T: Equatable>(
-        _ options: [(label: String, value: T)],
-        selected: T,
-        select: @escaping (T) -> Void
-    ) -> some View {
-        HStack(spacing: 4) {
-            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
-                Button {
-                    select(option.value)
-                    openMenu = nil
-                } label: {
-                    Text(option.label)
-                        .font(.system(size: 11, weight: .medium))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .padding(.vertical, 5)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            Capsule().fill(
-                                option.value == selected
-                                    ? styleStore.style.palette.solid.opacity(0.9)
-                                    : Color.white.opacity(0.12)
-                            )
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    /// Settings entry points, kept as two small text links rather than a
-    /// toolbar button: the wrist has no room for one, and this page is short
-    /// enough that they aren't buried. `Version` doubles as "did my new build
-    /// actually reach the watch?" — the companion propagates updates on its own
-    /// schedule, minutes after the iPhone app is replaced.
-    private var footerLinks: some View {
-        HStack(spacing: 6) {
-            NavigationLink {
-                WatchLanguageView()
-            } label: {
-                Text(L10n.Settings.language)
-            }
-            Text("·")
-            NavigationLink {
-                WatchAboutView()
-            } label: {
-                Text(L10n.Settings.version)
-            }
-        }
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        .buttonStyle(.plain)
-        .padding(.top, 4)
-    }
+    // MARK: - Pending list
 
     private var pendingList: some View {
         VStack(alignment: .leading, spacing: 7) {

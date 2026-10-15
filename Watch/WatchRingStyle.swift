@@ -121,29 +121,89 @@ struct WatchRingStyle: Equatable, Codable {
 
     /// Ring color while recording. Supplies the `AngularGradient` when gradient is on.
     var ringColors: [Color] { gradient ? palette.colors : [palette.solid] }
+
+    /// The ring's colour gradient.
+    ///
+    /// ⚠️ `WatchRingControl`'s main ring and the colour page's small preview **share this one copy** —
+    /// write it twice and they'll drift; and the subscript out-of-bounds trap is worth guarding exactly once, here.
+    ///
+    /// * Three colours or more (`activity`): spread the three colours around one lap of the ring — that's the activity ring's
+    ///   "three colours readable in one lap" look;
+    /// * Single/double colour: first colour + end colour + each end's own reduced opacity; with a single colour it degrades to
+    ///   "same colour at both ends", equivalent to the original solid look.
+    ///
+    /// Deliberately **not** indexing `ringColors[1]`: with the gradient off the array has one element,
+    /// and the subscript would go straight out of bounds.
+    var ringAngularGradient: AngularGradient {
+        let colors = ringColors
+        if colors.count > 2 {
+            return AngularGradient(
+                colors: colors,
+                center: .center,
+                startAngle: .degrees(-90),
+                endAngle: .degrees(270)
+            )
+        }
+        let from = colors.first ?? palette.solid
+        let to = colors.count > 1 ? colors[1] : from
+        return AngularGradient(
+            colors: [from.opacity(0.55), from, to, to.opacity(0.75)],
+            center: .center,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(270)
+        )
+    }
 }
 
-/// Which appearance option each of the 4 dots around the ring controls.
-enum WatchRingMenu: String, CaseIterable, Identifiable {
-    case color, gradient, breathing, reset
+/// Which page each of the 4 corner dots around the ring leads to.
+///
+/// ★ Second revision, 2026-10-15: originally the 4 dots **expanded a little menu in place** on the home screen
+/// (colour / gradient / breathing light / reset). The user's own words were
+/// "clicking the 4 menus should bring up a separate page", so it became 4 separate pages:
+///
+/// | Corner dot | Page |
+/// |---|---|
+/// | Top-left | Colour (**the gradient merged into it**, see `WatchColorStyleView`) |
+/// | Top-right | Breathing light |
+/// | Bottom-left | Language (previously a text link at the bottom of the home screen; the user asked for "the language to be in the menu too") |
+/// | Bottom-right | Settings (version + restore defaults) |
+///
+/// ⇒ the home screen therefore carries no text links at all, only "time + ring + 4 corner dots",
+/// the same structure as the Health app's activity-ring page.
+enum WatchRingCorner: String, CaseIterable, Identifiable {
+    case color, breathing, language, settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .color:     return L10n.Watch.styleColor
-        case .gradient:  return L10n.Watch.styleGradient
         case .breathing: return L10n.Watch.styleBreathing
-        case .reset:     return L10n.Watch.styleReset
+        case .language:  return L10n.Settings.language
+        case .settings:  return L10n.Watch.menuSettings
         }
     }
 
     var symbol: String {
         switch self {
         case .color:     return "paintpalette.fill"
-        case .gradient:  return "circle.lefthalf.filled"
         case .breathing: return "wind"
-        case .reset:     return "arrow.counterclockwise"
+        case .language:  return "globe"
+        case .settings:  return "gearshape.fill"
+        }
+    }
+
+    /// Which page this corner dot leads to. All four are **separate pages** (the user asked for "a separate page").
+    ///
+    /// ⚠️ The language page reuses `WatchLanguageView` (which also doubles as the whole-tree
+    /// rebuild of `LocalizedWatchRoot`), rather than starting another copy here.
+    @ViewBuilder
+    var destination: some View {
+        switch self {
+        case .color:     WatchColorStyleView()
+        case .breathing: WatchBreathingStyleView()
+        case .language:  WatchLanguageView()
+        case .settings:  WatchSettingsView()
         }
     }
 }
