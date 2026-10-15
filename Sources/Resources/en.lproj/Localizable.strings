@@ -94,6 +94,8 @@
 "llm.error.missing_candidates" = "The response has no candidates[0].content.parts.";
 "llm.fell_back" = "%@ wasn't usable — this result came from %@.";
 "llm.chunked_note" = "Long transcript — processed in %d parts and merged.";
+"llm.adopt_as_primary" = "Use %@ as the primary provider";
+"llm.unconfigured" = "%@ (not configured)";
 
 /* Azure Setup Guide */
 "azure_guide.title" = "Azure Speech Setup";

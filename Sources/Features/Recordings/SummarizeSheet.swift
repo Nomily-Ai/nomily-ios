@@ -201,18 +201,45 @@ struct SummarizeSheet: View {
             //   lets them decide whether to go fix the key first or just run as-is.
             //   Previously this situation only blew up as an English error message **after the run finished**.
             if let preflightWarning {
-                Label(preflightWarning, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                    .background(Color.orange.opacity(0.12))
+                // ★ 2026-10-15: The health check can't stop at "saying something" — it also needs a **one-tap fix**.
+                //
+                // What was actually observed: "the primary points at Open Router, and that entry has no
+                // api_key". With a hint alone, the user has to find their own way to Settings → LLM Providers,
+                // scroll to Open Router, and locate the primary-channel picker — when there is exactly one correct answer.
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(preflightWarning, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    if let fix = LLMCompletionService.suggestedPrimary(env.config.config) {
+                        Button {
+                            adoptFallbackAsPrimary(fix)
+                        } label: {
+                            Text(L10n.LLM.adoptAsPrimary(
+                                LLMCompletionService.providerLabel(fix)
+                            ))
+                            .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(Color.orange.opacity(0.12))
             }
             languageBar
             templateList
         }
         .onAppear { refreshPreflight() }
+    }
+
+    /// Promote the fallback channel to primary. Re-run the health check immediately afterwards — the warning banner must vanish on the spot,
+    /// or the user will think the button did nothing.
+    private func adoptFallbackAsPrimary(_ key: String) {
+        env.config.config.llmProviders.primary = key
+        env.config.scheduleSave()
+        refreshPreflight()
     }
 
     /// The pre-run notice when the primary is unavailable. With a fallback ⇒ say "who will serve as fallback";

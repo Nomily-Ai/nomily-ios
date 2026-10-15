@@ -314,6 +314,25 @@ enum L10n {
                                              value: "Long transcript — processed in %d parts and merged.",
                                              comment: "Notice: the transcript was too long for one request"), count)
         }
+        /// Label for the button that promotes the fallback channel to primary in one tap.
+        ///
+        /// ★ 2026-10-15: a health check that only "says something" isn't enough. The root cause observed in practice was
+        /// `primary = openRouter` with no `api_key` in that entry — what the user actually wanted was
+        /// local Ollama, and there is exactly one correct fix; making him dig through four pages to find a dropdown
+        /// is pure busywork.
+        static func adoptAsPrimary(_ provider: String) -> String {
+            String(format: NSLocalizedString("llm.adopt_as_primary",
+                                             value: "Use %@ as the primary provider",
+                                             comment: "Button: switch the primary LLM provider to the given one, which is already configured"),
+                   provider)
+        }
+        /// The entry in the Picker for "this is the current one, but it isn't fully configured".
+        static func unconfigured(_ provider: String) -> String {
+            String(format: NSLocalizedString("llm.unconfigured",
+                                             value: "%@ (not configured)",
+                                             comment: "Picker entry: this is the current primary provider but it lacks credentials/endpoint"),
+                   provider)
+        }
 
         static var activeProviderFooter: String { NSLocalizedString("llm.active_provider_footer", comment: "") }
         static var apiKey: String { NSLocalizedString("llm.api_key", comment: "") }

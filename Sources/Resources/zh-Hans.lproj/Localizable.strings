@@ -94,6 +94,8 @@
 "llm.error.missing_candidates" = "返回体里没有 candidates[0].content.parts。";
 "llm.fell_back" = "「%@」不可用，这次结果来自「%@」。";
 "llm.chunked_note" = "内容较长，已分成 %d 段分别处理后合并。";
+"llm.adopt_as_primary" = "改用「%@」作为主通道";
+"llm.unconfigured" = "%@（未配置）";
 
 /* Azure 设置指南 */
 "azure_guide.title" = "Azure Speech 设置";

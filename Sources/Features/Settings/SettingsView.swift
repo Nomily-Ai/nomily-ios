@@ -710,24 +710,73 @@ struct LLMProvidersView: View {
         configService.config.llmProviders.configuredProviders
     }
 
+    /// Why the primary channel is incompletely configured. Non-nil ⇒ the Picker above shows as "nothing selected".
+    ///
+    /// ★ 2026-10-15: this state really happened in practice — `primary = "openRouter"`,
+    /// while the `open_router` section didn't even have an `api_key`. And the Picker only lists **fully configured**
+    /// channels, so the tags don't line up, the UI just looks like "nothing is selected", with no clue at all;
+    /// the user only sees every summary fail once before falling back.
+    private var primaryGap: String? {
+        guard let primary = configService.config.llmProviders.primary, !primary.isEmpty else {
+            return nil
+        }
+        return LLMCompletionService.configGap(primary, configService.config)
+    }
+
     var body: some View {
         Form {
-            if !configured.isEmpty {
+            if !configured.isEmpty || primaryGap != nil {
                 Section {
-                    Picker(selection: Binding(
-                        get: { configService.config.llmProviders.primary ?? "" },
-                        set: {
-                            configService.config.llmProviders.primary = $0.isEmpty ? nil : $0
-                            configService.scheduleSave()
+                    if !configured.isEmpty {
+                        Picker(selection: Binding(
+                            get: { configService.config.llmProviders.primary ?? "" },
+                            set: {
+                                configService.config.llmProviders.primary = $0.isEmpty ? nil : $0
+                                configService.scheduleSave()
+                            }
+                        )) {
+                            Text(L10n.Common.none).tag("")
+                            // ★ 2026-10-15: when the primary channel is incompletely configured it is **not** in `configured`
+                            //   so no tag equals the current selection, and the Picker
+                            //   renders as "nothing selected" — all the user sees is a blank
+                            //   dropdown, when the real cause is the orange notice beside it.
+                            //   Add an entry labelled "Not configured" so the selected state has somewhere to land.
+                            if let primary = configService.config.llmProviders.primary,
+                               !primary.isEmpty,
+                               !configured.contains(where: { $0.key == primary }) {
+                                Text(L10n.LLM.unconfigured(
+                                    LLMCompletionService.providerLabel(primary)
+                                )).tag(primary)
+                            }
+                            ForEach(configured, id: \.key) { Text($0.label).tag($0.key) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(L10n.ASR.activeProvider)
+                                InfoTip(text: L10n.LLM.activeProviderFooter)
+                            }
                         }
-                    )) {
-                        Text(L10n.Common.none).tag("")
-                        ForEach(configured, id: \.key) { Text($0.label).tag($0.key) }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(L10n.ASR.activeProvider)
-                            InfoTip(text: L10n.LLM.activeProviderFooter)
+                    }
+
+                    // When it's incomplete, add the reason + a one-tap switch to the fallback. The one-tap part pays off most here:
+                    // since the user tapped into this page, what they want is "make it right", not to
+                    // work out for themselves which field to fill in, or that they should switch channels.
+                    if let gap = primaryGap {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label(gap, systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                            if let fix = LLMCompletionService.suggestedPrimary(configService.config) {
+                                Button(L10n.LLM.adoptAsPrimary(
+                                    LLMCompletionService.providerLabel(fix)
+                                )) {
+                                    configService.config.llmProviders.primary = fix
+                                    configService.scheduleSave()
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
                         }
+                        .padding(.vertical, 2)
                     }
                 }
             }

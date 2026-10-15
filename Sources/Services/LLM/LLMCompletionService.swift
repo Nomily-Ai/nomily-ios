@@ -228,6 +228,24 @@ struct LLMCompletionService {
         return (gap, others.first.map { providerLabel($0) })
     }
 
+    /// Which channel to switch to when the primary one can't be used — what's returned is the **channel key** ("ollama"),
+    /// not the display name, so the UI can write it straight back to `llm_providers.primary`.
+    ///
+    /// ★ 2026-10-15: used for "one-tap fix". The root cause measured this time has exactly this shape —
+    /// `llm_providers.primary` points at Open Router, yet the `open_router` section doesn't even have
+    /// an `api_key`, and what the user actually wants is the local Ollama. A hint alone still leaves them to
+    /// find "Settings → LLM providers" themselves, scroll to Open Router and locate the primary-channel selector;
+    /// and there is only one right answer to this.
+    ///
+    /// Returns nil when the primary channel is fine or there's no fallback at all (in which case the button shouldn't show).
+    static func suggestedPrimary(_ config: AppConfig) -> String? {
+        guard let primary = config.llmProviders.primary, !primary.isEmpty else { return nil }
+        guard configGap(primary, config) != nil else { return nil }
+        // `primary` non-empty ⇒ it is always at index 0 of `candidateChain`, so
+        // what `dropFirst()` gives you is the first usable fallback.
+        return candidateChain(config).dropFirst().first
+    }
+
     // MARK: - Entry points
 
     /// Translate `text` into the given language using the active LLM
