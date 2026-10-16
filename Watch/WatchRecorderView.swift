@@ -18,6 +18,27 @@ import WatchKit
 ///                   2 pending ›
 /// ```
 ///
+/// ─────────────────────────────────────────────────────────────────────────
+/// ★★ 2026-10-16 revision eight (user feedback on real hardware):
+///
+/// > `needs work, the blinking is too fast right now, slow the rhythm down, no green, just make the frame two eyes,
+/// >  the current interaction needs work, swiping left and right doesn't reach the menus`
+///
+/// All four were changed:
+///
+/// * **Horizontal swiping never reaches the menus** -- revision seven used `TabView` + `.tabViewStyle(.page)` for horizontal paging,
+///   which was a judgement made from the docs, and **the real hardware overturned it**: on watchOS the `.page` style exists but
+///   doesn't give horizontal paging (`VerticalPageTabViewStyle` was only split out as its own
+///   style in watchOS 10, which is exactly the hint that **vertical is the default on the watch**). Now it's our own horizontal paging (see
+///   `pageDrag`): the three pages sit in one `HStack`, translated by the finger's displacement, and only flip once it crosses the threshold.
+///   The upside is that direction, threshold and damping are all in our hands, with no more guessing at how the system interprets that style.
+/// * **Nobody knew "you can swipe here"** -- a row of three little dots was added (`pageDots`). A big part of why users
+///   couldn't find the menus is that nothing on screen ever hinted that you could swipe here.
+/// * **Blinking too fast / slow the rhythm down** -- the `BlinkPhase` cycle stretches from 4.63 seconds to about 8.12 seconds,
+///   and breathing from 2.6 seconds to 3.6 seconds (the accounting is written up in those two places).
+/// * **No green / just make the frame two eyes** -- the Bot's rounded-square plate is deleted outright, leaving only the two
+///   eyes; and this face **no longer takes any color from the palette**, it's all white (reasons at the top of `WatchBotFace`).
+///
 /// Three things change at once:
 ///
 /// * **The ring button in the middle becomes a Bot face** (`WatchBotFace`). The ring's "one tap starts recording"
@@ -65,6 +86,31 @@ struct WatchRecorderView: View {
     /// Defaults to **1** (Bot) -- the first thing you see when you raise your wrist has to be the page that "starts recording right away",
     /// not a menu page.
     @State private var page: Int = 1
+
+    /// The displacement (pt) the finger is currently dragging. Returns to 0 during the page-flip animation.
+    ///
+    /// ★ Added in revision eight, the key state for **implementing horizontal paging ourselves**: the three pages are laid side by side and the whole thing is
+    /// translated by `-page × screen width + dragX`. `dragX` makes the content **follow the finger** while dragging --
+    /// without it you only get "let go and it snaps over", which doesn't feel like a page turn, it feels like a switch.
+    @State private var dragX: CGFloat = 0
+
+    /// The finger has to travel this far before we accept that "this is a page turn".
+    ///
+    /// ⚠️ It must be **greater** than the jitter of a tap and **less** than `WatchBotFace.holdSlop` (34).
+    /// The three are three points on one line:
+    ///   < 24  → neither a page turn nor a cancelled hold, pure jitter, ignored;
+    ///   24~34 → no longer counts as "holding still", judged a paging intent;
+    ///   > 34  → the hold is void.
+    /// The 10pt in between is a **buffer zone**: a twitch of the hand and you're choosing between "start recording" and "turn the page",
+    /// which is the most common way this kind of interaction falls apart.
+    private static let pageDragSlop: CGFloat = 24
+
+    /// Travel this far and letting go actually turns the page.
+    ///
+    /// ⚠️ Much larger than `pageDragSlop` (24 → 44): after recognizing "they're swiping" you still have to see whether they
+    /// **swiped far enough**. If the two thresholds were one, a slight brush would turn the page and the user would keep overshooting.
+    private static let pageFlipDistance: CGFloat = 44
+
     /// Number of times it's tapped while idle, handed to `WatchBotFace` for a single bounce.
     @State private var pokeTick = 0
     /// Just after a hold has fired, **swallow the tap that comes right behind it**.
@@ -86,22 +132,38 @@ struct WatchRecorderView: View {
     /// Fraction of the screen width taken by the Bot face's side length.
     ///
     /// ⚠️ It leaves room for two things: the charge ring around the face (1.14×) and the line of
-    /// status text below the face (timer/hint). 0.70 is 109pt on the 40mm, 124pt including the ring,
+    /// Status text (timer/hint). 0.76 is 119pt on the 40mm, 136pt including the ring,
     /// and with a line of text it still fits in a 162×194 screen.
-    private static let botFraction: CGFloat = 0.70
+    ///
+    /// ⚠️ Revision eight raised it from 0.70 to 0.76: once the plate was deleted, the 0.70 box held only the two eyes,
+    ///    and at the original fraction the whole face looked small and empty. One size up exactly makes up the bulk lost with the plate.
+    private static let botFraction: CGFloat = 0.76
 
     var body: some View {
-        TabView(selection: $page) {
-            menuPane(menuPrefs.leadingItems).tag(0)
-            botPane.tag(1)
-            menuPane(menuPrefs.trailingItems).tag(2)
+        // ★ Revision eight: **no more `TabView`**, we lay out a horizontal row ourselves. Reasons in the "revision eight" passage at the top of the file
+        //    -- on watchOS, `.tabViewStyle(.page)` doesn't give horizontal paging.
+        //
+        // The structure is plain: each of the three pages fills one screen width, the whole row is translated by `page`, and `dragX`
+        // makes it follow the finger while dragging.
+        GeometryReader { geo in
+            HStack(spacing: 0) {
+                menuPane(menuPrefs.leadingItems)
+                    .frame(width: geo.size.width)
+                botPane
+                    .frame(width: geo.size.width)
+                menuPane(menuPrefs.trailingItems)
+                    .frame(width: geo.size.width)
+            }
+            .frame(width: geo.size.width * 3, alignment: .leading)
+            .offset(x: -CGFloat(page) * geo.size.width + dragX)
         }
-        // ⚠️ `.page` is **horizontal** paging. watchOS's `TabView` is vertical by default (Digital Crown scrolling),
-        //    and what the user wants is "swipe left or right".
-        // ⚠️ `indexDisplayMode: .never`: the system's row of little dots is tiny and blurry on the watch face,
-        //    and it pushes each page down -- the home screen has only one face, so being pushed off is obvious.
-        .tabViewStyle(.page(indexDisplayMode: .never))
-        .overlay(alignment: .bottom) { queueBar }
+        // Three pages side by side, but only one should be visible -- without clipping, the left and right pages spill over the current one.
+        .clipped()
+        // `simultaneousGesture`, not `.gesture`: the paging gesture has to **coexist** with the subviews'
+        // own gestures. `.gesture` would override the Bot `Button`'s hold/tap --
+        // which is exactly this page's most important interaction.
+        .simultaneousGesture(pageDrag)
+        .overlay(alignment: .bottom) { bottomBar }
         // What's hidden is **this page's** navigation bar; the pushed sub-pages have their own bars and back buttons.
         //
         // ⚠️ You need both: `.toolbar(.hidden, for: .navigationBar)` hides the navigation bar itself,
@@ -139,18 +201,19 @@ struct WatchRecorderView: View {
             WatchBotFace(
                 size: Self.dialSide * Self.botFraction,
                 isRecording: model.isRecording,
-                style: styleStore.style,
                 pokeTick: pokeTick,
                 handGestureEnabled: prefs.pinchToRecord,
                 onTap: handleTap,
                 onHold: beginRecordingByHold,
                 onToggle: handleToggle
             )
+            // ⚠️ After revision eight there is **no** `style:` parameter any more -- this face no longer takes colors from the palette
+            //    (user: "no green"). See the passage at the top of `WatchBotFace`; don't wire it back in.
 
             caption
 
-            // Leave room for the pending hint at the bottom so the two don't overlap.
-            Spacer(minLength: 0).frame(height: 14)
+            // Leave room for the bottom row of page dots + the pending hint so the two don't overlap.
+            Spacer(minLength: 0).frame(height: 22)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -310,6 +373,86 @@ struct WatchRecorderView: View {
         let cs = styleStore.style.palette.colors
         guard !cs.isEmpty else { return Color(white: 0.75) }
         return cs[index % cs.count]
+    }
+
+    // MARK: - Horizontal paging
+
+    /// The paging gesture. **Implemented ourselves, not via `TabView`** -- reasons in the "revision eight" passage at the top of the file.
+    ///
+    /// Three things are decided here:
+    /// * Whether to accept it (`pageDragSlop`) -- under 24pt counts as jitter and is ignored;
+    /// * Whether to flip (`pageFlipDistance`) -- only a full 44pt actually changes page;
+    /// * Direction -- only **clearly horizontal** swipes count (`abs(dx) > abs(dy)`). A vertical swipe is
+    ///   the user brushing the Digital Crown or flipping the system layer; swallowing it here would be baffling.
+    private var pageDrag: some Gesture {
+        DragGesture(minimumDistance: Self.pageDragSlop)
+            .onChanged { value in
+                // ⚠️ Animations **must be off** while dragging: this follows the finger frame by frame, and adding animation
+                //    turns it into "a rubber band a beat behind". Only the short settle on release needs animation.
+                var tx = Transaction()
+                tx.disablesAnimations = true
+
+                let raw = value.translation.width
+                // Already at the start/end and still swiping outward → damp to 1/4. It gives a bit of "you've pulled to the end" feel,
+                // otherwise the user thinks it's stuck and swipes harder.
+                let pastStart = page == 0 && raw > 0
+                let pastEnd = page == 2 && raw < 0
+                let damped = (pastStart || pastEnd) ? raw * 0.25 : raw
+
+                withTransaction(tx) { dragX = damped }
+            }
+            .onEnded { value in
+                let dx = value.translation.width
+                let dy = value.translation.height
+
+                // ★ When the paging swipe is released, the `Button` also fires its action at the **moment the finger lifts**
+                //   (that's defined `Button` behavior, not a bug). If we didn't block it,
+                //   swiping the screen while idle would make the eyes bounce for no reason -- with nothing actually tapped.
+                //   Reusing the same gate as the hold path; one fix for two traps.
+                tapGateUntil = Date().addingTimeInterval(0.35)
+
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                    if abs(dx) > abs(dy), abs(dx) > Self.pageFlipDistance {
+                        page = min(2, max(0, page + (dx < 0 ? 1 : -1)))
+                    }
+                    // Below threshold it settles back -- that "spring back" is itself the feedback that "you didn't swipe far enough".
+                    dragX = 0
+                }
+            }
+    }
+
+    // MARK: - Bottom edge of the screen
+
+    /// The little stack at the very bottom: page dots + pending hint.
+    ///
+    /// ⚠️ The two **must go in the same overlay** (not one overlay each): two
+    ///    `alignment: .bottom` overlays **stack in the same place**, so the moment the pending bar appears
+    ///    it covers the page dots.
+    private var bottomBar: some View {
+        VStack(spacing: 3) {
+            pageDots
+            queueBar
+        }
+        .padding(.bottom, 1)
+    }
+
+    /// Three little dots showing which page you're on.
+    ///
+    /// ★ Added in revision eight. The user reported "swiping left and right doesn't reach the menus"; half of that was broken behavior (`.page` not giving horizontal
+    /// paging, now fixed) and the other half was **discoverability**: nothing on screen ever hinted that you could swipe here.
+    /// Three dots are the least space and the least explanation.
+    ///
+    /// ⚠️ Deliberately **not tappable**: a 4pt dot is nearly impossible to hit on a 40mm watch, and making it a button would only
+    ///    bring "I tapped and nothing happened". Its job is "tell you that you can swipe", not "swipe for you".
+    private var pageDots: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(Color.white.opacity(index == page ? 0.85 : 0.25))
+                    .frame(width: 4, height: 4)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     // MARK: - The pending hint bar

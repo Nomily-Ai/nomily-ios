@@ -8,40 +8,65 @@ import SwiftUI
 //
 // The center of the home screen used to be a ring button; one tap started recording. The problem with "one tap starts recording" on
 // the wrist is that it misfires far too easily -- raising the wrist to check the time, or a brush from a cuff, would start a recording. Now it is a human-like
-// little robot: **hold its face for 2 seconds** to start, and a tap while recording stops.
+// The little robot: **hold it for 2 seconds** to start, and a tap while recording stops.
 //
+// ─────────────────────────────────────────────────────────────────────────
+// ★★ 2026-10-16 revision eight (user feedback on real hardware): "no green, just make the frame two eyes"
+//
+// The revision-seven version had a **rounded-square face plate** (`RoundedRectangle` filled with `style.centerFill`),
+// with the two eyes layered in the middle of the plate. On real hardware it was immediately wrong: that plate followed the palette chosen on the "Appearance" page,
+// and the default palette (the Health app's three colors) produced a colored square framing the two eyes --
+// the user's exact words were "no green, just make the frame two eyes."
+//
+// So revision eight did a piece of **subtraction**:
+//   · **Remove the plate entirely**, leaving only the two eyes. Grok's robot is, after all, two white bars on a black background
+//     with no face frame; a frame actually makes it look like an app icon.
+//   · **From now on this takes no color from the palette at all** -- the eyes, the charge ring and the recording glow are all white.
+//     The `style` parameter was therefore **deleted outright**, not forgotten.
+//
+// ⚠️ This is a **deliberate reversal**: revision seven specifically wrote "the face's color follows `WatchRingStyle`,
+//    and after a color change the home screen must update immediately." After seeing the actual result, what the user wanted was no color --
+//    the palette still governs the two side menus' icons and the recording timer line, it just no longer governs this face.
+//    Do not "helpfully" wire the color back in.
+//
+// ─────────────────────────────────────────────────────────────────────────
 // ## Blinking is the whole point of this face
 // A motionless eye is no different from a dot. What makes it "alive" is these few things:
 //
-//   · **Natural blinking** -- close fast (~85ms), pause for a beat, open a little more slowly (~130ms), then rest
-//     for two or three seconds. Human blinks are never a constant-rate open and close; a constant rate immediately reads as mechanical
-//     (for the phase-by-phase description see `BlinkPhase` at the end of the file). Each cycle also packs in one "double blink,"
-//     which is the most common rhythm in real people.
-//   · **Breathing** -- the whole face slowly inflates and deflates (plus or minus 3.5%, once every 2.6 seconds). The amplitude must be small:
+//   · **Slow natural blinking** -- close fast, pause for a beat, open a little more slowly, then **rest for several seconds**.
+//     Human blinks are never a constant-rate open and close; a constant rate immediately reads as mechanical (for the phase-by-phase description see the
+//     end of the file, `BlinkPhase`). Each cycle also packs in one "double blink," the most common rhythm in real people.
+//     ⚠️ Revision eight **halved the speed** of the whole rhythm: revision seven's cycle was 4.6 seconds and it blinked twice every time,
+//        which on real hardware read as "it is blinking constantly." Now a cycle is about 8.1 seconds (see `BlinkPhase` for details).
+//   · **Breathing** -- the whole pair of eyes slowly inflates and deflates (plus or minus 1.8%, once every 3.6 seconds). The amplitude must be small:
 //     any larger and it looks like it is pulsing; it should be small enough that "you can't say what is moving, but it is alive."
-//   · **Listening while recording** -- the eyes open one size larger, the two eyes drift out of phase, and a layer of
-//     same-color glow is added to the face. There is no room on the watch face for a "recording" line; these are that line.
-//   · **The charge ring while holding** -- while the finger stays down, a 2-second progress arc runs around the outside of the face. Without it,
+//     it too was slowed down in revision eight (it used to be 2.6 seconds).
+//   · **Listening while recording** -- the eyes open one size larger, the two eyes drift out of phase, plus a layer of white glow.
+//     There is no room on the watch face for a "recording" line; these are that line.
+//   · **The charge ring while holding** -- while the finger stays down, a 2-second progress arc runs around the outside of the eyes. Without it,
 //     the user does not know how long to press, nor whether that press was even picked up.
 //
 // ## Why all the gestures live in this one type instead of being scattered across the home screen
 // Hold to start, tap to stop, Double Tap to start/stop -- all three **land on this face**.
 // Splitting it into "the home screen owns the hold, the face owns the animations" would make "how should the face react while pressed" span two
 // files; and Double Tap requires the landing point to be a real `Button` (`handGestureShortcut`
-// only works on button-like controls), so here the face is simply wrapped in a `Button`,
+// only works on button-like controls), so here the eyes are simply wrapped in a `Button`,
 // with the hold attached to that same `Button` -- so the three things have just one source of truth.
 //
 // ⚠️ **Under always-on (`isLuminanceReduced`) everything must stop**: on a dimmed watch face
 // animations are both hard to see and power-hungry, and "looping animations" happen to be the hungriest kind. When stopped, show a **static
 // open-eyed face** -- not hide it; the watch face still has to show what this is.
 //
-// ⚠️ The face's color follows `WatchRingStyle` (the same palette chosen on the "Appearance" page).
-// After a color change the home screen must update immediately, otherwise the user thinks that page is adjusting something else.
+// ⚠️ Revision eight removed the plate, so **the tap target has to be added back by hand** (`.contentShape`, see `body`).
+//    Without that, the hit area shrinks to the two capsules -- pairing a "hold for 2 seconds" interaction with a small
+//    hit area makes the user conclude "I pressed it but nothing happened."
 struct WatchBotFace: View {
-    /// The face's own side length (excluding the charge ring outside).
+    /// The face's **nominal** side length (excluding the charge ring outside).
+    ///
+    /// ⚠️ After revision eight it is no longer the "plate side length" (the plate is gone), but the **bounding-size reference**
+    /// for the eye group -- all proportions are still taken from it, so changing watches needs no recalculation.
     let size: CGFloat
     let isRecording: Bool
-    let style: WatchRingStyle
     /// Number of times tapped while idle. The home screen adds 1, and this does one "bounce."
     ///
     /// ⚠️ Why not just expose a `poke()` method for the home screen to call: `WatchBotFace` is a value type,
@@ -74,7 +99,7 @@ struct WatchBotFace: View {
     @State private var sway = false
     /// Hold progress 0...1.
     @State private var holdProgress: CGFloat = 0
-    /// Whether a finger is currently pressed on the face. Driven by `LongPressGesture.updating`.
+    /// Whether a finger is currently pressed on the eyes. Driven by `LongPressGesture.updating`.
     @GestureState private var holding = false
     /// The most recent moment "a finger actually touched the face" (updated on both press and release).
     ///
@@ -89,19 +114,27 @@ struct WatchBotFace: View {
     /// raising the wrist to check the watch usually ends within a second, nowhere near 2 seconds.
     static let holdSeconds: TimeInterval = 2.0
     /// Allowed finger slop (pt) during a hold. Beyond it, the gesture is judged to be "paging" rather than "holding."
-    private static let holdSlop: CGFloat = 26
+    ///
+    /// ⚠️ Revision eight raised it from 26 to **34**: the home screen now implements horizontal paging itself (see
+    /// `WatchRecorderView.pageDrag`), and it requires a 24pt swipe to register. The two thresholds must stay **separate**
+    /// -- the 24-to-34 band is the buffer where "neither paging nor cancelling the hold" applies.
+    /// If the two numbers collided, one twitch of the hand would have to choose between "start recording" and "page."
+    private static let holdSlop: CGFloat = 34
 
     // MARK: Proportions
     //
     // Everything is derived as a proportion of `size`, never hard-coded -- the watch screen width differs by 40pt from 40mm to 49mm,
     // so hard-coding any single number would be off on at least one size.
-    private var eyeWidth: CGFloat { size * 0.185 }
-    private var eyeHeight: CGFloat { size * 0.285 }
+    //
+    // ⚠️ Revision eight **enlarged the eyes** by one step (width 0.185 → 0.235, height 0.285 → 0.375).
+    //    The old sizes were calculated to go with the plate: with a plate the eyes were just "a pattern on the board," so a bit smaller
+    //    still held up. Once the plate is gone the eyes are the whole face, and at the old size they look small and empty.
+    private var eyeWidth: CGFloat { size * 0.235 }
+    private var eyeHeight: CGFloat { size * 0.375 }
     /// The gap **between** the two eyes (not the centre-to-centre distance).
-    private var eyeGap: CGFloat { size * 0.185 }
-    private var faceCorner: CGFloat { size * 0.31 }
+    private var eyeGap: CGFloat { size * 0.235 }
     /// The amplitude of the eyes' drift while recording.
-    private var swayAmount: CGFloat { size * 0.014 }
+    private var swayAmount: CGFloat { size * 0.022 }
 
     var body: some View {
         // Use a `Button` instead of a bare view: `handGestureShortcut` (Double Tap)
@@ -113,13 +146,17 @@ struct WatchBotFace: View {
         Button(action: handlePrimaryAction) {
             ZStack {
                 holdRing
-                face
-                    .frame(width: size, height: size)
+                eyes
                     .scaleEffect(figureScale)
                     .animation(.spring(response: 0.34, dampingFraction: 0.62), value: isRecording)
             }
             // Leave room outside for the charge ring.
             .frame(width: size * 1.14, height: size * 1.14)
+            // ★ Added in revision eight, **not optional**: with the plate gone, `Button` by default treats only the drawn
+            //   shape as the hit area, i.e. those two capsules. A 2-second hold needs a steady press, and with the hit area
+            //   shrunk like that the user feels "I clearly pressed it but nothing happened."
+            //   Add a square hit area that makes the whole `frame` tappable.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         // The hold and the "tap" are recognized **simultaneously**: a tap requires a quick release, a hold requires staying pressed,
@@ -156,11 +193,11 @@ struct WatchBotFace: View {
             }
         }
         .onChange(of: isRecording) { _, recording in
-            // While recording, park the breathing at the "flat" position: the face is already enlarged and the eyes drifting,
+            // While recording, park the breathing at the "flat" position: the eyes are already enlarged + drifting,
             // and stacking another slow inflate-deflate on top makes it look like it is shaking.
             if recording {
                 withAnimation(.linear(duration: 0.25)) { breathe = false }
-                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
                     sway = true
                 }
             } else {
@@ -217,12 +254,16 @@ struct WatchBotFace: View {
     }
 
     /// Idle-state breathing. It should not run while dimmed or while recording.
+    ///
+    /// ⚠️ Revision eight slowed one "inhale-exhale" from 2.6 seconds to **3.6 seconds** (user: "slow the rhythm down").
+    ///    Breathing is this face's **most constant** motion -- far more frequent than blinking, so any faster reads as
+    ///    "panting," and it stacks with blinking to make the whole picture look busy.
     private func startIdleMotion() {
         guard !dimmed, !isRecording else {
             withAnimation(.linear(duration: 0.2)) { breathe = false }
             return
         }
-        withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) {
+        withAnimation(.easeInOut(duration: 3.6).repeatForever(autoreverses: true)) {
             breathe = true
         }
     }
@@ -231,8 +272,12 @@ struct WatchBotFace: View {
     ///
     /// Multiply rather than stack three `.scaleEffect`s -- with three stacked layers, changing any one means also changing
     /// the magnitude of the other two to match the look, and soon nobody can work out the total amplitude.
+    ///
+    /// ⚠️ Revision eight pulled the breathing amplitude in to plus or minus 1.8% (from plus or minus 3.5%). With the cycle slowed, the same amplitude
+    ///    covers less distance per second but lingers longer, so it actually looks more "swollen"; adjusting both together
+    ///    is what keeps it "slow and steady," while slowing only the cycle turns it into "slowly swelling."
     private var figureScale: CGFloat {
-        var s: CGFloat = (dimmed || isRecording) ? 1 : (breathe ? 1.035 : 0.985)
+        var s: CGFloat = (dimmed || isRecording) ? 1 : (breathe ? 1.028 : 0.992)
         s *= 1 + poke * 0.05
         if isRecording { s *= 1.06 }
         return s
@@ -252,18 +297,10 @@ struct WatchBotFace: View {
         }
     }
 
-    // MARK: - The face
-
-    private var face: some View {
-        RoundedRectangle(cornerRadius: faceCorner, style: .continuous)
-            .fill(style.centerFill)
-            // The same-color glow while recording -- the most space-efficient way to say "working."
-            .shadow(
-                color: isRecording ? style.palette.solid.opacity(0.75) : .clear,
-                radius: isRecording ? 10 : 0
-            )
-            .overlay { eyes }
-    }
+    // MARK: - The eyes
+    //
+    // ⚠️ Before revision eight there was still a `face` layer here (rounded-square plate + `overlay` eyes).
+    //    It was deleted outright -- for the reason see the "revision eight" paragraph at the top of the file.
 
     /// The two eyes. While recording they drift up and down out of phase -- that slight offset is where the "listening" look comes from;
     /// if both eyes moved in phase it would look like the whole face is nodding.
@@ -277,6 +314,12 @@ struct WatchBotFace: View {
         // As a group the eyes sit a little above the geometric center. Exactly centered looks "head down" --
         // the eyes on a human face sit above the midline anyway.
         .offset(y: -size * 0.03)
+        // The white glow while recording. The most space-efficient way to say "working," and it takes no color --
+        // after revision eight this face is purely monochrome (see the top of the file).
+        .shadow(
+            color: isRecording ? Color.white.opacity(0.65) : .clear,
+            radius: isRecording ? 9 : 0
+        )
     }
 
     /// One eye.
@@ -301,6 +344,7 @@ struct WatchBotFace: View {
         }
     }
 
+    /// A white capsule. **Takes no color from the palette** -- see the "revision eight" paragraph at the top of the file.
     private var eyeShape: some View {
         Capsule()
             .fill(Color.white)
@@ -311,19 +355,25 @@ struct WatchBotFace: View {
 
     /// The 2-second progress arc during a hold. **It appears only while pressed** (`holdProgress > 0`),
     /// and vanishes the instant you let go -- it is one-time feedback, not permanent decoration.
+    ///
+    /// ⚠️ After revision eight it is **white** (it used to take the palette's `solid`). This ring is system-level
+    ///    progress feedback, unrelated to "which theme color the user picked"; and with the plate already gone, a colored arc
+    ///    hanging all alone outside the eyes would be more jarring.
     @ViewBuilder
     private var holdRing: some View {
         if holdProgress > 0.002 {
             Circle()
                 .trim(from: 0, to: holdProgress)
                 .stroke(
-                    style.palette.solid,
+                    Color.white.opacity(0.9),
                     style: StrokeStyle(lineWidth: max(3, size * 0.035), lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
-                .frame(width: size * 1.08, height: size * 1.08)
-                // This ring is pure feedback: it must neither steal the hold (it sits right over the face's outer edge),
-                // nor stretch the `Button`'s tap target out beyond the face.
+                // Slightly larger than the eye group's bounding box (width 0.705×size, height 0.375×size),
+                // so the arc does not press onto the eyes.
+                .frame(width: size * 1.02, height: size * 1.02)
+                // This ring is pure feedback: it must neither steal the hold (it sits right over the eyes' outer edge),
+                // nor stretch the `Button`'s tap target outward.
                 .allowsHitTesting(false)
         }
     }
@@ -348,7 +398,7 @@ struct WatchBotFace: View {
 ///   if you only read the switch in without touching the modifier, the system still routes Double Tap to this page's
 ///   main button, so it fires even with the switch off.
 /// * **10.x**: do nothing. From watchOS 10.1 the system routes Double Tap by itself to the page's
-///   the single main button on the page (the center of the home screen has only this face as a `Button`; the two side menus are
+///   the single main button (the center of the home screen has only this eye as a `Button`; the two side menus are
 ///   `NavigationLink`s and do not take part in primary-action determination), so on that version the gesture
 ///   works anyway -- no API means **no switch**, which is a system limitation, not an omission.
 struct PrimaryHandGesture: ViewModifier {
@@ -377,6 +427,23 @@ struct PrimaryHandGesture: ViewModifier {
 // ⚠️ **No random numbers** here: `phaseAnimator`'s phase list is re-evaluated whenever the view is rebuilt,
 // and random durations would make the timeline change on every redraw, so the blink would jitter. For a "random feel," rely on
 // the **fixed** structure of "occasionally blinking twice" -- that is what actually characterizes a real person's blink rhythm.
+//
+// ─────────────────────────────────────────────────────────────────────────
+// ★★ 2026-10-16 revision eight: halve the speed of the whole cycle (user feedback on real hardware: "the blinking is too fast now, slow the rhythm down")
+//
+// Revision seven's cycle was **4.63 seconds**, and it **blinked twice in every round** -- meaning two open-close pairs every 4.6 seconds.
+// Watching it for a few seconds on real hardware reads as "it is blinking constantly," not "it is alive."
+//
+// Revision eight pulled three things at once:
+//   · `rest` + `settle` (the two hold segments) from 2.3 + 1.6 to **3.2 + 3.8**;
+//   · a single open-close from 85/130ms to **140/220ms** (a real human eye closing takes only
+//     100~150ms -- revision seven's version was a "flash," not a "close");
+//   · the gap between the double blinks from 260ms to 340ms.
+// The new cycle is ≈ **8.12 seconds**, about double the old one.
+//
+// ⚠️ Stretching only the resting and not the open-close gives a "frozen still → snap" look -- because the relative rhythm
+//    is unchanged. To be "slow" you have to slow everything **proportionally**, which is the payoff of describing it phase by phase in the first place:
+//    every number is out in the open, so you can change only the ones that need changing.
 private enum BlinkPhase: CaseIterable {
     /// Open, resting.
     case rest
@@ -408,14 +475,14 @@ private enum BlinkPhase: CaseIterable {
     /// Each phase's duration = the duration of that phase's animation.
     var animation: Animation {
         switch self {
-        case .rest:      return .linear(duration: 2.3)
-        case .shut:      return .easeIn(duration: 0.085)
-        case .hold:      return .linear(duration: 0.055)
-        case .open:      return .easeOut(duration: 0.13)
-        case .pause:     return .linear(duration: 0.26)
-        case .shutAgain: return .easeIn(duration: 0.08)
-        case .openAgain: return .easeOut(duration: 0.12)
-        case .settle:    return .linear(duration: 1.6)
+        case .rest:      return .linear(duration: 3.2)
+        case .shut:      return .easeIn(duration: 0.14)
+        case .hold:      return .linear(duration: 0.09)
+        case .open:      return .easeOut(duration: 0.22)
+        case .pause:     return .linear(duration: 0.34)
+        case .shutAgain: return .easeIn(duration: 0.13)
+        case .openAgain: return .easeOut(duration: 0.20)
+        case .settle:    return .linear(duration: 3.8)
         }
     }
 }
