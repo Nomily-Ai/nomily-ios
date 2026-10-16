@@ -111,36 +111,107 @@ struct SettingsView: View {
     /// only when "Automatic App Install" is on, and otherwise leaves it sitting
     /// in the Watch app's Available Apps list with no notification.
     ///
-    /// ★ 2026-10-16 revision thirteen: this section gained a **Home Face** row. It is the first
-    /// appearance setting written by the iPhone and read by the watch (colour / shortcut menu / language are all still watch-local),
-    /// so it gets its own Section + its own footer rather than crowding the install explanation below.
+    /// ★ 2026-10-16 revision thirteen: this section gained a **Home Face** row (at the time an independent row +
+    /// independent Section).
+    ///
+    /// ★★ 2026-10-16 revision fifteen: those two rows were **merged into one** (user's words: "add the watch
+    ///   home-screen expression to the Nomily AI app's watch settings; tapping Apple Watch there is the menu bar,
+    ///   and when it is installed a tap goes into the expression settings -- merge it rather than giving the watch its own expression menu bar;
+    ///   and when it is not installed, a tap jumps to the phone's Watch app").
+    ///
+    /// So this row now branches on **whether the watch App is installed**:
+    ///   · **Installed** — a `NavigationLink` into the expression picker, with the current option's name on the right;
+    ///   · **Not installed** (including a watch that isn't paired) — becomes a button that **jumps to the
+    ///     "Watch" App on the iPhone**, to install it there (the right side keeps the original status text, plus an "opens elsewhere" badge).
+    ///
+    /// ⚠️ Why merging is right: install state and expression setting are two things about the **same object** to begin with,
+    ///    and once split into two rows the user sees no way out on the "not installed" row — that row can only be looked at,
+    ///    not tapped, while "what to do" is buried in a long footer. After the merge, "what happens when
+    ///    you tap this row" and "its current state" land in the same place.
+    ///
+    /// ⚠️ The check uses `isWatchAppInstalled` **and** `isActivated`: before activation completes that
+    ///    flag is necessarily `false` (see the top of `WatchSyncService`), and looking at it alone would misjudge
+    ///    the first few seconds after launch as "not installed", so a single tap throws the user over to the Watch App.
     private var watchSection: some View {
-        Group {
-            Section {
-                NavigationLink {
-                    WatchFacePickerView()
-                } label: {
-                    HStack {
-                        Label(L10n.Face.title, systemImage: "eyes")
-                        Spacer()
-                        Text(chosenFaceTitle)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            } footer: {
+        Section {
+            watchRow
+        } footer: {
+            // The two sentences each do their own job: one says what this row is now (pick an expression),
+            // the other says what state the watch side is in (installed or not / connected or not).
+            VStack(alignment: .leading, spacing: 6) {
                 Text(L10n.Face.rowFooter)
-            }
-
-            Section {
-                HStack {
-                    Label(L10n.Watch.settingsTitle, systemImage: "applewatch")
-                    Spacer()
-                    Text(watchStatus)
-                        .foregroundStyle(.secondary)
-                }
-            } footer: {
                 Text(watchFooter)
             }
+        }
+    }
+
+    /// The single row of this section. For the three forms see the block above `watchSection`.
+    @ViewBuilder
+    private var watchRow: some View {
+        if watch.isActivated, watch.isPaired, watch.isWatchAppInstalled {
+            NavigationLink {
+                WatchFacePickerView()
+            } label: {
+                watchRowLabel(trailing: chosenFaceTitle, leavesTheApp: false)
+            }
+        } else if watch.isActivated, isWatchAppReachableOnThisOS {
+            // Not installed (or not paired) — tap to go handle it in the Watch App. Unpaired also goes here:
+            // the Watch App is exactly where you pair.
+            //
+            // ⚠️ This branch requires `isActivated`: before activation `isWatchAppInstalled` is necessarily
+            //    `false`, and offering a button then would throw the user to the
+            //    Watch App in the first few seconds after launch — when the watch App was installed long ago. For those seconds, honestly be a
+            //    read-only status row ("Checking…").
+            Button(action: openWatchApp) {
+                watchRowLabel(trailing: watchStatus, leavesTheApp: true)
+            }
+            // ⚠️ `.plain` rather than the default style: the default tints the whole row's text and label blue,
+            //    which would make this row differ from every row above and below in font size and weight.
+            .buttonStyle(.plain)
+        } else {
+            // Not activated yet, or on iOS 16 this feature can never become ready
+            // (see `isWatchAppReachableOnThisOS`): honestly be a read-only status row,
+            // don't offer a button that does nothing when tapped.
+            watchRowLabel(trailing: watchStatus, leavesTheApp: false)
+        }
+    }
+
+    /// The row's content. `trailing` is the status/current value on the right.
+    ///
+    /// ⚠️ The icon uses `Label` rather than an `Image` + `Text` pair: `Label` automatically aligns the symbol
+    ///    to the text baseline, whereas a hand-rolled pair has to be adjusted by hand across dynamic type sizes.
+    private func watchRowLabel(trailing: String, leavesTheApp: Bool) -> some View {
+        HStack {
+            Label(L10n.Watch.settingsTitle, systemImage: "applewatch")
+            Spacer()
+            Text(trailing)
+                .foregroundStyle(.secondary)
+            if leavesTheApp {
+                // A badge for "this jumps to another App". Without it this row looks like the
+                // `NavigationLink`s above, and the user is baffled when tapping leaves "the whole App switched away".
+                Image(systemName: "arrow.up.forward.app")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    /// Open the "Watch" App on the iPhone — when the watch App isn't installed, the user has to tap install there.
+    ///
+    /// ## Why not `canOpenURL`
+    /// `itms-watchs://` is a system App's private scheme; unless it's listed in `LSApplicationQueriesSchemes`,
+    /// `canOpenURL` **always** returns `false` (the query restriction since iOS 9) —
+    /// using it as a pre-check would make this button dead on every device. So `open` directly
+    /// and use its completion callback to tell whether it worked.
+    private func openWatchApp() {
+        guard let url = URL(string: "itms-watchs://") else { return }
+        UIApplication.shared.open(url, options: [:]) { opened in
+            guard !opened,
+                  let fallback = URL(string: UIApplication.openSettingsURLString)
+            else { return }
+            // If it can't open (say there's no Watch App on iPad), fall back to **this App's settings page**:
+            // there you can at least dig up permissions like "Microphone". Better than "tap and nothing happens".
+            UIApplication.shared.open(fallback)
         }
     }
 

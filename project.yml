@@ -46,7 +46,7 @@ targets:
         # Must track `nomily_watch`'s build number — watchOS refuses to install
         # a companion whose version doesn't match its host, and an embedded
         # watch app one build ahead is enough to trip it. Bump both or neither.
-        CFBundleVersion: "25"
+        CFBundleVersion: "26"
         # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
         # appropriate when the app's crypto use is exempt from US export
         # documentation requirements:
@@ -166,13 +166,21 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         # Must track the iPhone app's build number — watchOS refuses to install
         # a companion whose version doesn't match its host.
-        CFBundleVersion: "25"
+        CFBundleVersion: "26"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.nomily.app
         NSMicrophoneUsageDescription: Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.
         # ★ 2026-10-16 revision eleven: while recording the waveform follows the measured heart rate, so it needs to read heart rate.
         # ⚠️ The copy must make "read-only, not shared" clear: the HealthKit authorisation sheet shows this text to the user verbatim,
         #    and "why does a voice recorder need to read my heart rate" is the question the user will ask on the spot — the answer has to be in that sentence.
+        #
+        # ★★ 2026-10-16 revision fifteen: **this copy and the entitlement below are kept for now,
+        #    but nowhere in the code requests it any more** (user: "do not go by the heart rate").
+        #    Keeping them is **deliberate**: deleting the entitlement would change the App ID's capability set,
+        #    which means another trip to the portal to re-sign the provisioning profile — all to gain "one less line of copy that never shows".
+        #    ⚠️ Remember the cost: if it's ever really decided to drop HealthKit, this is **two places**
+        #    （`NSHealthShareUsageDescription` + `com.apple.developer.healthkit`），
+        #    and after deleting them the first build will fail because the provisioning profile is stale — that's expected behaviour.
         NSHealthShareUsageDescription: Nomily AI reads your current heart rate while recording, so the waveform on the watch face beats in time with your own pulse. It never reads any other health data and never leaves your devices.
         # ⚠️ Only `NSHealthShareUsageDescription` (read) is needed. **`NSHealthUpdateUsageDescription` is not written**
         #    — this App never writes to Health, and declaring it would only add a write permission to the authorisation sheet,
@@ -259,7 +267,7 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         # Must match the parent App — when an embedded binary's version numbers differ from the host's, watchOS
         # refuses to install the whole App.
-        CFBundleVersion: "25"
+        CFBundleVersion: "26"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

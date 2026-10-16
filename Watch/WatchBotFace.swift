@@ -88,6 +88,12 @@ import SwiftUI
 //    and does the most harm (the user picks a smiling eye on the phone and, raising their wrist, finds a drooping eye).
 //
 // ─────────────────────────────────────────────────────────────────────────
+// ★★ 2026-10-16 revision fifteen (user's words:
+//    "right now tapping the eyes doesn't go straight to a white screen, it spreads those two eyes across the whole screen"):
+// This is about the picture during those two seconds of holding. Revision fourteen drew a solid circle growing out from the eyes' position,
+// which the user read as "the two eyes spreading," whereas what he wants is **the whole screen changing color at once**. So it became a full-screen solid color
+// using opacity as the progress -- the full reasoning is in the paragraph above `holdFill`.
+// ─────────────────────────────────────────────────────────────────────────
 // ## The things that make this face "alive" (after revision twelve)
 //
 //   · **Gaze drift** (`runGazeLoop`, **this is the main idle motion**) -- the two eyes **as a whole**
@@ -195,12 +201,6 @@ struct WatchBotFace: View {
     /// ⚠️ The idle state does not use it -- it is passed all the way to `WatchVoiceWave`, and that view only exists
     /// in the recording state, so level changes while idle do not drag this face into redrawing.
     let meter: WatchAudioMeter
-    /// The heart rate measured by the watch while recording (bpm), forwarded all the way to `WatchVoiceWave` to set the rhythm.
-    ///
-    /// ★ Added in revision eleven (user: "the overall rise and fall should follow your personal real-time heart rate from the watch").
-    /// ⚠️ This face **does not read** this value itself, it only carries it -- the sampling and starting/stopping are both
-    ///    inside `WatchHeartRateMonitor`, and the face should not know HealthKit exists.
-    let bpm: Double?
     /// The timer shown **directly below** the waveform while recording (`mm:ss`). Pass `nil` while idle.
     ///
     /// ★ Added in revision eleven (user: "attach the recording time below if recording has started").
@@ -287,8 +287,9 @@ struct WatchBotFace: View {
     @State private var dizzyTask: Task<Void, Never>?
     /// Hold progress 0...1.
     ///
-    /// ★ Revision fourteen: what it drives is no longer that ring of "2-second progress arc," but **a patch of color
-    ///   expanding outward from the eyes** (see `holdSweep`). The semantics are unchanged -- 0 = not pressed, 1 = time to start recording.
+    /// ★ Revision fourteen: what it drives is no longer that ring of "2-second progress arc," but a patch of color that fills the screen.
+    /// ★ Revision fifteen: the **opacity** of that color patch is it (see `holdFill`). The semantics are unchanged --
+    ///   0 = not pressed (transparent), 1 = filled (time to start recording).
     @State private var holdProgress: CGFloat = 0
     /// The switch for the color patch to **fade out** after the hold has run its course and recording has started.
     ///
@@ -296,6 +297,8 @@ struct WatchBotFace: View {
     ///    recording state, and a patch of color already covering the screen vanishing with a "snap" would flash. Let it **fill first,
     ///    then fade out** (0.5 seconds), and the wave picks up at the same time it fades -- this is exactly what the user wants,
     ///    "fill the entire screen **then** show the heart-rate time ripple."
+    ///    ⚠️ After revision fifteen `holdProgress` controls **opacity**, so "filled" and "faded out"
+    ///    are two layers of the same property -- see the two `opacity` comments in `holdFill`.
     @State private var sweepFading = false
     /// Whether a finger is currently pressed on the eyes. Driven by `LongPressGesture.updating`.
     @GestureState private var holding = false
@@ -405,12 +408,13 @@ struct WatchBotFace: View {
         //    behavior directly here.
         Button(action: handlePrimaryAction) {
             ZStack {
-                // ★ Revision fourteen: the color sits in the **bottom layer**, with the eyes drawn on top of it -- so the expansion process reads
-                //   as "the color in the eyes spilling out," rather than "a block of palette covering the eyes."
-                holdSweep
                 figure
                     .scaleEffect(figureScale)
                     .animation(.spring(response: 0.34, dampingFraction: 0.62), value: isRecording)
+                // ★ Revision fifteen: the full-screen color patch is drawn in the **top layer** (in revision fourteen it was in the bottom layer).
+                //   Covering the eyes is deliberate -- what the user wants this round is "straight to a white screen,"
+                //   not "watching the eyes being enlarged." See the `holdFill` paragraph for the reason.
+                holdFill
             }
             // This outer frame is the face's **nominal** boundary (all of `BotFaceMetrics` derives its proportions from it).
             // ⚠️ It **does not clip** its content -- the color patch during a hold has to spill all the way to the screen edge, and this is exactly what makes that possible.
@@ -809,7 +813,7 @@ struct WatchBotFace: View {
     private var figure: some View {
         if isRecording {
             VStack(spacing: 6) {
-                WatchVoiceWave(meter: meter, size: size, tint: tint, bpm: bpm)
+                WatchVoiceWave(meter: meter, size: size, tint: tint)
 
                 if let elapsedText {
                     Text(elapsedText)
@@ -867,47 +871,51 @@ struct WatchBotFace: View {
     ///    along with the decision to "cross-fade via `opacity` rather than pick one with `if/else`."
     ///    For the reason for the move see the `eyes` paragraph -- the picker on the iPhone has to lay out the preview with the same code.
 
-    // MARK: - The hold's "color spilling out"
+    // MARK: - The hold's "whole-screen color change"
 
-    /// ★★ Revision fourteen (user's words: "when holding the front of the watch, the eyes should fill the whole screen directly using the eye color, then
-    ///     show the heart-rate time ripple, instead of the current transition where a hold is just a circle").
+    /// ★★ 2026-10-16 revision fifteen (user's words:
+    ///   "right now tapping the eyes doesn't go straight to a white screen, it spreads those two eyes across the whole screen").
     ///
-    /// ## Why a **solid** patch of color rather than an arc
-    /// An arc answers "how much longer do I press" (progress); what the user wants this time is **something else**:
-    /// to play the "hold" as "the color inside the eyes can't be held back any longer and spills out to flood the whole watch."
-    /// It is also an advance notice that "recording is about to start" -- the instant it fills the screen is exactly when the 2 seconds elapse,
-    /// so it **serves two roles at once**: it is both the animation and the progress bar (radius = progress).
+    /// ## Where revision fourteen went wrong
+    /// Revision fourteen drew a solid circle **growing out from the eyes' position** (radius = progress, starting from the eye group's
+    /// circumscribed circle). The design intent was "color spilling out of the eyes," but on real hardware it looked like **something else**:
+    /// the color patch emerged from the eye area and swelled ring by ring -- the user read it as "**those two eyes** spreading,"
+    /// whereas what he wants is "**the whole screen changing color directly**." The difference is **agency**: one grows
+    /// out locally, the other changes the whole screen at once.
     ///
-    /// ## How the three dimensions were set
-    /// * **Start**: it does not begin from a single point at the circle's center, but from **the eyes' bounding size**
-    ///   (width 0.705×size, height 0.375×size ⇒ circumscribed circle about 0.805×size). Starting from a zero radius,
-    ///   the first 0.3 seconds are just a pinprick-sized dot, and it does not read as "growing out of the eyes."
-    /// * **End**: `2.6 × size`. What has to be covered is **the whole watch screen**, not the face frame
-    ///   (`size × 1.14`). A 40mm screen is 162×194 with a 253pt diagonal, `size` = 119 ⇒
-    ///   it needs 2.13×size; a 49mm screen is 205×251 with a 324pt diagonal, `size` = 151 ⇒
-    ///   it needs 2.14×size. Taking 2.6 leaves margin, so both watch sizes fill completely.
-    /// * The part that spills out is clipped by **the page's own `.clipped()`** (`WatchRecorderView`
-    ///   needs it for that three-page row), so the edge of "filled" is the screen edge and nothing is drawn onto the neighbouring page.
+    /// ## The fix: the whole screen at once, with opacity as the progress
+    /// Draw a solid-color square **much larger than the screen** (`4 × size`; the part that spills out is
+    /// clipped to the screen edge by `WatchRecorderView`'s three-page row `.clipped()`),
+    /// and use `opacity = holdProgress` to make **the whole block brighten together**.
     ///
-    /// ## The three "must be false / not tappable" reasons
+    /// ⇒ During those two seconds of holding, what you see is "the screen gradually drowning in this color," no longer
+    ///   "a ball growing out of the eyes." The instant it fills the screen is exactly when the 2 seconds elapse,
+    ///   so it **still serves two roles at once**: it is both the animation and the progress bar (opacity = progress).
+    ///
+    /// ## Why it is drawn **above the eyes** (in revision fourteen it was below)
+    /// For "straight to a white screen" to hold, the eyes must in the end be **invisible**. Revision fourteen laid the color underneath
+    /// with the eyes floating on top, so after it filled the screen there were still two eye shapes in the picture (lucky enough to be invisible when the colors matched,
+    /// but the moment the eyes had any stroke or color difference they would show). Covering them from the top layer removes that variable.
+    ///
+    /// ## Two things that are mandatory
     /// * `allowsHitTesting(false)` -- it covers the whole screen, and if it were tappable this page would be unusable.
-    /// * Drawn **below** `figure` -- the expansion has to read as "spilling out of the eyes."
-    /// * The fade-out is left to `sweepFading`, **leaving `holdProgress` alone** -- radius and opacity are two separate things,
-    ///   and mixed into one state, "fill first, then exit" cannot be written.
+    /// * The fade-out is left to `sweepFading`, **leaving `holdProgress` alone** -- radius/size and opacity are
+    ///   two separate things, and mixed into one state, "fill first, then exit" cannot be written.
     @ViewBuilder
-    private var holdSweep: some View {
+    private var holdFill: some View {
         if holdProgress > 0.002 {
-            // The eye group's circumscribed circle: width 0.235×2 + 0.235 = 0.705, height 0.375 ⇒ diagonal 0.805.
-            let rest = size * 0.805
-            let full = size * 2.6
-            Circle()
+            Rectangle()
                 .fill(tint)
-                .frame(width: rest + (full - rest) * holdProgress,
-                       height: rest + (full - rest) * holdProgress)
+                // 4 × size far exceeds the screen width on both watch sizes (on 40mm, 4 × 119 = 476pt
+                // against a screen width of 162pt; on 49mm, 4 × 151 = 604pt against a screen width of 205pt) --
+                // but a fixed screen width **cannot** be used: this layer has no access to the screen size, and it has to
+                // cover the whole page. The excess is left to the page's `.clipped()`.
+                .frame(width: size * 4, height: size * 4)
+                // The two `opacity` layers **multiply** (the later modifier applies to the result of the
+                // former), so "progress" and "exit" each carry their own animation without interfering --
+                // written on a single `opacity`, SwiftUI would track only one `value:`.
+                .opacity(holdProgress)
                 .opacity(sweepFading ? 0 : 1)
-                // The fade-out uses **its own** animation (0.5 seconds) and does not interfere with the
-                // 2-second linear animation for the radius -- two properties on the same view each carrying their own `animation(value:)`
-                // is allowed; SwiftUI tracks them separately.
                 .animation(.easeOut(duration: 0.5), value: sweepFading)
                 .allowsHitTesting(false)
         }

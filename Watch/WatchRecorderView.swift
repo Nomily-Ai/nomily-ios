@@ -238,11 +238,11 @@ struct WatchRecorderView: View {
         }
         .onAppear {
             syncShakeDetector()
-            // ★ Revision eleven: request heart-rate permission here, **not when recording starts**.
-            //   popping the system permission page at that moment would likely interrupt the recording just begun; popping it when the home screen appears,
-            //   the user hasn't started recording yet, so interrupting costs nothing.
-            //   ⚠️ The system only actually shows the page the first time; after that this method can safely be called every time.
-            model.prepareHeartRate()
+            // ★ Revision fifteen: there used to be a `model.prepareHeartRate()` here (added in revision eleven,
+            //   requesting heart-rate access when the home screen appears). From this round on, nothing calls the heart-rate chain any more,
+            //   so this line goes with it -- otherwise the user sees a permission page asking "why does this recording app want
+            //   to read my heart rate", and all it buys is a number nobody uses.
+            //   The full reasoning is at the top of `WatchHeartRate.swift`.
         }
         // Stop sampling when leaving this page: keeping the accelerometer on is a big line on the battery bill,
         // and this page only comes to the foreground when you raise your wrist.
@@ -265,9 +265,9 @@ struct WatchRecorderView: View {
                 style: faceStore.style,
                 tint: styleStore.style.tint,
                 meter: model.meter,
-                // ★ Revision eleven: live heart rate, deciding how fast the waveform moves.
-                bpm: model.heartRate,
                 // ★ Revision eleven: while recording the timer shows right by the wave (user: "with the recording time attached below").
+                // ★ Revision fifteen: the `bpm:` parameter is **deleted** -- the waveform is no longer driven by heart rate,
+                //   reasons in the "revision fifteen" passage at the top of `WatchVoiceWave`.
                 elapsedText: model.isRecording
                     ? WatchFormat.compactDuration(model.elapsed)
                     : nil,
@@ -292,44 +292,32 @@ struct WatchRecorderView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// The small line below the face. While idle it's a usage hint; while recording it's the **heart rate + byte count**.
+    /// The small line below the face. While idle it's a usage hint; while recording it's the **byte count written so far**.
     ///
     /// ⚠️ While idle that hint **cannot be dropped**. "Hold for 2 seconds" is an **invisible** interaction --
     /// without the hint, a first-time user just pokes once, finds nothing happens, and gives up.
     ///
     /// ★ Revision eleven: **the recording timer moves below the wave** (see `WatchBotFace.elapsedText`),
-    /// so this no longer shows the time, and shows the live heart rate instead.
+    /// So this no longer shows the time; at that point it was switched to the live heart rate.
     ///
-    /// ⚠️ Why **show** the heart rate at all (the user didn't ask): this round did something
-    ///    that "doesn't count if you can't see it" -- by eye you can't tell "72" from "75" by how fast the wave moves.
-    ///    Without the reading on screen the user can never confirm whether the heart rate is actually working, and will just keep asking.
-    ///    With the number there, one glance says "got a reading / no reading".
-    ///    **When there's no heart rate the whole item disappears** (rather than showing 0), which is itself the clearest failure signal.
+    /// ★★ Revision fifteen: this line **drops back from "heart rate + byte count" to just the byte count**.
+    /// Once heart rate no longer drives the waveform (see "revision fifteen" at the top of `WatchVoiceWave`), the only
+    /// reason it sat here disappears -- it was shown so the user could confirm "the heart rate really is working"
+    /// (the user can't see the difference between 72 and 75). And the pile of trouble it caused is real:
+    ///   · When no heart rate is read you have to write "watch not worn", but the most common reason for no reading is actually
+    ///     **no health permission granted**, so that line hangs permanently over a failure that isn't there;
+    ///   · At rest HealthKit only records a sample every ten-odd minutes, so the number is stale most of the time.
+    /// ⚠️ The byte count stays: it's the **only** hard evidence that "the recording is really being written to disk" --
+    ///   after revision fifteen that waveform is a flat line hugging the bottom when things are quiet, and from it alone you can't tell "no sound" from "broken".
     @ViewBuilder
     private var caption: some View {
         if model.isRecording {
-            HStack(spacing: 5) {
-                if let bpm = model.heartRate {
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text("\(Int(bpm.rounded()))")
-                        .monospacedDigit()
-                    Text("·")
-                } else {
-                    // ★ Revision fourteen: no heart rate = not worn (or not authorized). At that point the waveform is
-                    //   **a flat, motionless line** (see "revision fourteen" at the top of `WatchVoiceWave`),
-                    //   and without an explanation it just reads as "broken".
-                    Image(systemName: "applewatch.slash")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text(L10n.Watch.notWorn)
-                    Text("·")
-                }
-                Text(WatchFormat.bytes(model.currentBytes))
-            }
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(styleStore.style.tint)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
+            Text(WatchFormat.bytes(model.currentBytes))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(styleStore.style.tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .monospacedDigit()
         } else {
             Text(L10n.Watch.holdToRecord)
                 .font(.system(size: 11, weight: .medium))

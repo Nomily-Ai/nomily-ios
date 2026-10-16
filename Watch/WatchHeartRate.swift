@@ -3,8 +3,31 @@ import HealthKit
 
 // MARK: - Heart rate measured on the watch
 //
-// ★ 2026-10-16 revision eleven (user's words:
-//   "when recording, the rises and falls should overall follow your personal real-time heart rate that the watch reads").
+// ⛔⛔ **2026-10-16 revision fifteen: the whole file is now disabled, with no callers at all.**
+//
+// Why it was retired (user's words): "when recording, the waveform should still follow the recording decibels around the sound,
+// not the heart rate, because it is not accurate and is just a straight white line".
+//
+// When it was written (revision eleven) it had exactly **one** purpose: setting how fast the waveform's heartbeat base shape runs.
+// After revision fifteen switched that waveform to pure microphone-level drive, this class has no consumers left.
+// The resulting dead points (all cleaned up):
+//   · `WatchRecorderModel.heartRate` / `.prepareHeartRate()` / `heart.follow()`
+//   · the permission request and the heart-rate readout row in `WatchRecorderView`
+//   · the `bpm` parameter of `WatchVoiceWave` (along with the `beat` base-shape table)
+//
+// ## Why "disabled" rather than "deleted"
+// What's accumulated here is a conclusion **that can't be found anywhere else** (see the blocks below): on watchOS, outside a workout,
+// you can't get per-second heart rate, the only route is `HKWorkoutSession` and its cost is a
+// green workout icon on the watch face; and "an anchored query looks more real-time but may never fire once across a whole recording".
+// These judgements came out of a full round of evaluation; delete them and you'd have to redo the whole thing next time.
+//
+// ## ⚠️ If it ever needs to be restored
+// Do both things together, don't do only half:
+//   ① call `follow()` / `unfollow()` as a pair in `WatchRecorderModel.start()` / `stop()`,
+//      and call `prepare()` once in `WatchRecorderView.onAppear`;
+//   ② **don't** let it open and close the waveform's gate again — that's how revision fourteen crashed:
+//      when the heart rate can't be read (one reading every ten-plus minutes at rest, or the user didn't grant permission) the whole waveform freezes into a straight line.
+//      Heart rate can only be **supplementary information**, never a **requirement**.
 //
 // ## What it solves
 // Revision ten's waveform used a **hard-coded** heartbeat base shape: ten slots = 0.8 s ≈ **75 bpm**.
