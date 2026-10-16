@@ -49,6 +49,7 @@ import WatchKit
 /// * **The eyes shouldn't keep blinking** (but "**not never blink**") -- the `BlinkPhase` cycle stretches from
 ///   8.12 seconds out to about **19.12 seconds**. The structure is untouched (still "one rapid double-blink between two rests"),
 ///   only the two rest periods are stretched proportionally -- we want "a calm occasional blink", not "a dead-fish stare".
+///   ⚠️ **Revision ten overturns this**, see below.
 /// * **While recording swap in a waveform** (`WatchVoiceWave`): the peak height follows the microphone's **real level**
 ///   (`isMeteringEnabled`, only turned on in `WatchRecorderModel` this round; the sample rate
 ///   goes 1Hz → **12.5Hz**), and while quiet a "boom-tick" base keeps up a heartbeat-like rhythm.
@@ -59,6 +60,27 @@ import WatchKit
 /// * **Drop the gradient** -- the `gradient` dimension in `WatchRingStyle` is deleted entirely; the appearance page loses a row;
 ///   the swatches become solid-color dots; and the menu icons go from "cycling through the palette" to the same color
 ///   (cycling gave the three-color palette's 2nd entry a neon green -- one of the sources of last round's "green" complaint).
+///
+/// ─────────────────────────────────────────────────────────────────────────
+/// ★★ 2026-10-16 revision ten (user feedback on real hardware):
+///
+/// > `those eyes of his aren't blinking all the time, they don't need to keep blinking,
+/// >  https://github.com/sam70361/aora-bot go look at the expression handling in this repo,
+/// >  just the eyes, the two eyes shouldn't keep blinking, inside the watch`
+///
+/// **This one kills the whole approach of revisions eight and nine.** Those two did the same thing:
+/// stretching the "fixed blink cycle" longer and longer (4.63s → 8.12s → 19.12s). Stretching it to 19 seconds and still being told
+/// "they don't need to keep blinking" means **the root cause isn't the frequency**.
+///
+/// After reading that repo (`mood-mates/` and `emotion-ball/`, two engines from the same source, pure SVG + vanilla JS)
+/// and its idle state, the problem turned into four points: a fixed cycle = a metronome, a rapid double-blink every round, blinking is the only thing moving,
+/// and one open-close takes too long (450ms). All four were fixed, with the accounting written up at the top of `WatchBotFace`
+/// in the "revision ten" passage and in "the rhythm of blinking" at the end of the file.
+///
+/// In one line: **promote "gaze drift" to the main idle motion and demote blinking to an occasional garnish** --
+/// once the eyes are never still, "blinking" is no longer the thing the user notices.
+/// It also turned up something counterintuitive: the total blink rate on both sides is about the same (roughly one per 9 seconds),
+/// so what needs changing isn't the speed, it's the **regularity** and the **make-up of the motion**.
 ///
 /// Three things change at once:
 ///

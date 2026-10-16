@@ -11,7 +11,7 @@ import SwiftUI
 // The little robot: **hold it for 2 seconds** to start, and a tap while recording stops.
 //
 // ─────────────────────────────────────────────────────────────────────────
-// ## How this face is put together (the conclusion after three revisions)
+// ## How this face is put together (the conclusion after four revisions)
 //
 // ★ Revision eight: removed the **rounded-square plate**. The user's exact words were "no green, just make the frame two eyes"
 // -- with that plate it was a colored square framing the eyes, more like an app icon than a face.
@@ -24,17 +24,58 @@ import SwiftUI
 // not a whole `WatchRingStyle`: this face needs only a color, and handing it a whole style struct
 // would turn "will it actually use the gradient / breathing light" into a question to re-confirm every time.
 //
-// ─────────────────────────────────────────────────────────────────────────
-// ## Blinking is the whole point of this face
-// A motionless eye is no different from a dot. What makes it "alive" is these few things:
+// ★★ Revision ten (the problem that neither of revision eight's nor nine's two slow-downs solved):
+// > `his eyes are not blinking all the time, no need to keep blinking,
+// >  https://github.com/sam70361/aora-bot look at the expression management in this repo,
+// >  just the eyes is enough, the two eyes should not keep blinking, in the watch`
 //
-//   · **Occasionally blink once** -- close fast, pause for a beat, open a little more slowly, then **rest for a long time**.
-//     Human blinks are never a constant-rate open and close; a constant rate immediately reads as mechanical (for the phase-by-phase description see the
-//     end of the file, `BlinkPhase`). Each cycle also packs in one "double blink," the most common rhythm in real people.
-//     ⚠️ Revision nine slowed the rhythm **down again by more than double**: after seeing revision eight on real hardware the user said
-//        "the eyes should not keep blinking," but immediately added "**not no blinking**" --
-//        what they want is "blink calmly once in a while," not "dead-fish eyes." The new cycle is about **19.1 seconds**
-//        (revision seven 4.63s → revision eight 8.12s → revision nine 19.12s; the ledger is in `BlinkPhase`).
+// So I went and read that repo (the `mood-mates/` and `emotion-ball/` engines, two engines from one source, pure SVG +
+// native JS), and took apart its idle state (`02 idle blank-out`):
+//
+// ```js
+// pool: [0, 8], poolMs: [9000, 16000], blinkMs: [6000, 14000], antics: true,
+// body: { breathe: 0.012 },
+// anims: [
+//   { target: 'eyes', prop: 'lookX', type: 'glance', amp: 10, period: 4800 },
+//   { target: 'eyes', prop: 'lookY', type: 'sine',   amp: 2,  period: 4100, phase: 1.1 }
+// ]
+// ```
+//
+// **★ That read turned the whole problem in a different direction.** Revision nine's approach was "stretch the blink cycle longer and longer,"
+// and that road had already run out -- because the root cause is not **frequency**, it is these four things below:
+//
+// 1. **A metronome.** Revision nine was a **fixed 19.12 seconds** per round. A fixed period is the pattern the human eye is best at catching,
+//    and once it is caught, every blink becomes "it blinked on schedule again," still mechanical no matter how slow.
+//    The reference implementation's `blinkMs: [6000, 14000]` is **drawing a fresh random wait within a range after every blink**
+//    (`this._blinkNext = now + rand(...)`), so there is never a beat.
+// 2. **A double blink every round.** Revision nine was "one double blink inserted between the singles" -- a cycle **necessarily** has two open-close pairs.
+//    The reference implementation is `if (Math.random() < 0.14)` -- **only a 14% chance** of a second blink.
+//    So the great majority of the reference implementation's blinks are **a single, 300ms flash**, half the visual weight of revision nine.
+// 3. **Blinking is the only motion.** The plus-or-minus 1.8% breathing in revision nine is invisible to the naked eye, so
+//    this face was **completely still** for 19 seconds, then suddenly "snap-snap" twice -- both rigid and noisy.
+//    The reference implementation's main idle motion is **gaze drift** (`lookX` pausing a moment at each side, `lookY`
+//    slowly rising and falling), with blinking only as an accent. The eyes **are never still**, so "blinking" is not noticed at all.
+// 4. **Slow.** Revision nine's open-close took 0.45 seconds (140+90+220). The reference implementation totals 300ms,
+//    and when opening it **overshoots to 1.08 then falls back to 1** -- that light "spring open" is where "alive" comes from.
+//
+// ⚠️ Which incidentally works out to a counter-intuitive fact: **the overall blink frequency on both sides is actually about the same.**
+//    Revision nine = 2 open-close pairs per 19.12 seconds = **1 per 9.6 seconds**;
+//    reference implementation = 1 per 6~14 seconds, 14% of which add a second ≈ **1 per 9 seconds**.
+//    ⇒ So revision ten **does not** need to go any slower; what has to change is the **regularity** and the **motion make-up**.
+//    (Revision ten still raised the range to 9~20 seconds, quieter than the reference implementation -- the user said "don't
+//    keep blinking" two rounds in a row, and when the "reference mechanism" conflicts with the "user constraint" the user wins: copy the mechanism, tighten the numbers.)
+//
+// ─────────────────────────────────────────────────────────────────────────
+// ## The things that make this face "alive" (after revision ten)
+//
+//   · **Gaze drift** (`runGazeLoop`, **this is the main idle motion**) -- the two eyes **as a whole**
+//     look gently left and right, **pausing a moment** at each side before switching, with a 4.8-second period. The reference implementation uses
+//     `tanh(2.8·sin)`, a smooth square wave, to express "long pause, fast transition"; here
+//     `withAnimation(.easeInOut(0.9))` + sleeping out half a period is an equivalent implementation.
+//     ⚠️ It is **the whole pair translating together**, not each eye looking its own way -- doing it separately becomes a squint.
+//   · **Occasionally blink once** (`runBlinkLoop`) -- close fast (70ms) → pause 70ms →
+//     open to a 1.08 overshoot (80ms) → fall back to 1 over 150ms. **300ms** total, mostly single blinks,
+//     14% chance of adding one more after 70ms.
 //   · **Breathing** -- the whole pair of eyes slowly inflates and deflates (plus or minus 1.8%, once every 3.6 seconds). The amplitude must be small:
 //     any larger and it looks like it is pulsing; it should be small enough that "you can't say what is moving, but it is alive."
 //   · **Swap in a waveform while recording** (`WatchVoiceWave`) -- user: "when recording starts it should be
@@ -42,6 +83,22 @@ import SwiftUI
 //     the peak height is the microphone's real level, and when quiet a "thump-tick" base shape keeps a heartbeat-like rhythm.
 //   · **The charge ring while holding** -- while the finger stays down, a 2-second progress arc runs around the outside of the eyes. Without it,
 //     the user does not know how long to press, nor whether that press was even picked up.
+//
+// ⚠️ **Why `phaseAnimator` is no longer used** (revisions eight and nine both used it):
+//    `phaseAnimator`'s phase list is re-evaluated **whenever the view is rebuilt**, so it cannot give a random duration
+//    -- that limitation is what the line "no random numbers here" in revision nine's comment refers to. And the core of this round
+//    is precisely **randomness** (drawing a fresh wait after every blink), so the whole thing was switched to a `Task` loop +
+//    `withAnimation` driving. That limitation is real and cannot be worked around, so the mechanism had to change.
+//
+// ⚠️ **Two things from the reference implementation that did not come across** (deliberate, not missed):
+//   · The independent sine on `lookY` (amplitude 2 / canvas 240 = 0.83%, only 6.7% relative to the eye-center distance)
+//     -- converted to the watch face it is **±1.7pt**, invisible to the naked eye. Its only job is "keep the gaze from being a
+//     perfectly horizontal rail," so folding it into the very small vertical component in `runGazeLoop` is enough;
+//     it is not worth keeping a separate phase alive for it.
+//   · Rotating the eye-shape pool (`calm` / `calm2` swapping every 9~16 seconds). The difference between those two is
+//     width ×0.96, height ×1.05 -- that is, **4% / 5%**, smaller than the breathing here,
+//     yet it means maintaining one more scale layer. The scale layers already stacked in this file are the two of breathing × poke,
+//     and adding one more means nobody can work out the total amplitude (the `figureScale` comment made this point).
 //
 // ## Why all the gestures live in this one type instead of being scattered across the home screen
 // Hold to start, tap to stop, Double Tap to start/stop -- all three **land on this face**.
@@ -100,6 +157,25 @@ struct WatchBotFace: View {
 
     /// For breathing. A single `false → true` flip + `repeatForever`; interpolation is left to the render server.
     @State private var breathe = false
+    /// Blink openness. 1 = fully open, 0.05 = closed, may briefly exceed 1 (overshoot).
+    ///
+    /// ★ Added in revision ten. Revisions eight/nine drove it phase by phase with `phaseAnimator`; here it was changed to
+    /// **plain state + assigning each one with `withAnimation` inside a `Task` loop** -- for the reason see
+    /// "why `phaseAnimator` is no longer used" at the top of the file (it cannot give a random duration).
+    @State private var openness: CGFloat = 1
+    /// The idle-state gaze offset. The whole pair translates together, **not** each eye looking its own way.
+    @State private var gaze = CGSize.zero
+    /// The handles for the two idle loops (blink + gaze), one each.
+    ///
+    /// ⚠️ Why **two** `Task`s rather than one `withTaskGroup`: `addTask`'s closure is
+    ///    `@Sendable`, and capturing `self` (a view struct containing several closures) trips the concurrency checker;
+    ///    this project has zero warnings, and it does not go looking for that trouble.
+    ///
+    /// ⚠️ Why not `.task(id:)`: same reason -- that modifier's closure is `@Sendable` too.
+    ///    The `Task {}` here carries `_inheritActorContext` (this file's `pokeOnce()` already uses it),
+    ///    so capturing `self` inherits the main actor and, as a bonus, can be cancelled proactively.
+    @State private var idleLoop: Task<Void, Never>?
+    @State private var gazeLoop: Task<Void, Never>?
     /// The bounce amount when poked. 0 = original state.
     @State private var poke: CGFloat = 0
     /// Hold progress 0...1.
@@ -125,6 +201,36 @@ struct WatchBotFace: View {
     /// -- the 24-to-34 band is the buffer where "neither paging nor cancelling the hold" applies.
     /// If the two numbers collided, one twitch of the hand would have to choose between "start recording" and "page."
     private static let holdSlop: CGFloat = 34
+
+    // MARK: The idle rhythm (revision ten)
+    //
+    // For where the numbers come from see the "revision ten" paragraph at the top of the file: the mechanism is copied from `aora-bot`'s idle state, the numbers
+    // follow the user's actual feedback -- revision ten tightened them ("don't keep blinking").
+    //
+    // ⚠️ Why "**draw fresh every time**" rather than a fixed period: see item 1 at the top.
+    //    A fixed period = a metronome, and no matter how long it is it still gets read out. Here `Task.sleep` sleeps a random value,
+    //    wakes up, blinks once, then draws the next -- structurally there is no beat to speak of.
+    /// How long to wait between two blinks (seconds). The reference implementation's idle is `[6, 14]`; here it is raised to **9~20**.
+    private static let blinkWait: ClosedRange<Double> = 9 ... 20
+    /// The chance of adding one more after a blink. The reference implementation's `Math.random() < 0.14`.
+    ///
+    /// ⚠️ Do **not** raise this number. Revision nine was "a double blink every round" (= 100%), and that is half the source
+    ///    of the "always blinking" look -- a double blink should be the exception, not the beat.
+    private static let doubleBlinkChance: Double = 0.14
+    /// How long the gaze holds on one side and how long it takes to switch (seconds). The reference implementation's `lookX` has a 4800ms period,
+    /// about 1.4 seconds holding on one side and about 1.0 second in transition -- here 1.5 + 0.9, essentially the same.
+    private static let gazeHold: Double = 2.4
+    private static let gazeShift: Double = 0.9
+    /// How far the gaze can travel left and right (relative to `size`).
+    ///
+    /// The reference implementation's `amp 10` / eye-center-to-midline `30` = **1/3**. This file's eye-center distance is
+    /// `0.235 × size`, and copying that directly would reach ±0.078 × size (about ±9pt on 40mm),
+    /// which wobbles too much on a watch face. Take **about 55%** of it: ±5.3pt on 40mm, ±6.8pt on 49mm --
+    /// you can tell it is "looking around," without looking like it is searching for something.
+    private var gazeAmpX: CGFloat { size * 0.045 }
+    /// The vertical component of the gaze. Only so the motion is not a **perfectly horizontal rail** --
+    /// it is too small to see; see "two things from the reference implementation that did not come across" at the top of the file.
+    private var gazeAmpY: CGFloat { size * 0.011 }
 
     // MARK: Proportions
     //
@@ -196,25 +302,28 @@ struct WatchBotFace: View {
                 withAnimation(.easeOut(duration: 0.16)) { holdProgress = 0 }
             }
         }
-        .onChange(of: isRecording) { _, recording in
-            // While recording, park the breathing at the "flat" position: that waveform has its own rhythm (a heartbeat),
-            // and stacking another slow inflate-deflate makes two cycles fight each other.
+        .onChange(of: isRecording) { _, _ in
+            // ⚠️ Revision ten: both branches now call `startIdleMotion()`, no longer each writing their own.
+            //    Because "what to do while recording" is no longer just "park the breathing flat" -- there are now two
+            //    `Task` loops to shut down. Letting the single switch decide is safer than duplicating the condition here
+            //    (the duplicated copy will eventually miss a newly added loop).
+            //
+            //    Incidentally: the recording state's waveform has its own rhythm (a heartbeat), and stacking another slow inflate-deflate
+            //    makes two cycles fight -- `startIdleMotion()` parks `breathe` flat.
             //
             // ⚠️ Before revision nine there was also a `sway` here (the two eyes drifting out of phase). The recording state
             //    is now swapped entirely for a waveform, the eyes are simply absent, and that state was deleted along with it.
-            if recording {
-                withAnimation(.linear(duration: 0.25)) { breathe = false }
-            } else {
-                startIdleMotion()
-            }
+            startIdleMotion()
         }
-        .onChange(of: dimmed) { _, reduced in
-            if reduced {
-                // Dimmed: stop everything at the rest position. See the paragraph at the top of the file.
-                withAnimation(.linear(duration: 0.2)) { breathe = false }
-            } else if !isRecording {
-                startIdleMotion()
-            }
+        .onChange(of: dimmed) { _, _ in
+            // Dimmed: stop everything at the rest position. See the paragraph at the top of the file. Same reasoning -- leave it to the single switch.
+            startIdleMotion()
+        }
+        .onDisappear {
+            // Close the loops when leaving the home screen. If you do not, this pair of `Task`s keeps hanging around,
+            // and each round they write a `@State` nobody is looking at any more.
+            idleLoop?.cancel()
+            gazeLoop?.cancel()
         }
     }
 
@@ -255,19 +364,120 @@ struct WatchBotFace: View {
             }
     }
 
-    /// Idle-state breathing. It should not run while dimmed or while recording.
+    /// Starts and stops **all** idle motion: breathing + gaze drift + blinking.
+    ///
+    /// ★ Before revision ten this only handled breathing, with blinking run by `phaseAnimator` itself (blinking as long as the view was around).
+    /// Now blinking and gaze are both `Task` loops, and someone has to **explicitly start and explicitly stop** them -- so this
+    /// became the single switch: dimming, recording, leaving the page, all shut down from here.
+    ///
+    /// ⚠️ Every time it is entered it **cancels the old ones first** before deciding whether to start new ones. Not cancelling would stack them:
+    ///    `isRecording` and `dimmed` can each change twice in a row, and every loop is a
+    ///    "sleep a while → blink once" endless loop, so stacking them doubles the blink rate.
     ///
     /// ⚠️ Revision eight slowed one "inhale-exhale" from 2.6 seconds to **3.6 seconds** (user: "slow the rhythm down").
-    ///    Breathing is this face's **most constant** motion -- far more frequent than blinking, so any faster reads as
-    ///    "panting," and it stacks with blinking to make the whole picture look busy.
+    ///    After revision ten, breathing is **no longer** this face's most constant motion (the most constant is gaze),
+    ///    but any faster still reads as "panting," and it stacks with gaze and blinking to look busy.
     private func startIdleMotion() {
+        idleLoop?.cancel()
+        idleLoop = nil
+        gazeLoop?.cancel()
+        gazeLoop = nil
+
         guard !dimmed, !isRecording else {
-            withAnimation(.linear(duration: 0.2)) { breathe = false }
+            // Back to the rest position. Dimming wants a static open-eyed face, and in the recording state the eyes are simply absent --
+            // both are handled by these three lines, leaving no gaze stopped halfway.
+            withAnimation(.linear(duration: 0.2)) {
+                breathe = false
+                openness = 1
+                gaze = .zero
+            }
             return
         }
+
         withAnimation(.easeInOut(duration: 3.6).repeatForever(autoreverses: true)) {
             breathe = true
         }
+        // ★ The eyes start, on entering, from the "looking right" position rather than from dead center --
+        //   starting from dead center means the first second after the user raises their wrist is "the eyes sliding out from the middle,"
+        //   as if just woken up. The reference implementation's lookX is also always-on, with no starting position.
+        gaze = CGSize(width: gazeAmpX, height: gazeAmpY)
+        idleLoop = Task { await runBlinkLoop() }
+        gazeLoop = Task { await runGazeLoop() }
+    }
+
+    // MARK: - The idle loops
+    //
+    // Two loops run side by side, independent of each other:
+    //   · `runGazeLoop`  switches sides every 4.8 seconds (**persistent** eye motion)
+    //   · `runBlinkLoop` sleeps a random value of 9~20 seconds → blinks once → draws again
+    //
+    // ⚠️ The two periods are **deliberately unequal** (4.8 vs the 9~20 random), so their relative phase is always
+    //    changing -- two motions with equal periods phase-lock, and once phase-locked the whole face starts "tapping out a beat,"
+    //    more obvious than a single metronome. In the reference implementation lookX(4.8s) / lookY(4.1s) were likewise
+    //    deliberately given different periods.
+
+    /// Gaze: pause a moment on each of the left and right, then switch quickly. The reference implementation's `glance` (`tanh(2.8·sin)`).
+    private func runGazeLoop() async {
+        var rightSide = true
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: UInt64(Self.gazeHold * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            rightSide.toggle()
+            // The vertical travels only a very short distance, and it **follows the horizontal back and forth** -- see `gazeAmpY`.
+            withAnimation(.easeInOut(duration: Self.gazeShift)) {
+                gaze = CGSize(
+                    width: rightSide ? gazeAmpX : -gazeAmpX,
+                    height: rightSide ? gazeAmpY : -gazeAmpY
+                )
+            }
+        }
+    }
+
+    /// Blinking. **The wait is drawn fresh every time**, and that is the core of revision ten -- see item 1 at the top of the file.
+    ///
+    /// ⚠️ The reference implementation schedules the next blink from the **start** moment of this blink
+    ///    (`this._blinkNext = now + rand(...)`). Here it is scheduled from **after the blink finishes**.
+    ///    The difference is only the double blink (about 0.8 seconds), negligible in magnitude, but "after the blink finishes" was chosen deliberately
+    ///    -- so that the measure of "between two blinks" is clean: the interval the user perceives does not include
+    ///    the 300ms the blink itself takes.
+    private func runBlinkLoop() async {
+        while !Task.isCancelled {
+            let wait = Double.random(in: Self.blinkWait)
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+
+            await blinkOnce()
+
+            if Double.random(in: 0 ..< 1) < Self.doubleBlinkChance {
+                // Add one more after 70ms. The reference implementation is `{at: t+370}`, and this side's first blink
+                // is done in 300ms -- so the gap is likewise 70ms.
+                try? await Task.sleep(nanoseconds: 70_000_000)
+                guard !Task.isCancelled else { return }
+                await blinkOnce()
+            }
+        }
+    }
+
+    /// Blink once. The keyframes are copied from the reference implementation's `_blinkNow`:
+    /// `close → pause 70ms → open to a 1.08 overshoot → fall back to 1 over 300ms`.
+    ///
+    /// ⚠️ **Total 300ms, do not stretch it.** Revision nine's open-close was 450ms (140+90+220),
+    ///    and the longer it lingers on the watch the more likely it is to be noticed -- "always blinking" had a share of it.
+    ///    A real human's eye closing is 100~150ms, a whole blink 200~400ms, and 300ms is exactly the natural range.
+    ///
+    /// ⚠️ **That 1.08 overshoot is the soul of it**: after opening all the way it opens a touch more then falls back,
+    ///    which gives the eye its "spring open." Without it, a plain three-stage open-close looks like a mechanical shutter.
+    private func blinkOnce() async {
+        withAnimation(.easeIn(duration: 0.07)) { openness = 0.05 }
+        try? await Task.sleep(nanoseconds: 70_000_000)
+        guard !Task.isCancelled else { return }
+
+        withAnimation(.easeOut(duration: 0.08)) { openness = 1.08 }
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        guard !Task.isCancelled else { return }
+
+        withAnimation(.easeOut(duration: 0.15)) { openness = 1 }
+        try? await Task.sleep(nanoseconds: 150_000_000)
     }
 
     /// The product of three scale layers: breathing × poke × recording.
@@ -320,6 +530,14 @@ struct WatchBotFace: View {
 
     /// The two eyes.
     ///
+    /// ★ Revision ten: this pair of eyes **as a whole** drifts gently (`gaze`) -- this is the **main
+    /// motion** of the idle state, and it is why "don't keep blinking" actually holds: the eyes are never still, so blinking degrades into
+    /// an occasional accent rather than the only thing happening (see item 3 at the top of the file).
+    ///
+    /// ⚠️ It is **the whole pair translating together**, not each eye looking its own way. Doing it separately is not "looking,"
+    ///    it is "a squint" -- the reference implementation's `lookX`, outside `_blinkNow`, is likewise the same value
+    ///    added to both eyes.
+    ///
     /// ⚠️ Revision eight deleted the "out-of-phase drift while recording" scheme (back then the recording state was still a variant of the eyes).
     ///    Revision nine swapped the whole recording state for a waveform, the eyes are simply absent, and the `sway` state was deleted along with it
     ///    -- not forgotten.
@@ -331,26 +549,22 @@ struct WatchBotFace: View {
         // As a group the eyes sit a little above the geometric center. Exactly centered looks "head down" --
         // the eyes on a human face sit above the midline anyway.
         .offset(y: -size * 0.03)
+        // Gaze. Stacked on top of the "rise" on the line above (the two `offset`s are added).
+        .offset(x: gaze.width, y: gaze.height)
     }
 
     /// One eye.
     ///
     /// Opening/closing is squashed from the center with `scaleEffect(y:)`, not by changing `frame(height:)` --
     /// changing the height makes the eye "grow from the bottom up," whereas a real eyelid comes down **from both sides at once**.
-    @ViewBuilder
+    ///
+    /// ★ Revision ten replaces `phaseAnimator` with reading `openness` directly. Revision eight/nine's phase-by-phase
+    /// description was deleted outright, for the reason see "why `phaseAnimator` is no longer used" at the top of the file.
+    /// The dimmed branch needs no separate check either: `startIdleMotion()` resets `openness`
+    /// to 1, so when dimmed this is naturally a static open-eyed face.
     private var eye: some View {
-        if dimmed {
-            // Dimmed: a static open-eyed face.
-            eyeShape
-        } else {
-            eyeShape
-                // Occasionally blink once. For the rhythm see `BlinkPhase` at the end of the file.
-                .phaseAnimator(BlinkPhase.allCases) { view, phase in
-                    view.scaleEffect(y: phase.openness, anchor: .center)
-                } animation: { phase in
-                    phase.animation
-                }
-        }
+        eyeShape
+            .scaleEffect(y: openness, anchor: .center)
     }
 
     /// Uses the color chosen on the "Appearance" page, **solid** (revision nine dropped the gradient).
@@ -422,86 +636,44 @@ struct PrimaryHandGesture: ViewModifier {
     }
 }
 
-// MARK: - The blink rhythm
+// MARK: - The blink rhythm (four versions, the ledger stays here)
 //
-// A human blink is not a constant-rate "open-closed-open" loop. The measured rhythm is:
-//   open and rest 2~6 seconds → close **fast** (~80ms) → pause for a beat → open a little more slowly (~130ms)
-// and about one time in four it **blinks twice in a row**.
-//
-// Use `phaseAnimator` to describe it phase by phase, with each phase's own duration in its own `animation`:
-// this is exactly why "open and close fast, rest long" can be expressed -- a single
-// `repeatForever(autoreverses: true)` can only produce a **symmetric** rhythm,
-// closed for as long as it opens, which looks like a twitch rather than a blink.
-//
-// ⚠️ **No random numbers** here: `phaseAnimator`'s phase list is re-evaluated whenever the view is rebuilt,
-// and random durations would make the timeline change on every redraw, so the blink would jitter. For a "random feel," rely on
-// the **fixed** structure of "occasionally blinking twice" -- that is what actually characterizes a real person's blink rhythm.
-//
-// ─────────────────────────────────────────────────────────────────────────
-// ## Three versions, three slow-downs (this phase list was changed twice; the ledger stays here)
-//
-// | version | cycle | user feedback |
+// | version | blink rhythm | user feedback |
 // |---|---|---|
-// | revision seven | 4.63s | first version |
-// | revision eight | 8.12s | "the blinking is too fast, slow the rhythm down" |
-// | **revision nine** | **19.12s** | "the eyes should not keep blinking"... "**not no blinking**" |
+// | revision seven | fixed 4.63s, a double blink in every round | first version |
+// | revision eight | fixed 8.12s, a double blink every round | "the blinking is too fast, slow the rhythm down" |
+// | revision nine | fixed 19.12s, a double blink every round | "the eyes should not keep blinking"... "**not no blinking**" |
+// | **revision ten** | **9~20s random, redrawn each time; mostly single blinks, 14% add one** | "**no need to keep blinking**" |
 //
-// Revision seven blinked twice in every round, meaning two open-close pairs every 4.6 seconds -- watching it for a few seconds reads as
-// "it is blinking constantly," not "it is alive." Revision eight slowed the open-close itself too (85/130ms → 140/220ms,
-// a real human eye closing takes about 100~150ms; revision seven's version was really a "flash," not a "close").
+// ★ Revision seven through nine is **one road walked three steps: stretching the fixed cycle longer and longer**. By the time it reached 19 seconds
+// the user was still saying "no need to keep blinking" -- which shows the road itself is wrong.
 //
-// That sentence in revision nine **hinges on the second half**: what the user wants is "blink calmly once in a while," **not to delete blinking**.
-// So the structure did not move a single cell (still "one double blink inserted between the singles"), only the two rest segments were stretched proportionally:
-// `rest` 3.2 → **7.0**, `settle` 3.8 → **11.0**. There is still one
-// "double blink" per cycle -- which is precisely the evidence of "not dead-fish eyes."
+// The real problem is three things, and the first three versions touched none of them:
 //
-// ⚠️ Stretching only the resting and not the open-close gives a "frozen still → snap" look -- because the relative rhythm
-//    is unchanged. To be "slow" you have to slow everything **proportionally**, which is the payoff of describing it phase by phase in the first place:
-//    every number is out in the open, so you can change only the ones that need changing.
+// 1. **A fixed period = a metronome.** The human eye is far better at catching patterns than intuition suggests: a 19-second cycle
+//    still gets caught, and once caught every blink reads as "it blinked on schedule again." **Slow is not the same as natural.**
+//    Revision ten changed it to drawing a fresh random value in a range after every blink, so structurally there is no period to speak of.
+// 2. **A double blink every round.** Revisions seven/eight/nine were all `100%` double blinks -- two open-close pairs necessarily in every cycle.
+//    Real people are not like that: the reference implementation (`aora-bot`) is `Math.random() < 0.14`.
+//    Revision ten copies 0.14 ⇒ the great majority of blinks become a single, 300ms flash.
+// 3. **Blinking is the only thing moving.** The plus-or-minus 1.8% breathing in revision nine is invisible to the naked eye, so for 19 seconds
+//    this face was completely still, then suddenly "snap-snap." Revision ten promotes **gaze drift** to the main idle motion
+//    (`runGazeLoop`), the eyes are never still -- so blinking degrades into an accent, no longer the
+//    thing that gets noticed. This one is the real solution to "no need to keep blinking."
 //
-// ⚠️ Stop pushing it further. Revision seven to eight was ×1.75, revision eight to nine was ×2.35 -- doubling it again gets close to
-//    once every 30 seconds, which is no longer "blinking occasionally" but "looks broken." If it really still feels too noisy,
-//    what should change is **the double blink** (drop the three phases `pause`/`shutAgain`/`openAgain`),
-//    not stretching the rest any further.
-private enum BlinkPhase: CaseIterable {
-    /// Open, resting.
-    case rest
-    /// Closed.
-    case shut
-    /// Hold closed for a beat (a real blink has a 40~80ms closed hold; omitting it makes it look like a flash).
-    case hold
-    /// Open.
-    case open
-    /// Open, short pause (the second blink of the pair is coming next).
-    case pause
-    case shutAgain
-    case openAgain
-    /// Long rest, then back to `rest`.
-    case settle
-
-    /// 1 = fully open, 0.05 = closed.
-    ///
-    /// ⚠️ Closed is not written as 0: when you go to 0 and then scale back up from 0, `scaleEffect` at extremely thin sizes
-    /// produces a gap thinner than the line width, which looks like "the eye dropped for a frame." Leaving 0.05 is exactly
-    /// the level that looks "closed" to the eye while not showing a gap.
-    var openness: CGFloat {
-        switch self {
-        case .rest, .open, .pause, .openAgain, .settle: return 1
-        case .shut, .hold, .shutAgain:                  return 0.05
-        }
-    }
-
-    /// Each phase's duration = the duration of that phase's animation.
-    var animation: Animation {
-        switch self {
-        case .rest:      return .linear(duration: 7.0)
-        case .shut:      return .easeIn(duration: 0.14)
-        case .hold:      return .linear(duration: 0.09)
-        case .open:      return .easeOut(duration: 0.22)
-        case .pause:     return .linear(duration: 0.34)
-        case .shutAgain: return .easeIn(duration: 0.13)
-        case .openAgain: return .easeOut(duration: 0.20)
-        case .settle:    return .linear(duration: 11.0)
-        }
-    }
-}
+// ⚠️ **Stop going back to tune that fixed period.** To make it quieter, what should change is
+//    the upper bound of `blinkWait` (currently 20 seconds), not turning it back into a fixed value.
+//    Any combination of "fixed duration + `repeatForever`" falls back into a metronome.
+//
+// ⚠️ Three invariants; do not casually break them while changing numbers:
+//    · blink total duration **300ms** (revision nine was 450ms -- the longer it lingers the more conspicuous);
+//    · the eyes **overshoot to 1.08** then fall back to 1 (without it, it looks like a mechanical shutter);
+//    · the closed value sits at **0.05**, not 0 (when you go to 0 and then scale back up, `scaleEffect` at extremely thin
+//      sizes shows a gap thinner than the line width, which looks like "the eye dropped for a frame").
+//
+// ⚠️ The gaze period (4.8s) and the blink interval (9~20s random) are **deliberately unequal**, see
+//    the "idle loops" comment below `startIdleMotion`: two motions with equal periods phase-lock.
+//
+// ⚠️ The implementation is no longer at the end of this file -- revision ten deleted the phase-by-phase `BlinkPhase` outright,
+//    replacing it with `runBlinkLoop()` / `blinkOnce()` (below `startIdleMotion()`).
+//    For the reason see "why `phaseAnimator` is no longer used" at the top of the file.
