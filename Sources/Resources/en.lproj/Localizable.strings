@@ -1041,3 +1041,13 @@
 "face.shy" = "Shy";
 "face.listen" = "Listening";
 "face.scan" = "Scanning";
+
+// MARK: - 回收站多选 + 手表未佩戴提示（2026-10-16 十四改）
+"trash.select" = "Select";
+"trash.select_all" = "Select All";
+"trash.deselect_all" = "Deselect All";
+"trash.restore_selected" = "Recover %d";
+"trash.delete_selected" = "Delete %d";
+"trash.delete_selected_title" = "Delete for Good?";
+"trash.delete_selected_message" = "%d item(s) will be removed for good. This can't be undone.";
+"watch.not_worn" = "Not worn";

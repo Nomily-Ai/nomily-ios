@@ -107,6 +107,30 @@ import SwiftUI
 // ⚠️ The re-12 discipline "don't push the base shape to full scale" **still holds**: full height is reserved for the real level,
 //    and now it's **shape** that tells them apart (a heartbeat is an isolated 1~2-slot spike, speech a continuous 5~15-slot plateau).
 // ─────────────────────────────────────────────────────────────────────────
+// ★★ 2026-10-16 revision 14 (user's words: "when the watch isn't being worn there's no up-and-down
+//    ripple during recording; you have to be wearing the watch"):
+//
+// **From now on this wave only moves when it's "worn".**
+//
+// ## Why "is there a heart-rate reading" is the criterion for "worn or not"
+// The watch records on the wrist, so physically there are only two ways "not wearing the watch" can happen: take it off and set it aside,
+// or leave it on the charger. In both cases HealthKit **gives no heart-rate reading** —
+// `bpm` is `nil`. Conversely, as long as the wrist is in the band, the optical heart rate gives a number within seconds.
+// So "is `bpm` `nil`" is the **only** reliable signal for "worn or not", and there's no need to separately
+// ask about some "wear sensor" (watchOS has no such API).
+//
+// ## What gets drawn when it isn't worn
+// **A flat line hugging the baseline**, with nothing moving. Not "draw the wave as usual but don't beat with the heart rate" —
+// that way the user can't tell "not worn" from "worn but the heart rate hasn't been read yet".
+// ⚠️ The mic level stops too: the user's mental model of this wave is "**my heartbeat** is pushing it",
+//    so if it moved with your speech while unworn it would be lying that "your heart rate was read".
+//    The small line on the home screen reads "not worn" (see `WatchRecorderView.caption`),
+//    so the flat line won't be read as "broken".
+//
+// ⚠️ The **other** reason the heart rate can't be read is that HealthKit permission wasn't granted — the symptom is the same (flat line +
+//    "not worn"). This conflation is acceptable: both paths are solved by "wear the watch properly / grant the permission",
+//    and the permission prompt only appears once.
+// ─────────────────────────────────────────────────────────────────────────
 // ## Why keep a short history instead of drawing only the instantaneous value
 // A heart-rate-style trace is "a line that scrolls left over time", not a bar jumping up and down. So you need a little
 // history (`sampleCount` slots), appending one slot at the right on each tick and shifting the whole thing left.
@@ -273,7 +297,13 @@ struct WatchVoiceWave: View {
         // The glow for the recording state. It used to hang on the eyes and moved over once the eyes were replaced by this wave —
         // on the watch face there's nowhere else to say "it's working".
         .shadow(color: tint.opacity(0.55), radius: 7)
-        .onChange(of: meter) { _, new in advance(using: new) }
+        // ★ Revision 14: **no watch on the wrist, nothing moves** (`bpm == nil`).
+        //   For the reasoning and criterion see the "revision 14" block at the top of the file — in one line: `bpm == nil` is
+        //   one of the only two sources of "not worn" (the other is no permission, same symptom).
+        .onChange(of: meter) { _, new in
+            guard bpm != nil else { return }
+            advance(using: new)
+        }
         .accessibilityHidden(true)
     }
 

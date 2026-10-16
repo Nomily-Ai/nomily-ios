@@ -161,6 +161,11 @@ struct WatchRecorderView: View {
 
     /// Number of times it's tapped while idle, handed to `WatchBotFace` for a single bounce.
     @State private var pokeTick = 0
+    /// Number of times shake fired, handed to `WatchBotFace` to make the eyes **spin in circles**.
+    ///
+    /// ★ Added in revision fourteen (user: "shaking makes the eyes spin in circles with a dizzy feel").
+    /// The reason for using a count as the trigger is the same as `pokeTick`.
+    @State private var dizzyTick = 0
     /// Just after a hold has fired, **swallow the tap that comes right behind it**.
     ///
     /// ⚠️ This is where the whole interaction chain is most likely to fall apart: the hold gesture succeeds, and as the user lifts their finger,
@@ -267,6 +272,7 @@ struct WatchRecorderView: View {
                     ? WatchFormat.compactDuration(model.elapsed)
                     : nil,
                 pokeTick: pokeTick,
+                dizzyTick: dizzyTick,
                 handGestureEnabled: prefs.pinchToRecord,
                 onTap: handleTap,
                 onHold: beginRecordingByHold,
@@ -308,6 +314,14 @@ struct WatchRecorderView: View {
                         .font(.system(size: 10, weight: .semibold))
                     Text("\(Int(bpm.rounded()))")
                         .monospacedDigit()
+                    Text("·")
+                } else {
+                    // ★ Revision fourteen: no heart rate = not worn (or not authorized). At that point the waveform is
+                    //   **a flat, motionless line** (see "revision fourteen" at the top of `WatchVoiceWave`),
+                    //   and without an explanation it just reads as "broken".
+                    Image(systemName: "applewatch.slash")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(L10n.Watch.notWorn)
                     Text("·")
                 }
                 Text(WatchFormat.bytes(model.currentBytes))
@@ -585,7 +599,22 @@ struct WatchRecorderView: View {
             // so without feedback you can't tell whether it actually started recording. Two different feels, "start/stop",
             // let the haptic alone tell start from stop.
             WKInterfaceDevice.current().play(model.isRecording ? .stop : .start)
-            model.toggleRecording()
+            // ★ Revision fourteen: the eyes **spin in circles** (user: "shaking makes the eyes spin in circles with a dizzy feel
+            //   to add more interaction"). A haptic for the wrist and the dizzy for the eyes; together the two channels say "received".
+            dizzyTick += 1
+            // ⚠️ The actual start/stop is **pushed back 0.45 seconds**: without that, the recording state immediately swaps in the waveform
+            //    the moment the eyes start spinning and the "dizzy" is never seen.
+            //    0.45 seconds falls in the **first half** of the two spins (0.9 seconds total): when recording starts you see
+            //    the eyes dizzy through half a turn, then the color floods in; when recording stops the wave exits and the eyes come back
+            //    with the second half of the dizzy. Both directions get their moment.
+            //
+            //    The delay is **added on the perception side**, but shake already has about a 0.9-second detection window
+            //    (`WatchShakeDetector.burstWindow`), and the user's expectation for a "shake" was never
+            //    instant anyway. Any longer and it's no good -- that reads as "I shook it and nothing happened".
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                model.toggleRecording()
+            }
         }
     }
 }

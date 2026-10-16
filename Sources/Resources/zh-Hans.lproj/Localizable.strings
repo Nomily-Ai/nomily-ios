@@ -1043,3 +1043,13 @@
 "face.shy" = "害羞";
 "face.listen" = "聆听";
 "face.scan" = "扫视";
+
+// MARK: - 回收站多选 + 手表未佩戴提示（2026-10-16 十四改）
+"trash.select" = "选择";
+"trash.select_all" = "全选";
+"trash.deselect_all" = "取消全选";
+"trash.restore_selected" = "恢复 %d 条";
+"trash.delete_selected" = "删除 %d 条";
+"trash.delete_selected_title" = "彻底删除？";
+"trash.delete_selected_message" = "%d 条将被永久删除，无法撤销。";
+"watch.not_worn" = "未佩戴手表";

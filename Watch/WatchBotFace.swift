@@ -215,6 +215,12 @@ struct WatchBotFace: View {
     /// and the home screen constructs it inline in `body`, so it cannot get a reference to that instance. Using a monotonically increasing
     /// counter as the trigger is the standard SwiftUI way to "send a child view one pulse from outside."
     let pokeTick: Int
+    /// The number of shake triggers. The home screen adds 1, and this makes the eyes **spin in circles** (see `playDizzy()`).
+    ///
+    /// ★ Added in revision fourteen (user: "change the watch's shake so a shake makes the eyes spin in circles with a dizzy feel
+    /// and adds interaction"). The reason for using a counter as the trigger is the same as `pokeTick` -- this face is a value type,
+    /// and the home screen constructs it inline in `body`, so it cannot get a reference to the instance.
+    let dizzyTick: Int
     /// Whether Double Tap can start/stop recording. Toggled in by `WatchRecordingPrefs.pinchToRecord`.
     let handGestureEnabled: Bool
     /// Tap (a finger actually touched the face). Recording = stop; idle = the home screen decides whether to just poke it.
@@ -273,8 +279,24 @@ struct WatchBotFace: View {
     ///    unaware of each other, so the one that wakes first would erase **the new expression that has just come on** --
     ///    showing up as "tapping twice produced nothing at all."
     @State private var moodTask: Task<Void, Never>?
+    /// How many degrees the eyes have **spun in circles** so far. 0 = not spinning.
+    ///
+    /// ★ Added in revision fourteen, see `playDizzy()`.
+    @State private var dizzyAngle: Double = 0
+    /// The handle for the dizzy `Task`. Shaking twice in a row must cancel the previous one first, for the same reason as `moodTask`.
+    @State private var dizzyTask: Task<Void, Never>?
     /// Hold progress 0...1.
+    ///
+    /// ★ Revision fourteen: what it drives is no longer that ring of "2-second progress arc," but **a patch of color
+    ///   expanding outward from the eyes** (see `holdSweep`). The semantics are unchanged -- 0 = not pressed, 1 = time to start recording.
     @State private var holdProgress: CGFloat = 0
+    /// The switch for the color patch to **fade out** after the hold has run its course and recording has started.
+    ///
+    /// ⚠️ `holdProgress` cannot simply be zeroed: at that moment the user has just let go and the screen is about to switch to the
+    ///    recording state, and a patch of color already covering the screen vanishing with a "snap" would flash. Let it **fill first,
+    ///    then fade out** (0.5 seconds), and the wave picks up at the same time it fades -- this is exactly what the user wants,
+    ///    "fill the entire screen **then** show the heart-rate time ripple."
+    @State private var sweepFading = false
     /// Whether a finger is currently pressed on the eyes. Driven by `LongPressGesture.updating`.
     @GestureState private var holding = false
     /// The most recent moment "a finger actually touched the face" (updated on both press and release).
@@ -383,12 +405,15 @@ struct WatchBotFace: View {
         //    behavior directly here.
         Button(action: handlePrimaryAction) {
             ZStack {
-                holdRing
+                // ★ Revision fourteen: the color sits in the **bottom layer**, with the eyes drawn on top of it -- so the expansion process reads
+                //   as "the color in the eyes spilling out," rather than "a block of palette covering the eyes."
+                holdSweep
                 figure
                     .scaleEffect(figureScale)
                     .animation(.spring(response: 0.34, dampingFraction: 0.62), value: isRecording)
             }
-            // Leave room outside for the charge ring.
+            // This outer frame is the face's **nominal** boundary (all of `BotFaceMetrics` derives its proportions from it).
+            // ⚠️ It **does not clip** its content -- the color patch during a hold has to spill all the way to the screen edge, and this is exactly what makes that possible.
             .frame(width: size * 1.14, height: size * 1.14)
             // ★ Added in revision eight, **not optional**: with the plate gone, `Button` by default treats only the drawn
             //   shape as the hit area, i.e. those two capsules (or that wave while recording).
@@ -413,6 +438,7 @@ struct WatchBotFace: View {
         .accessibilityValue(isRecording ? L10n.Watch.recordingBusy : L10n.Watch.holdToRecord)
         .onAppear { startIdleMotion() }
         .onChange(of: pokeTick) { _, _ in pokeOnce() }
+        .onChange(of: dizzyTick) { _, _ in playDizzy() }
         .onChange(of: holding) { _, pressing in
             // ★ Record a timestamp on both press and release: the Button's action fires at the moment of **release**,
             //   so recording only the press would make "hold for a moment then let go" be misjudged
@@ -420,12 +446,22 @@ struct WatchBotFace: View {
             //   "start recording").
             lastTouchAt = Date()
 
-            // A hold while recording does not light up the progress ring -- otherwise the user thinks "two more seconds and it starts again."
+            // A hold while recording does not light up the progress -- otherwise the user thinks "two more seconds and it starts again."
             guard !isRecording else { return }
             if pressing {
+                // ★ Revision fourteen: first clear away the residue from the previous round (**without animation**), then grow it back from scratch.
+                //    The last time the hold ended, `holdProgress` was left at 1 and `sweepFading` was true
+                //    (the color patch had only faded out; its size was unchanged). Without clearing it, this press starts straight from
+                //    "a full-screen fill" -- what the user sees is not "the color growing," just a flash.
+                var reset = Transaction()
+                reset.disablesAnimations = true
+                withTransaction(reset) {
+                    holdProgress = 0
+                    sweepFading = false
+                }
                 // The progress filling up is exactly 2 seconds, aligned with the gesture's minimumDuration.
-                // If the two disagree you get either "recording starts before the ring completes" or
-                // "the ring completes but recording never starts" -- both make the user stop trusting the ring.
+                // Once the two disagree, you get either "recording starts before the color has filled the screen" or
+                // "the screen is full but recording never starts" -- both make the user stop trusting this action.
                 withAnimation(.linear(duration: Self.holdSeconds)) { holdProgress = 1 }
             } else {
                 withAnimation(.easeOut(duration: 0.16)) { holdProgress = 0 }
@@ -455,6 +491,8 @@ struct WatchBotFace: View {
             gazeLoop?.cancel()
             // ★ Revision twelve: the expression one has to be shut down too -- same as above.
             moodTask?.cancel()
+            // ★ Revision fourteen: the dizzy one has to be cancelled too.
+            dizzyTask?.cancel()
         }
     }
 
@@ -488,9 +526,12 @@ struct WatchBotFace: View {
         LongPressGesture(minimumDuration: Self.holdSeconds, maximumDistance: Self.holdSlop)
             .updating($holding) { current, state, _ in state = current }
             .onEnded { _ in
-                // Collapse the ring first: the user is still pressing, the face is about to switch to the recording state,
-                // and leaving a fully-completed arc around would clash with the recording-state glow.
-                withAnimation(.linear(duration: 0.12)) { holdProgress = 0 }
+                // ★ Revision fourteen: the color **fills first, then fades out**, rather than "the ring collapsing."
+                //    Before revision thirteen this collapsed the progress arc within 0.12 seconds, because an arc left
+                //    shown as "completed" would clash with the recording-state glow. Now it is a whole patch of color: its 0.5-second fade-out
+                //    exactly covers the "eyes → wave" switch, so it reads as
+                //    "the color washes across the screen → the wave lights up as the color recedes."
+                withAnimation(.easeOut(duration: 0.5)) { sweepFading = true }
                 onHold()
             }
     }
@@ -684,6 +725,41 @@ struct WatchBotFace: View {
         playRandomMood()
     }
 
+    /// The shake "dizzy": the whole pair of eyes **spins twice** around its own center, then settles back in place.
+    ///
+    /// ★★ Added in revision fourteen (user: "change the watch's shake so a shake makes the eyes spin in circles with a dizzy feel
+    /// and adds interaction"). The shake's feedback used to be a single vibration -- felt by the body,
+    /// with the eyes taking no part. Now the eyes "go dizzy" along with it, and only then does the shake register on **this face**.
+    ///
+    /// ## How the rhythm was set
+    /// * **720° in 0.9 seconds** (two turns). One turn is so fast it looks like fanning the air, and three or more on a 40mm
+    ///   little screen blur into a single smudge. 0.9 seconds is also exactly the window for
+    ///   the "two impacts within a 0.9-second window" test in `WatchShakeDetector` -- the eyes finish spinning just as the test lands.
+    /// * **`timingCurve(0.3, 0, 0.4, 1)`**: slow start → fastest in the middle → easing off at the end.
+    ///   Only "spinning faster and faster and then stopping" feels "dizzy"; two turns at a constant speed is an electric fan, not dizziness.
+    /// * **Afterwards the angle must be reset to zero, and without animation**: parked there at 720°,
+    ///   the next spin would have to start from 720°; and animating the reset to zero makes the eyes, after stopping,
+    ///   spin two turns backwards again -- that is a "rewind," not "finished being dizzy."
+    ///
+    /// ⚠️ **It only means anything while the eyes are visible**. After a shake trigger the home screen does not actually
+    ///    start or stop recording for about 0.45 seconds (see `WatchRecorderView.syncShakeDetector`), so when recording starts
+    ///    the first half of the dizzy is visible; when recording stops the eyes return after 0.45 seconds,
+    ///    picking up exactly the second half. Both paths get their moment; the spin is not wasted.
+    private func playDizzy() {
+        dizzyTask?.cancel()
+        guard !dimmed else { return }
+        dizzyTask = Task {
+            withAnimation(.timingCurve(0.3, 0.0, 0.4, 1.0, duration: 0.9)) {
+                dizzyAngle = 720
+            }
+            try? await Task.sleep(nanoseconds: 950_000_000)
+            guard !Task.isCancelled else { return }
+            var settle = Transaction()
+            settle.disablesAnimations = true
+            withTransaction(settle) { dizzyAngle = 0 }
+        }
+    }
+
     /// Play one expression once: 0.26 seconds coming in → hold about 0.8 seconds → 0.34 seconds leaving.
     ///
     /// ⚠️ Every time it **cancels the previous** `Task` first (see the `moodTask` paragraph): on a double tap,
@@ -775,6 +851,8 @@ struct WatchBotFace: View {
             tint: tint,
             openness: openness
         )
+            // ★ Revision fourteen: the shake "dizzy." The whole pair of eyes spins twice around its own center.
+            .rotationEffect(.degrees(dizzyAngle), anchor: .center)
         // As a group the eyes sit a little above the geometric center. Exactly centered looks "head down" --
         // the eyes on a human face sit above the midline anyway.
         .offset(y: BotFaceMetrics.eyeRise(size))
@@ -789,29 +867,48 @@ struct WatchBotFace: View {
     ///    along with the decision to "cross-fade via `opacity` rather than pick one with `if/else`."
     ///    For the reason for the move see the `eyes` paragraph -- the picker on the iPhone has to lay out the preview with the same code.
 
-    // MARK: - The charge ring
+    // MARK: - The hold's "color spilling out"
 
-    /// The 2-second progress arc during a hold. **It appears only while pressed** (`holdProgress > 0`),
-    /// and vanishes the instant you let go -- it is one-time feedback, not permanent decoration.
+    /// ★★ Revision fourteen (user's words: "when holding the front of the watch, the eyes should fill the whole screen directly using the eye color, then
+    ///     show the heart-rate time ripple, instead of the current transition where a hold is just a circle").
     ///
-    /// ⚠️ Revision eight briefly made it white (that was when the whole face was colorless). After revision nine brought color back to the eyes,
-    ///    this ring follows `tint` too -- so the whole face has just one color,
-    ///    rather than two systems, "colored eyes plus a white arc."
+    /// ## Why a **solid** patch of color rather than an arc
+    /// An arc answers "how much longer do I press" (progress); what the user wants this time is **something else**:
+    /// to play the "hold" as "the color inside the eyes can't be held back any longer and spills out to flood the whole watch."
+    /// It is also an advance notice that "recording is about to start" -- the instant it fills the screen is exactly when the 2 seconds elapse,
+    /// so it **serves two roles at once**: it is both the animation and the progress bar (radius = progress).
+    ///
+    /// ## How the three dimensions were set
+    /// * **Start**: it does not begin from a single point at the circle's center, but from **the eyes' bounding size**
+    ///   (width 0.705×size, height 0.375×size ⇒ circumscribed circle about 0.805×size). Starting from a zero radius,
+    ///   the first 0.3 seconds are just a pinprick-sized dot, and it does not read as "growing out of the eyes."
+    /// * **End**: `2.6 × size`. What has to be covered is **the whole watch screen**, not the face frame
+    ///   (`size × 1.14`). A 40mm screen is 162×194 with a 253pt diagonal, `size` = 119 ⇒
+    ///   it needs 2.13×size; a 49mm screen is 205×251 with a 324pt diagonal, `size` = 151 ⇒
+    ///   it needs 2.14×size. Taking 2.6 leaves margin, so both watch sizes fill completely.
+    /// * The part that spills out is clipped by **the page's own `.clipped()`** (`WatchRecorderView`
+    ///   needs it for that three-page row), so the edge of "filled" is the screen edge and nothing is drawn onto the neighbouring page.
+    ///
+    /// ## The three "must be false / not tappable" reasons
+    /// * `allowsHitTesting(false)` -- it covers the whole screen, and if it were tappable this page would be unusable.
+    /// * Drawn **below** `figure` -- the expansion has to read as "spilling out of the eyes."
+    /// * The fade-out is left to `sweepFading`, **leaving `holdProgress` alone** -- radius and opacity are two separate things,
+    ///   and mixed into one state, "fill first, then exit" cannot be written.
     @ViewBuilder
-    private var holdRing: some View {
+    private var holdSweep: some View {
         if holdProgress > 0.002 {
+            // The eye group's circumscribed circle: width 0.235×2 + 0.235 = 0.705, height 0.375 ⇒ diagonal 0.805.
+            let rest = size * 0.805
+            let full = size * 2.6
             Circle()
-                .trim(from: 0, to: holdProgress)
-                .stroke(
-                    tint.opacity(0.9),
-                    style: StrokeStyle(lineWidth: max(3, size * 0.035), lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-                // Slightly larger than the eye group's bounding box (width 0.705×size, height 0.375×size),
-                // so the arc does not press onto the eyes.
-                .frame(width: size * 1.02, height: size * 1.02)
-                // This ring is pure feedback: it must neither steal the hold (it sits right over the eyes' outer edge),
-                // nor stretch the `Button`'s tap target outward.
+                .fill(tint)
+                .frame(width: rest + (full - rest) * holdProgress,
+                       height: rest + (full - rest) * holdProgress)
+                .opacity(sweepFading ? 0 : 1)
+                // The fade-out uses **its own** animation (0.5 seconds) and does not interfere with the
+                // 2-second linear animation for the radius -- two properties on the same view each carrying their own `animation(value:)`
+                // is allowed; SwiftUI tracks them separately.
+                .animation(.easeOut(duration: 0.5), value: sweepFading)
                 .allowsHitTesting(false)
         }
     }

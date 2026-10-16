@@ -861,6 +861,46 @@ enum L10n {
         static var artefactSummary: String {
             NSLocalizedString("trash.artefact_summary", value: "Summary", comment: "")
         }
+
+        // MARK: Multi-select (★ fourteenth revision 2026-10-16: user — "trash supports multi-select, select-all, restore, or delete")
+        //
+        // ⚠️ Always `static var` + `value:` inline English fallback (only the en / zh-Hans
+        // .lproj files were added; same reason as `Library.sourceCard`).
+        /// The toolbar button that enters/exits multi-select mode.
+        static var select: String {
+            NSLocalizedString("trash.select", value: "Select", comment: "Trash toolbar: enter multi-select mode")
+        }
+        /// The "Select All / Deselect All" button in multi-select mode — its label switches with the state.
+        static var selectAll: String {
+            NSLocalizedString("trash.select_all", value: "Select All", comment: "Trash multi-select toolbar")
+        }
+        static var deselectAll: String {
+            NSLocalizedString("trash.deselect_all", value: "Deselect All", comment: "Trash multi-select toolbar, shown when everything is already ticked")
+        }
+        /// The "Restore" button at the bottom of multi-select mode.
+        static func restoreSelected(_ count: Int) -> String {
+            String(format: NSLocalizedString("trash.restore_selected",
+                                             value: "Recover %d",
+                                             comment: "Trash multi-select bottom bar; %d is how many are ticked"),
+                   count)
+        }
+        /// The "Delete" button at the bottom of multi-select mode.
+        static func deleteSelected(_ count: Int) -> String {
+            String(format: NSLocalizedString("trash.delete_selected",
+                                             value: "Delete %d",
+                                             comment: "Trash multi-select bottom bar; %d is how many are ticked"),
+                   count)
+        }
+        static var deleteSelectedTitle: String {
+            NSLocalizedString("trash.delete_selected_title", value: "Delete for Good?",
+                              comment: "Confirmation title for permanently deleting the ticked items")
+        }
+        static func deleteSelectedMessage(_ count: Int) -> String {
+            String(format: NSLocalizedString("trash.delete_selected_message",
+                                             value: "%d item(s) will be removed for good. This can't be undone.",
+                                             comment: "Confirmation body; %d is how many are ticked"),
+                   count)
+        }
     }
 
     // MARK: - Apple Watch
@@ -1098,6 +1138,18 @@ enum L10n {
         static var statusRecording: String { NSLocalizedString("watch.status_recording", comment: "") }
         static var statusTransferring: String { NSLocalizedString("watch.status_transferring", comment: "") }
         static var statusOutOfRange: String { NSLocalizedString("watch.status_out_of_range", comment: "") }
+
+        // MARK: Recording home screen (★ fourteenth revision 2026-10-16)
+        //
+        // ⚠️ With `value:` inline English fallback (only the en / zh-Hans .lproj files were added).
+        /// The hint shown when heart rate can't be read. At that moment the wave is a **flat, motionless line**,
+        /// and without an explanation it reads as "broken" (see the fourteenth-revision note at the top of `WatchVoiceWave`).
+        ///
+        /// ⚠️ Deliberately **short**: it shares a line with the byte count, and a long string would shrink the whole line into illegibility.
+        static var notWorn: String {
+            NSLocalizedString("watch.not_worn", value: "Not worn",
+                              comment: "Watch recorder caption when no heart rate is available — the watch isn't being worn")
+        }
     }
 
     // MARK: - Watch home screen expression (★ thirteenth revision 2026-10-16)
