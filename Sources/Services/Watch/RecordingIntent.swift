@@ -110,6 +110,16 @@ enum ToggleRecordingError: Error, CustomLocalizedStringResourceConvertible {
 
 #if os(watchOS)
 
+// ⚠️ The block below is **compiled into the App only**, not into the Control Center extension (`nomily_watch_controls`).
+//    Reason: App Shortcuts are registered by the App; if an extension of the same App registers them again,
+//    "Record with Nomily" ends up with two sources on the system side. The extension side drops it via
+//    `NOMILY_WIDGET_EXTENSION` in `SWIFT_ACTIVE_COMPILATION_CONDITIONS`
+//    (see that target in project.yml).
+//
+//    Note that `RecordingIntentBus` is **not** under this condition — `ToggleRecordingIntent.perform()`
+//    calls it on the watchOS branch, and without it the extension won't compile.
+#if !NOMILY_WIDGET_EXTENSION
+
 /// Watch-only. An iPhone-side App Shortcut would publish a "Record with Nomily
 /// Nomi" that opens the app and stops there — a promise the phone can't keep.
 struct NomilyWatchShortcuts: AppShortcutsProvider {
@@ -122,6 +132,8 @@ struct NomilyWatchShortcuts: AppShortcutsProvider {
         )
     }
 }
+
+#endif
 
 /// Parking spot between the intent and the recorder.
 ///
