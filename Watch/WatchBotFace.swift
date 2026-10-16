@@ -92,7 +92,16 @@ import SwiftUI
 //    "right now tapping the eyes doesn't go straight to a white screen, it spreads those two eyes across the whole screen"):
 // This is about the picture during those two seconds of holding. Revision fourteen drew a solid circle growing out from the eyes' position,
 // which the user read as "the two eyes spreading," whereas what he wants is **the whole screen changing color at once**. So it became a full-screen solid color
-// using opacity as the progress -- the full reasoning is in the paragraph above `holdFill`.
+// Use opacity as the progress.
+//
+// ─────────────────────────────────────────────────────────────────────────
+// ★★ 2026-10-16 revision sixteen (user's words:
+//    "what I want is for the two eyes, based on where I press down, to automatically merge together at the place I press,
+//     and then slowly spread across the whole screen and jump over to the recording side"):
+// Revision fifteen's "whole screen brightening" was rejected -- clean, but with **no origin**: the color rose out of thin air across the whole screen
+// with nothing to do with those two eyes. This round adds the sequence back, splitting the hold into two pieces of geometry:
+// **merge first (the first 32%), then spread (the last 68%)**, with the merge target being **where the finger pressed**.
+// The implementation is all in `holdLayer`; how the parameters were chosen is written in the paragraph above it.
 // ─────────────────────────────────────────────────────────────────────────
 // ## The things that make this face "alive" (after revision twelve)
 //
@@ -288,17 +297,28 @@ struct WatchBotFace: View {
     /// Hold progress 0...1.
     ///
     /// ★ Revision fourteen: what it drives is no longer that ring of "2-second progress arc," but a patch of color that fills the screen.
-    /// ★ Revision fifteen: the **opacity** of that color patch is it (see `holdFill`). The semantics are unchanged --
-    ///   0 = not pressed (transparent), 1 = filled (time to start recording).
+    /// ★ Revision fifteen: the **opacity** of that color patch is it.
+    /// ★★ Revision sixteen: what it drives now is **two pieces of geometry** (see `holdLayer`) --
+    ///   the first 32% kneads the two eyes into one blob, the last 68% spreads that blob until it fills the whole screen.
     @State private var holdProgress: CGFloat = 0
+    /// The position where the finger pressed (**this face's local coordinates**). `nil` = not pressed yet.
+    ///
+    /// ★★ Added in revision sixteen (user: "the two eyes automatically merge together at the place I press").
+    /// It only answers "where to merge toward" and takes part in no decision -- the hold timing is still entirely
+    /// `LongPressGesture`'s business.
+    ///
+    /// ⚠️ Lifting the finger does **not** clear it: during the 0.16 seconds that `holdProgress` rolls back, the two eyes still travel back
+    ///    along this point. Clearing it would make them divert to the face center mid-return. The next press overwrites it.
+    @State private var pressPoint: CGPoint?
     /// The switch for the color patch to **fade out** after the hold has run its course and recording has started.
     ///
     /// ⚠️ `holdProgress` cannot simply be zeroed: at that moment the user has just let go and the screen is about to switch to the
     ///    recording state, and a patch of color already covering the screen vanishing with a "snap" would flash. Let it **fill first,
     ///    then fade out** (0.5 seconds), and the wave picks up at the same time it fades -- this is exactly what the user wants,
     ///    "fill the entire screen **then** show the heart-rate time ripple."
-    ///    ⚠️ After revision fifteen `holdProgress` controls **opacity**, so "filled" and "faded out"
-    ///    are two layers of the same property -- see the two `opacity` comments in `holdFill`.
+    ///    ⚠️ Revision fifteen turned `holdProgress` into the color patch's **opacity**; revision sixteen turned it
+    ///    into **the progress of the two pieces of geometry**, so "filled" and "faded out" are now handled separately by
+    ///    what `holdLayer` draws and this layer's `sweepFading`, each minding its own business.
     @State private var sweepFading = false
     /// Whether a finger is currently pressed on the eyes. Driven by `LongPressGesture.updating`.
     @GestureState private var holding = false
@@ -410,11 +430,14 @@ struct WatchBotFace: View {
             ZStack {
                 figure
                     .scaleEffect(figureScale)
+                    // During a hold, yield the position to the two inside `holdLayer` (see `figureOpacity`).
+                    .opacity(figureOpacity)
                     .animation(.spring(response: 0.34, dampingFraction: 0.62), value: isRecording)
-                // ★ Revision fifteen: the full-screen color patch is drawn in the **top layer** (in revision fourteen it was in the bottom layer).
-                //   Covering the eyes is deliberate -- what the user wants this round is "straight to a white screen,"
-                //   not "watching the eyes being enlarged." See the `holdFill` paragraph for the reason.
-                holdFill
+                // ★ Revision fifteen: the color patch is drawn in the **top layer** (in revision fourteen it was in the bottom layer).
+                // ★★ Revision sixteen: it handles both "kneading the two eyes into one blob" and "spreading across the screen,"
+                //    so from the very first frame of the press it has to take over the eyes -- which is why `figure`'s two
+                //    have to yield (`figureOpacity`).
+                holdLayer
             }
             // This outer frame is the face's **nominal** boundary (all of `BotFaceMetrics` derives its proportions from it).
             // ⚠️ It **does not clip** its content -- the color patch during a hold has to spill all the way to the screen edge, and this is exactly what makes that possible.
@@ -432,6 +455,12 @@ struct WatchBotFace: View {
         // `.gesture`, so the hold does not displace the `Button`'s own tap (which would make "tap to stop"
         // fail during hold recognition -- exactly when the user needs it most).
         .simultaneousGesture(holdGesture)
+        // ★★ Revision sixteen: used only to answer "where the finger pressed."
+        // ⚠️ It must **sit alongside** the hold (`simultaneousGesture`), not be chained into `holdGesture`
+        //    : `LongPressGesture` gives no coordinates, and "where the finger was at the moment of pressing"
+        //    is known only to a drag gesture -- chained together, it would not arrive until the hold ended, by which time the eyes
+        //    would long since have finished merging.
+        .simultaneousGesture(pressLocation)
         // ★ Double Tap (pinching index finger and thumb) = start/stop recording.
         //
         // ⚠️ When the switch is off you must **explicitly** pass `isEnabled: false`, not "leave it alone" --
@@ -544,6 +573,26 @@ struct WatchBotFace: View {
                 //    "the color washes across the screen → the wave lights up as the color recedes."
                 withAnimation(.easeOut(duration: 0.5)) { sweepFading = true }
                 onHold()
+            }
+    }
+
+    /// Its only job is to answer "where the finger pressed." It makes no decisions and takes no part in timing.
+    ///
+    /// ★★ Added in revision sixteen (user: "the two eyes automatically merge together at the place I press").
+    ///
+    /// ## Why a drag with `minimumDistance: 0`
+    /// * A tap (`SpatialTapGesture`) only gives coordinates on **release**, whereas what we want is
+    ///   "where the finger was at the moment of pressing";
+    /// * `LongPressGesture` gives no coordinates at all.
+    ///
+    /// ## Why it is recorded only once, on the first frame
+    /// A finger held down for 2 seconds cannot stay perfectly still. Updating it every frame would make the two eyes
+    /// drift along a little with the finger -- looking like they are stuck to it, rather than "merging toward where it pressed."
+    private var pressLocation: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                guard pressPoint == nil else { return }
+                pressPoint = value.startLocation
             }
     }
 
@@ -878,54 +927,138 @@ struct WatchBotFace: View {
     ///    along with the decision to "cross-fade via `opacity` rather than pick one with `if/else`."
     ///    For the reason for the move see the `eyes` paragraph -- the picker on the iPhone has to lay out the preview with the same code.
 
-    // MARK: - The hold's "whole-screen color change"
+    // MARK: - Hold: eyes merge → spread across the screen
 
-    /// ★★ 2026-10-16 revision fifteen (user's words:
-    ///   "right now tapping the eyes doesn't go straight to a white screen, it spreads those two eyes across the whole screen").
+    /// ★★ 2026-10-16 revision sixteen (user's words:
+    ///   "what I want is for the two eyes, based on where I press down, to automatically merge together at the place I press,
+    ///    and then slowly spread across the whole screen and jump over to the recording side").
     ///
-    /// ## Where revision fourteen went wrong
-    /// Revision fourteen drew a solid circle **growing out from the eyes' position** (radius = progress, starting from the eye group's
-    /// circumscribed circle). The design intent was "color spilling out of the eyes," but on real hardware it looked like **something else**:
-    /// the color patch emerged from the eye area and swelled ring by ring -- the user read it as "**those two eyes** spreading,"
-    /// whereas what he wants is "**the whole screen changing color directly**." The difference is **agency**: one grows
-    /// out locally, the other changes the whole screen at once.
+    /// ## Both versions were rejected; what this one wants is "an origin"
+    /// * Revision fourteen: a solid circle growing out of the eyes' circumscribed circle → the user read it as "the two eyes spreading";
+    /// * Revision fifteen: a full-screen solid color faded in via opacity → clean, but with **no origin** --
+    ///   the color rose out of thin air across the whole screen, with nothing to do with those two eyes.
+    /// This time the user spelled out the order: **merge first, then spread**. So this version is two pieces of geometry,
+    /// the first piece starring the two eyes, and only the second the full screen.
     ///
-    /// ## The fix: the whole screen at once, with opacity as the progress
-    /// Draw a solid-color square **much larger than the screen** (`4 × size`; the part that spills out is
-    /// clipped to the screen edge by `WatchRecorderView`'s three-page row `.clipped()`),
-    /// and use `opacity = holdProgress` to make **the whole block brighten together**.
+    /// ## Two segments (`holdProgress` 0 → 1)
+    /// | Segment | Share | What it is doing |
+    /// |---|---|---|
+    /// | Merge | first **32%** | Each eye slides toward **the point the finger pressed**, growing from a "vertical bar" into a "circle," and they finally overlap into one blob at the press point |
+    /// | Spread | last **68%** | That blob grows round from the press point until it covers the whole screen |
     ///
-    /// ⇒ During those two seconds of holding, what you see is "the screen gradually drowning in this color," no longer
-    ///   "a ball growing out of the eyes." The instant it fills the screen is exactly when the 2 seconds elapse,
-    ///   so it **still serves two roles at once**: it is both the animation and the progress bar (opacity = progress).
+    /// * The merge segment's end size is a **circle of `0.47 × size`**: that number was not pulled out of a hat --
+    ///   the two eyes' area is `2 × 0.235 × 0.375 ≈ 0.176 size²`, and a circle of diameter `d`
+    ///   has area `0.785 d²`; setting the two equal gives `d ≈ 0.47`. That is, **after merging the blob
+    ///   is the same size as before merging**, which reads as "combining," not "shrinking" or "swelling."
+    /// * Both segments pass through `smoothstep` (`3x² − 2x³`): linear interpolation has a
+    ///   corner at both the start and the end, and the eyes feel like they are yanked. Smoothed, it is "light start, fast middle, light finish."
+    /// * The spread segment's end radius is **`2.0 × size`**: the press point can at most be at the corner of the face's square
+    ///   (`0.57√2 ≈ 0.81 size` from the face center), the farthest screen corner is about `1.06 size` from the face center,
+    ///   so from the press point to the farthest corner is at most `1.87 size`. 2.0 leaves a little margin.
     ///
-    /// ## Why it is drawn **above the eyes** (in revision fourteen it was below)
-    /// For "straight to a white screen" to hold, the eyes must in the end be **invisible**. Revision fourteen laid the color underneath
-    /// with the eyes floating on top, so after it filled the screen there were still two eye shapes in the picture (lucky enough to be invisible when the colors matched,
-    /// but the moment the eyes had any stroke or color difference they would show). Covering them from the top layer removes that variable.
+    /// ## Why draw it by hand with `Canvas` rather than `Rectangle` + two `Capsule`s
+    /// The merge segment needs the eyes to **grow round while moving**, whereas `BotFaceEye` draws a capsule
+    ///   (fixed aspect ratio, and carrying `BotFaceStyle`'s `arc` branch). To deform that shape
+    ///   continuously into a circle in SwiftUI, the geometry in `BotFaceStyle` would have to be rewritten -- and
+    ///   that is exactly the piece shared by both sides that must never fork. Drawing a **rounded rectangle** in `Canvas`
+    ///   leaves it untouched: when width = height the rounded rectangle **is** a circle, and the deformation is two parameters of the same `Path`
+    ///   being interpolated, with no second set of geometry.
     ///
-    /// ## Two things that are mandatory
+    /// ## Three things that are mandatory
     /// * `allowsHitTesting(false)` -- it covers the whole screen, and if it were tappable this page would be unusable.
-    /// * The fade-out is left to `sweepFading`, **leaving `holdProgress` alone** -- radius/size and opacity are
-    ///   two separate things, and mixed into one state, "fill first, then exit" cannot be written.
+    /// * Canvas `4.2 × size`: `Canvas` **draws only within its own bounds**, so it has to be much
+    ///   larger than the screen (a 500pt square on 40mm, where the screen is only 162×194).
+    ///   The ring of the circle that gets clipped falls outside the screen and is invisible.
+    /// * The fade-out is left to `sweepFading`, **leaving `holdProgress` alone** -- geometry and exit are two separate things,
+    ///   and mixed into one state, "fill first, then exit" cannot be written.
     @ViewBuilder
-    private var holdFill: some View {
+    private var holdLayer: some View {
         if holdProgress > 0.002 {
-            Rectangle()
-                .fill(tint)
-                // 4 × size far exceeds the screen width on both watch sizes (on 40mm, 4 × 119 = 476pt
-                // against a screen width of 162pt; on 49mm, 4 × 151 = 604pt against a screen width of 205pt) --
-                // but a fixed screen width **cannot** be used: this layer has no access to the screen size, and it has to
-                // cover the whole page. The excess is left to the page's `.clipped()`.
-                .frame(width: size * 4, height: size * 4)
-                // The two `opacity` layers **multiply** (the later modifier applies to the result of the
-                // former), so "progress" and "exit" each carry their own animation without interfering --
-                // written on a single `opacity`, SwiftUI would track only one `value:`.
-                .opacity(holdProgress)
-                .opacity(sweepFading ? 0 : 1)
-                .animation(.easeOut(duration: 0.5), value: sweepFading)
-                .allowsHitTesting(false)
+            Canvas { context, canvasSize in
+                let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+
+                // The press point is converted from "the face's local coordinates" to "canvas coordinates": the two views are concentric
+                //   (both centered in the same ZStack), so they differ by a single translation.
+                let faceSide = size * 1.14
+                let press = pressPoint ?? CGPoint(x: faceSide / 2, y: faceSide / 2)
+                let target = CGPoint(
+                    x: center.x + (press.x - faceSide / 2),
+                    y: center.y + (press.y - faceSide / 2)
+                )
+
+                let merge = Self.smoothstep(min(1, holdProgress / Self.mergeShare))
+                let spread = Self.smoothstep(
+                    max(0, (holdProgress - Self.mergeShare) / (1 - Self.mergeShare))
+                )
+
+                // Start: **matched item by item** with the two idle eyes (the same `BotFaceMetrics`,
+                //   the same `style` deformation). Off by even a little and the eyes visibly jump on the first frame of the press.
+                let geo = style.geometry
+                let restW = BotFaceMetrics.eyeWidth(size) * geo.scaleX
+                let restH = BotFaceMetrics.eyeHeight(size) * geo.scaleY
+                let restGap = (BotFaceMetrics.eyeWidth(size) + BotFaceMetrics.eyeGap(size)) / 2
+                let restY = BotFaceMetrics.eyeRise(size)
+                let blobD = size * 0.47
+
+                for side in [CGFloat(-1), 1] {
+                    let rest = CGPoint(x: center.x + side * restGap, y: center.y + restY)
+                    let eye = CGPoint(
+                        x: rest.x + (target.x - rest.x) * merge,
+                        y: rest.y + (target.y - rest.y) * merge
+                    )
+                    let w = restW + (blobD - restW) * merge
+                    let h = restH + (blobD - restH) * merge
+                    let rect = CGRect(x: eye.x - w / 2, y: eye.y - h / 2, width: w, height: h)
+                    context.fill(
+                        Path(roundedRect: rect, cornerRadius: min(w, h) / 2),
+                        with: .color(tint)
+                    )
+                }
+
+                if spread > 0 {
+                    let from = blobD / 2
+                    let r = from + (size * 2.0 - from) * spread
+                    context.fill(
+                        Path(ellipseIn: CGRect(
+                            x: target.x - r, y: target.y - r, width: r * 2, height: r * 2
+                        )),
+                        with: .color(tint)
+                    )
+                }
+            }
+            .frame(width: size * 4.2, height: size * 4.2)
+            // A little blur. Merging and spreading are both "liquid" affairs; hard edges read as "two geometric shapes
+            //   stacked on top of each other." The radius follows `size`, about 5pt on 40mm.
+            .blur(radius: size * 0.045)
+            .opacity(sweepFading ? 0 : 1)
+            .animation(.easeOut(duration: 0.5), value: sweepFading)
+            .allowsHitTesting(false)
         }
+    }
+
+    /// The share of `holdProgress` the merge segment takes. The rest all goes to the spread segment.
+    ///
+    /// ⚠️ 0.32 is a measured ratio: merging too fast (<0.2) looks like "the eyes flashed once and vanished,"
+    ///    and too slow (>0.45) leaves the spread only half the time, so it grows hurriedly -- what the user wants is
+    ///    "spreading **slowly** across the whole screen."
+    private static let mergeShare: CGFloat = 0.32
+
+    /// Smooth interpolation: `3x² − 2x³`. The derivative is 0 at both ends, so the eyes neither start nor finish by "being yanked."
+    private static func smoothstep(_ x: CGFloat) -> CGFloat {
+        let t = min(1, max(0, x))
+        return t * t * (3 - 2 * t)
+    }
+
+    /// How much `figure`'s two eyes yield while the finger is down.
+    ///
+    /// ⚠️ **This handoff is mandatory**: `holdLayer` is the upper layer in the ZStack, and from the first frame of the press
+    ///    it is already drawing two eyes (using the same geometry). If `figure` is not dismissed, you get two pairs of eyes
+    ///    overlapping -- invisible on the base tier (a plain capsule), but with the `arc` tiers in `BotFaceStyle`
+    ///    (`happy` / `sad`) it shows: an arc underneath and a straight bar on top.
+    ///    0.06 of progress ≈ 0.12 seconds, too fast to tell this is a "hand-off."
+    private var figureOpacity: Double {
+        guard holdProgress > 0.002 else { return 1 }
+        return Double(max(0, 1 - holdProgress / 0.06))
     }
 }
 
