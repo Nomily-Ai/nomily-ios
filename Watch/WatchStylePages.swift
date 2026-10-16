@@ -1,6 +1,10 @@
 import SwiftUI
 
-// MARK: - Standalone pages reached from the corner badges
+// MARK: - Standalone pages reached from the menus
+//
+// ★ Seventh revision, 2026-10-16: the pages below **haven't changed** — what changed is how you get into them:
+// they used to be entered by tapping the four corner badges on the home screen, now via the menus that slide out when swiping left/right on the
+// home screen (see `WatchHomeMenu` / `WatchMenuPreferences`). Not a line of the pages themselves changed.
 //
 // ★ Second revision, 2026-10-15: these four pages used to be "a small menu expanded in place on the home screen", which the user
 // explicitly rejected — "tapping the 4 menus should open a separate page". After switching to pages:
@@ -294,6 +298,27 @@ struct WatchSettingsView: View {
                 }
             }
 
+            // ★ Seventh revision, 2026-10-16: quick menu.
+            //
+            // User's words: "the watch's quick-recording menu bar needs a place to add quick
+            // menu settings; that setting is a component you tap to add inside the watch's Wi-Fi menu bar".
+            // The user likened this page to "the Wi-Fi-style list in system settings" — so "add quick menu" becomes a row on this page,
+            // tapped through to make selections.
+            //
+            // ⚠️ This row **must not** exist only in the settings page: the side menu pages off the home screen also carry the same
+            //    entry at the bottom (`WatchRecorderView.editTile`). When a user swipes to an empty page on the home screen,
+            //    their first instinct is "add one here", not "swipe back to the middle, open settings, and dig down to here".
+            NavigationLink {
+                WatchQuickMenuSettingsView()
+            } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(L10n.Watch.quickMenu)
+                    Text(L10n.Watch.quickMenuHint)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Button {
                 store.reset()
             } label: {
@@ -310,6 +335,64 @@ struct WatchSettingsView: View {
             // (The shake toggle is therefore deliberately not in this store either; see `WatchRecordingPrefs`.)
         }
         .navigationTitle(L10n.Watch.menuSettings)
+    }
+}
+
+// MARK: - Quick menu (★ new in the seventh revision, 2026-10-16)
+
+/// "Which menus sit on either side of the home screen".
+///
+/// User's words: "the watch's quick-recording menu bar needs a place to add quick menu settings,
+/// and that setting is a component you tap to add inside the watch's Wi-Fi menu bar".
+///
+/// One toggle per row; whatever is checked appears in the home screen's side swipe menus (see `WatchHomeMenu` and
+/// `WatchMenuPreferences`）。
+///
+/// ## Why **no** reordering is offered
+/// The order is fixed to `WatchHomeMenu.allCases`. If users could drag to reorder, unchecking and rechecking
+/// would send an item to the end — menu items would jump around between the left and right pages, and finding the same feature next time means searching all over again.
+/// Dragging is hard to do precisely on the watch face anyway; trading "works" for "easily scrambled" isn't worth it.
+struct WatchQuickMenuSettingsView: View {
+    @ObservedObject private var prefs = WatchMenuPreferences.shared
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(WatchHomeMenu.allCases) { item in
+                    Toggle(isOn: binding(for: item)) {
+                        HStack(spacing: 6) {
+                            Image(systemName: item.symbol)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 16)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.title)
+                                    .lineLimit(1)
+                                // Small print saying "what you'll see inside". On the watch, "Appearance" alone
+                                // doesn't say what it adjusts (same reason as `L10n.Watch.styleBreathing`).
+                                Text(item.subtitle)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+                }
+            } footer: {
+                // Says clearly "where it went after checking". After checking items on this page, back on the home screen the user has to **swipe
+                // sideways** to see them — without this line, they'll think checking did nothing.
+                Text(L10n.Watch.quickMenuFooter)
+                    .font(.system(size: 10))
+            }
+        }
+        .navigationTitle(L10n.Watch.quickMenu)
+    }
+
+    private func binding(for item: WatchHomeMenu) -> Binding<Bool> {
+        Binding(
+            get: { prefs.isOn(item) },
+            set: { prefs.set(item, on: $0) }
+        )
     }
 }
 

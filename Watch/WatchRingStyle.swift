@@ -155,62 +155,15 @@ struct WatchRingStyle: Equatable, Codable {
     }
 }
 
-/// Which page each of the 4 corner dots around the ring leads to.
-///
-/// ★ Second revision, 2026-10-15: originally the 4 dots **expanded a little menu in place** on the home screen
-/// (colour / gradient / breathing light / reset). The user's own words were
-/// "clicking the 4 menus should bring up a separate page", so it became 4 separate pages.
-///
-/// ★ Fifth revision, 2026-10-15 (user: "put the top-right breathing-light rate into the top-left menu, and then
-/// the top-right is the watch's transfer history"): the breathing light **merged into the top-left appearance page**, and the top-right became transfer history.
-///
-/// | Corner dot | Page |
-/// |---|---|
-/// | Top-left | Appearance (colour + gradient + **breathing light**, see `WatchColorStyleView`) |
-/// | Top-right | **Transfer history** (see `WatchTransferHistoryView`) |
-/// | Bottom-left | Language (previously a text link at the bottom of the home screen; the user asked for "the language to be in the menu too") |
-/// | Bottom-right | Settings (version + shake + restore defaults) |
-///
-/// Why the breathing light belongs top-left: like colour and gradient it's part of "what the ring looks like", and only the three together make up
-/// the complete **appearance**; splitting it across two corner dots would make the user hop between pages to adjust it. And the slot freed up top-right
-/// went to transfer history — that's **state**, not appearance, and never belonged alongside colour tuning anyway.
-enum WatchRingCorner: String, CaseIterable, Identifiable {
-    case appearance, history, language, settings
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .appearance: return L10n.Watch.styleAppearance
-        case .history:    return L10n.Watch.transferHistory
-        case .language:   return L10n.Settings.language
-        case .settings:   return L10n.Watch.menuSettings
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .appearance: return "paintpalette.fill"
-        case .history:    return "arrow.up.arrow.down.circle.fill"
-        case .language:   return "globe"
-        case .settings:   return "gearshape.fill"
-        }
-    }
-
-    /// Which page this corner dot leads to. All four are **separate pages** (the user asked for "a separate page").
-    ///
-    /// ⚠️ The language page reuses `WatchLanguageView` (which also doubles as the whole-tree
-    /// rebuild of `LocalizedWatchRoot`), rather than starting another copy here.
-    @ViewBuilder
-    var destination: some View {
-        switch self {
-        case .appearance: WatchColorStyleView()
-        case .history:    WatchTransferHistoryView()
-        case .language:   WatchLanguageView()
-        case .settings:   WatchSettingsView()
-        }
-    }
-}
+// MARK: - Menu item definitions moved to `WatchMenuPreferences.swift`
+//
+// ★ Seventh revision, 2026-10-16: the `WatchRingCorner` that used to be here (four corner dots, each leading to a page)
+// moved out along with the home screen redesign — the four items are no longer pinned to the four corners but became **side menus
+// that appear on a left/right swipe**, and the user ticks which items go in. The new definition is `WatchHomeMenu`, see
+// `WatchMenuPreferences.swift`。
+//
+// Why leave no `typealias` for compatibility: there is no external caller at all (this enum is used only inside this target),
+// and an alias layer would only give "how many kinds of menu item are there" two answers.
 
 /// Stored in the watch-local `UserDefaults`. Same approach as `RecorderAliasStore`:
 /// JSON + a rebuildable cache; if it cannot be decoded, treat it as never saved (a preference is not worth raising an error for,

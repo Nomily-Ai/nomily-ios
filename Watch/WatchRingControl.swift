@@ -3,6 +3,17 @@ import SwiftUI
 /// The wrist recorder's main control: an Activity-style pair of rings that
 /// doubles as the record button.
 ///
+/// ★ Seventh revision, 2026-10-16: **nothing in the UI uses this any more.**
+/// The centre of the home screen has changed from this ring to a blinking Bot face (`WatchBotFace`) —
+/// the user's own words were "remove the current home screen's record button and change it to something as lively as the bot". This file is kept
+/// because three things about it will still be asked about in the near term; delete it and only git history can answer:
+///   · the whole approach to the idle "ring turning by itself" (one flip + `repeatForever`, zero app-side cost);
+///   · the recording-state comet / ripples / chunk progress arc ("you can tell it's still recording from across the room");
+///   · and the list of which things to stop and which to keep when `always-on` dims.
+/// The `PrimaryHandGesture` it references has already moved to `WatchBotFace.swift` (the landing spot changed).
+///
+/// ---
+///
 /// Three things move while a take is running, and each one is saying
 /// something different:
 ///
@@ -498,30 +509,10 @@ struct WatchRingControl: View {
 }
 
 // MARK: - Double Tap
-
-/// Binds the **double tap** (index finger and thumb pinch, which Apple calls Double Tap) to this page's main button.
-///
-/// ## Why a separate `ViewModifier`
-/// `.handGestureShortcut(_:isEnabled:)` is an API that appeared only in **watchOS 11.0**, while this
-/// project's `WATCHOS_DEPLOYMENT_TARGET` is **10.0**. Splitting it into a modifier lets one explicit
-/// `#available` branch spell out two things:
-///
-/// * **11 and above**: explicitly declare that this button is the gesture's landing point, and that it is **controlled by the switch**
-///   (`isEnabled`). Here you must explicitly write `isEnabled: false` rather than "leave it alone" --
-///   if you only read the switch in without touching the modifier, the system still routes Double Tap to this page's
-///   main button, so it fires even with the switch off.
-/// * **10.x**: do nothing. From watchOS 10.1 the system routes Double Tap by itself to the page's
-///   single main button (this page has only the one ring `Button`; the four corner dots are
-///   `NavigationLink` and don't take part in the primary-action decision), so on that version the
-///   gesture works anyway — no API means **no switch**, which is a system limitation, not an omission.
-private struct PrimaryHandGesture: ViewModifier {
-    let enabled: Bool
-
-    func body(content: Content) -> some View {
-        if #available(watchOS 11.0, *) {
-            content.handGestureShortcut(.primaryAction, isEnabled: enabled)
-        } else {
-            content
-        }
-    }
-}
+//
+// ★ Seventh revision, 2026-10-16: the `PrimaryHandGesture` modifier **moved out**, and now lives in
+// `WatchBotFace.swift`. The reason for the move isn't that it changed, but that its landing spot did —
+// the centre of the home screen is no longer this ring button but that Bot face; that modifier was always
+// about "binding a gesture to the current page's primary control", which is a **control**'s business, not a **ring**'s.
+//
+// It is still `internal`, so this page (if it ever returns to the home screen) can still use it.

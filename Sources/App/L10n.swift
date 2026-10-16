@@ -925,6 +925,89 @@ enum L10n {
             )
         }
 
+        // MARK: Home screen bot (★ seventh revision 2026-10-16)
+        //
+        // The center of the home screen swapped the ring button for a blinking bot face. The user's words:
+        // "like the Grok Bot, with two eyes... remove the recording button on the current home screen and make it a lively bot;
+        // recording starts only after long-pressing its eye for 2s".
+        //
+        // ⚠️ The `holdToRecord` hint **cannot be skipped**. "Hold for 2 seconds" is an **invisible** interaction:
+        //    without it, first-time users will tap once, find nothing happens, and give up.
+        static var holdToRecord: String {
+            NSLocalizedString("watch.hold_to_record", value: "Hold 2s to record",
+                              comment: "Watch home: caption under the bot face, explains the long-press gesture")
+        }
+        /// A line read by screen readers while recording (visually the home screen shows the timer, no text).
+        static var recordingBusy: String {
+            NSLocalizedString("watch.recording_busy", value: "Recording",
+                              comment: "Watch home: accessibility value while a take is running")
+        }
+
+        // MARK: Side swipe menus + quick menu settings (★ seventh revision 2026-10-16)
+        //
+        // User's words: "the 4 menus should appear by swiping left or right... the quick-recording menu bar on the watch
+        // needs a place to add quick menu settings; that setting is a component you tap to add inside the watch's Wi-Fi
+        // menu bar".
+        /// The row in Settings, and also the title of the selection page.
+        static var quickMenu: String {
+            NSLocalizedString("watch.quick_menu", value: "Quick Menu",
+                              comment: "Watch settings: which items show in the home screen's side menus")
+        }
+        static var quickMenuHint: String {
+            NSLocalizedString("watch.quick_menu_hint", value: "Swipe left or right on the home screen",
+                              comment: "Watch settings: subtitle explaining where these items appear")
+        }
+        /// The dashed entry at the bottom of the menu page.
+        static var quickMenuAdd: String {
+            NSLocalizedString("watch.quick_menu_add", value: "Add a shortcut",
+                              comment: "Watch home: dashed entry at the bottom of a side menu")
+        }
+        /// Empty state when one side's menu has nothing checked.
+        static var quickMenuEmpty: String {
+            NSLocalizedString("watch.quick_menu_empty", value: "No shortcuts here yet",
+                              comment: "Watch home: a side menu with nothing enabled")
+        }
+        /// Note at the bottom of the selection page. **Must make clear "where to look after checking"** — back on the home screen you have to swipe sideways
+        /// to see it; without this line users will think checking did nothing.
+        static var quickMenuFooter: String {
+            NSLocalizedString(
+                "watch.quick_menu_footer",
+                value: "Enabled items appear when you swipe left or right from the home screen.",
+                comment: "Watch quick-menu settings: footer explaining where the items show up"
+            )
+        }
+        /// Empty state of the pending-transfer queue page (this page can now be reached directly from the menu, so "empty" is normal).
+        static var queueEmpty: String {
+            NSLocalizedString("watch.queue_empty", value: "Nothing to send",
+                              comment: "Watch queue page: empty state")
+        }
+
+        // The small print under each row on the selection page. One sentence saying "what you'll see inside".
+        static var menuHintAppearance: String {
+            NSLocalizedString("watch.menu_hint_appearance", value: "Colour, gradient and breathing",
+                              comment: "Watch quick menu: what the Appearance page holds")
+        }
+        static var menuHintHistory: String {
+            NSLocalizedString("watch.menu_hint_history", value: "Which recordings reached the phone",
+                              comment: "Watch quick menu: what the Transfers page holds")
+        }
+        static var menuHintLanguage: String {
+            NSLocalizedString("watch.menu_hint_language", value: "Language used on the watch",
+                              comment: "Watch quick menu: what the Language page holds")
+        }
+        static var menuHintSettings: String {
+            NSLocalizedString("watch.menu_hint_settings", value: "Gestures, version, reset",
+                              comment: "Watch quick menu: what the Settings page holds")
+        }
+        static var menuHintQueue: String {
+            NSLocalizedString("watch.menu_hint_queue", value: "Clips still waiting to upload",
+                              comment: "Watch quick menu: what the queue page holds")
+        }
+        static var menuHintAbout: String {
+            NSLocalizedString("watch.menu_hint_about", value: "Build number on the watch",
+                              comment: "Watch quick menu: what the version page holds")
+        }
+
         // MARK: Ring appearance (directly called on the watch face)
         //
         // ⚠️ Always use `static var` (switches language at runtime) + provide inline English fallback via `value:`
