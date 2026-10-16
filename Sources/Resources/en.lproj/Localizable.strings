@@ -983,3 +983,47 @@
 "trash.artefact_audio" = "Audio";
 "trash.artefact_transcript" = "Transcript";
 "trash.artefact_summary" = "Summary";
+
+/* ===== Background tasks (2026-10-16, twelfth pass) =====
+   Summaries / translations / audio conversions are queued and can carry on
+   after the user leaves the app, so they need a place to be seen. */
+
+"jobs.kind_transcribe" = "Transcription";
+"jobs.kind_summarize" = "Summary";
+"jobs.kind_translate" = "Translation";
+"jobs.kind_export" = "Audio export";
+
+"jobs.detail_translated_transcript" = "Transcript → %@";
+"jobs.detail_translated_summary" = "Summary → %@";
+
+"jobs.source_prompt" = "The summary prompt";
+"jobs.source_language" = "The target language";
+"jobs.source_format" = "The export format";
+"jobs.source_audio" = "The audio file";
+"jobs.source_transcript" = "The transcript";
+"jobs.source_summary" = "The summary";
+"jobs.source_missing" = "%@ is no longer available.";
+"jobs.no_runner" = "This kind of task isn't supported in this build.";
+
+"jobs.page_title" = "Background tasks";
+"jobs.empty" = "Nothing here right now. Summaries, translations and audio conversions you start will show up on this page.";
+"jobs.section_active" = "In progress";
+"jobs.section_finished" = "Finished";
+"jobs.clear_finished" = "Clear finished";
+"jobs.footer" = "These tasks keep running when you switch away or lock your phone. If the app is closed, they pick up again the next time you open it.";
+"jobs.can_leave_hint" = "You can leave this screen — it keeps running in the background.";
+
+"jobs.status_waiting" = "Waiting";
+"jobs.status_running" = "Running";
+"jobs.status_done" = "Done";
+"jobs.status_gave_up" = "Gave up";
+"jobs.attempts" = "Attempt %1$d of %2$d";
+"jobs.progress" = "Part %1$d of %2$d";
+
+"jobs.retry" = "Try again";
+"jobs.cancel" = "Cancel";
+"jobs.remove" = "Remove";
+
+"jobs.open_queue" = "Background tasks";
+"jobs.open_queue_footer" = "Summaries, translations and audio conversions carry on after you leave the app.";
+"jobs.enqueued_toast" = "%@ added to background tasks.";

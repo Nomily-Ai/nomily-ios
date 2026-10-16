@@ -6,12 +6,18 @@ struct ClipDetailView: View {
 
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var transcription: TranscriptionService
+    /// The persistence queue for summary / translation / format conversion.
+    ///
+    /// ⚠️ Must be **injected separately**, not fetched via `env.jobs`: a nested `ObservableObject`'s
+    ///    `@Published` changes won't invalidate a view that only observes the parent object (same as the
+    ///    `watch` comment in `NomilyApp`). Going through `env.jobs`, the page would never update when a job finishes —
+    ///    precisely the failure this change can least afford.
+    @EnvironmentObject private var jobs: JobQueue
     @EnvironmentObject private var configService: ConfigService
     @Environment(\.dismiss) private var dismiss
     @StateObject private var player = AudioPlaybackController()
     @StateObject private var languages = LanguageService()
     @State private var transcript: TranscriptDocument?
-    @State private var transcribeState: TranscribeUIState = .idle
     @State private var deleteAudioAlert = false
     @State private var deleteTranscriptAlert = false
     @State private var deleteSummaryAlert = false
@@ -29,12 +35,22 @@ struct ClipDetailView: View {
     @State private var showRetranscribeChoice = false
     @State private var showTranslatePicker = false
     @State private var translateTarget: TranslateTarget = .transcript
-    @State private var translatingTranscript = false
-    @State private var translatingSummary = false
-    @State private var translateError: String?
-    @State private var isExporting = false
+    // ★ Twelfth revision, 2026-10-16: the three `@State` busy flags — `translatingTranscript` / `translatingSummary` /
+    // `isExporting` — are **all deleted**, replaced by values derived from `jobs`
+    // (see the `activeJob(_:target:)` section below).
+    //
+    // The reason is the very motivation of this change: in-memory flags leave nothing behind once the system ends the app,
+    // while jobs are still queued on disk. In that state the UI would show "not running" — worse than showing nothing at all,
+    // — users would think the job was lost, tap again, and end up with two queued.
+    //
+    // The two `@State` properties `translateError` / `exportError` and their two alerts are deleted along with them:
+    // jobs can now fail **while the user isn't looking**, and an alert's "pop up on the spot" form simply
+    // can't cover that; they now show in place within their own sections (`failedRow`) — visible and retryable.
     @State private var exportShareURL: URL?
-    @State private var exportError: String?
+    /// If the user **doesn't leave this page** after tapping export, push the share sheet straight out when it finishes (same as
+    /// before the twelfth revision). If they leave, the `exportReady` row covers it — it was already there.
+    /// The flag disappears together with the view, which fits the semantics exactly.
+    @State private var pendingExportShare = false
     @State private var showVADPreview = false
     @State private var showMindMap = false
     @State private var showExportChoice = false
@@ -132,7 +148,7 @@ struct ClipDetailView: View {
         .sheet(isPresented: $showLocalesPicker) {
             AzureLocalesPickerSheet(initial: lastLocalesPicked) { codes in
                 lastLocalesPicked = codes
-                Task { await runTranscribe(locales: codes) }
+                runTranscribe(locales: codes)
             }
         }
         .confirmationDialog(L10n.ClipDetail.transcribe, isPresented: $showTranscribeChoice, titleVisibility: .hidden) {
@@ -141,12 +157,12 @@ struct ClipDetailView: View {
             Button(L10n.Common.cancel, role: .cancel) {}
         }
         .confirmationDialog(L10n.ClipDetail.exportAudio, isPresented: $showExportChoice, titleVisibility: .visible) {
-            Button(L10n.ClipDetail.exportAsM4A) { Task { await runExport(.m4a) } }
-            Button(L10n.ClipDetail.exportAsWAV) { Task { await runExport(.wav) } }
+            Button(L10n.ClipDetail.exportAsM4A) { enqueueExport(.m4a) }
+            Button(L10n.ClipDetail.exportAsWAV) { enqueueExport(.wav) }
             Button(L10n.Common.cancel, role: .cancel) {}
         }
         .confirmationDialog(L10n.ClipDetail.retranscribe, isPresented: $showRetranscribeChoice, titleVisibility: .hidden) {
-            Button(L10n.ASR.transcribeAuto) { Task { await runTranscribe(locales: nil) } }
+            Button(L10n.ASR.transcribeAuto) { runTranscribe(locales: nil) }
             Button(L10n.ASR.specifyLanguages) { showLocalesPicker = true }
             Button(L10n.Common.cancel, role: .cancel) {}
         }
@@ -188,21 +204,15 @@ struct ClipDetailView: View {
                 guard !lang.code.isEmpty else { return }
                 env.config.config.lastTargetLang = lang.code
                 env.config.scheduleSave()
-                Task { await runTranslate(target: translateTarget, languageName: lang.name) }
+                enqueueTranslate(target: translateTarget, languageName: lang.name)
             }
         }
-        .alert(
-            L10n.Summarize.error,
-            isPresented: Binding(
-                get: { translateError != nil },
-                set: { if !$0 { translateError = nil } }
-            ),
-            presenting: translateError
-        ) { _ in
-            Button(L10n.Common.ok, role: .cancel) { translateError = nil }
-        } message: { msg in
-            Text(msg)
-        }
+        // ★ Twelfth revision: these two alerts (translation failed / export failed) are gone.
+        //
+        // Jobs can now fail **while the user isn't looking**, and alerts can only fire "right then and there";
+        // worse, they'd **fire repeatedly** — the `lastError` in the ledger sticks around,
+        // retriggering on every UI refresh. Replaced with in-place display in each section
+        // (`failedRow`): visible, retryable, and never popping up on its own.
         .sheet(
             isPresented: Binding(
                 get: { exportShareURL != nil },
@@ -214,18 +224,9 @@ struct ClipDetailView: View {
                 ShareSheet(items: [url])
             }
         }
-        .alert(
-            L10n.Summarize.error,
-            isPresented: Binding(
-                get: { exportError != nil },
-                set: { if !$0 { exportError = nil } }
-            ),
-            presenting: exportError
-        ) { _ in
-            Button(L10n.Common.ok, role: .cancel) { exportError = nil }
-        } message: { msg in
-            Text(msg)
-        }
+        // Follow along whenever the queue changes: when a job on this recording finishes / gives up, the summary, translation,
+        // and share entry all have to update.
+        .onChange(of: jobs.jobs) { _ in jobsChanged() }
     }
 
     // MARK: - hero card
@@ -284,6 +285,16 @@ struct ClipDetailView: View {
         transcription.inFlight.contains(item.name)
     }
 
+    /// This recording's entry in the transcription queue that gave up after max attempts.
+    ///
+    /// The criterion is identical to the `asr.queue_stuck` row on the settings page (`attempts >= maxAttempts`);
+    /// deliberately not inventing a second standard — if the same fact reads differently in two places, users won't know which to believe.
+    private var stuckTranscription: TranscriptionService.PendingJob? {
+        transcription.pending.first {
+            $0.name == item.name && $0.attempts >= TranscriptionService.maxAttempts
+        }
+    }
+
     @ViewBuilder
     private var transcriptSection: some View {
         Section {
@@ -298,20 +309,38 @@ struct ClipDetailView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
-            } else if case .failed(let msg) = transcribeState {
-                Label(msg, systemImage: "exclamationmark.bubble")
-                    .foregroundStyle(.orange)
-                    .font(.callout)
-                Button(L10n.Common.tryAgain) { Task { await runTranscribe() } }
-            }
-
-            if translatingTranscript {
-                HStack(spacing: 8) {
-                    ProgressView()
-                    Text(L10n.ClipDetail.translating)
-                        .foregroundStyle(.secondary)
+            } else if let stuck = stuckTranscription {
+                // Transcription used its three attempts and gave up.
+                //
+                // This state used to be visible only in the settings page row (`asr.queue_stuck_detail`),
+                // but the user pressed the button **on this recording** — all they'd feel is "nothing happened".
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(L10n.Jobs.statusGaveUp, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                    if let reason = stuck.lastError {
+                        Text(reason)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    // Retrying is just enqueueing again — `enqueue` resets the attempt counter,
+                    // the same semantics as `JobQueue.retry(id:)`.
+                    Button(L10n.Jobs.retry) { runTranscribe(locales: stuck.locales) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                 }
             }
+
+            // Transcript translation: shown in place here whether running or given up.
+            //
+            // This row used to hang off the in-memory `translatingTranscript`; switch away and back and it
+            // was gone — users couldn't tell whether the job was still alive and would most likely tap translate again.
+            if let job = activeJob(.translate, target: "transcript") {
+                runningRow(job, L10n.ClipDetail.translating)
+            } else if let job = failedJob(.translate, target: "transcript") {
+                failedRow(job)
+            }
+            if let job = lastFinishedJob(.translate, target: "transcript") { notesRow(job) }
 
             if let doc = transcript {
                 Text(transcriptPreview(doc))
@@ -322,7 +351,7 @@ struct ClipDetailView: View {
                 NavigationLink(L10n.ClipDetail.viewFullTranscript) {
                     TranscriptFullView(document: doc)
                 }
-            } else if item.hasAudio, !isTranscribing, case .idle = transcribeState {
+            } else if item.hasAudio, !isTranscribing {
                 Button {
                     if env.config.config.asrProviders.hasConfiguredProvider {
                         showTranscribeChoice = true
@@ -342,7 +371,7 @@ struct ClipDetailView: View {
             HStack {
                 Text(L10n.ClipDetail.transcript)
                 Spacer()
-                if transcript != nil, !isTranscribing, case .idle = transcribeState {
+                if transcript != nil, !isTranscribing {
                     Button { tapTranslate(.transcript) } label: {
                         Image(systemName: "character.bubble")
                             .font(.caption)
@@ -361,20 +390,19 @@ struct ClipDetailView: View {
 
     private func triggerTranscribe(locales: [String]?) {
         if env.config.config.asrProviders.hasConfiguredProvider {
-            Task { await runTranscribe(locales: locales) }
+            runTranscribe(locales: locales)
         } else {
             showNoASR = true
         }
     }
 
+    /// Forwards to `JobRunners.summarizableText` — **keep exactly one implementation**.
+    ///
+    /// After the twelfth revision summarizing gained a second entry point (the `JobQueue` runner, which reads the transcript from disk),
+    /// and that path must be fed the exact same text. Written separately in two places they will eventually drift, manifesting as
+    /// "the same template producing summaries with different structures a day apart" — a problem no one can debug.
     private static func textForSummarization(_ doc: TranscriptDocument) -> String {
-        if !doc.segments.isEmpty, doc.segments.contains(where: { $0.speaker != nil && !$0.speaker!.isEmpty }) {
-            return doc.segments.map { $0.formatted() }.joined(separator: "\n")
-        }
-        if !doc.segments.isEmpty {
-            return doc.segments.map(\.text).joined(separator: "\n")
-        }
-        return doc.text
+        JobRunners.summarizableText(text: doc.text, segments: doc.segments)
     }
 
     private func transcriptPreview(_ doc: TranscriptDocument) -> String {
@@ -382,22 +410,161 @@ struct ClipDetailView: View {
         return String(doc.segments.map(\.text).joined(separator: " ").prefix(200))
     }
 
-    private func runTranscribe(locales: [String]? = nil) async {
+    /// Start a transcription.
+    ///
+    /// ★ Twelfth revision, 2026-10-16: switched to `enqueue` **instead of** `transcribe`.
+    ///
+    /// The difference only shows in the one case of "app killed midway": a directly-run job vanishes into thin air
+    /// the moment the process is gone; the user comes back the next day to an untranscribed recording, with no way of knowing an attempt
+    /// was ever made. `enqueue` persists first, runs second, and `resumePending()` picks it up on next launch —
+    /// exactly what the user's "exit to the background first and check when it's done" asked for.
+    ///
+    /// No longer `async`: enqueueing is synchronous, and the real waiting is driven into the UI by `transcription.inFlight`
+    /// / `pending` (see `isTranscribing` and `stuckTranscription`).
+    /// Keeping `async` would make every call site warn "no 'async' operations occur within
+    /// 'await' expression", and this project builds with zero warnings.
+    private func runTranscribe(locales: [String]? = nil) {
         guard let fileURL = item.url else { return }
-        transcribeState = .idle
-        do {
-            _ = try await env.transcription.transcribe(fileURL: fileURL, locales: locales)
-        } catch is CancellationError {
-            // User hit Cancel — fall back to the idle state without a scary
-            // error banner.
-        } catch let urlError as URLError where urlError.code == .cancelled {
-            // Same story, but as surfaced by URLSession's cancellation path.
-        } catch {
-            transcribeState = .failed(error.localizedDescription)
+        env.transcription.enqueue(fileURL: fileURL, locales: locales)
+    }
+
+    // MARK: - Job queue integration (★ twelfth revision 2026-10-16)
+
+    /// The running job of this kind on this recording (the UI uses it for the button's busy state).
+    private func activeJob(_ kind: JobKind, target: String? = nil) -> Job? {
+        jobs.activeJobs(for: item.name).first { job in
+            job.kind == kind && (target == nil || job.translateTarget == target)
+        }
+    }
+
+    /// The job of this kind on this recording that **gave up after max attempts**.
+    ///
+    /// "Has `finishedAt` and a `lastError`" means gave up — on success `lastError` is
+    /// nil, and so it is on cancellation; the three states separate on these two fields alone (see `JobQueue.State`).
+    /// Once the user starts again (`enqueue` clears `lastError`) or taps retry, this row disappears on its own.
+    private func failedJob(_ kind: JobKind, target: String? = nil) -> Job? {
+        jobs.jobs.first { job in
+            job.clipName == item.name && job.kind == kind
+                && job.finishedAt != nil && job.lastError != nil
+                && (target == nil || job.translateTarget == target)
+        }
+    }
+
+    /// The most recently **finished successfully** job of a given kind (used to show the result note).
+    ///
+    /// Only "success" counts (`finishedAt` set and `lastError` nil): the reason for failure has already been
+    /// stated once in `failedRow`; repeating it here would only make people think there are two problems.
+    /// "Most recent" rather than any entry: one recording can be translated into several languages in turn, and the note
+    /// (say, "truncated") must match **the content the user is looking at now**.
+    private func lastFinishedJob(_ kind: JobKind, target: String? = nil) -> Job? {
+        jobs.jobs
+            .filter {
+                $0.clipName == item.name && $0.kind == kind
+                    && $0.finishedAt != nil && $0.lastError == nil
+                    && (target == nil || $0.translateTarget == target)
+            }
+            .max { ($0.finishedAt ?? .distantPast) < ($1.finishedAt ?? .distantPast) }
+    }
+
+    /// The little result-note block (fallback channel / chunked / body truncated).
+    ///
+    /// Draws nothing when there's no content. **Why it must exist**: the note is "part of the result",
+    /// and such jobs usually finish while the user isn't looking — without keeping it here, the question "I set
+    /// Open Router, so why was this generated by Ollama?" goes unanswered forever; and a truncated
+    /// body reads exactly like a complete one.
+    @ViewBuilder
+    private func notesRow(_ job: Job) -> some View {
+        if job.wasTruncated == true {
+            Label(L10n.Summarize.truncatedWarning, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+        ForEach(job.notes ?? [], id: \.self) { note in
+            Label(note, systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// The "in progress" row.
+    ///
+    /// When the user starts it here, switches away, and comes back, this is the only place they can see "it's still running"
+    /// — the row used to exist only while the `await` hadn't returned (in-memory flag), vanishing after a switch away and back.
+    @ViewBuilder
+    private func runningRow(_ job: Job, _ label: String) -> some View {
+        HStack(spacing: 8) {
+            ProgressView()
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .foregroundStyle(.secondary)
+                if let done = job.progressDone, let total = job.progressTotal {
+                    Text(L10n.Jobs.progress(done, total))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                } else if let detail = job.detail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
+    /// The "gave up after max attempts" row + retry in place.
+    ///
+    /// **Must be shown**: coming back after switching away, if the content still looks old, users will think it's still running
+    /// (or that the button is broken), and will most likely tap again — queueing a second job.
+    @ViewBuilder
+    private func failedRow(_ job: Job) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(L10n.Jobs.statusGaveUp, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(.orange)
+            if let error = job.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Button(L10n.Jobs.retry) { jobs.retry(id: job.id) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+    }
+
+    /// Follow along whenever the queue changes.
+    ///
+    /// ⚠️ Hooked on `.onChange(of: jobs.jobs)` rather than waiting for the runner to call back into the view: jobs very often
+    ///    finish while this page **doesn't even exist** (exactly the scenario the twelfth revision set out to support).
+    ///    So the only thing to do here is re-read the output from **disk**.
+    ///
+    /// The cost is one re-read per chunk-progress tick (a few dozen small file reads); the payoff is an implementation needing
+    /// no extra state synchronization at all. Worth it.
+    private func jobsChanged() {
+        loadSummary()
+        loadTranslation()
+        loadTranslatedSummary()
+
+        // Export finished → share sheet (same "pop up when done" behavior as before the twelfth revision).
+        //
+        // Pops only if the user **didn't leave this page** after tapping export: the flag disappears with the view,
+        // and if they left, the `exportReady` row covers it — it was already there; nothing new to add.
+        if pendingExportShare, activeJob(.export) == nil, failedJob(.export) == nil,
+           let staged = ExportCenter.shared.ready(forOrigin: item.name) {
+            pendingExportShare = false
+            exportShareURL = ExportCenter.shared.url(for: staged)
         }
     }
 
     // MARK: - translation (Live-produced or on-demand via tapTranslate(.transcript))
+
+    /// The transcript translation is running.
+    ///
+    /// Computed instead of an `@State` — see the comment at the top of the file. All three flags follow the same pattern, so
+    /// "the UI says it's running when it stopped long ago" (the state after the app is killed) becomes structurally impossible.
+    private var translatingTranscript: Bool { activeJob(.translate, target: "transcript") != nil }
+    private var translatingSummary: Bool { activeJob(.translate, target: "summary") != nil }
+
 
     @ViewBuilder
     private var translationSection: some View {
@@ -461,57 +628,17 @@ struct ClipDetailView: View {
         showTranslatePicker = true
     }
 
-    private func runTranslate(target: TranslateTarget, languageName: String) async {
-        // ★ 2026-10-15: Whole-piece translation is a long job (translating a transcript of dozens of minutes in one go can run a long while),
-        // so it must stay alive in the background. Held only here — the live translation path doesn't hold one (it runs continuously,
-        // and holding it would mean never letting go; during recording `LiveModel` already holds
-        // the `.recording` token).
-        BackgroundKeeper.shared.acquire(.summary)
-        defer { BackgroundKeeper.shared.release(.summary) }
-        switch target {
-        case .transcript:
-            guard let doc = transcript else { return }
-            let source = Self.textForSummarization(doc)
-            translatingTranscript = true
-            defer { translatingTranscript = false }
-            do {
-                let output = try await LLMCompletionService.translate(
-                    text: source,
-                    targetLanguage: languageName,
-                    config: env.config.config
-                )
-                if output.truncated { translateError = L10n.Summarize.truncatedWarning }
-                let urls = StorageLocations.translationURLs(for: item.name)
-                try? output.text.data(using: .utf8)?.write(to: urls.txt, options: .atomic)
-                // The Live-produced `.translated.json` carries word-level
-                // timestamps for a specific target language; once the user
-                // re-translates on-demand to a different language, that JSON
-                // is stale, so wipe it rather than let it drift out of sync
-                // with the displayed text.
-                try? FileManager.default.removeItem(at: urls.json)
-                translation = output.text
-            } catch {
-                translateError = error.localizedDescription
-            }
-
-        case .summary:
-            guard let src = summary else { return }
-            translatingSummary = true
-            defer { translatingSummary = false }
-            do {
-                let output = try await LLMCompletionService.translate(
-                    text: src,
-                    targetLanguage: languageName,
-                    config: env.config.config
-                )
-                if output.truncated { translateError = L10n.Summarize.truncatedWarning }
-                let url = StorageLocations.summaryTranslatedURL(for: item.name)
-                try? output.text.data(using: .utf8)?.write(to: url, options: .atomic)
-                translatedSummary = output.text
-            } catch {
-                translateError = error.localizedDescription
-            }
-        }
+    /// Enqueue a translation. **No longer awaits itself** — see the note at the top of `JobQueue`:
+    /// an in-memory `Task` disappears when the system ends the app; a persisted job doesn't.
+    ///
+    /// The keep-alive token (`BackgroundKeeper.acquire(.summary)`) moved into
+    /// `JobRunners.translate` — whoever does the work holds the token; all four runners follow the same pattern.
+    private func enqueueTranslate(target: TranslateTarget, languageName: String) {
+        // `TranslateTarget` → the job's `translateTarget` string. A `String` rather than
+        // moving this private enum into `Job`: the enum belongs to the **UI** (it decides which
+        // button is tapped), while the job needs only the fact "transcript or summary is being translated"; the two don't need to share a type.
+        let t = target == .summary ? "summary" : "transcript"
+        jobs.enqueue(Job.translate(clip: item.name, target: t, languageName: languageName))
     }
 
     // MARK: - summary
@@ -519,12 +646,20 @@ struct ClipDetailView: View {
     @ViewBuilder
     private var summarySection: some View {
         Section {
-            if translatingSummary {
-                HStack(spacing: 8) {
-                    ProgressView()
-                    Text(L10n.ClipDetail.translating)
-                        .foregroundStyle(.secondary)
-                }
+            // The summary itself plus its translation — both kinds produce "summary section content", so they sit together.
+            //
+            // ★ The most important case here: the user **picked a template in the summary sheet and then
+            //   swiped it away** (exactly the usage the twelfth revision set out to support). Without these two lines,
+            //   they'd return to the detail page to find only the "Generate summary" button, with no sign a job is running.
+            if let job = activeJob(.summarize) {
+                runningRow(job, L10n.Summarize.summarizing)
+            } else if let job = failedJob(.summarize) {
+                failedRow(job)
+            }
+            if let job = activeJob(.translate, target: "summary") {
+                runningRow(job, L10n.ClipDetail.translating)
+            } else if let job = failedJob(.translate, target: "summary") {
+                failedRow(job)
             }
             if let summary {
                 Text(String(summary.prefix(200)))
@@ -556,6 +691,11 @@ struct ClipDetailView: View {
                     .foregroundStyle(.secondary)
                     .font(.callout)
             }
+
+            // Result note (fallback channel / chunked / truncated). Placed after the content — it describes
+            // the content above.
+            if let job = lastFinishedJob(.summarize) { notesRow(job) }
+            if let job = lastFinishedJob(.translate, target: "summary") { notesRow(job) }
         } header: {
             HStack {
                 Text(L10n.ClipDetail.summary)
@@ -605,12 +745,20 @@ struct ClipDetailView: View {
                 HStack {
                     Label(L10n.ClipDetail.exportAudio, systemImage: "square.and.arrow.up.on.square")
                     Spacer()
-                    if isExporting {
+                    if activeJob(.export) != nil {
                         ProgressView()
                     }
                 }
             }
-            .disabled(isExporting)
+            .disabled(activeJob(.export) != nil)
+
+            // Converting / conversion failed (max attempts used). Both shown in place here — after switching away and
+            // coming back, this row is the only place they can tell "the transcode is still running" or "it actually failed".
+            if let job = activeJob(.export) {
+                runningRow(job, L10n.ClipDetail.exporting)
+            } else if let job = failedJob(.export) {
+                failedRow(job)
+            }
 
             // ★ Sixth revision, 2026-10-15: if **the previously exported copy is still there**, offer the share entry directly.
             //
@@ -621,7 +769,7 @@ struct ClipDetailView: View {
             //
             // ⚠️ Only accept `origin == item.name`: the copy prepared by a batch export belongs to another item,
             //    and offering a share entry for it on this recording's detail page would imply "this is what's being shared".
-            if !isExporting, let staged = ExportCenter.shared.ready(forOrigin: item.name) {
+            if activeJob(.export) == nil, let staged = ExportCenter.shared.ready(forOrigin: item.name) {
                 HStack(spacing: 8) {
                     Button {
                         // Reuse the share sheet above driven by `exportShareURL` —
@@ -666,37 +814,13 @@ struct ClipDetailView: View {
         return "\(L10n.ClipDetail.exportReadyFiles(item.itemCount)) · \(size)"
     }
 
-    private func runExport(_ format: AudioExportFormat) async {
-        guard let source = item.url else { return }
-        isExporting = true
-        defer { isExporting = false }
-        // ★ Keep-alive: transcoding a large file takes tens of seconds to minutes; getting suspended after switching away would waste the whole run.
-        // Shares the same mechanism as transcription and summarisation; no separate one.
-        BackgroundKeeper.shared.acquire(.export)
-        defer { BackgroundKeeper.shared.release(.export) }
-        do {
-            // ★ Written to `ExportCenter`'s staging directory instead of `tmp`: iOS clears `tmp`
-            // at any time, and "export, switch away, come back and share" is exactly the flow this round must support.
-            let dir = try ExportCenter.shared.beginNewStaging()
-            let stem = (item.name as NSString).deletingPathExtension
-            let url = try await AudioExporter.export(
-                format, source: source, suggestedName: stem, directory: dir
-            )
-            ExportCenter.shared.publish(
-                id: dir.lastPathComponent,
-                title: stem,
-                itemCount: 1,
-                bytes: Self.fileSize(url),
-                origin: item.name
-            )
-            exportShareURL = url
-        } catch {
-            exportError = error.localizedDescription
-        }
-    }
-
-    private static func fileSize(_ url: URL) -> Int64 {
-        Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+    /// Enqueue a format conversion. **No longer awaits itself** (same reason as `enqueueTranslate`).
+    ///
+    /// `ExportCenter.publish` also moved into `JobRunners.export` — writing the output to disk and registering it in the ledger
+    /// must be the same stretch of code, otherwise an app kill leaves "file converted but absent from the ledger".
+    private func enqueueExport(_ format: AudioExportFormat) {
+        pendingExportShare = true
+        jobs.enqueue(Job.export(clip: item.name, format: format))
     }
 
     // MARK: - delete
@@ -1132,11 +1256,6 @@ struct ShareSheet: UIViewControllerRepresentable {
 }
 
 // MARK: - helpers
-
-private enum TranscribeUIState {
-    case idle
-    case failed(String)
-}
 
 struct TranscriptDocument {
     let text: String

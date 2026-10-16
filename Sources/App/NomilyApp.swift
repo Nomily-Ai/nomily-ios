@@ -47,6 +47,11 @@ struct NomilyApp: App {
                 .environmentObject(environment.config)
                 .environmentObject(environment.library)
                 .environmentObject(environment.transcription)
+                // ★ 2026-10-16 twelfth revision: the background job queue (summary / translation / format conversion).
+                // Same reason as `watch` — changes to a nested ObservableObject's `@Published`
+                // don't invalidate a view that observes only the parent object, so without injecting it separately the detail page and
+                // the background-jobs page would stay stuck on the old state ("the job finished but the UI doesn't update").
+                .environmentObject(environment.jobs)
                 .environmentObject(environment.localization)
                 // Injected in its own right, not reached through `environment`:
                 // a nested ObservableObject's @Published changes don't

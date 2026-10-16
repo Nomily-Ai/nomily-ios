@@ -5,6 +5,10 @@ struct SettingsView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var watch: WatchSyncService
     @EnvironmentObject private var localization: LocalizationService
+    /// Background job queue. For why it's injected separately see the `.environmentObject`
+    /// block in `NomilyApp`: a nested `ObservableObject`'s `@Published` won't invalidate
+    /// views that only observe the parent, so going through `env.jobs` would leave the entry badge stuck on its old value forever.
+    @EnvironmentObject private var jobs: JobQueue
     /// The number of items sitting in the trash is shown on the right of that row, so it has to be observed — delete
     /// one on the detail page and come back to the settings page, and the number has to follow.
     @ObservedObject private var trash = ClipTrash.shared
@@ -14,6 +18,14 @@ struct SettingsView: View {
 
     private static let tapsToToggle = 7
     private static let tapsBeforeHint = 3
+
+    /// Jobs not finished yet: summary / translation / format conversion (`jobs`) + transcription (`transcription`).
+    ///
+    /// **Both** kinds count: the entry badge answers "is anything still busy in the background", and leaving transcription out
+    /// would show a blank entry when only transcription is queued, making people think the page is empty.
+    private var busyJobCount: Int {
+        jobs.unfinishedCount + env.transcription.pending.count
+    }
 
     var body: some View {
         Form {
@@ -35,6 +47,27 @@ struct SettingsView: View {
                         if !trash.items.isEmpty {
                             Text("\(trash.items.count)")
                                 .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                // ★ 2026-10-16 revision twelve: the **overview** of the four kinds of long job.
+                //
+                // Placed in this section rather than crammed into "Recording Settings": of the four job kinds, transcription belongs to recording,
+                // summary and translation belong to LLM, format conversion belongs to the library — it belongs to none of
+                // those sections, and cramming it into one would force the user to guess which one to find it in.
+                //
+                // The badge on the right only appears when there are really unfinished jobs (same as the trash row above):
+                // a permanent "0" reads as "0 things are broken".
+                NavigationLink {
+                    TaskCenterView()
+                } label: {
+                    HStack {
+                        Text(L10n.Jobs.openQueue)
+                        Spacer()
+                        if busyJobCount > 0 {
+                            Text("\(busyJobCount)")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
                         }
                     }
                 }

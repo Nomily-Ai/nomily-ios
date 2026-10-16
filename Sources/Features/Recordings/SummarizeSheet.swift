@@ -1,11 +1,19 @@
 import SwiftUI
 
 struct SummarizeSheet: View {
+    /// The transcript body of this recording.
+    ///
+    /// ⚠️ After the twelfth revision **it no longer feeds the model** — the job is read from disk by `JobRunners`
+    ///    (see its `transcriptText(for:)`; the text both paths feed in comes from the same source, verbatim).
+    ///    It's kept because it still has one real use: call sites rely on it to decide "does this recording actually have
+    ///    a transcript", and `use(_:)` uses it to block "empty transcript" before enqueueing.
     let transcriptText: String
     let audioName: String
     let onComplete: (String) -> Void
 
     @EnvironmentObject private var env: AppEnvironment
+    /// The summary persistence queue. See the same-named field in `ClipDetailView` for why it's injected separately.
+    @EnvironmentObject private var jobs: JobQueue
     @Environment(\.dismiss) private var dismiss
     @StateObject private var templateStore = SummarizeTemplateStore()
     @StateObject private var languages = LanguageService()
@@ -25,21 +33,21 @@ struct SummarizeSheet: View {
     @State private var result = ""
     @State private var outputLangCode: String = ""
     @State private var showLangPicker = false
-    /// Held in memory until the user saves. Writing it as soon as the LLM
-    /// answered meant Cancel still renamed the recording in the library —
-    /// new title, no summary.
-    @State private var pendingTitle: String?
-    /// The in-flight summarize/title work, so Cancel actually stops it
-    /// instead of only closing the sheet (and still burning the quota).
-    @State private var summarizeTask: Task<Void, Never>?
+    /// ★ Twelfth revision, 2026-10-16: this job's id in that queue (`summarize:<audioName>`).
+    /// Non-nil = already enqueued; from then on the UI only **observes** it and never runs it itself.
+    ///
+    /// The previous version's three `@State` properties — `pendingTitle` / `summarizeTask` / `workingProvider` —
+    /// are all gone: persisting the summary and title moved into `JobRunners.summarize`,
+    /// and "which channel actually did the work" is persisted along with `Job.notes`. Every piece of in-memory state left here
+    /// is something that gets lost when the app is killed — and lies while it lasts.
+    @State private var jobID: String?
     /// The provider said it stopped because it hit the output cap. The text
     /// is real but cut off — say so instead of presenting it as finished.
+    /// This one is **read back from the ledger** (`Job.wasTruncated`), no longer maintained by a local variable.
     @State private var wasTruncated = false
-    /// ★ 2026-10-15: The channel that **actually does the work**. When the primary dies and the fallback takes over, the title generation afterwards
-    /// must go straight to it — otherwise every generated title waits out another primary-channel timeout.
-    @State private var workingProvider: String?
     /// The user-facing note: fallback took over / chunking was used. **Must be shown** —
     /// the user set A but B generated the result; without an explanation it becomes "is it even using my configuration?"
+    /// Also read back from the ledger (`Job.notes`).
     @State private var notices: [String] = []
     /// Chunk progress. `(completed, total chunks)`; nil for a single chunk.
     @State private var chunkProgress: (done: Int, total: Int)?
@@ -92,6 +100,17 @@ struct SummarizeSheet: View {
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                         }
+                        // ★ Twelfth revision, 2026-10-16: this page can now be **dismissed**, and dismissing it
+                        //   doesn't stop the run. This must be spelled out — the previous version's
+                        //   "Cancel" button made people think closing would kill the job, so all they could do was wait.
+                        Divider().padding(.horizontal, 48)
+                        Text(L10n.Jobs.canLeaveHint)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                        Button(L10n.Common.close) { dismiss() }
+                            .buttonStyle(.bordered)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 case .done:
@@ -141,16 +160,24 @@ struct SummarizeSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.Common.cancel) {
-                        summarizeTask?.cancel()
-                        summarizeTask = nil
-                        pendingTitle = nil
-                        dismiss()
-                    }
+                    // ★ Twelfth revision: this button **no longer cancels the job**.
+                    //
+                    // The user's exact request was "exit to the background first and check when it's done" —
+                    // so "leave this page" and "don't want this job" have to be two separate things.
+                    // The former is this button (and the swipe-down gesture); the latter moved to the background tasks page
+                    // (`TaskCenterView`) — that's where jobs are managed.
+                    //
+                    // The cost of conflating them was concrete: the old button said "Cancel", so users wanting to leave feared
+                    // tapping would stop everything and just sat there watching the spinner — and the whole reason this feature exists
+                    // is so they never have to.
+                    Button(closeLabel) { dismiss() }
                 }
                 if case .done = summarizeState {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button(L10n.Common.save) { saveSummary() }
+                        // The output is already persisted inside the runner (that's the key of the twelfth revision: a job
+                        // must land on its own, otherwise "come back after it finished" has nothing to look at). Here it's just
+                        // "I've seen it, we're done".
+                        Button(L10n.Common.done) { dismiss() }
                     }
                 }
             }
@@ -173,19 +200,25 @@ struct SummarizeSheet: View {
                 }
             }
         }
-        // Block interactive swipe-to-dismiss while a summary is being
-        // generated (else the swipe cancels it — w6estkf) or when a
-        // generated summary hasn't been saved yet (else swiping down
-        // silently discards it — g17h5nk). The user must tap Cancel or
-        // Save to leave those states.
-        .interactiveDismissDisabled(dismissGuard)
+        // ★ Twelfth revision: this used to carry `.interactiveDismissDisabled(dismissGuard)`
+        //   — blocking the swipe-down dismissal while running (else one swipe cancels it, w6estkf),
+        //   and also once generated but unsaved (else swiping away silently discards it, g17h5nk).
+        //
+        // Both of those reasons **no longer hold under this model**:
+        //   · swiping away while it runs, the job keeps running (it's queued in that persisted queue);
+        //   · the generated output is already on disk — there is no "unsaved" state.
+        // So the blocking is removed entirely, replaced with watching the queue to see where this job has gotten to.
+        .onChange(of: jobs.jobs) { _ in observeJob() }
+        .onAppear { observeJob() }
     }
 
-    private var dismissGuard: Bool {
-        switch summarizeState {
-        case .running, .done: return true
-        case .picking, .failed: return false
-        }
+    /// What the close button says.
+    ///
+    /// "Cancel" on the template-picking page (nothing has actually happened yet); "Close" once the run has started
+    /// — by then "Cancel" would be a lie; tapping it doesn't stop the job.
+    private var closeLabel: String {
+        if case .running = summarizeState { return L10n.Common.close }
+        return L10n.Common.cancel
     }
 
     private var navTitle: String {
@@ -260,11 +293,106 @@ struct SummarizeSheet: View {
     ///
     /// Clear `previewing` in the same frame: if this run fails and the user taps "Retry" back into
     /// the picker page, they see the grid rather than the **previous template's overview**.
+    ///
+    /// ★ Twelfth revision, 2026-10-16: this no longer spawns its own `Task { await runSummarize }` — the job is handed to
+    ///   `JobQueue`. The difference isn't "one extra hop"; it's **who holds it**: an in-memory
+    ///   `Task` dies the moment the system ends the app, while a persisted job is still sitting in the queue the next day
+    ///   waiting to be picked up by `resume()`.
+    ///
+    /// ⚠️ The prompt is finalized **at enqueue time** (`withLanguageInstruction` applied before storing),
+    ///    not computed at run time. See `Job.prompt`: the job may only be picked up days later,
+    ///    by which time the template may have been edited or deleted. A job's content must be frozen at the moment the user pressed
+    ///    the button — including the output language they chose then.
     private func use(_ template: SummarizeTemplate) {
         selected = template
         previewing = nil
+        // The previous run's result must be cleared: after a failure, going back to the picker and tapping again would first
+        // flash the old summary if not cleared — looking like "the new run didn't take".
+        result = ""
+        wasTruncated = false
+        notices = []
+        chunkProgress = nil
+
+        // An empty transcript is blocked before enqueueing. Letting it into the queue would waste a whole round (the runner can't find the source file,
+        // throws `JobSourceMissing`, and the queue wipes it) — same outcome, but for those seconds
+        // the UI spins and the user gets their hopes up.
+        guard !transcriptText.isEmpty else {
+            summarizeState = .failed(L10n.Jobs.sourceMissing(L10n.Jobs.sourceTranscript))
+            return
+        }
+
+        let job = Job.summarize(
+            clip: audioName,
+            prompt: withLanguageInstruction(template.localizedPrompt),
+            templateName: template.name
+        )
+        jobID = job.id
         summarizeState = .running
-        summarizeTask = Task { await runSummarize(template) }
+        jobs.enqueue(job)
+    }
+
+    // MARK: - Observing the queue
+
+    private var isWaitingOnJob: Bool {
+        if case .running = summarizeState { return true }
+        return false
+    }
+
+    /// Check on this job's progress whenever the queue changes.
+    ///
+    /// ⚠️ Uses `.onChange(of: jobs.jobs)` instead of having the runner call back into this view: the job
+    ///    will often finish while this page **doesn't even exist** (the user dismissed it long ago) —
+    ///    there'd be nowhere for the callback to go. Reading state solely from the ledger covers both cases.
+    private func observeJob() {
+        guard isWaitingOnJob, let jobID else { return }
+        guard let job = jobs.job(id: jobID) else {
+            // The entry is gone from the ledger. Only one thing causes that: the source is gone (transcript cleared /
+            // recording deleted), the queue judged it can never succeed, and wiped it instead of wasting three attempts.
+            summarizeState = .failed(L10n.Jobs.sourceMissing(L10n.Jobs.sourceTranscript))
+            return
+        }
+        if let done = job.progressDone, let total = job.progressTotal {
+            chunkProgress = (done, total)
+        } else {
+            chunkProgress = nil
+        }
+        switch jobs.state(of: job) {
+        case .waiting, .running:
+            break
+        case .done:
+            adoptResult(of: job)
+        case .gaveUp:
+            chunkProgress = nil
+            summarizeState = .failed(job.lastError ?? L10n.Summarize.error)
+        }
+    }
+
+    /// The job dequeued, and as a success — read the result back from **disk**.
+    ///
+    /// Read from disk rather than stuffing the text into the job: the output *is* that file (`{base}.summary.md`),
+    /// and the detail page, full-text page, and mind map all read it. Keeping an extra in-memory copy only adds one more truth
+    /// that can drift out of sync.
+    private func adoptResult(of job: Job) {
+        let url = StorageLocations.summaryURL(for: audioName)
+        guard let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8), !text.isEmpty else {
+            // The file is missing, yet the ledger says "success". Only one possibility: the user just cancelled this job on the
+            // background tasks page — cancellation is also a form of "dequeue", and in the ledger it looks identical to success
+            // (`lastError == nil`; see `JobQueue.cancel(id:)`). They no longer want it,
+            // so this page should quietly close out — not pop an error they can't make sense of.
+            dismiss()
+            return
+        }
+        result = text
+        wasTruncated = job.wasTruncated == true
+        notices = job.notes ?? []
+        chunkProgress = nil
+        summarizeState = .done
+        // ★ Tell the detail page immediately, don't wait for the user to tap "Done".
+        //
+        // The output is on disk whether they tap or not; the detail page has no reason to keep showing the old one
+        // (or the "Generate summary" button at all).
+        onComplete(text)
     }
 
     /// Promote the fallback channel to primary. Re-run the health check immediately afterwards — the warning banner must vanish on the spot,
@@ -431,6 +559,13 @@ struct SummarizeSheet: View {
         return languages.targetLanguages.first { $0.code == outputLangCode }?.name ?? outputLangCode
     }
 
+    /// ★ The only "working" logic left in this file, and it does one thing: prepend the output-language instruction
+    ///   to the template's prompt.
+    ///
+    /// Why it stays in the view rather than moving into `JobRunners`: it depends on `outputLangName`, which is
+    /// **the language the user is choosing on this page right now** (it falls back to the language code while
+    /// `languages.targetLanguages` hasn't finished loading). The finished product is stored into `Job.prompt` by `use(_:)` —
+    /// meaning it runs exactly once, **at enqueue time**, and never touches this page again.
     private func withLanguageInstruction(_ prompt: String) -> String {
         if let name = outputLangName {
             return "Write your ENTIRE response in \(name) — including all section headers, labels, and body text.\n\n" + prompt
@@ -442,106 +577,15 @@ struct SummarizeSheet: View {
         return "IMPORTANT: Detect the language of the user's content and write your ENTIRE response in that same language — including all section headers, labels, and body text. Only use English if the user's content is in English.\n\n" + prompt
     }
 
-    private func runSummarize(_ template: SummarizeTemplate) async {
-        summarizeState = .running
-        wasTruncated = false
-        notices = []
-        chunkProgress = nil
-        // ★ 2026-10-15: Hold the background keep-alive for the duration of a long summary.
-        //
-        // A local 3B model takes minutes per 8000-character chunk, and the whole piece chunked takes even longer. During that window
-        // the user will almost certainly switch away ("just a quick WeChat reply"); without the keep-alive the process suspends,
-        // the URLSession requests break on the spot, and all that greets them on return is a failure message.
-        //
-        // `defer` rather than releasing before each return: there are three exits here
-        // (finish / cancel / fail), and missing one would leave the silent audio playing forever.
-        BackgroundKeeper.shared.acquire(.summary)
-        defer { BackgroundKeeper.shared.release(.summary) }
-        do {
-            let outcome = try await LLMCompletionService.completeResilient(
-                systemPrompt: withLanguageInstruction(template.localizedPrompt),
-                userContent: transcriptText,
-                config: env.config.config,
-                preferred: workingProvider,
-                onChunk: { done, total in
-                    chunkProgress = (done, total)
-                }
-            )
-            try Task.checkCancellation()
-            workingProvider = outcome.providerKey
-            notices = Self.notices(for: outcome, config: env.config.config)
-            result = outcome.completion.text
-            wasTruncated = outcome.completion.truncated
-            await extractTitle(from: outcome.completion.text)
-            try Task.checkCancellation()
-            chunkProgress = nil
-            summarizeState = .done
-        } catch is CancellationError {
-            pendingTitle = nil
-        } catch {
-            chunkProgress = nil
-            summarizeState = .failed(error.localizedDescription)
-        }
-        summarizeTask = nil
-    }
-
-    /// Translate the `Outcome` into plain words. **Both must be spelled out**:
-    /// the primary channel wasn't the one used (something's off in the configuration), and the content went through chunking (the result's structure
-    /// differs subtly from a single-shot generation; users seeing missing chunk headers will assume it's a bug).
-    private static func notices(
-        for outcome: LLMCompletionService.Outcome, config: AppConfig
-    ) -> [String] {
-        var result: [String] = []
-        let primary = config.llmProviders.primary ?? ""
-        if !primary.isEmpty, primary != outcome.providerKey {
-            result.append(L10n.LLM.fellBack(
-                LLMCompletionService.providerLabel(primary),
-                LLMCompletionService.providerLabel(outcome.providerKey)
-            ))
-        }
-        if outcome.chunked {
-            result.append(L10n.LLM.chunkedNote(outcome.chunkCount))
-        }
-        return result
-    }
-
-    private func extractTitle(from summary: String) async {
-        do {
-            let title = try await LLMCompletionService.completeResilient(
-                systemPrompt: withLanguageInstruction("Generate a short title (under 60 characters) for the following notes. Reply with ONLY the title text, no quotes, no punctuation at the end."),
-                userContent: String(summary.prefix(1000)),
-                config: env.config.config,
-                // Title generation gets only 1000 characters of input; nothing to chunk.
-                allowChunking: false,
-                // ★ Go straight to the channel that actually did the work. Without this, the primary has
-                //   already proven unusable, and this step would **wait out another timeout** on it before the fallback gets a turn.
-                preferred: workingProvider
-            )
-            let clean = title.completion.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !clean.isEmpty {
-                pendingTitle = clean
-            }
-        } catch {
-            // Title extraction is best-effort; summary is still valid
-        }
-    }
-
-    /// Title and summary land together or not at all.
-    private func saveSummary() {
-        let url = StorageLocations.summaryURL(for: audioName)
-        try? result.data(using: .utf8)?.write(to: url, options: .atomic)
-        if let pendingTitle, !pendingTitle.isEmpty {
-            try? pendingTitle.data(using: .utf8)?
-                .write(to: StorageLocations.titleURL(for: audioName), options: .atomic)
-        }
-        onComplete(result)
-        dismiss()
-    }
-
+    /// The "generating with X" reported while running.
+    ///
+    /// ⚠️ Only the **entry** (primary channel) can be reported here, not the one actually doing the work —
+    /// `completeResilient` tries channels one by one internally, and which one succeeds is only known once it returns.
+    /// Which one actually did the work is stated by the "fell back to X" line in `JobRunners.notices(for:config:)`,
+    /// and that's the accurate one. The previous version tracked it once in `workingProvider`, but that only had a value
+    /// **after the first round finished** — during the run it displayed the primary channel all along.
     private var activeProviderLabel: String {
-        // Once a round has run, report "the one actually doing the work" — seeing "generating with Ollama" is how
-        // the user knows the settings did take effect.
-        let key = workingProvider ?? env.config.config.llmProviders.primary ?? ""
+        let key = env.config.config.llmProviders.primary ?? ""
         return LLMCompletionService.providerLabel(key)
     }
 }

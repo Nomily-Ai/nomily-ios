@@ -275,6 +275,23 @@ final class TranscriptionService: ObservableObject {
         forget(name: name)
     }
 
+    /// One item in the retry queue (tapped by the user from the background jobs page / the detail page).
+    ///
+    /// ★ Added in the twelfth revision, 2026-10-16. It exists so that **callers don't have to assemble the path themselves**:
+    /// `enqueue` identifies things by `fileURL.lastPathComponent`, so a caller would have to know
+    /// the whole convention of "the audio is in `decryptedDir` and the job's name is the file name" — that is this class's
+    /// internal knowledge, and scattering it into the UI would sooner or later produce one wrong path (say, using `root` instead of
+    /// `decryptedDir`, showing up as "tapping retry does nothing").
+    ///
+    /// Goes through `enqueue` rather than opening another path: for an **existing** entry `enqueue` only clears
+    /// `attempts` and `lastError`, leaving `locales` / `enforceMinDuration` alone —
+    /// that is, "retry" retries **the original job**, including the recognition language the user specified originally.
+    /// This is exactly the semantics of `JobQueue.retry(id:)`, kept consistent on both sides.
+    func retry(name: String) {
+        guard pending.contains(where: { $0.name == name }) else { return }
+        enqueue(fileURL: StorageLocations.decryptedDir.appendingPathComponent(name))
+    }
+
     /// Transcribe `fileURL` using the configured provider chain.
     /// Returns the first successful provider's `AsrResult` and writes
     /// the transcript pair to disk; throws the last provider's error if

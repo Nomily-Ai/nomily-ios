@@ -984,3 +984,48 @@
 "trash.artefact_audio" = "音频";
 "trash.artefact_transcript" = "转录";
 "trash.artefact_summary" = "摘要";
+
+/* ===== 后台任务（2026-10-16 十二改）=====
+   摘要 / 翻译 / 音频转换改成入队执行，切走之后也能接着跑，所以需要一个地方
+   让用户看得见它们。文案口径同 asr.queue_*：只说"切走还会继续"，
+   不讲我们是怎么在后台把进程顶住的。 */
+
+"jobs.kind_transcribe" = "转录";
+"jobs.kind_summarize" = "摘要";
+"jobs.kind_translate" = "翻译";
+"jobs.kind_export" = "音频转换";
+
+"jobs.detail_translated_transcript" = "转录 → %@";
+"jobs.detail_translated_summary" = "摘要 → %@";
+
+"jobs.source_prompt" = "摘要提示词";
+"jobs.source_language" = "目标语言";
+"jobs.source_format" = "导出格式";
+"jobs.source_audio" = "音频文件";
+"jobs.source_transcript" = "转录文本";
+"jobs.source_summary" = "摘要文本";
+"jobs.source_missing" = "%@已经不在了。";
+"jobs.no_runner" = "当前版本不支持这类任务。";
+
+"jobs.page_title" = "后台任务";
+"jobs.empty" = "现在没有任务。你发起的摘要、翻译和音频转换会显示在这一页。";
+"jobs.section_active" = "进行中";
+"jobs.section_finished" = "已完成";
+"jobs.clear_finished" = "清除已完成";
+"jobs.footer" = "这些任务在你切到别的 App 或锁屏之后会继续跑；App 被系统结束的话，下次打开会自动接着跑。";
+"jobs.can_leave_hint" = "你可以离开这一页，它会在后台继续跑。";
+
+"jobs.status_waiting" = "排队中";
+"jobs.status_running" = "进行中";
+"jobs.status_done" = "已完成";
+"jobs.status_gave_up" = "已放弃";
+"jobs.attempts" = "第 %1$d/%2$d 次尝试";
+"jobs.progress" = "第 %1$d/%2$d 段";
+
+"jobs.retry" = "重试";
+"jobs.cancel" = "取消";
+"jobs.remove" = "移除";
+
+"jobs.open_queue" = "后台任务";
+"jobs.open_queue_footer" = "摘要、翻译和音频转换在你离开 App 之后也会继续。";
+"jobs.enqueued_toast" = "%@已加入后台任务。";

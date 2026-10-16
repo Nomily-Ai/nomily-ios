@@ -2288,6 +2288,183 @@ enum L10n {
         static var brainstormSynthesis: String { NSLocalizedString("template.brainstorm_synthesis", comment: "") }
         static var interviewSummary: String { NSLocalizedString("template.interview_summary", comment: "") }
     }
+
+    // MARK: - Jobs (background task overview)
+
+    /// The **overview** strings for the four kinds of long-running jobs (twelfth revision, 2026-10-16).
+    ///
+    /// This layer only solves "being visible": scheduling for summary / translation / format conversion lives in `JobQueue`,
+    /// transcription still lives in `TranscriptionService`, but both appear in one list on the overview page.
+    ///
+    /// ⚠️ Keep the wording consistent with the `ASR.queue_*` batch: **never say "silent audio"**. What users want
+    ///    to judge is "will it keep going after I switch away", not how we keep the process alive.
+    enum Jobs {
+
+        // MARK: Kinds of jobs (`JobKind.title`)
+
+        static var kindTranscribe: String {
+            NSLocalizedString("jobs.kind_transcribe", value: "Transcription",
+                              comment: "Task list: an ASR transcription job")
+        }
+        static var kindSummarize: String {
+            NSLocalizedString("jobs.kind_summarize", value: "Summary",
+                              comment: "Task list: a summary-generation job")
+        }
+        static var kindTranslate: String {
+            NSLocalizedString("jobs.kind_translate", value: "Translation",
+                              comment: "Task list: a translation job")
+        }
+        static var kindExport: String {
+            NSLocalizedString("jobs.kind_export", value: "Audio export",
+                              comment: "Task list: an audio format-conversion job")
+        }
+
+        // MARK: Subtitles (`Job.detail`)
+
+        static func detailTranslatedTranscript(_ language: String) -> String {
+            String(format: NSLocalizedString("jobs.detail_translated_transcript",
+                                             value: "Transcript → %@",
+                                             comment: "Task list subtitle: translating the transcript into this language"),
+                   language)
+        }
+        static func detailTranslatedSummary(_ language: String) -> String {
+            String(format: NSLocalizedString("jobs.detail_translated_summary",
+                                             value: "Summary → %@",
+                                             comment: "Task list subtitle: translating the summary into this language"),
+                   language)
+        }
+
+        // MARK: Source is gone (`JobSourceMissing`)
+
+        static var sourcePrompt: String {
+            NSLocalizedString("jobs.source_prompt", value: "The summary prompt",
+                              comment: "JobSourceMissing subject: the job recorded no prompt")
+        }
+        static var sourceLanguage: String {
+            NSLocalizedString("jobs.source_language", value: "The target language",
+                              comment: "JobSourceMissing subject: the job recorded no target language")
+        }
+        static var sourceFormat: String {
+            NSLocalizedString("jobs.source_format", value: "The export format",
+                              comment: "JobSourceMissing subject: the job recorded no export format")
+        }
+        static var sourceAudio: String {
+            NSLocalizedString("jobs.source_audio", value: "The audio file",
+                              comment: "JobSourceMissing subject: the recording's audio is gone")
+        }
+        static var sourceTranscript: String {
+            NSLocalizedString("jobs.source_transcript", value: "The transcript",
+                              comment: "JobSourceMissing subject: the transcript is gone")
+        }
+        static var sourceSummary: String {
+            NSLocalizedString("jobs.source_summary", value: "The summary",
+                              comment: "JobSourceMissing subject: the summary is gone")
+        }
+        /// "This thing no longer exists". **Not** "job failed" — it's the kind that can **never succeed'',
+        /// so the queue wipes it straight from the ledger instead of wasting three attempts.
+        static func sourceMissing(_ what: String) -> String {
+            String(format: NSLocalizedString("jobs.source_missing",
+                                             value: "%@ is no longer available.",
+                                             comment: "Shown when a queued task's source file has been deleted"),
+                   what)
+        }
+        static var noRunner: String {
+            NSLocalizedString("jobs.no_runner", value: "This kind of task isn't supported in this build.",
+                              comment: "Internal error: no runner registered for a job kind")
+        }
+
+        // MARK: Overview page
+
+        static var pageTitle: String {
+            NSLocalizedString("jobs.page_title", value: "Background tasks",
+                              comment: "Task center: navigation title")
+        }
+        static var empty: String {
+            NSLocalizedString("jobs.empty",
+                              value: "Nothing here right now. Summaries, translations and audio conversions you start will show up on this page.",
+                              comment: "Task center: empty state")
+        }
+        static var sectionActive: String {
+            NSLocalizedString("jobs.section_active", value: "In progress",
+                              comment: "Task center: section header for unfinished jobs")
+        }
+        static var sectionFinished: String {
+            NSLocalizedString("jobs.section_finished", value: "Finished",
+                              comment: "Task center: section header for finished jobs")
+        }
+        static var clearFinished: String {
+            NSLocalizedString("jobs.clear_finished", value: "Clear finished",
+                              comment: "Task center: button that removes finished rows")
+        }
+        static var footer: String {
+            NSLocalizedString("jobs.footer",
+                              value: "These tasks keep running when you switch away or lock your phone. If the app is closed, they pick up again the next time you open it.",
+                              comment: "Task center: explanation of background continuation")
+        }
+        /// The "you're free to go" line shown right after it's started.
+        static var canLeaveHint: String {
+            NSLocalizedString("jobs.can_leave_hint",
+                              value: "You can leave this screen — it keeps running in the background.",
+                              comment: "Shown under a running task: the user does not have to stay on the page")
+        }
+
+        // MARK: Status
+
+        static var statusWaiting: String {
+            NSLocalizedString("jobs.status_waiting", value: "Waiting", comment: "Job status chip")
+        }
+        static var statusRunning: String {
+            NSLocalizedString("jobs.status_running", value: "Running", comment: "Job status chip")
+        }
+        static var statusDone: String {
+            NSLocalizedString("jobs.status_done", value: "Done", comment: "Job status chip")
+        }
+        static var statusGaveUp: String {
+            NSLocalizedString("jobs.status_gave_up", value: "Gave up",
+                              comment: "Job status chip: exhausted its retries")
+        }
+        static func attempts(_ attempts: Int, _ max: Int) -> String {
+            String(format: NSLocalizedString("jobs.attempts", value: "Attempt %1$d of %2$d",
+                                             comment: "Job row: how many tries have been used"),
+                   attempts, max)
+        }
+        static func progress(_ done: Int, _ total: Int) -> String {
+            String(format: NSLocalizedString("jobs.progress", value: "Part %1$d of %2$d",
+                                             comment: "Job row: chunked progress"),
+                   done, total)
+        }
+
+        // MARK: Inline actions
+
+        static var retry: String {
+            NSLocalizedString("jobs.retry", value: "Try again", comment: "Job row: retry action")
+        }
+        static var cancel: String {
+            NSLocalizedString("jobs.cancel", value: "Cancel", comment: "Job row: cancel action")
+        }
+        static var remove: String {
+            NSLocalizedString("jobs.remove", value: "Remove", comment: "Job row: dismiss this row")
+        }
+
+        // MARK: Entry points (settings page / detail page)
+
+        static var openQueue: String {
+            NSLocalizedString("jobs.open_queue", value: "Background tasks",
+                              comment: "Settings row: opens the task center")
+        }
+        static var openQueueFooter: String {
+            NSLocalizedString("jobs.open_queue_footer",
+                              value: "Summaries, translations and audio conversions carry on after you leave the app.",
+                              comment: "Settings row footer: what the task center is for")
+        }
+        /// The light toast shown when enqueueing succeeds.
+        static func enqueuedToast(_ kind: String) -> String {
+            String(format: NSLocalizedString("jobs.enqueued_toast",
+                                             value: "%@ added to background tasks.",
+                                             comment: "Toast shown right after a task is queued"),
+                   kind)
+        }
+    }
 }
 
 // swiftlint:enable type_body_length file_length
