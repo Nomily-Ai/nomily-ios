@@ -20,19 +20,38 @@ import SwiftUI
 // they are not styling, they are function.
 
 /// Which color set the center disc (and the ring while recording) uses.
+///
+/// ★ Twelfth revision, 2026-10-16: **white** was added (user: "doesn't the current colour list have white, watch?").
+/// This is the first colour in this enum that "requires matching changes elsewhere" — white-on-white text and a white swatch with a white ring
+/// both have to invert along with it, see `onSolid` / `selectionRing`.
+/// ⚠️ Save compatibility: a `rawValue` enum + `Codable`. **Adding a case is safe** — old saves
+///    store strings like "green" that still exist, and an extra `white` doesn't affect decoding.
+///    (The reverse isn't safe: after storing white, going back to an old version, that version can't decode the string
+///    and the whole appearance falls back to default — only encountered on a downgrade, so no migration is written for it.)
 enum WatchRingPalette: String, CaseIterable, Identifiable, Codable {
     /// The three colours of the Health app activity rings (magenta / neon green / cyan).
     /// **The default** — on 2026-10-15 the user brought a screenshot of the activity rings and called it out: "reference this colour scheme".
     case activity
     case green, teal, blue, indigo, purple, pink, orange, red, graphite
+    /// ★ Added in the twelfth revision (user: "doesn't the current colour list have white, watch?").
+    ///
+    /// Placed **last**: it is the only "achromatic yet not black" option, and sitting next to `graphite`
+    /// it makes a neat grey scale (grey → white). Inserting it into the middle of the colour wheel would
+    /// jumble this ordering of "after activity comes a row of hues".
+    ///
+    /// ⚠️ White is the only colour in this set that turns two places in the UI into "white text on white",
+    ///    so it has to be read alongside both the `onSolid` and `selectionRing` properties —
+    ///    adding a colour is **not** just a case of dropping one more case into this enum.
+    case white
 
     var id: String { rawValue }
 
     /// The gradient's endpoint colours; solid mode takes only `[0]`, and three or more colours spread around the ring (see `ringGradient`).
     ///
-    /// ⚠️ Single/double-colour palettes are all **dark** (not light): the centre icon and timer are white text,
-    /// and a light base colour would smear the "stop" icon into a blob while recording. `activity` is the exception — it uses
-    /// three-colour ring spreading with the centre taking only the first and last colours (see `centerFill`), brightness carried by the gradient.
+    /// ⚠️ Single/double-colour palettes are all **dark** (not light): the icons and
+    /// text drawn **on top of** this colour are white by default, and a light base colour smears them into a blob (`onSolid` is about exactly this).
+    /// `activity` is the exception — it uses three-colour ring spreading with the centre taking only the first and last colours (see `centerFill`),
+    /// with brightness carried by the gradient; `white` is the other exception, solved by inverting in `onSolid`.
     var colors: [Color] {
         switch self {
         case .activity: return [
@@ -50,11 +69,40 @@ enum WatchRingPalette: String, CaseIterable, Identifiable, Codable {
         case .orange:   return [Color(red: 0.90, green: 0.52, blue: 0.16), Color(red: 0.70, green: 0.24, blue: 0.02)]
         case .red:      return [Color(red: 0.86, green: 0.26, blue: 0.24), Color(red: 0.62, green: 0.04, blue: 0.10)]
         case .graphite: return [Color(white: 0.52), Color(white: 0.26)]
+        // ★ Twelfth revision: pure white. `[0]` is `Color(white: 1)` — on a black face it's the brightest
+        // eye, and the only counter-example where "the centre icon and timer would smear on their own"
+        // (see `onSolid` below).
+        case .white:    return [Color(white: 1.00), Color(white: 0.86)]
         }
     }
 
     /// Solid color (used when "gradient" is off).
     var solid: Color { colors[0] }
+
+    /// What colour the text/icons drawn **on top of** `solid` should use.
+    ///
+    /// ★ Added in the twelfth revision. Before white was added this spot was always "white by default" (on watchOS
+    ///    that's `Text`'s default colour), because the other ten palettes were dark enough to carry white text. The moment white arrived this
+    ///    implicit convention broke on the spot — the selected capsule on the appearance page became **white on white**.
+    ///
+    /// ⚠️ The test is "is this colour bright", not "is it white". Right now only `.white` is bright enough to need
+    ///    inverting; when light colours are added later (pale yellow, pale cyan and the like), this should grow a second branch
+    ///    rather than changing the callers.
+    var onSolid: Color {
+        switch self {
+        case .white: return .black
+        default:     return .white
+        }
+    }
+
+    /// What colour the ring around a swatch uses when it's selected.
+    ///
+    /// ★ Added in the twelfth revision. It used to be hard-coded `Color.white`, which on a white swatch is as good as nothing — the user would see
+    ///    "I tapped white but there's no selection feedback at all".
+    ///
+    /// ⚠️ The stroke is `strokeBorder` (drawn on the **inside** of the circle), so it lands on the swatch itself
+    ///    and must take `onSolid` rather than "a colour that's visible on a black background".
+    var selectionRing: Color { onSolid }
 
     /// Colour of the inner ring (the hour ring); `nil` = keep the main colour `solid`.
     ///

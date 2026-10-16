@@ -27,6 +27,13 @@ import SwiftUI
 
 /// Appearance page: color + breathing light speed.
 ///
+/// ★ Twelfth revision, 2026-10-16: the palette **gained white** (user: "doesn't the current color list have white, watch?").
+/// This page thereby grew a problem found nowhere else — a swatch that "is itself white" needs a selection ring
+/// visible without relying on white, and a capsule "whose background is white" needs text visible without relying on white.
+/// Both now invert against the palette (`WatchRingPalette.selectionRing` / `.onSolid`).
+/// ⚠️ The palette grid is 5 columns with 11 colors ⇒ the third row has white alone. **Deliberately not rounding up**
+///    by changing the column count: 4 columns would widen the gaps between swatches and lengthen the page, and the extra whitespace would merely be slightly ugly.
+///
 /// ★ Ninth revision, 2026-10-16: **the gradient is gone** (user: "remove the gradient"), so this page lost a row.
 /// The remaining "color" now has a much clearer scope — it's **the color of the eye on the home screen**
 /// (along with the waveform while recording, the side menu icons, and the recording timer line). The user's words:
@@ -61,12 +68,17 @@ struct WatchColorStyleView: View {
                             // For one, the "gradient" dimension has been removed (see `WatchRingStyle`);
                             // for another, the question this swatch answers got simpler —
                             // "if you pick this, what color is the home screen's eye" — one color says it all.
+                            //
+                            // ⚠️ Twelfth revision: the stroke color can't be hardcoded to white anymore. This palette now contains
+                            //    `white`, and a white stroke on the inside of a white swatch is as good as none —
+                            //    tapping it, users would think "the white option is broken, nothing happens".
+                            //    Uses `palette.selectionRing` (= each swatch's own inverse).
                             Circle()
                                 .fill(palette.solid)
                                 .frame(width: 26, height: 26)
                                 .overlay(
                                     Circle().strokeBorder(
-                                        Color.white,
+                                        palette.selectionRing,
                                         lineWidth: store.style.palette == palette ? 2 : 0
                                     )
                                 )
@@ -113,6 +125,14 @@ struct WatchColorStyleView: View {
                 Button(action: option.action) {
                     Text(option.label)
                         .font(.system(size: 12, weight: .medium))
+                        // ★ Twelfth revision: the selected capsule's background is the palette's `solid`,
+                        // so the text color must invert against it — otherwise selecting `white` yields
+                        // white text on white (until now the default happened to be white, so the problem never showed).
+                        .foregroundStyle(
+                            option.selected
+                                ? store.style.palette.onSolid
+                                : Color.white
+                        )
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
                         .padding(.vertical, 6)

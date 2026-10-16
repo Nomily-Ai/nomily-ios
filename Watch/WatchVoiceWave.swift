@@ -43,6 +43,27 @@ import SwiftUI
 //    and the user watches this wave precisely to confirm **it's recording**. For that purpose a fake waveform is a liability.
 //
 // ─────────────────────────────────────────────────────────────────────────
+// ★★ 2026-10-16 revision 12 (user: "when recording, the heart-rate rises and falls need a bigger amplitude and a bigger share of the screen"):
+//
+// What changed is **two dimensions**, not two sets of logic:
+//
+// | | revision 11 | revision 12 | actual size on 40mm |
+// |---|---|---|---|
+// | canvas width | `0.86 × size` | **`1.06 × size`** | 102pt → 126pt (screen width 162pt) |
+// | canvas height | `0.30 × size` | **`0.44 × size`** | 36pt → 52pt |
+// | heartbeat main peak | `0.34` | **`0.52`** | about 5pt → about 12pt (relative to the centre line) |
+// | line width | `0.024 × size` | **`0.028 × size`** | 2.9pt → 3.3pt |
+//
+// ⚠️ The re-11/re-9 amplitude **existed only on paper**: a 0.34 peak × a 15pt reach ≈ 5pt,
+//    which on a 36pt-tall canvas looks like a thin line that barely moves. When the user said it
+//    "looks broken" two rounds running, that's what they meant — the heartbeat base shape was too weak to read a rhythm from.
+//
+// ⚠️ But the line "don't hit full scale" **must not be crossed**: full height is reserved for the real level (see the block above).
+//    Revision 12 is "lift the invisible up to visible", not "lift the base shape into the main event"; telling the two apart
+//    now relies on **shape** (a heartbeat's isolated 1~2-slot spike vs speech's 5~15-slot plateau),
+//    so the height can go up a bit without sacrificing that discipline.
+//
+// ─────────────────────────────────────────────────────────────────────────
 // ## Why keep a short history instead of drawing only the instantaneous value
 // A heart-rate-style trace is "a line that scrolls left over time", not a bar jumping up and down. So you need a little
 // history (`sampleCount` slots), appending one slot at the right on each tick and shifting the whole thing left.
@@ -100,12 +121,20 @@ struct WatchVoiceWave: View {
     /// The shape is **boom-tick**: slot 2 is a tall peak (ventricular contraction), slot 7 a shorter
     /// second sound, and the rest a baseline near 0. This looks far more like a heart rate than "every slot the same height".
     ///
-    /// ⚠️ The peak is deliberately kept under **0.35**: it's the "I'm still here" idle hum, not the star.
-    ///    Make it bigger and you can't tell "it's beating" from "the mic really picked up sound" — and telling those two apart
-    ///    is the only purpose this wave has.
+    /// ★ Revision 12: the peak goes **0.34 → 0.52**, the second sound **0.15 → 0.26**
+    /// (user: "when recording, the heart-rate rises and falls need a bigger amplitude").
+    /// Together with the canvas height going 0.30 → 0.44, that beat's **absolute height** goes from about 5pt to about 12pt
+    /// (on 40mm) — the original amplitude was in practice almost invisible to the eye, existing only on paper.
+    ///
+    /// ⚠️ Why it **still** doesn't hit full scale: full height is reserved for the real level. This wave's only purpose
+    ///    is to "tell 'it's beating' from 'the mic really picked up sound'", and once the base shape hits full scale those two
+    ///    are down to a single criterion. Now it's **shape** rather than height alone that tells them apart —
+    ///    a heartbeat is an isolated **1~2-slot** spike (narrow), speech is a continuous **5~15-slot** plateau (wide),
+    ///    and even at similar heights they're obvious at a glance.
+    ///    ⇒ If you want "bigger" again later, first ask whether it's the canvas height that should change, not this table.
     private static let beat: [CGFloat] = [
-        0.05, 0.34, 0.16, 0.06, 0.04,
-        0.04, 0.15, 0.07, 0.04, 0.03,
+        0.08, 0.52, 0.24, 0.09, 0.06,
+        0.06, 0.26, 0.11, 0.06, 0.05,
     ]
 
     init(meter: WatchAudioMeter, size: CGFloat, tint: Color, bpm: Double?) {
@@ -154,7 +183,18 @@ struct WatchVoiceWave: View {
                 style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
             )
         }
-        .frame(width: size * 0.86, height: size * 0.30)
+        // ★ Revision 12: 0.86 × 0.30 → **1.06 × 0.44** (user: "a bigger share of the screen").
+        //
+        // ⚠️ The width cap is set hard by the `WatchBotFace` frame, not by the screen:
+        //    that face's frame is `size × 1.14` and the wave is drawn inside it. 1.06 leaves only about 4% of headroom
+        //    (about 5pt per side on 40mm); any wider and it pushes past the face frame — and then, even if the screen hasn't clipped it,
+        //    the wave no longer "belongs to this face".
+        //    If you want to go bigger, what should change is `WatchRecorderView.botFraction` (the whole face's
+        //    share), not this one number.
+        // ⚠️ Height 0.44: the face frame is also 1.14×size tall, and a line of elapsed time (about 16pt) goes below the wave.
+        //    0.44 + the elapsed-time allowance is just right; any taller and the face frame gets pushed out of shape (`ZStack` doesn't clip,
+        //    but the two rows start crowding each other).
+        .frame(width: size * 1.06, height: size * 0.44)
         // The glow for the recording state. It used to hang on the eyes and moved over once the eyes were replaced by this wave —
         // on the watch face there's nowhere else to say "it's working".
         .shadow(color: tint.opacity(0.55), radius: 7)
@@ -200,7 +240,10 @@ struct WatchVoiceWave: View {
     }
 
     /// The line width is derived from `size`, not hard-coded — 40mm to 49mm differ by 40pt, and a hard-coded value would be wrong on one of them.
+    ///
+    /// ★ Revision 12: 0.024 → **0.028** (2.9pt → 3.3pt on 40mm). Once the canvas is enlarged the same
+    /// line width looks thinner on screen, so it goes up a notch to keep that bit of "brushstroke" feel.
     private static func lineWidth(for size: CGFloat) -> CGFloat {
-        max(2, size * 0.024)
+        max(2, size * 0.028)
     }
 }

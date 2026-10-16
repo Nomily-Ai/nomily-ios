@@ -330,6 +330,11 @@ struct WatchRecorderView: View {
     ///
     /// ⚠️ Not starting a recording **while idle** is deliberate: "one tap records" is exactly the habit this revision set out to break
     /// (raising the wrist to check the time, or a brush from a cuff, would start recording). To start, hold for 2 seconds, double tap, or shake.
+    ///
+    /// ★ After revision twelve, what a "poke" does has changed: `pokeTick` now makes that face **play a random
+    /// expression** (one drawn from five), no longer the single whole-face bounce and "one kind of eye wobble" of revision ten.
+    /// This layer doesn't need to know which expressions exist -- it just fires the pulse off (see the `pokeTick`
+    /// passage in `WatchBotFace`, which explains why it doesn't just call a method).
     private func handleTap() {
         guard Date() >= tapGateUntil else { return }
         if model.isRecording {

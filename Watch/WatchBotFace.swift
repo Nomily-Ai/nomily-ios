@@ -66,7 +66,7 @@ import SwiftUI
 //    keep blinking" two rounds in a row, and when the "reference mechanism" conflicts with the "user constraint" the user wins: copy the mechanism, tighten the numbers.)
 //
 // ─────────────────────────────────────────────────────────────────────────
-// ## The things that make this face "alive" (after revision ten)
+// ## The things that make this face "alive" (after revision twelve)
 //
 //   · **Gaze drift** (`runGazeLoop`, **this is the main idle motion**) -- the two eyes **as a whole**
 //     look gently left and right, **pausing a moment** at each side before switching, with a 4.8-second period. The reference implementation uses
@@ -75,7 +75,12 @@ import SwiftUI
 //     ⚠️ It is **the whole pair translating together**, not each eye looking its own way -- doing it separately becomes a squint.
 //   · **Occasionally blink once** (`runBlinkLoop`) -- close fast (70ms) → pause 70ms →
 //     open to a 1.08 overshoot (80ms) → fall back to 1 over 150ms. **300ms** total, mostly single blinks,
-//     14% chance of adding one more after 70ms.
+//     14% chance of adding one more after 70ms. The interval draws from **two tiers** at random (mostly 3.5~6.5 seconds,
+//     22% chance of inserting a 10~18 second stretch), see `nextBlinkGap()`.
+//   · **A tap gives an expression** (`EyeMood`) -- one of five is drawn and played once: ∩ arched smiling eye / ∪ drooping eye /
+//     wide-open / squint / angry glare. This is the **only** action that "actually changes the eye shape";
+//     there is still well over half of that 20-slot library in the reference implementation that cannot be brought over, for the reason see the `EyeMood` paragraph below
+//     (put simply: a round-tipped vertical bar has only four dimensions it can express).
 //   · **Breathing** -- the whole pair of eyes slowly inflates and deflates (plus or minus 1.8%, once every 3.6 seconds). The amplitude must be small:
 //     any larger and it looks like it is pulsing; it should be small enough that "you can't say what is moving, but it is alive."
 //   · **Swap in a waveform while recording** (`WatchVoiceWave`) -- user: "when recording starts it should be
@@ -99,6 +104,34 @@ import SwiftUI
 //     width ×0.96, height ×1.05 -- that is, **4% / 5%**, smaller than the breathing here,
 //     yet it means maintaining one more scale layer. The scale layers already stacked in this file are the two of breathing × poke,
 //     and adding one more means nobody can work out the total amplitude (the `figureScale` comment made this point).
+//
+// ⚠️ The second item above **was reversed by revision twelve** -- but reversed in a different way from the reference implementation: not
+//    "swap a 4% difference every 9~16 seconds" (nobody can see that kind of swap, and it requires maintaining one more loop),
+//    but **a tap giving a whole, instantly distinguishable expression**, returning to idle once it finishes.
+//    So there is still no "rotation loop" here, only a one-shot `mood` (see `EyeMood`).
+//
+// ─────────────────────────────────────────────────────────────────────────
+// ★★ 2026-10-16 revision twelve (user's words: "in the current colors is there no white on the watch, and while recording
+//    the heart-rate rise and fall needs a large amplitude and to take up a big part of the screen, and the eyes need to show various expressions on a light touch rather than
+//    a single eye wobble, and the random blink frequency should be just like a normal person's"):
+//
+// Two of the four items concern this face:
+//
+// **1. A tap should produce an expression, not just a bounce.** Revision ten's `pokeOnce()` did one thing:
+//    bounce the whole face 5%. The user read that as "a single eye wobble" -- and was right; that bounce
+//    really is just an "I got it," with no **expression** to speak of.
+//    Now a tap **draws a random expression and plays it once** (`EyeMood`, five options: ∩ arched smiling eye / ∪ drooping eye /
+//    wide-open / squint / angry glare), springing in, holding about 0.8 seconds, then relaxing back. The overall bounce stays,
+//    but is pulled in to 3% -- it is demoted to a "close-up response," and the expression is the star.
+//
+// **2. Blink frequency is changed back to "a normal person."** Revision ten had tightened it to
+//    9~20 seconds based on the user's two rounds of "don't keep blinking," averaging about 1 per 15 seconds. This round the user explicitly asked for "like a normal person," so it was changed to a
+//    **two-tier** distribution (`blinkGapNear` / `blinkGapFar`) -- the reasoning and the arithmetic are written over in
+//    `nextBlinkGap()`, in one sentence: human blinking is not uniformly random, it is "short intervals with an occasional
+//    long stretch inserted." The average is about 1 per 7 seconds (≈ 8.6 per minute), exactly the **person staring at a screen**
+//    tier, which is exactly the posture the user is in right now looking at this watch.
+//    ⚠️ Revision ten's constraint "don't go back to tuning the fixed period" **was not** violated: what changed is the range, the mechanism
+//        is still "draw fresh after every blink," with no fixed period of any kind.
 //
 // ## Why all the gestures live in this one type instead of being scattered across the home screen
 // Hold to start, tap to stop, Double Tap to start/stop -- all three **land on this face**.
@@ -191,7 +224,21 @@ struct WatchBotFace: View {
     @State private var idleLoop: Task<Void, Never>?
     @State private var gazeLoop: Task<Void, Never>?
     /// The bounce amount when poked. 0 = original state.
+    ///
+    /// ⚠️ Revision twelve pulled the amplitude in to **3%** (from 5%): it is no longer the **whole** expression of "being poked" --
+    ///    the main act became that random expression (`mood`), and this only gives a close-up response.
+    ///    Leaving it at 5% would read again as the "single eye wobble" the user described (see `figureScale`).
     @State private var poke: CGFloat = 0
+    /// The expression drawn on a tap. `nil` = idle (a pair of vertical capsules).
+    ///
+    /// ★ Added in revision twelve (user: "the eyes need to have various expressions on a light touch rather than a single eye wobble").
+    @State private var mood: EyeMood?
+    /// The handle for the expression's `Task`.
+    ///
+    /// ⚠️ When tapping twice in a row it must **cancel the previous one first**: the two `Task`s each sleep 0.8 seconds and then leave,
+    ///    unaware of each other, so the one that wakes first would erase **the new expression that has just come on** --
+    ///    showing up as "tapping twice produced nothing at all."
+    @State private var moodTask: Task<Void, Never>?
     /// Hold progress 0...1.
     @State private var holdProgress: CGFloat = 0
     /// Whether a finger is currently pressed on the eyes. Driven by `LongPressGesture.updating`.
@@ -216,16 +263,49 @@ struct WatchBotFace: View {
     /// If the two numbers collided, one twitch of the hand would have to choose between "start recording" and "page."
     private static let holdSlop: CGFloat = 34
 
-    // MARK: The idle rhythm (revision ten)
+    // MARK: The idle rhythm (revision twelve)
     //
-    // For where the numbers come from see the "revision ten" paragraph at the top of the file: the mechanism is copied from `aora-bot`'s idle state, the numbers
-    // follow the user's actual feedback -- revision ten tightened them ("don't keep blinking").
+    // For where the numbers come from see the "revision ten" and "revision twelve" paragraphs at the top of the file: the mechanism is copied from `aora-bot`'s idle state,
+    // and the numbers follow the user's actual feedback -- revision ten tightened them ("don't keep blinking"),
+    // revision twelve went back to "a normal person" ("random blink frequency like a normal person").
     //
     // ⚠️ Why "**draw fresh every time**" rather than a fixed period: see item 1 at the top.
     //    A fixed period = a metronome, and no matter how long it is it still gets read out. Here `Task.sleep` sleeps a random value,
     //    wakes up, blinks once, then draws the next -- structurally there is no beat to speak of.
-    /// How long to wait between two blinks (seconds). The reference implementation's idle is `[6, 14]`; here it is raised to **9~20**.
-    private static let blinkWait: ClosedRange<Double> = 9 ... 20
+    /// The interval between two blinks (seconds) -- **two tiers**, not one.
+    ///
+    /// ★ Revision twelve: there used to be only one tier, `9 ... 20`; now it is split into "near" and "far"
+    /// (user: "random blink frequency just like a normal person's").
+    ///
+    /// ## Why it must be two tiers
+    /// Human blinking is **not uniformly random**: the vast majority of intervals bunch within a few seconds, but now and then a
+    /// long interval of a dozen-plus seconds gets inserted (blinking drops noticeably when spacing out, concentrating, or thinking). Fitting that distribution
+    /// with a single uniform range can only hit half of it no matter where you set the range --
+    /// tuned dense it is like using a stopwatch, tuned sparse it is like dead-fish eyes. Two tiers express exactly
+    /// "the dense majority" and "the sparse minority" separately.
+    ///
+    /// ## Where the numbers come from
+    /// | state | times/min | interval |
+    /// |---|---|---|
+    /// | relaxed conversation | 15~20 | 3.0~4.0s |
+    /// | **staring at a screen / focused** | **5~7** | **8.6~12s** |
+    /// | resting average | 12~15 | 4.0~5.0s |
+    ///
+    /// ⇒ the near tier takes **3.5~6.5** (≈ the human resting tier), the far tier takes **10~18**
+    ///   (≈ the staring-at-a-screen tier), with a 22% chance of the far tier.
+    ///   Weighted average ≈ 0.78 × 5 + 0.22 × 14 ≈ **7.0 seconds ≈ 8.6 per minute**.
+    ///
+    /// ⚠️ Revision ten's constraint "don't go back to tuning that fixed period" **was not violated**: what changed is
+    ///    **the random range and its distribution**; the mechanism is still "draw a fresh value after every blink,"
+    ///    and structurally there is no fixed period. Any "fixed duration + `repeatForever`" is still
+    ///    forbidden (that is exactly why revision eight turned into a metronome).
+    /// ⚠️ Each tier has one thing it must not do visually: the near tier **must not** drop below 2 seconds (that becomes
+    ///    a jitter, not a blink), and the far tier **must not** stretch past 20 seconds (that falls back to revision ten's
+    ///    "dead-fish eyes" look -- this is the feedback revision ten received).
+    private static let blinkGapNear: ClosedRange<Double> = 3.5 ... 6.5
+    private static let blinkGapFar: ClosedRange<Double> = 10 ... 18
+    /// The chance of taking the "far" tier. 22% ≈ inserting a long one about every four or five blinks.
+    private static let blinkGapFarChance: Double = 0.22
     /// The chance of adding one more after a blink. The reference implementation's `Math.random() < 0.14`.
     ///
     /// ⚠️ Do **not** raise this number. Revision nine was "a double blink every round" (= 100%), and that is half the source
@@ -338,6 +418,8 @@ struct WatchBotFace: View {
             // and each round they write a `@State` nobody is looking at any more.
             idleLoop?.cancel()
             gazeLoop?.cancel()
+            // ★ Revision twelve: the expression one has to be shut down too -- same as above.
+            moodTask?.cancel()
         }
     }
 
@@ -378,11 +460,15 @@ struct WatchBotFace: View {
             }
     }
 
-    /// Starts and stops **all** idle motion: breathing + gaze drift + blinking.
+    /// Starts and stops **all** idle motion: breathing + gaze drift + blinking + expression.
     ///
     /// ★ Before revision ten this only handled breathing, with blinking run by `phaseAnimator` itself (blinking as long as the view was around).
     /// Now blinking and gaze are both `Task` loops, and someone has to **explicitly start and explicitly stop** them -- so this
     /// became the single switch: dimming, recording, leaving the page, all shut down from here.
+    /// ★ After revision twelve there is one more managed object: the expression (`moodTask`). It is **not** a loop,
+    /// it is a one-shot `Task`; but "invalidated the moment recording starts" is exactly the same as the two loops,
+    /// so it is hung on this switch all the same -- rather than adding another cancel line in `onChange(of: isRecording)`,
+    /// better to let the single switch shut it all down (the duplicated copy will eventually miss something newly added).
     ///
     /// ⚠️ Every time it is entered it **cancels the old ones first** before deciding whether to start new ones. Not cancelling would stack them:
     ///    `isRecording` and `dimmed` can each change twice in a row, and every loop is a
@@ -396,14 +482,20 @@ struct WatchBotFace: View {
         idleLoop = nil
         gazeLoop?.cancel()
         gazeLoop = nil
+        // ★ Revision twelve: the expression's `Task` is managed here too. When recording starts / when dimmed, the expression currently being played has to be
+        //   shut down on the spot -- it changes the eyes' size and shape, and in the recording state the eyes are simply absent,
+        //   so leaving it hanging would make an expression from two actions ago suddenly pop up after recording ends.
+        moodTask?.cancel()
+        moodTask = nil
 
         guard !dimmed, !isRecording else {
             // Back to the rest position. Dimming wants a static open-eyed face, and in the recording state the eyes are simply absent --
-            // both are handled by these three lines, leaving no gaze stopped halfway.
+            // Both are handled by these four lines, leaving no gaze stopped halfway and no expression half-played.
             withAnimation(.linear(duration: 0.2)) {
                 breathe = false
                 openness = 1
                 gaze = .zero
+                mood = nil
             }
             return
         }
@@ -423,9 +515,9 @@ struct WatchBotFace: View {
     //
     // Two loops run side by side, independent of each other:
     //   · `runGazeLoop`  switches sides every 4.8 seconds (**persistent** eye motion)
-    //   · `runBlinkLoop` sleeps a random value of 9~20 seconds → blinks once → draws again
+    //   · `runBlinkLoop` sleeps a random interval (near tier 3.5~6.5s / far tier 10~18s) → blinks once → draws again
     //
-    // ⚠️ The two periods are **deliberately unequal** (4.8 vs the 9~20 random), so their relative phase is always
+    // ⚠️ The two periods are **deliberately unequal** (4.8 vs the two-tier random), so their relative phase is always
     //    changing -- two motions with equal periods phase-lock, and once phase-locked the whole face starts "tapping out a beat,"
     //    more obvious than a single metronome. In the reference implementation lookX(4.8s) / lookY(4.1s) were likewise
     //    deliberately given different periods.
@@ -454,9 +546,12 @@ struct WatchBotFace: View {
     ///    The difference is only the double blink (about 0.8 seconds), negligible in magnitude, but "after the blink finishes" was chosen deliberately
     ///    -- so that the measure of "between two blinks" is clean: the interval the user perceives does not include
     ///    the 300ms the blink itself takes.
+    ///
+    /// ★ Revision twelve changed only one thing: `Double.random(in: blinkWait)` → `nextBlinkGap()`.
+    ///    The loop structure, the double-blink chance and `blinkOnce()`'s keyframes **did not move a single cell**.
     private func runBlinkLoop() async {
         while !Task.isCancelled {
-            let wait = Double.random(in: Self.blinkWait)
+            let wait = Self.nextBlinkGap()
             try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             guard !Task.isCancelled else { return }
 
@@ -494,6 +589,19 @@ struct WatchBotFace: View {
         try? await Task.sleep(nanoseconds: 150_000_000)
     }
 
+    /// Draw the next "interval between two blinks."
+    ///
+    /// ★ Added in revision twelve. This is the whole implementation of "like a normal person" -- first decide by probability whether this round
+    /// is "dense" or "sparse," then randomize within that tier. The numbers for the two tiers are documented over at the constants.
+    ///
+    /// ⚠️ Why draw **twice** rather than use "a skewed distribution": `Double.random` only has a uniform distribution,
+    ///    and building a skewed distribution on top of it would need an inverse transform, not worth it for two numbers. The two-tier approach
+    ///    instead puts the intent out in the open -- whoever reads the code immediately sees "mostly a few seconds, occasionally a dozen-plus."
+    private static func nextBlinkGap() -> Double {
+        let far = Double.random(in: 0 ..< 1) < blinkGapFarChance
+        return Double.random(in: far ? blinkGapFar : blinkGapNear)
+    }
+
     /// The product of three scale layers: breathing × poke × recording.
     ///
     /// Multiply rather than stack three `.scaleEffect`s -- with three stacked layers, changing any one means also changing
@@ -506,23 +614,60 @@ struct WatchBotFace: View {
     /// ⚠️ The recording state is 1 (no shrink, no grow). Revision seven's version grew another 1.06 while recording, which was for
     ///    "open the eyes one size larger"; after revision nine swapped the recording state for a waveform, that wave's height **is the level itself**,
     ///    and multiplying by another factor would make "the amplitude you see" and "the real volume" stop being the same thing.
+    ///
+    /// ⚠️ Revision twelve pulled the poke from 5% in to **3%**: it is now just a side dish (the main act is `mood`).
+    ///    There are still only **three layers** here, and the expression's deformation is not in this product -- the expression changes the eyes'
+    ///    own size and shape (`eye(mirrored:)`), which is a different matter from the whole face's inflate-deflate,
+    ///    and mixing it into this product would turn into "how big the expression is depends on where the breathing happened to be."
     private var figureScale: CGFloat {
         var s: CGFloat = (dimmed || isRecording) ? 1 : (breathe ? 1.028 : 0.992)
-        s *= 1 + poke * 0.05
+        s *= 1 + poke * 0.03
         return s
     }
 
-    /// Tapped while idle: bounce once. It does **not** start recording -- starting recording is a 2-second hold.
+    /// Tapped while idle: **bounce once + play a random expression**.
     ///
-    /// Why this feedback: if a tap does nothing at all, the user assumes "maybe I have to hold it,"
-    /// and starts trying random things; a bounce both says "I got it" and, because it is **clearly not** the recording look
-    /// (recording swaps in a whole bouncing waveform) and will not be mistaken for having already started recording.
+    /// ⚠️ Starting recording is still not this -- starting recording is a 2-second hold, a Double Tap, or a shake.
+    ///
+    /// Why there has to be feedback: if a tap does nothing at all, the user assumes "maybe I have to hold it," so
+    /// they start trying random things. So this one has to say "I got it."
+    ///
+    /// ★ Revision twelve (user: "the eyes need to have various expressions on a light touch rather than a single eye wobble"):
+    /// before revision ten there was only the overall bounce here, and the user described that bounce as "a single eye wobble"
+    /// -- accurate. Now the bounce is only the **response**, and the **expression** is the content:
+    /// one of five is drawn at random (∩ arched smiling eye / ∪ drooping eye / wide-open / squint / angry glare), played once and withdrawn.
+    ///
+    /// ⚠️ Their **happening at once** is deliberate (not casually stacked): a pure expression change has no "I was tapped" feel,
+    ///    and a pure bounce has no expression -- what the user complained about was exactly "only the latter."
     private func pokeOnce() {
         guard !isRecording, !dimmed else { return }
         withAnimation(.spring(response: 0.22, dampingFraction: 0.5)) { poke = 1 }
         Task {
             try? await Task.sleep(nanoseconds: 180_000_000)
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { poke = 0 }
+        }
+        playRandomMood()
+    }
+
+    /// Play one expression once: 0.26 seconds coming in → hold about 0.8 seconds → 0.34 seconds leaving.
+    ///
+    /// ⚠️ Every time it **cancels the previous** `Task` first (see the `moodTask` paragraph): on a double tap,
+    ///    the one that wakes first erases the new expression that has just come on.
+    ///
+    /// ⚠️ The exit uses `easeOut` rather than `spring`: the entrance should spring ("got amused"),
+    ///    and the exit should go back **loosely**. Using spring at both ends makes "withdrawing the expression" look like it is being sprung back.
+    ///
+    /// ⚠️ 0.8 seconds is the level between "clearly visible" and "not in the way." Below 0.5 seconds it looks like a flash,
+    ///    above 1.2 seconds the user starts waiting for it to go back (this face can be held at any moment, so it cannot hang
+    ///    an expression for a long time).
+    private func playRandomMood() {
+        moodTask?.cancel()
+        guard let next = EyeMood.allCases.randomElement() else { return }
+        moodTask = Task {
+            withAnimation(.spring(response: 0.26, dampingFraction: 0.72)) { mood = next }
+            try? await Task.sleep(nanoseconds: 820_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.34)) { mood = nil }
         }
     }
 
@@ -576,8 +721,13 @@ struct WatchBotFace: View {
     ///    -- not forgotten.
     private var eyes: some View {
         HStack(spacing: eyeGap) {
-            eye
-            eye
+            // ★ Revision twelve: the two eyes each know whether they are the "right eye." `EyeMood.tilt` writes only one
+            //   number (the left eye's), and the right eye takes its negation -- so "the two eyes slanting symmetrically" (an angry face)
+            //   needs only one number to express, rather than writing an angle for each eye.
+            //   ⚠️ What is meant here is **the symmetry of the eye shape itself**, which is a different thing from the `gaze`
+            //      below (the whole pair translating together); do not mix them up.
+            eye(mirrored: false)
+            eye(mirrored: true)
         }
         // As a group the eyes sit a little above the geometric center. Exactly centered looks "head down" --
         // the eyes on a human face sit above the midline anyway.
@@ -595,16 +745,54 @@ struct WatchBotFace: View {
     /// description was deleted outright, for the reason see "why `phaseAnimator` is no longer used" at the top of the file.
     /// The dimmed branch needs no separate check either: `startIdleMotion()` resets `openness`
     /// to 1, so when dimmed this is naturally a static open-eyed face.
-    private var eye: some View {
-        eyeShape
-            .scaleEffect(y: openness, anchor: .center)
+    ///
+    /// ★ Revision twelve: both **drawing methods** (capsule + arc) sit inside at once, cross-fading via `opacity`,
+    /// rather than picking one with `if/else`. The reason is that `if/else` swaps **view identity**,
+    /// and the frame it swaps on gives only a hard cut (the view is removed and another inserted), whereas these two precisely need
+    /// a smooth transition -- what the user should see is "the eye squints into an arc," not "it flashed."
+    ///
+    /// ⚠️ The outer `frame` is **fixed** (`eyeWidth × eyeHeight`) and does not follow the expression.
+    ///   With it fixed: the `HStack`'s spacing does not change with the expression (the two eyes' spacing suddenly widening is more conspicuous than the expression
+    ///   itself), and both drawing methods have the same alignment reference.
+    ///   Anything beyond this box is not clipped -- `frame` does not clip, only `.clipped()` does.
+    private func eye(mirrored: Bool) -> some View {
+        let current = mood
+        let widthScale = current?.scaleX ?? 1
+        let isArc = current?.isArc ?? false
+
+        return ZStack {
+            eyeShape(widthScale: widthScale, heightScale: current?.scaleY ?? 1)
+                .opacity(isArc ? 0 : 1)
+            eyeArc(up: current?.arcUp ?? true, widthScale: widthScale)
+                .opacity(isArc ? 1 : 0)
+        }
+        .frame(width: eyeWidth, height: eyeHeight)
+        .rotationEffect(.degrees(mirrored ? -(current?.tilt ?? 0) : (current?.tilt ?? 0)))
+        .scaleEffect(y: openness, anchor: .center)
     }
 
+    /// The eyes for the idle state, and for the expressions that "do not change shape": a round-tipped vertical bar.
+    ///
     /// Uses the color chosen on the "Appearance" page, **solid** (revision nine dropped the gradient).
-    private var eyeShape: some View {
+    private func eyeShape(widthScale: CGFloat, heightScale: CGFloat) -> some View {
         Capsule()
             .fill(tint)
-            .frame(width: eyeWidth, height: eyeHeight)
+            .frame(width: eyeWidth * widthScale, height: eyeHeight * heightScale)
+    }
+
+    /// The arc for the arched smiling eye (∩) / drooping eye (∪).
+    ///
+    /// ⚠️ height = `eyeHeight × 0.44`, thickness = `eyeHeight × 0.20` (about 20pt tall and
+    ///    9pt thick on 40mm). **It must not be drawn thin**: a thin arc on the watch face reads as an eyebrow, or a scratch;
+    ///    only thick enough to approach the thickness of a closed eye does it read as "this is a smiling eye."
+    ///    This is also why `EyeCurve` is a "stroke" rather than a "fill" -- so the thickness can be adjusted on its own.
+    private func eyeArc(up: Bool, widthScale: CGFloat) -> some View {
+        EyeCurve(up: up)
+            .stroke(
+                tint,
+                style: StrokeStyle(lineWidth: eyeHeight * 0.20, lineCap: .round)
+            )
+            .frame(width: eyeWidth * widthScale, height: eyeHeight * 0.44)
     }
 
     // MARK: - The charge ring
@@ -632,6 +820,131 @@ struct WatchBotFace: View {
                 // nor stretch the `Button`'s tap target outward.
                 .allowsHitTesting(false)
         }
+    }
+}
+
+// MARK: - Expressions (★ 2026-10-16 added in revision twelve)
+//
+// The user's exact words: "the eyes need to have various expressions on a light touch rather than a single eye wobble."
+//
+// ## Where the assets come from
+// The `aora-bot` expression library (`mood-mates/src/core/geometry.js`) has **20 eye-shape
+// slots**: `calm / calm2 / happy / happy2 / wide / wide2 / closed / closed2 /
+// sleepy / squint / squint2 / angry / angry2 / scan / scan2 / scan3 /
+// listen / listen2 / shy / sad`. Each slot is a set of parameters
+// `{ w, h, bend, taper, slope, shift }`。
+//
+// ## Why only five could be brought over
+// An eye here is a `Capsule` (a round-tipped vertical bar), not a bendable path. In the reference implementation
+// `bend` / `taper` describe "how this eye line bends and how its ends taper" --
+// that needs a shape capable of drawing an arbitrary curve. So the dimensions expressible here are only four:
+//
+//   · **height** (`scaleY`) -- open wide / squint
+//   · **width** (`scaleX`)
+//   · **tilt** (`tilt`) -- slant
+//   · **straight / curved** (`isArc`) -- the two curved ones swap in an `EyeCurve` stroke
+//
+// So the five below were "selected" from the 20 slots, not accepted wholesale.
+//
+// ## ⚠️ Two rules kept when choosing
+// 1. **Distinguishable at a glance.** In the reference implementation the difference between `calm` and `calm2` is width ×0.96, height ×1.05
+//    -- 4% / 5%, not much more than the idle breathing (plus or minus 1.8%). Put into this pool, tapping five times in a row
+//    might land on the "indistinguishable" two tiers four times, and the user concludes "tapping does nothing."
+//    ⇒ The five that get drawn must be **recognizable as different expressions from half a meter away**.
+// 2. **They cannot be "closed eyes."** The `closed` / `sleepy` tiers would collide with **blinking** on the watch --
+//    the user could not tell "it is blinking at me" from "it switched to sleeping." So they are not in the pool.
+private enum EyeMood: CaseIterable {
+    /// ∩ arched smiling eye. The reference implementation's `happy`: `{ w: ×1.05, h: ×0.5, bend: 0.62, taper: 1.15 }`.
+    case happy
+    /// ∪ drooping eye. The reference implementation's `sad` tier -- the same arc flipped over, a "deflated" eye.
+    case sad
+    /// Wide-open. The reference implementation's `wide`: `{ w: ×1.12, h: ×1.3, bend: 0, taper: 0.8 }`.
+    case wide
+    /// Squint. The reference implementation's `squint` tier (height compressed to about a third).
+    case squint
+    /// Angry glare. The reference implementation's `angry`: `{ slope: -0.5, shift: 0.3 }` -- the inner side pressed down.
+    case angry
+
+    /// The eye width multiplier.
+    var scaleX: CGFloat {
+        switch self {
+        case .happy:  return 1.06
+        case .sad:    return 1.00
+        case .wide:   return 1.06
+        case .squint: return 1.04
+        case .angry:  return 1.00
+        }
+    }
+
+    /// The eye height multiplier (relative to the idle `0.375 × size` vertical bar).
+    ///
+    /// ⚠️ The two arc shapes **ignore** this value -- the arc's height is set by `eyeArc` itself (`0.44 ×`),
+    ///    because "multiplying a 20pt-tall arc by 0.5" would turn it into an almost invisible thin line,
+    ///    rather than "a squint." So these two tiers are given 1, letting the arc keep its own shape.
+    var scaleY: CGFloat {
+        switch self {
+        case .happy, .sad: return 1
+        case .wide:        return 1.24
+        case .squint:      return 0.34
+        case .angry:       return 0.80
+        }
+    }
+
+    /// How many degrees the **left eye** turns; the right eye takes the negative (see `eye(mirrored:)`), so the two eyes
+    /// are automatically symmetric.
+    ///
+    /// ## Why it is negative
+    /// The screen's y-axis points down, so **a positive angle = clockwise**. The left eye turns −12° (counterclockwise) ⇒
+    /// the top end of this vertical bar tilts **outward** (further from the midline) and the bottom end tilts **inward** --
+    /// so the two eyes **converge toward the midline at the bottom**, and the brow forms a "∧".
+    ///
+    /// ⚠️ This direction is the entire source of "angry"; written the other way it becomes a different expression:
+    ///    · bottom ends converging (−12°) = "∧" = angry brows (inner ends pressed down);
+    ///    · top ends converging (+12°) = "∨" = that is aggrieved / pitiful, not angry.
+    ///    So **do not casually flip this number to positive** -- before changing it, draw the two bars on paper first.
+    ///
+    /// ⚠️ More important is "the two eyes are **opposite**" itself: both eyes turning the same direction (`///`)
+    ///    is not angry, it is a squint. In the reference implementation `slope` is signed, for the same reason.
+    var tilt: Double {
+        switch self {
+        case .angry: return -12
+        default:     return 0
+        }
+    }
+
+    /// Whether it is drawn as an arc (arched smiling eye / drooping eye).
+    var isArc: Bool { self == .happy || self == .sad }
+
+    /// Whether the arc arches up or down.
+    var arcUp: Bool { self == .happy }
+}
+
+/// An arc bowing up (∩) or down (∪).
+///
+/// ★ Added in revision twelve; it is the only tier in the whole expression set that **changes shape** (the other four are scaling/rotation).
+///
+/// ⚠️ Use a quadratic Bézier rather than `Circle().trim(from:to:)`: `trim`'s start position and drawing
+///    direction hang on SwiftUI's "y axis down, angles clockwise" convention, which is the easiest place to
+///    go wrong and the hardest to read when changing the drawing. Writing "both ends on the midline, the apex raised to the edge" with control points is
+///    **self-evident** -- the formulas in the two comment lines below can be verified directly.
+private struct EyeCurve: Shape {
+    /// `true` = ∩ (smile), `false` = ∪ (droop).
+    let up: Bool
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        // The midpoint of a quadratic Bézier is B(0.5) = ¼P₀ + ½P₁ + ¼P₂. To have the midpoint land exactly on the edge
+        // (the `minY` when bowing up), the control point must sit one more height **outside the box**:
+        //   0.5·maxY + 0.5·P₁.y = minY  ⇒  P₁.y = 2·minY − maxY
+        // the two ends are pinned to the other edge, so the arc exactly fills the whole `rect`.
+        let anchor = up ? rect.maxY : rect.minY
+        let controlY = up ? rect.minY - rect.height : rect.maxY + rect.height
+        path.move(to: CGPoint(x: rect.minX, y: anchor))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: anchor),
+            control: CGPoint(x: rect.midX, y: controlY)
+        )
+        return path
     }
 }
 
@@ -669,14 +982,15 @@ struct PrimaryHandGesture: ViewModifier {
     }
 }
 
-// MARK: - The blink rhythm (four versions, the ledger stays here)
+// MARK: - The blink rhythm (five versions, the ledger stays here)
 //
 // | version | blink rhythm | user feedback |
 // |---|---|---|
 // | revision seven | fixed 4.63s, a double blink in every round | first version |
 // | revision eight | fixed 8.12s, a double blink every round | "the blinking is too fast, slow the rhythm down" |
 // | revision nine | fixed 19.12s, a double blink every round | "the eyes should not keep blinking"... "**not no blinking**" |
-// | **revision ten** | **9~20s random, redrawn each time; mostly single blinks, 14% add one** | "**no need to keep blinking**" |
+// | revision ten | 9~20s random, redrawn each time; mostly single blinks, 14% add one | "**no need to keep blinking**" |
+// | **revision twelve** | **two-tier random: mostly 3.5~6.5s, 22% chance of 10~18s; mostly single blinks, 14% add one** | "**random blink frequency just like a normal person's**" |
 //
 // ★ Revision seven through nine is **one road walked three steps: stretching the fixed cycle longer and longer**. By the time it reached 19 seconds
 // the user was still saying "no need to keep blinking" -- which shows the road itself is wrong.
@@ -694,9 +1008,17 @@ struct PrimaryHandGesture: ViewModifier {
 //    (`runGazeLoop`), the eyes are never still -- so blinking degrades into an accent, no longer the
 //    thing that gets noticed. This one is the real solution to "no need to keep blinking."
 //
-// ⚠️ **Stop going back to tune that fixed period.** To make it quieter, what should change is
-//    the upper bound of `blinkWait` (currently 20 seconds), not turning it back into a fixed value.
-//    Any combination of "fixed duration + `repeatForever`" falls back into a metronome.
+// ★★ Revision twelve is **the first time this line went the other way** (denser). Revision ten had tightened the range to 9~20,
+// based on the user's two rounds of "don't keep blinking"; this round the user explicitly changed their mind and asked for "like a normal person,"
+// so it was redrawn against the measured human frequency and switched from **one uniform tier** to **two tiers**:
+// human blinking is "short intervals with an occasional long stretch inserted," not a uniform distribution -- for the arithmetic see the table
+// above `nextBlinkGap()` and the comments on `blinkGapNear` / `blinkGapFar`. The weighted average ≈ 1 per 7 seconds
+// (≈ 8.6 per minute), landing in the "person staring at a screen" tier.
+//
+// ⚠️ The only thing on this line that **has never been reversed** is: no fixed period.
+//    · want it quieter → tune `blinkGapFar` (the far tier's upper bound);
+//    · want it denser → tune `blinkGapNear` / lower `blinkGapFarChance`.
+//    Any combination of "fixed duration + `repeatForever`" falls back into a metronome (that is how revision eight crashed).
 //
 // ⚠️ Three invariants; do not casually break them while changing numbers:
 //    · blink total duration **300ms** (revision nine was 450ms -- the longer it lingers the more conspicuous);
@@ -704,9 +1026,10 @@ struct PrimaryHandGesture: ViewModifier {
 //    · the closed value sits at **0.05**, not 0 (when you go to 0 and then scale back up, `scaleEffect` at extremely thin
 //      sizes shows a gap thinner than the line width, which looks like "the eye dropped for a frame").
 //
-// ⚠️ The gaze period (4.8s) and the blink interval (9~20s random) are **deliberately unequal**, see
+// ⚠️ The gaze period (4.8s) and the blink interval (two-tier random) are **deliberately unequal**, see
 //    the "idle loops" comment below `startIdleMotion`: two motions with equal periods phase-lock.
 //
 // ⚠️ The implementation is no longer at the end of this file -- revision ten deleted the phase-by-phase `BlinkPhase` outright,
 //    replacing it with `runBlinkLoop()` / `blinkOnce()` (below `startIdleMotion()`).
 //    For the reason see "why `phaseAnimator` is no longer used" at the top of the file.
+//    Revision twelve changed only the "draw the interval" step (`nextBlinkGap()`); the loop structure did not move a single cell.
