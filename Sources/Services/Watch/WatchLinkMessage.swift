@@ -39,4 +39,23 @@ enum WatchLinkMessage {
     /// mid-take — which is the whole difference between a live status and a
     /// lie.
     static let heartbeatKey = "heartbeat"
+
+    // MARK: - Face style (phone → watch)
+    //
+    // ★ 2026-10-16 thirteenth revision: this is the **first time** the phone actively pushes an appearance setting to the watch.
+    // Before this, phone→watch had only one message, `stored` (`transferUserInfo`, a one-shot event),
+    // and "what the watch home screen looks like" had always been a **local** watch preference (colour, quick menu, language).
+    // This round the user explicitly asked for the "home-screen eye expression" to sit **in the iPhone's Settings**,
+    // so it has to cross this link.
+
+    /// Which expression the home-screen face shows. The value is `BotFaceStyle.rawValue`.
+    ///
+    /// ⚠️ Goes through `updateApplicationContext` rather than `transferUserInfo`: this pushes
+    ///    the "**current value**", not "something happened". A late-arriving old value means nothing,
+    ///    and the definition of `updateApplicationContext` is precisely "the new version **replaces**
+    ///    the version not yet sent" — when the user taps three times to change the expression, the watch should see only the last one.
+    ///
+    /// ℹ️ The two directions' application contexts are **separate** slots, so the watch's
+    ///    "recording state" push (also `updateApplicationContext`) won't be crowded out by this one.
+    static let faceStyleKey = "faceStyle"
 }

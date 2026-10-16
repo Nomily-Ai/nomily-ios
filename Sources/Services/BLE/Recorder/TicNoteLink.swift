@@ -163,7 +163,7 @@ final class TicNoteLink: NSObject, ObservableObject, RecorderLink {
     /// has a stagnant value (real device stays at constant `49920`) that never increments; after 6 s it will be judged as ended.
     ///
     /// ⚠️ This constant is the toggle for the user's complaint:
-    /// > "After tapping record, Bluetooth auto-transfers and then automatically starts another recording"
+    /// > "After tapping record, Bluetooth finishes transfer and then automatically starts another recording"
     /// Previously the criterion was "if `0x14` seen within the last 2 hours, consider recording" (`sessionOpenTrustWindow`).
     /// Consequently, the **post-session residual notification** causes the UI to re-enter recording mode and the stopwatch to keep counting,
     /// The user can only tap stop once — and the next residual will light it again.
@@ -362,7 +362,7 @@ final class TicNoteLink: NSObject, ObservableObject, RecorderLink {
     //
     // This group is **only used by the `LiveAudioSource` section**, but must be declared in the class body ——
     // Swift extensions cannot add stored properties. See the end of the file
-    // `// MARK: - LiveAudioSource`.
+    // `// MARK: - LiveAudioSource`。
 
     /// The **full 32-bit** sid when the card pushes `0x14`/`0x17`.
     ///
@@ -2606,7 +2606,7 @@ extension TicNoteLink: LiveAudioSource {
         livePump = pump
         TicNoteDiagLog.log("LIVE",
             "Start streaming sid=\(candidates[0]) (\(candidates.count) candidates: "
-            + candidates.map { String(format: "0x%08X", $0) }.joined(separator: " → ") + ")")
+            + candidates.map { String(format: "0x%08X", $0) }.joined(separator: " → ") + "）")
 
         var sawFirstPacket = false
         let firstDeadline = Date().addingTimeInterval(firstFrameTimeout)
@@ -2639,7 +2639,10 @@ extension TicNoteLink: LiveAudioSource {
             }
 
             if Date() >= nextWriteAt, let request = pump.nextRequest() {
-                try? write(request)
+                // The `_ =` is for the compiler: this branch is best-effort anyway (the pull-stream's
+                // write failures surface as the next `nextFrame` timeout; there's nowhere to report them here),
+                // but discarding the result of `try?` would leave a "result of 'try?' is unused" warning.
+                _ = try? write(request)
             }
 
             guard let frame = try? await nextFrame(timeout: 1.0) else {

@@ -12,6 +12,12 @@ final class AppEnvironment: ObservableObject {
     let config: ConfigService
     let library: Library
     let transcription: TranscriptionService
+    /// The on-disk ledger of the three kinds of long jobs — summary / translation / format conversion (2026-10-16 twelfth revision).
+    ///
+    /// ⚠️ **Parallel** to `transcription`, not a replacement for it — the transcription queue has its own
+    ///    620-line pipeline and a complete set of working semantics; the reasoning is in the block at the top of `JobQueue`
+    ///    titled "why transcription wasn't moved in". The two are only aggregated on the overview page (`TaskCenterView`).
+    let jobs: JobQueue
     /// UI language override. Built from `config.json` so the choice survives
     /// relaunches; `nil` inside means follow the system.
     let localization: LocalizationService
@@ -52,10 +58,33 @@ final class AppEnvironment: ObservableObject {
         let afterLibrary = Date()
         let transcription = TranscriptionService(config: config)
         let afterTranscription = Date()
+        // ★ 2026-10-16 twelfth revision: the on-disk queue for summary / translation / format conversion. The initialiser has only
+        // a single disk read (`load()`), no side effects, so it slots in between transcription and watch.
+        let jobs = JobQueue()
+        let afterJobs = Date()
         self.bluetooth = bluetooth
         self.config = config
         self.library = library
         self.transcription = transcription
+        self.jobs = jobs
+        // The three runners are registered here rather than written into `JobQueue` — were that to reference
+        // the LLM / exporters directly, it would have to know how to construct all three services, whereas all it truly needs to know
+        // is "give me a job, I'll run it, and tell me the result when I'm done".
+        //
+        // The closure captures `config` (`ConfigService`, a reference type, globally unique) and only **when it runs**
+        // reads `config.config` (that's a value type) — so this job reads **the current**
+        // config, not the snapshot from the moment it was enqueued. This is deliberate: if the user goes into Settings while it's queued and adds
+        // an API key, the job ought to run with the new key — no sense making them press the button again.
+        // The only thing deliberately frozen is the summary's prompt (see the comment on `Job.prompt`).
+        jobs.register(.summarize) { job, reporter in
+            try await JobRunners.summarize(job, config: config.config, reporter: reporter)
+        }
+        jobs.register(.translate) { job, reporter in
+            try await JobRunners.translate(job, config: config.config, reporter: reporter)
+        }
+        jobs.register(.export) { job, _ in
+            try await JobRunners.export(job, config: config.config)
+        }
         self.localization = LocalizationService(selected: config.config.appLanguage)
         self.watch = WatchSyncService(
             config: config,
@@ -68,6 +97,23 @@ final class AppEnvironment: ObservableObject {
         // dispatched off the main thread — see `WatchSyncService.activate`.
         self.watch.activate()
         Self.shared = self
+        // ★ 2026-10-15: resume the transcription that didn't finish last time.
+        //
+        // This is the half that makes "background transcription" possible — `BackgroundKeeper` only holds out against
+        // "switching away for a bit", not the system killing the process when memory runs tight; the queue is persisted to disk,
+        // and replaying it at launch is the only way to rescue that situation.
+        //
+        // Hung off the composition root rather than a view's `.task`: when the view appears depends on what the user
+        // taps, and this shouldn't rely on the user happening to pass through the Library. It also lets the launch-timing stats
+        // count it in (it only pulls the unfinished items out and queues them; it doesn't await itself).
+        transcription.resumePending()
+        // Same reasoning, for the other three kinds of job: resume the unfinished summary / translation / format conversion from last time.
+        //
+        // ⚠️ Like `transcription.resumePending()`, it's hung off the composition root: this init runs only
+        //    once **on a cold launch**, and the "app was killed by the system" path can only be saved by it
+        //    (the moment the user reopens the app). The "process isn't dead, just switching back" path relies on
+        //    `RootView`'s scenePhase — both are needed; see the comment there.
+        jobs.resume()
         let done = Date()
         log.notice("""
             environment ready in \(Self.ms(startedAt, done)) ms \
@@ -75,7 +121,8 @@ final class AppEnvironment: ObservableObject {
             ble=\(Self.ms(afterConfig, afterBluetooth)) \
             library=\(Self.ms(afterBluetooth, afterLibrary)) \
             asr=\(Self.ms(afterLibrary, afterTranscription)) \
-            watch=\(Self.ms(afterTranscription, done)))
+            jobs=\(Self.ms(afterTranscription, afterJobs)) \
+            watch=\(Self.ms(afterJobs, done)))
             """)
     }
 

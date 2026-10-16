@@ -45,6 +45,10 @@ final class WatchLanguageStore: ObservableObject {
         // Applied before the first frame: everything below reads `L10n`, which
         // goes through `Bundle.main`.
         Bundle.applyLanguage(stored)
+        // ★ 2026-10-16 thirteenth revision: **both halves have to be flipped**. `Bundle` handles strings,
+        //   `Locale` handles dates/numbers — flipping only the former shows up as "UI in English, while in the transfer records
+        //   the time is still Chinese" (the same problem on the phone side; see the block at the top of `AppLocale`).
+        AppLocale.set(stored)
     }
 
     func select(_ tag: String?) {
@@ -56,6 +60,7 @@ final class WatchLanguageStore: ObservableObject {
             defaults.removeObject(forKey: Self.defaultsKey)
         }
         Bundle.applyLanguage(tag)
+        AppLocale.set(tag)
     }
 }
 

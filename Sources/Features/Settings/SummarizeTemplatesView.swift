@@ -7,38 +7,24 @@ struct SummarizeTemplatesView: View {
     @State private var showAddSheet = false
     @State private var showResetConfirm = false
     @State private var pendingDelete: SummarizeTemplate?
+    /// ★ 2026-10-15 seventh revision: once templates pile up (20 built-in + 65 adopted from the library), a block grid runs longer than a list,
+    /// and without search you can only scroll screen by screen. This and the "select a template" page use the same approach.
+    @State private var search = ""
 
     var body: some View {
-        List {
-            ForEach(store.categories, id: \.self) { category in
-                Section(SummarizeTemplate.localizedCategoryName(category)) {
-                    ForEach(store.templates(in: category)) { template in
-                        Button {
-                            // Custom templates also start with a read‑only preview
-                            // (Markdown / source toggle), with the edit entry on the
-                            // preview page: opening straight into a plain‑text editor
-                            // hides how the template’s formatting will actually look.
-                            viewingTemplate = template
-                        } label: {
-                            templateRow(template)
-                        }
-                        .swipeActions(edge: .trailing) {
-                            if !template.isBuiltIn {
-                                // Deletion is irreversible; a swipe deletes instantly, which is easy to trigger accidentally: ask for confirmation first.
-                                Button(role: .destructive) {
-                                    pendingDelete = template
-                                } label: {
-                                    Label(L10n.Common.delete, systemImage: "trash")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-        }
+        // ★ 2026-10-15 seventh revision: `List + one row = icon + name + 100-character preview` changed to a block grid.
+        //
+        // This is the same change as the selection page in `SummarizeSheet` (the user's exact words: "inside summary templates
+        // don't show plain text; I suggest showing the current structure as blocks, and tapping in gives you an overall
+        // overview"). The two must change together — change only one side, and the user sees "the same template"
+        // looking completely different at the two entry points.
+        //
+        // Tapping a block still goes to the existing read-only preview page (`TemplatePreviewView`), which already is
+        // that "overall overview": category + Markdown rendering + raw toggle + clone/edit entry.
+        templateGrid
         .navigationTitle(L10n.Settings.summarizeTemplates)
         .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $search, prompt: L10n.Summarize.searchTemplates)
         .toolbar {
             // "Add" lives in the navigation bar, not at the bottom of the list:
             // with a dozen templates the old entry was a full scroll away
@@ -131,23 +117,127 @@ struct SummarizeTemplatesView: View {
         }
     }
 
-    private func templateRow(_ template: SummarizeTemplate) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: template.isBuiltIn ? "doc.text" : "pencil.and.outline")
-                .font(.caption)
-                .foregroundColor(template.isBuiltIn ? .secondary : .accentColor)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(template.localizedName)
-                    .font(.body)
-                    .foregroundColor(.primary)
-                Text(template.pickerSubtitle(limit: 100))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+    // MARK: - Block grid (★ seventh revision)
+
+    @ViewBuilder
+    private var templateGrid: some View {
+        if visibleCategories.isEmpty {
+            // When a search finds nothing it **must** say so: once the grid empties out the whole page is blank,
+            // and the user's first reaction is "the page is broken", not "my search term was wrong".
+            EmptyStateView(
+                L10n.Summarize.noMatchingTemplates,
+                systemImage: "magnifyingglass",
+                message: L10n.Summarize.searchTemplates
+            )
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    ForEach(visibleCategories, id: \.self) { category in
+                        VStack(alignment: .leading, spacing: 10) {
+                            categoryHeader(category)
+                            LazyVGrid(
+                                columns: [GridItem(.adaptive(minimum: 148), spacing: 10)],
+                                spacing: 10
+                            ) {
+                                ForEach(templatesIn(category)) { template in
+                                    templateCard(template)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 28)
             }
         }
-        .padding(.vertical, 2)
+    }
+
+    /// Keep the existing order of `store.categories` (custom categories first), only dropping the categories that searched empty.
+    private var visibleCategories: [String] {
+        store.categories.filter { !templatesIn($0).isEmpty }
+    }
+
+    private func templatesIn(_ category: String) -> [SummarizeTemplate] {
+        let all = store.templates(in: category)
+        guard !search.isEmpty else { return all }
+        let q = search.lowercased()
+        return all.filter {
+            $0.name.lowercased().contains(q)
+            || $0.category.lowercased().contains(q)
+            || ($0.localizedSummary?.lowercased().contains(q) ?? false)
+        }
+    }
+
+    private func categoryHeader(_ category: String) -> some View {
+        HStack(spacing: 6) {
+            Text(SummarizeTemplate.localizedCategoryName(category))
+                .font(.subheadline.weight(.semibold))
+            Text(L10n.Summarize.templateCount(templatesIn(category).count))
+                .font(.caption2)
+                .monospacedDigit()
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// A template block. The block holds **only the name**: the description and prompt both live on the overview page you tap into.
+    ///
+    /// ⚠️ After moving from `List` to the grid, the old `.swipeActions` are gone — items in a grid
+    /// have no such thing as a swipe. Deleting a custom template moved to a long-press menu, with the same second confirmation (deletion can't
+    /// be undone; it must never become "one tap and it's gone").
+    private func templateCard(_ template: SummarizeTemplate) -> some View {
+        Button {
+            // Custom templates also start with a read‑only preview
+            // (Markdown / source toggle), with the edit entry on the
+            // preview page: opening straight into a plain‑text editor
+            // hides how the template’s formatting will actually look.
+            viewingTemplate = template
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: template.isBuiltIn ? "doc.text" : "pencil.and.outline")
+                        .font(.caption)
+                        .foregroundStyle(template.isBuiltIn ? Color.secondary : Color.accentColor)
+                    Spacer(minLength: 0)
+                    if !template.isBuiltIn {
+                        Text(L10n.Summarize.customBadge)
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.16)))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+                Text(template.localizedName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: 88, maxHeight: .infinity, alignment: .topLeading)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if !template.isBuiltIn {
+                Button(role: .destructive) {
+                    pendingDelete = template
+                } label: {
+                    Label(L10n.Common.delete, systemImage: "trash")
+                }
+            }
+        }
     }
 }
 

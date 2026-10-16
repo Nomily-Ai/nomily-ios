@@ -46,7 +46,7 @@ targets:
         # Must track `nomily_watch`'s build number — watchOS refuses to install
         # a companion whose version doesn't match its host, and an embedded
         # watch app one build ahead is enough to trip it. Bump both or neither.
-        CFBundleVersion: "7"
+        CFBundleVersion: "27"
         # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
         # appropriate when the app's crypto use is exempt from US export
         # documentation requirements:
@@ -134,6 +134,11 @@ targets:
       # Shared so the Action Button intent exists on both sides: the iPhone
       # needs it to author the shortcut, the watch needs it to run one.
       - path: Sources/Services/Watch/RecordingIntent.swift
+      # ★ 2026-10-16 revision thirteen: the home-face **expression library**. Sharing it across both ends isn't to save code, it's
+      # a correctness requirement — the picker in the iPhone settings needs to show previews, and the preview and the face actually
+      # drawn on the watch must be **the same code**, otherwise the user picks a smiling eye on the phone
+      # and finds a droopy one on raising the wrist. The asset sources and geometry parameters are written at the top of this file.
+      - path: Sources/Services/Watch/BotFaceStyle.swift
       - path: Sources/Services/Storage/RecordingName.swift
       - path: Sources/App/L10n.swift
       # Runtime language switching. Compiled into the watch too (2026-10-15) so
@@ -145,6 +150,15 @@ targets:
       - path: Sources/Services/Localization/AppLanguage.swift
       - path: Sources/Resources
         buildPhase: resources
+    dependencies:
+      # ★ 2026-10-16 revision eight: the Control Center quick-record control.
+      # Its content is a Control Widget that only exists on watchOS 26 (for the reason see the top of
+      # `WatchControls/NomilyWatchControls.swift`).
+      # ⚠️ It must be embedded in the **watch App**, not in the iPhone App — watchOS extensions
+      #    follow the App they belong to, and Apple specifies that "when both ends have an App, only the watch-side control
+      #    is recognised by Control Center".
+      - target: nomily_watch_controls
+        embed: true
     info:
       path: Watch/Info.plist
       properties:
@@ -152,10 +166,25 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         # Must track the iPhone app's build number — watchOS refuses to install
         # a companion whose version doesn't match its host.
-        CFBundleVersion: "7"
+        CFBundleVersion: "27"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.nomily.app
         NSMicrophoneUsageDescription: Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.
+        # ★ 2026-10-16 revision eleven: while recording the waveform follows the measured heart rate, so it needs to read heart rate.
+        # ⚠️ The copy must make "read-only, not shared" clear: the HealthKit authorisation sheet shows this text to the user verbatim,
+        #    and "why does a voice recorder need to read my heart rate" is the question the user will ask on the spot — the answer has to be in that sentence.
+        #
+        # ★★ 2026-10-16 revision fifteen: **this copy and the entitlement below are kept for now,
+        #    but nowhere in the code requests it any more** (user: "do not go by the heart rate").
+        #    Keeping them is **deliberate**: deleting the entitlement would change the App ID's capability set,
+        #    which means another trip to the portal to re-sign the provisioning profile — all to gain "one less line of copy that never shows".
+        #    ⚠️ Remember the cost: if it's ever really decided to drop HealthKit, this is **two places**
+        #    （`NSHealthShareUsageDescription` + `com.apple.developer.healthkit`），
+        #    and after deleting them the first build will fail because the provisioning profile is stale — that's expected behaviour.
+        NSHealthShareUsageDescription: Nomily AI reads your current heart rate while recording, so the waveform on the watch face beats in time with your own pulse. It never reads any other health data and never leaves your devices.
+        # ⚠️ Only `NSHealthShareUsageDescription` (read) is needed. **`NSHealthUpdateUsageDescription` is not written**
+        #    — this App never writes to Health, and declaring it would only add a write permission to the authorisation sheet,
+        #    and a user seeing "wants to write" would refuse outright.
         # Background audio on watchOS is UIBackgroundModes, same as iOS.
         # WKBackgroundModes is a different key — it names `WKExtendedRuntimeSession`
         # types (workout-processing, self-care, mindfulness, …) and does not
@@ -164,6 +193,19 @@ targets:
         # there risks installd rejecting the bundle outright.
         UIBackgroundModes:
           - audio
+    # ★ 2026-10-16 revision eleven: reading heart rate needs the HealthKit entitlement.
+    #
+    # ⚠️ Added to the **watch target**, not the iPhone: it's the App on the watch that actually reads heart rate,
+    #    and the iPhone side never touches HealthKit once. Requesting it on the iPhone too would only give
+    #    "this voice-recorder App wants to read my health data" one more inexplicable source.
+    #
+    # ⚠️ This changes the capability set of App ID `com.nomily.app.watchkitapp`, so
+    #    `-allowProvisioningUpdates` has to go to the portal, enable HealthKit,
+    #    and re-sign a watchOS provisioning profile. The first build will be slower; when it errors, look at this line first.
+    entitlements:
+      path: Watch/nomily_watch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nomily.app.watchkitapp
@@ -182,5 +224,66 @@ targets:
         # ★ 2026-10-12: together with `nomily_ios`, the signing config is written into the spec (reasons above).
         #   The watch needs a **different** watchOS profile (bundle id is
         #   `com.nomily.app.watchkitapp`, not `com.nomily.app`), but uses the **same team**.
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 96S46YT5TP
+
+  # ★ 2026-10-16 revision eight: the Control Center quick-record control (watchOS 26+).
+  #
+  # Why it must be a **separate target**: WidgetKit controls can only live in an app-extension,
+  # there's no "write the control straight into the App target" route. And an extension isn't an App and can't install itself;
+  # it gets onto the watch by being embedded from the `nomily_watch` side.
+  #
+  # ⚠️ The deployment target is 26.0, **not following** `nomily_watch`'s 10.0: the Control Widget set
+  #    starts at 26.0 on the watch (the iOS side is 18.0; the same API is a whole major version later).
+  #    Following 10.0 would mean "it won't pass the availability check at compile time / even forced through, the control won't appear on 25.x".
+  #    Full reasoning at the top of `WatchControls/NomilyWatchControls.swift`.
+  #
+  # ⚠️ The bundle id must be a **child prefix** of `nomily_watch`'s (`…watchkitapp.controls`).
+  #    If the extension's bundle id doesn't inherit the host's, installing on the watch gets refused outright by installd.
+  nomily_watch_controls:
+    type: app-extension
+    platform: watchOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: WatchControls
+      # Reuse the Action Button's intent — the control's action is exactly it, and it can't be written without compiling it in.
+      # Both ends' Apps also each compile a copy of this file; a fourth copy looks redundant, but `#if os(...)` already
+      # separates the iPhone / watch differences cleanly and the content is identical. Extracting an SPM package to save one file isn't worth it.
+      - path: Sources/Services/Watch/RecordingIntent.swift
+      # Only those `.lproj`s: the control's name and description go through `LocalizedStringResource(key, defaultValue:)`,
+      # and the key must be findable in **the extension's own bundle**, otherwise it silently falls back to the English default on a Chinese watch.
+      # Deliberately excludes Assets.xcassets and the two web-page js/css files — the control is tinted by the system and needs no
+      # asset catalogue, so those three files are just along for the ride.
+      - path: Sources/Resources
+        buildPhase: resources
+        excludes:
+          - "Assets.xcassets"
+          - "*.js"
+          - "*.css"
+    info:
+      path: WatchControls/Info.plist
+      properties:
+        CFBundleDisplayName: Nomily AI
+        CFBundleShortVersionString: "1.0.0"
+        # Must match the parent App — when an embedded binary's version numbers differ from the host's, watchOS
+        # refuses to install the whole App.
+        CFBundleVersion: "27"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nomily.app.watchkitapp.controls
+        TARGETED_DEVICE_FAMILY: "4"
+        WATCHOS_DEPLOYMENT_TARGET: "26.0"
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_DEBUG_DYLIB: NO
+        # The extension doesn't install on its own; it follows the watch App.
+        SKIP_INSTALL: YES
+        # The extension mustn't use APIs that are "only for Apps".
+        APPLICATION_EXTENSION_API_ONLY: YES
+        # ★ Used to pull "things that should only belong to the App" out of **shared source**. Currently only one place:
+        #   `NomilyWatchShortcuts` in `RecordingIntent.swift` — App Shortcuts
+        #   are only registered in the App; registering them again in the extension would give "Record with Nomily" a second source.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) NOMILY_WIDGET_EXTENSION"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 96S46YT5TP

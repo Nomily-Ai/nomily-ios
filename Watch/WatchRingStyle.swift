@@ -20,17 +20,46 @@ import SwiftUI
 // they are not styling, they are function.
 
 /// Which color set the center disc (and the ring while recording) uses.
+///
+/// ★ Twelfth revision, 2026-10-16: **white** was added (user: "doesn't the current colour list have white, watch?").
+/// This is the first colour in this enum that "requires matching changes elsewhere" — white-on-white text and a white swatch with a white ring
+/// both have to invert along with it, see `onSolid` / `selectionRing`.
+/// ⚠️ Save compatibility: a `rawValue` enum + `Codable`. **Adding a case is safe** — old saves
+///    store strings like "green" that still exist, and an extra `white` doesn't affect decoding.
+///    (The reverse isn't safe: after storing white, going back to an old version, that version can't decode the string
+///    and the whole appearance falls back to default — only encountered on a downgrade, so no migration is written for it.)
 enum WatchRingPalette: String, CaseIterable, Identifiable, Codable {
+    /// The three colours of the Health app activity rings (magenta / neon green / cyan).
+    /// **The default** — on 2026-10-15 the user brought a screenshot of the activity rings and called it out: "reference this colour scheme".
+    case activity
     case green, teal, blue, indigo, purple, pink, orange, red, graphite
+    /// ★ Added in the twelfth revision (user: "doesn't the current colour list have white, watch?").
+    ///
+    /// Placed **last**: it is the only "achromatic yet not black" option, and sitting next to `graphite`
+    /// it makes a neat grey scale (grey → white). Inserting it into the middle of the colour wheel would
+    /// jumble this ordering of "after activity comes a row of hues".
+    ///
+    /// ⚠️ White is the only colour in this set that turns two places in the UI into "white text on white",
+    ///    so it has to be read alongside both the `onSolid` and `selectionRing` properties —
+    ///    adding a colour is **not** just a case of dropping one more case into this enum.
+    case white
 
     var id: String { rawValue }
 
-    /// The two gradient endpoints; solid mode uses only `[0]`.
+    /// The gradient's endpoint colours; solid mode takes only `[0]`, and three or more colours spread around the ring (see `ringGradient`).
     ///
-    /// ⚠️ All of them are **dark** (not light): the center icon and timer are white text,
-    /// and a light base color would smear the "stop" icon into a blob while recording. `graphite` follows the same rule.
+    /// ⚠️ Single/double-colour palettes are all **dark** (not light): the icons and
+    /// text drawn **on top of** this colour are white by default, and a light base colour smears them into a blob (`onSolid` is about exactly this).
+    /// `activity` is the exception — it uses three-colour ring spreading with the centre taking only the first and last colours (see `centerFill`),
+    /// with brightness carried by the gradient; `white` is the other exception, solved by inverting in `onSolid`.
     var colors: [Color] {
         switch self {
+        case .activity: return [
+            // Apple's three activity-ring primaries: Move magenta / Exercise neon green / Stand cyan.
+            Color(red: 0.98, green: 0.07, blue: 0.31),
+            Color(red: 0.57, green: 0.91, blue: 0.16),
+            Color(red: 0.10, green: 0.88, blue: 1.00),
+        ]
         case .green:    return [Color(red: 0.24, green: 0.78, blue: 0.38), Color(red: 0.05, green: 0.48, blue: 0.24)]
         case .teal:     return [Color(red: 0.20, green: 0.76, blue: 0.72), Color(red: 0.02, green: 0.42, blue: 0.46)]
         case .blue:     return [Color(red: 0.26, green: 0.56, blue: 0.94), Color(red: 0.04, green: 0.26, blue: 0.68)]
@@ -40,11 +69,49 @@ enum WatchRingPalette: String, CaseIterable, Identifiable, Codable {
         case .orange:   return [Color(red: 0.90, green: 0.52, blue: 0.16), Color(red: 0.70, green: 0.24, blue: 0.02)]
         case .red:      return [Color(red: 0.86, green: 0.26, blue: 0.24), Color(red: 0.62, green: 0.04, blue: 0.10)]
         case .graphite: return [Color(white: 0.52), Color(white: 0.26)]
+        // ★ Twelfth revision: pure white. `[0]` is `Color(white: 1)` — on a black face it's the brightest
+        // eye, and the only counter-example where "the centre icon and timer would smear on their own"
+        // (see `onSolid` below).
+        case .white:    return [Color(white: 1.00), Color(white: 0.86)]
         }
     }
 
     /// Solid color (used when "gradient" is off).
     var solid: Color { colors[0] }
+
+    /// What colour the text/icons drawn **on top of** `solid` should use.
+    ///
+    /// ★ Added in the twelfth revision. Before white was added this spot was always "white by default" (on watchOS
+    ///    that's `Text`'s default colour), because the other ten palettes were dark enough to carry white text. The moment white arrived this
+    ///    implicit convention broke on the spot — the selected capsule on the appearance page became **white on white**.
+    ///
+    /// ⚠️ The test is "is this colour bright", not "is it white". Right now only `.white` is bright enough to need
+    ///    inverting; when light colours are added later (pale yellow, pale cyan and the like), this should grow a second branch
+    ///    rather than changing the callers.
+    var onSolid: Color {
+        switch self {
+        case .white: return .black
+        default:     return .white
+        }
+    }
+
+    /// What colour the ring around a swatch uses when it's selected.
+    ///
+    /// ★ Added in the twelfth revision. It used to be hard-coded `Color.white`, which on a white swatch is as good as nothing — the user would see
+    ///    "I tapped white but there's no selection feedback at all".
+    ///
+    /// ⚠️ The stroke is `strokeBorder` (drawn on the **inside** of the circle), so it lands on the swatch itself
+    ///    and must take `onSolid` rather than "a colour that's visible on a black background".
+    var selectionRing: Color { onSolid }
+
+    /// Colour of the inner ring (the hour ring); `nil` = keep the main colour `solid`.
+    ///
+    /// Only the three-colour palette (`activity`) specifies it — it takes the middle neon green, exactly reproducing the activity ring's
+    /// "outer magenta / middle neon green / inner cyan" layering. Double-colour gradient palettes **must not** do that:
+    /// their `[1]` is the gradient's dark end, and using it to draw a ring would go black on a black background.
+    var lapColor: Color? {
+        colors.count > 2 ? colors[1] : nil
+    }
 }
 
 /// The "breathing light" rhythm. `period` = seconds for one full inhale-exhale cycle.
@@ -73,55 +140,69 @@ enum WatchBreathing: String, CaseIterable, Identifiable, Codable {
 }
 
 /// A persistable appearance.
+///
+/// ★ Ninth revision, 2026-10-16: **the "gradient" dimension was removed** (user: "remove the gradient").
+///
+/// The original three dimensions were colour / gradient / breathing light, where "gradient" governed "whether the centre disc is filled with a solid colour or
+/// a two-colour linear gradient". It was deleted entirely because there's hardly anything left for it to govern:
+///   · the home screen face lost its base plate in the eighth revision, and in the ninth the eyes take only a **solid colour**;
+///   · nothing in any UI uses `WatchRingControl`'s ring now (see the top of that file);
+///   · the only visible use left is the small preview on the appearance page — not worth keeping a switch for one preview.
+///
+/// ⚠️ Deleting a property **does not** make old saves undecodable: Swift's synthesised `init(from:)` ignores
+///    extra keys in the JSON, so old data holding `"gradient": true` still reads the other two items fine.
+///    That's exactly why it's safe to delete outright here instead of leaving a `deprecated` shell.
 struct WatchRingStyle: Equatable, Codable {
-    var palette: WatchRingPalette = .green
-    /// Whether the center uses a gradient (off = solid color).
-    var gradient: Bool = true
+    /// Defaults to the Health ring's three colours (see `WatchRingPalette.activity`).
+    var palette: WatchRingPalette = .activity
     var breathing: WatchBreathing = .off
 
     static let `default` = WatchRingStyle()
 
+    /// **The one** colour of this theme.
+    ///
+    /// ★ After the ninth revision "a theme has exactly one colour" is a settled conclusion, no longer "pick an endpoint from three colours":
+    /// it is used for the home screen eyes, the waveform while recording, the side-menu icons, and the recording timer line.
+    /// Funnelling it into this one property means there can no longer be cases of "one place uses `colors[0]`, another uses
+    /// `colors[1]`", where one theme has several colours (that drift is exactly why in the last round
+    /// the user saw a green menu icon while the face was another colour).
+    var tint: Color { palette.solid }
+
     /// Fill of the center disc.
-    var centerFill: AnyShapeStyle {
-        gradient
-            ? AnyShapeStyle(
-                LinearGradient(
-                    colors: palette.colors,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            : AnyShapeStyle(palette.solid)
-    }
+    ///
+    /// ⚠️ It now always equals `tint`. Why it isn't deleted so callers can just use `tint`:
+    ///    both `WatchRingControl` and the appearance-page preview use it with the semantics of "the centre disc",
+    ///    so if the centre ever really gets a different way of being drawn, one place is enough to change.
+    var centerFill: Color { tint }
 
-    /// Ring color while recording. Supplies the `AngularGradient` when gradient is on.
-    var ringColors: [Color] { gradient ? palette.colors : [palette.solid] }
-}
-
-/// Which appearance option each of the 4 dots around the ring controls.
-enum WatchRingMenu: String, CaseIterable, Identifiable {
-    case color, gradient, breathing, reset
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .color:     return L10n.Watch.styleColor
-        case .gradient:  return L10n.Watch.styleGradient
-        case .breathing: return L10n.Watch.styleBreathing
-        case .reset:     return L10n.Watch.styleReset
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .color:     return "paintpalette.fill"
-        case .gradient:  return "circle.lefthalf.filled"
-        case .breathing: return "wind"
-        case .reset:     return "arrow.counterclockwise"
-        }
+    /// The ring's colour.
+    ///
+    /// ⚠️ What comes back is still an `AngularGradient` rather than a `Color`: the only caller is
+    ///    `.stroke(_:style:)`, and a solid colour would lose the "a touch of opacity at each end" layer of same-hue shading
+    ///    altogether. That isn't a gradient, it's a sense of depth.
+    ///
+    /// ⚠️ There used to be a branch here for "the three-colour palette spreading three colours around the ring" (that was the activity-ring look).
+    ///    With the gradient removed it's useless — spreading three colours is itself a kind of gradient.
+    var ringAngularGradient: AngularGradient {
+        let c = tint
+        return AngularGradient(
+            colors: [c.opacity(0.55), c, c, c.opacity(0.75)],
+            center: .center,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(270)
+        )
     }
 }
+
+// MARK: - Menu item definitions moved to `WatchMenuPreferences.swift`
+//
+// ★ Seventh revision, 2026-10-16: the `WatchRingCorner` that used to be here (four corner dots, each leading to a page)
+// moved out along with the home screen redesign — the four items are no longer pinned to the four corners but became **side menus
+// that appear on a left/right swipe**, and the user ticks which items go in. The new definition is `WatchHomeMenu`, see
+// `WatchMenuPreferences.swift`。
+//
+// Why leave no `typealias` for compatibility: there is no external caller at all (this enum is used only inside this target),
+// and an alias layer would only give "how many kinds of menu item are there" two answers.
 
 /// Stored in the watch-local `UserDefaults`. Same approach as `RecorderAliasStore`:
 /// JSON + a rebuildable cache; if it cannot be decoded, treat it as never saved (a preference is not worth raising an error for,

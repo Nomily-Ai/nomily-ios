@@ -5,12 +5,27 @@ struct SettingsView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var watch: WatchSyncService
     @EnvironmentObject private var localization: LocalizationService
+    /// Background job queue. For why it's injected separately see the `.environmentObject`
+    /// block in `NomilyApp`: a nested `ObservableObject`'s `@Published` won't invalidate
+    /// views that only observe the parent, so going through `env.jobs` would leave the entry badge stuck on its old value forever.
+    @EnvironmentObject private var jobs: JobQueue
+    /// The number of items sitting in the trash is shown on the right of that row, so it has to be observed — delete
+    /// one on the detail page and come back to the settings page, and the number has to follow.
+    @ObservedObject private var trash = ClipTrash.shared
     @State private var versionTapCount = 0
     @State private var versionTapResetTask: Task<Void, Never>?
     @State private var devModeToast: String?
 
     private static let tapsToToggle = 7
     private static let tapsBeforeHint = 3
+
+    /// Jobs not finished yet: summary / translation / format conversion (`jobs`) + transcription (`transcription`).
+    ///
+    /// **Both** kinds count: the entry badge answers "is anything still busy in the background", and leaving transcription out
+    /// would show a blank entry when only transcription is queued, making people think the page is empty.
+    private var busyJobCount: Int {
+        jobs.unfinishedCount + env.transcription.pending.count
+    }
 
     var body: some View {
         Form {
@@ -20,6 +35,42 @@ struct SettingsView: View {
                 NavigationLink(L10n.Settings.recordings) { RecordingsSettingsView() }
                 NavigationLink(L10n.Settings.summarizeTemplates) { SummarizeTemplatesView() }
                 NavigationLink(L10n.Settings.devicesAndLibrary) { DevicesLibraryView() }
+                // Trash sits right next to "Devices & Library": what it manages is exactly those library entries,
+                // so it lives in this section, before Language. It only shows a count when there's really something in it —
+                // a permanent "0" reads as "0 things are broken here".
+                NavigationLink {
+                    TrashView()
+                } label: {
+                    HStack {
+                        Text(L10n.Trash.settingsRow)
+                        Spacer()
+                        if !trash.items.isEmpty {
+                            Text("\(trash.items.count)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                // ★ 2026-10-16 revision twelve: the **overview** of the four kinds of long job.
+                //
+                // Placed in this section rather than crammed into "Recording Settings": of the four job kinds, transcription belongs to recording,
+                // summary and translation belong to LLM, format conversion belongs to the library — it belongs to none of
+                // those sections, and cramming it into one would force the user to guess which one to find it in.
+                //
+                // The badge on the right only appears when there are really unfinished jobs (same as the trash row above):
+                // a permanent "0" reads as "0 things are broken".
+                NavigationLink {
+                    TaskCenterView()
+                } label: {
+                    HStack {
+                        Text(L10n.Jobs.openQueue)
+                        Spacer()
+                        if busyJobCount > 0 {
+                            Text("\(busyJobCount)")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
+                }
                 // Language sits last, right above About: it belongs to none of
                 // the four feature areas above, and slotting it among them
                 // would break their order. The row shows the current choice so
@@ -59,17 +110,116 @@ struct SettingsView: View {
     /// but that's exactly why it needs explaining. iOS installs it on its own
     /// only when "Automatic App Install" is on, and otherwise leaves it sitting
     /// in the Watch app's Available Apps list with no notification.
+    ///
+    /// ★ 2026-10-16 revision thirteen: this section gained a **Home Face** row (at the time an independent row +
+    /// independent Section).
+    ///
+    /// ★★ 2026-10-16 revision fifteen: those two rows were **merged into one** (user's words: "add the watch
+    ///   home-screen expression to the Nomily AI app's watch settings; tapping Apple Watch there is the menu bar,
+    ///   and when it is installed a tap goes into the expression settings -- merge it rather than giving the watch its own expression menu bar;
+    ///   and when it is not installed, a tap jumps to the phone's Watch app").
+    ///
+    /// So this row now branches on **whether the watch App is installed**:
+    ///   · **Installed** — a `NavigationLink` into the expression picker, with the current option's name on the right;
+    ///   · **Not installed** (including a watch that isn't paired) — becomes a button that **jumps to the
+    ///     "Watch" App on the iPhone**, to install it there (the right side keeps the original status text, plus an "opens elsewhere" badge).
+    ///
+    /// ⚠️ Why merging is right: install state and expression setting are two things about the **same object** to begin with,
+    ///    and once split into two rows the user sees no way out on the "not installed" row — that row can only be looked at,
+    ///    not tapped, while "what to do" is buried in a long footer. After the merge, "what happens when
+    ///    you tap this row" and "its current state" land in the same place.
+    ///
+    /// ⚠️ The check uses `isWatchAppInstalled` **and** `isActivated`: before activation completes that
+    ///    flag is necessarily `false` (see the top of `WatchSyncService`), and looking at it alone would misjudge
+    ///    the first few seconds after launch as "not installed", so a single tap throws the user over to the Watch App.
     private var watchSection: some View {
         Section {
-            HStack {
-                Label(L10n.Watch.settingsTitle, systemImage: "applewatch")
-                Spacer()
-                Text(watchStatus)
-                    .foregroundStyle(.secondary)
-            }
+            watchRow
         } footer: {
-            Text(watchFooter)
+            // The two sentences each do their own job: one says what this row is now (pick an expression),
+            // the other says what state the watch side is in (installed or not / connected or not).
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.Face.rowFooter)
+                Text(watchFooter)
+            }
         }
+    }
+
+    /// The single row of this section. For the three forms see the block above `watchSection`.
+    @ViewBuilder
+    private var watchRow: some View {
+        if watch.isActivated, watch.isPaired, watch.isWatchAppInstalled {
+            NavigationLink {
+                WatchFacePickerView()
+            } label: {
+                watchRowLabel(trailing: chosenFaceTitle, leavesTheApp: false)
+            }
+        } else if watch.isActivated, isWatchAppReachableOnThisOS {
+            // Not installed (or not paired) — tap to go handle it in the Watch App. Unpaired also goes here:
+            // the Watch App is exactly where you pair.
+            //
+            // ⚠️ This branch requires `isActivated`: before activation `isWatchAppInstalled` is necessarily
+            //    `false`, and offering a button then would throw the user to the
+            //    Watch App in the first few seconds after launch — when the watch App was installed long ago. For those seconds, honestly be a
+            //    read-only status row ("Checking…").
+            Button(action: openWatchApp) {
+                watchRowLabel(trailing: watchStatus, leavesTheApp: true)
+            }
+            // ⚠️ `.plain` rather than the default style: the default tints the whole row's text and label blue,
+            //    which would make this row differ from every row above and below in font size and weight.
+            .buttonStyle(.plain)
+        } else {
+            // Not activated yet, or on iOS 16 this feature can never become ready
+            // (see `isWatchAppReachableOnThisOS`): honestly be a read-only status row,
+            // don't offer a button that does nothing when tapped.
+            watchRowLabel(trailing: watchStatus, leavesTheApp: false)
+        }
+    }
+
+    /// The row's content. `trailing` is the status/current value on the right.
+    ///
+    /// ⚠️ The icon uses `Label` rather than an `Image` + `Text` pair: `Label` automatically aligns the symbol
+    ///    to the text baseline, whereas a hand-rolled pair has to be adjusted by hand across dynamic type sizes.
+    private func watchRowLabel(trailing: String, leavesTheApp: Bool) -> some View {
+        HStack {
+            Label(L10n.Watch.settingsTitle, systemImage: "applewatch")
+            Spacer()
+            Text(trailing)
+                .foregroundStyle(.secondary)
+            if leavesTheApp {
+                // A badge for "this jumps to another App". Without it this row looks like the
+                // `NavigationLink`s above, and the user is baffled when tapping leaves "the whole App switched away".
+                Image(systemName: "arrow.up.forward.app")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    /// Open the "Watch" App on the iPhone — when the watch App isn't installed, the user has to tap install there.
+    ///
+    /// ## Why not `canOpenURL`
+    /// `itms-watchs://` is a system App's private scheme; unless it's listed in `LSApplicationQueriesSchemes`,
+    /// `canOpenURL` **always** returns `false` (the query restriction since iOS 9) —
+    /// using it as a pre-check would make this button dead on every device. So `open` directly
+    /// and use its completion callback to tell whether it worked.
+    private func openWatchApp() {
+        guard let url = URL(string: "itms-watchs://") else { return }
+        UIApplication.shared.open(url, options: [:]) { opened in
+            guard !opened,
+                  let fallback = URL(string: UIApplication.openSettingsURLString)
+            else { return }
+            // If it can't open (say there's no Watch App on iPad), fall back to **this App's settings page**:
+            // there you can at least dig up permissions like "Microphone". Better than "tap and nothing happens".
+            UIApplication.shared.open(fallback)
+        }
+    }
+
+    /// The name shown on the right of that row — the localised name of the current option.
+    ///
+    /// Same as the language row: you know what's set without tapping in.
+    private var chosenFaceTitle: String {
+        (BotFaceStyle.decode(configService.config.watchFaceStyle) ?? .calm).title
     }
 
     /// The bundled watch app needs watchOS 10, and watchOS 10 only pairs with
@@ -199,6 +349,8 @@ struct SettingsView: View {
 
 struct ASRProvidersView: View {
     @EnvironmentObject private var configService: ConfigService
+    /// 2026-10-15: to read the transcription queue state (`pending` / `inFlight`).
+    @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     @State private var azureVerify: VerifyState = .idle
     /// Active connectivity test for the local server (added 2026-10-13).
@@ -318,9 +470,74 @@ struct ASRProvidersView: View {
                     InfoTip(text: L10n.ASR.localVADFooter)
                 }
             }
+
+            // ★ 2026-10-15: background keep-alive.
+            Toggle(isOn: Binding(
+                get: { configService.config.backgroundKeepAliveEnabled },
+                set: { configService.config.backgroundKeepAliveEnabled = $0; configService.scheduleSave() }
+            )) {
+                HStack(spacing: 4) {
+                    Text(L10n.ASR.backgroundKeepAlive)
+                    InfoTip(text: L10n.ASR.backgroundKeepAliveFooter)
+                }
+            }
+
+            // The queue state only appears when there's really a job queued — adding an extra row while it's empty
+            // is just noise (and makes people think "is it broken?").
+            if !env.transcription.pending.isEmpty {
+                queueStatusRow
+            }
         } header: {
             Text(L10n.ASR.transcription)
         }
+    }
+
+    /// "How many are still waiting to be transcribed".
+    ///
+    /// Why it deserves a row: this queue is **cross-launch**. Users may simply not remember that yesterday
+    /// they fed it a few recordings waiting to be transcribed, and those jobs are either quietly running or have quietly
+    /// given up after three tries — without saying so, both can only be inferred from "that recording in the library never gets transcript text",
+    /// and "not transcribed" and "transcription failed" look exactly alike in the list.
+    private var queueStatusRow: some View {
+        let pending = env.transcription.pending
+        let running = pending.filter { $0.attempts < TranscriptionService.maxAttempts }.count
+        let stuck = pending.count - running
+        let inFlight = env.transcription.inFlight.count
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                if inFlight > 0 {
+                    ProgressView().controlSize(.mini)
+                }
+                Text(L10n.ASR.queueTitle)
+                Spacer(minLength: 8)
+                Text(
+                    [
+                        inFlight > 0 ? L10n.ASR.queueRunning(inFlight) : nil,
+                        running - inFlight > 0 ? L10n.ASR.queueWaiting(running - inFlight) : nil,
+                        stuck > 0 ? L10n.ASR.queueStuck(stuck) : nil,
+                    ]
+                    .compactMap { $0 }
+                    .joined(separator: " · ")
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            }
+            // Only report the **first** one given up: reporting them all would stretch this Section to a full screen,
+            // when what the user wants right now is "to know something is stuck", not to read every error one by one.
+            if stuck > 0,
+               let first = pending.first(where: { $0.attempts >= TranscriptionService.maxAttempts }) {
+                Text(L10n.ASR.queueStuckDetail(
+                    first.name,
+                    first.attempts,
+                    first.lastError ?? ""
+                ))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     private var azureSection: some View {
@@ -625,24 +842,73 @@ struct LLMProvidersView: View {
         configService.config.llmProviders.configuredProviders
     }
 
+    /// Why the primary channel is incompletely configured. Non-nil ⇒ the Picker above shows as "nothing selected".
+    ///
+    /// ★ 2026-10-15: this state really happened in practice — `primary = "openRouter"`,
+    /// while the `open_router` section didn't even have an `api_key`. And the Picker only lists **fully configured**
+    /// channels, so the tags don't line up, the UI just looks like "nothing is selected", with no clue at all;
+    /// the user only sees every summary fail once before falling back.
+    private var primaryGap: String? {
+        guard let primary = configService.config.llmProviders.primary, !primary.isEmpty else {
+            return nil
+        }
+        return LLMCompletionService.configGap(primary, configService.config)
+    }
+
     var body: some View {
         Form {
-            if !configured.isEmpty {
+            if !configured.isEmpty || primaryGap != nil {
                 Section {
-                    Picker(selection: Binding(
-                        get: { configService.config.llmProviders.primary ?? "" },
-                        set: {
-                            configService.config.llmProviders.primary = $0.isEmpty ? nil : $0
-                            configService.scheduleSave()
+                    if !configured.isEmpty {
+                        Picker(selection: Binding(
+                            get: { configService.config.llmProviders.primary ?? "" },
+                            set: {
+                                configService.config.llmProviders.primary = $0.isEmpty ? nil : $0
+                                configService.scheduleSave()
+                            }
+                        )) {
+                            Text(L10n.Common.none).tag("")
+                            // ★ 2026-10-15: when the primary channel is incompletely configured it is **not** in `configured`
+                            //   so no tag equals the current selection, and the Picker
+                            //   renders as "nothing selected" — all the user sees is a blank
+                            //   dropdown, when the real cause is the orange notice beside it.
+                            //   Add an entry labelled "Not configured" so the selected state has somewhere to land.
+                            if let primary = configService.config.llmProviders.primary,
+                               !primary.isEmpty,
+                               !configured.contains(where: { $0.key == primary }) {
+                                Text(L10n.LLM.unconfigured(
+                                    LLMCompletionService.providerLabel(primary)
+                                )).tag(primary)
+                            }
+                            ForEach(configured, id: \.key) { Text($0.label).tag($0.key) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(L10n.ASR.activeProvider)
+                                InfoTip(text: L10n.LLM.activeProviderFooter)
+                            }
                         }
-                    )) {
-                        Text(L10n.Common.none).tag("")
-                        ForEach(configured, id: \.key) { Text($0.label).tag($0.key) }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(L10n.ASR.activeProvider)
-                            InfoTip(text: L10n.LLM.activeProviderFooter)
+                    }
+
+                    // When it's incomplete, add the reason + a one-tap switch to the fallback. The one-tap part pays off most here:
+                    // since the user tapped into this page, what they want is "make it right", not to
+                    // work out for themselves which field to fill in, or that they should switch channels.
+                    if let gap = primaryGap {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label(gap, systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                            if let fix = LLMCompletionService.suggestedPrimary(configService.config) {
+                                Button(L10n.LLM.adoptAsPrimary(
+                                    LLMCompletionService.providerLabel(fix)
+                                )) {
+                                    configService.config.llmProviders.primary = fix
+                                    configService.scheduleSave()
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
                         }
+                        .padding(.vertical, 2)
                     }
                 }
             }

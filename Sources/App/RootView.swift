@@ -248,6 +248,27 @@ struct RootView: View {
             // way a button-press start shows up in the UI.
             await pollDeviceInfo()
         }
+        // ★ 2026-10-15: on returning to the foreground, resume the transcription that didn't finish last time.
+        //
+        // Why this point (with `AppEnvironment.init` having already hung it once): when the process is
+        // killed by the system in the background, the `init` path **never gets a chance to run** — because that's "the next
+        // cold launch". But there's a more common case: the process **isn't dead**, it's just that the task was
+        // cut off by URLSession during suspension, and when the user switches back, `init` won't run again.
+        // Hanging it on `scenePhase` covers both cases, and depends on no persistence flag.
+        //
+        // Re-entry is guarded by `TranscriptionService.startDrainIfNeeded`, so repeated calls are safe.
+        //
+        // ★ 2026-10-16 twelfth revision: here we also resume the summary / translation / format conversion queue
+        // (`env.jobs.resume()`). The reasoning for both resumes is perfectly symmetric:
+        // hanging only off `init` misses the "process alive, task cut off" half; hanging only off here misses
+        // the "process killed, user cold-starts again" half. Both re-entries are guarded by their own
+        // `startDrainIfNeeded`.
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                env.transcription.resumePending()
+                env.jobs.resume()
+            }
+        }
     }
 
     private func pollDeviceInfo() async {

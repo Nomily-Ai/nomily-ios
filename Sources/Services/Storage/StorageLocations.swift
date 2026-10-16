@@ -71,6 +71,27 @@ enum StorageLocations {
         root.appendingPathComponent("summarize_templates.json", isDirectory: false)
     }
 
+    /// The pending-transcription queue (survives across launches).
+    ///
+    /// Lives in `root` rather than `decryptedDir`: it isn't the product of a recording but the list of "work not yet
+    /// finished". Placed in `decryptedDir` it would get swept away by "delete recording", whereas the queue
+    /// validates for itself whether the corresponding audio still exists — so deleting recordings and deleting the queue each mind their own business.
+    static var transcriptionQueueURL: URL {
+        root.appendingPathComponent("transcription-queue.json", isDirectory: false)
+    }
+
+    /// The on-disk ledger of the three kinds of long jobs — summary / translation / export (survives across launches).
+    ///
+    /// ★ 2026-10-16 twelfth revision: **parallel** to `transcriptionQueueURL`, not merged —
+    /// the transcription queue has its own 624-line pipeline and a working set of semantics; merging it in is trading
+    /// "the only path that works" for a prettier abstraction; see the block at the top of `JobQueue`.
+    ///
+    /// Its location is `root` (same as `transcriptionQueueURL`): it's the list of "work not yet finished",
+    /// not the product of a recording — placed in `decryptedDir` it would get swept away by "delete recording".
+    static var jobsQueueURL: URL {
+        root.appendingPathComponent("jobs-queue.json", isDirectory: false)
+    }
+
     /// Where the on-disk diagnostic log goes.
     ///
     /// ⚠️ Deliberately **not via `root`** (that is the app group container). `--domain-type` of `xcrun devicectl`

@@ -15,6 +15,11 @@ struct AppConfig: Codable, Equatable {
     var autoDeleteAfterTransfer: Bool
     var autoTranscribeAfterDownload: Bool
     var localVADEnabled: Bool
+    /// Background keep-alive. When on, long jobs like transcription/summary keep a loop of
+    /// silent audio going after the app moves to the background to hold the process up and stop iOS suspending it (hung off `BackgroundKeeper`).
+    /// Turning it off leaves only `beginBackgroundTask`'s ~30-second grace — short jobs still finish,
+    /// long ones get cut. There's a switch because the user should have the right to refuse "tricking the background with silent audio".
+    var backgroundKeepAliveEnabled: Bool
     /// When on, the app reconnects to the most recent device by itself after
     /// an unexpected drop (device powered off/on, out of range). When off the
     /// app stays disconnected until the user taps the connection pill.
@@ -35,6 +40,17 @@ struct AppConfig: Codable, Equatable {
     /// an English UI on first launch. Tags outside `AppLanguage.supported`
     /// resolve to English (`AppLanguage.resolve`).
     var appLanguage: String?
+    /// Which expression the watch home-screen face shows — `BotFaceStyle.rawValue`.
+    ///
+    /// **`nil` = never chosen**, equivalent to `calm` (what the face looked like before the thirteenth revision).
+    /// Like `appLanguage`, this stores a **bare tag**, not an enum:
+    /// `AppConfig` is a pure disk schema; dragging the UI layer's enum type in would get it compiled
+    /// into places that don't need it (this file is in `Sources/`, while the expression library is in
+    /// `Sources/Services/Watch/`）。
+    ///
+    /// ⚠️ This copy **exists only on the phone side**; the watch's copy is the one it stores itself after the push
+    /// (see `WatchFaceStore`). Both sides are "newest version wins", so there's no sync conflict to speak of.
+    var watchFaceStyle: String?
     /// Backlog size (in KB) above which the Wi-Fi fast-transfer button
     /// is offered on the device-files screen. 0 disables the suggestion
     /// and the button never appears.
@@ -50,6 +66,7 @@ struct AppConfig: Codable, Equatable {
         autoDeleteAfterTransfer: true,
         autoTranscribeAfterDownload: false,
         localVADEnabled: true,
+        backgroundKeepAliveEnabled: true,
         autoReconnectEnabled: true,
         cloudEgressConsented: false,
         isDeveloperMode: false
@@ -65,6 +82,7 @@ struct AppConfig: Codable, Equatable {
         case autoDeleteAfterTransfer = "auto_delete_after_transfer"
         case autoTranscribeAfterDownload = "auto_transcribe_after_download"
         case localVADEnabled = "local_vad_enabled"
+        case backgroundKeepAliveEnabled = "background_keep_alive_enabled"
         case autoReconnectEnabled = "auto_reconnect_enabled"
         case cloudEgressConsented = "cloud_egress_consented"
         case isDeveloperMode = "developer_mode"
@@ -72,6 +90,7 @@ struct AppConfig: Codable, Equatable {
         case lastTargetLang = "last_target_lang"
         case lastSummaryLang = "last_summary_lang"
         case appLanguage = "app_language"
+        case watchFaceStyle = "watch_face_style"
         case fastTransferThresholdKB = "fast_transfer_threshold_kb"
     }
 
@@ -91,6 +110,7 @@ struct AppConfig: Codable, Equatable {
         self.autoDeleteAfterTransfer = try c.decodeIfPresent(Bool.self, forKey: .autoDeleteAfterTransfer) ?? true
         self.autoTranscribeAfterDownload = try c.decodeIfPresent(Bool.self, forKey: .autoTranscribeAfterDownload) ?? false
         self.localVADEnabled = try c.decodeIfPresent(Bool.self, forKey: .localVADEnabled) ?? true
+        self.backgroundKeepAliveEnabled = try c.decodeIfPresent(Bool.self, forKey: .backgroundKeepAliveEnabled) ?? true
         self.autoReconnectEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoReconnectEnabled) ?? true
         self.cloudEgressConsented = try c.decodeIfPresent(Bool.self, forKey: .cloudEgressConsented) ?? false
         self.isDeveloperMode = try c.decodeIfPresent(Bool.self, forKey: .isDeveloperMode) ?? false
@@ -98,6 +118,7 @@ struct AppConfig: Codable, Equatable {
         self.lastTargetLang = try c.decodeIfPresent(String.self, forKey: .lastTargetLang)
         self.lastSummaryLang = try c.decodeIfPresent(String.self, forKey: .lastSummaryLang)
         self.appLanguage = try c.decodeIfPresent(String.self, forKey: .appLanguage)
+        self.watchFaceStyle = try c.decodeIfPresent(String.self, forKey: .watchFaceStyle)
         self.fastTransferThresholdKB = try c.decodeIfPresent(Int.self, forKey: .fastTransferThresholdKB) ?? 512
     }
 
@@ -111,6 +132,7 @@ struct AppConfig: Codable, Equatable {
         autoDeleteAfterTransfer: Bool,
         autoTranscribeAfterDownload: Bool = false,
         localVADEnabled: Bool = true,
+        backgroundKeepAliveEnabled: Bool = true,
         autoReconnectEnabled: Bool = true,
         cloudEgressConsented: Bool = false,
         isDeveloperMode: Bool = false,
@@ -118,6 +140,7 @@ struct AppConfig: Codable, Equatable {
         lastTargetLang: String? = nil,
         lastSummaryLang: String? = nil,
         appLanguage: String? = nil,
+        watchFaceStyle: String? = nil,
         fastTransferThresholdKB: Int = 512
     ) {
         self.asrProviders = asrProviders
@@ -129,6 +152,7 @@ struct AppConfig: Codable, Equatable {
         self.autoDeleteAfterTransfer = autoDeleteAfterTransfer
         self.autoTranscribeAfterDownload = autoTranscribeAfterDownload
         self.localVADEnabled = localVADEnabled
+        self.backgroundKeepAliveEnabled = backgroundKeepAliveEnabled
         self.autoReconnectEnabled = autoReconnectEnabled
         self.cloudEgressConsented = cloudEgressConsented
         self.isDeveloperMode = isDeveloperMode
@@ -136,6 +160,7 @@ struct AppConfig: Codable, Equatable {
         self.lastTargetLang = lastTargetLang
         self.lastSummaryLang = lastSummaryLang
         self.appLanguage = appLanguage
+        self.watchFaceStyle = watchFaceStyle
         self.fastTransferThresholdKB = fastTransferThresholdKB
     }
 

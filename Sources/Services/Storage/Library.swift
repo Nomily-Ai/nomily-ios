@@ -70,6 +70,23 @@ final class Library: ObservableObject {
         entries[Self.key(name: name, deviceSerial: deviceSerial)]
     }
 
+    /// Fetch the raw record (key + value) by **on-disk file name**.
+    ///
+    /// Why it's needed: restoring from the trash has to put the "already downloaded from the device" evidence back **verbatim**,
+    /// and `source(forLocalName:)` only yields "which device", not `transport` /
+    /// `size`, nor the original file name on the device — miss any one of the three,
+    /// and `recordDownload(size:transport:…)` can't restore the same key.
+    ///
+    /// It's an O(n) linear scan: called only once on the next delete/restore, and iterating a 1900-entry dictionary
+    /// costs microseconds; to give `localName` a reverse index instead would mean keeping another copy
+    /// that can drift.
+    func rawEntry(forLocalName localName: String) -> (key: String, entry: Entry)? {
+        for (key, entry) in entries where (entry.localName ?? key) == localName {
+            return (key, entry)
+        }
+        return nil
+    }
+
     // MARK: mutations
 
     /// Record a successful transfer. The raw bytes should already be on disk
@@ -110,6 +127,23 @@ final class Library: ObservableObject {
         saveNow()
     }
 
+    /// Forget an entry by its **on-disk file name**.
+    ///
+    /// The only difference from `forget(_:)` is the shape of the key: a device download's record key is
+    /// `serial::name`, while the list gets the on-disk name (`entry.localName`) — the two
+    /// are **not** the same string; using the first overload only deletes correctly by way of "incidentally filtering by localName once more"
+    /// and happening to match. Batch deletion goes through this one: the semantics are plain and it doesn't lean on that coincidence.
+    ///
+    /// ⚠️ Batch deletion **must** call it: this table is the only evidence that "this clip has already been downloaded from the device",
+    /// and leaving residue means the same recording can never be downloaded again (`isDownloaded` stays true forever).
+    func forget(localName: String) {
+        entries = entries.filter {
+            ($0.value.localName ?? $0.key) != localName
+        }
+        rebuildSourceIndex()
+        saveNow()
+    }
+
     func clearAll() {
         entries = [:]
         rebuildSourceIndex()
@@ -123,7 +157,7 @@ final class Library: ObservableObject {
         enum Kind: String {
             /// Came down from a recorder card (TicNote / D·NOTE, both `ble` and `wifi` count).
             case card
-            /// Apple Watch.
+            /// Apple Watch。
             case watch
             /// Fragments left by on-device live transcription.
             case phone

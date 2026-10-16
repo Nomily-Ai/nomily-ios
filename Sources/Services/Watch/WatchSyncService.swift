@@ -190,6 +190,32 @@ final class WatchSyncService: NSObject, ObservableObject {
         lastWatchHeartbeat = Date(timeIntervalSince1970: beat)
     }
 
+    // MARK: - Home-screen expression (★ 2026-10-16 thirteenth revision)
+
+    /// The user changed the "watch home-screen eye expression" in Settings — push it to the watch at once.
+    ///
+    /// ⚠️ **Deliberately doesn't check reachability** (`session.isReachable`): when unreachable,
+    ///    `updateApplicationContext` leaves this context in the daemon
+    ///    and hands it over the next time the watch wakes. Checking reachability would instead treat "the watch is in the background right now" as a failure,
+    ///    so the user changes the setting, raises their wrist, and finds nothing changed.
+    func sendFaceStyle(_ tag: String) {
+        pushFaceStyle(tag)
+    }
+
+    /// The style in use on the watch — re-pushed once on activation, closing the window where
+    /// "what's stored on the watch differs from the phone" (the user switched phones, reinstalled the watch app, or a previous push never arrived).
+    private func pushFaceStyle(_ tag: String) {
+        guard WCSession.isSupported() else { return }
+        do {
+            try WCSession.default.updateApplicationContext([WatchLinkMessage.faceStyleKey: tag])
+            log.info("face style pushed: \(tag, privacy: .public)")
+        } catch {
+            // You reach here when the session hasn't activated yet. The activation callback pushes again, so this time
+            // failing isn't fatal — a log line is enough; don't show the user anything.
+            log.error("face style push failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
     /// Called with the file already copied out of the WatchConnectivity inbox.
     private func didImport(_ url: URL, size: Int) {
         library.recordDownload(name: url.lastPathComponent, size: size, transport: "watch")
@@ -206,7 +232,11 @@ final class WatchSyncService: NSObject, ObservableObject {
         // swallowed because the user accepted the duration floor when they
         // turned the toggle on.
         Task.detached { @MainActor in
-            _ = try? await self.transcription.transcribe(fileURL: url, enforceMinDuration: true)
+            // ★ 2026-10-15: switched to going through the **queue** and waiting for it to dequeue.
+            //   Going through the queue ⇒ persist to disk then start, so after the app is killed the next launch picks up from this list;
+            //   waiting for dequeue ⇒ the `libraryDidChange` below still fires only after the transcription actually lands,
+            //   so the Library list can bring out the transcript in one pass.
+            await self.transcription.enqueueAndWait(fileURL: url, enforceMinDuration: true)
             NotificationCenter.default.post(name: .libraryDidChange, object: nil)
         }
     }
@@ -232,6 +262,10 @@ extension WatchSyncService: WCSessionDelegate {
             self.isWatchAppInstalled = installed
             self.isReachable = reachable
             self.apply(watchState: pending)
+            // ★ Thirteenth revision: re-push the "home-screen expression" while we're at it. This phone-side setting exists **only**
+            //   on the phone side; the watch has no other way to get it, and the watch may have just been reinstalled, just switched phones,
+            //   or been absent during the last push. Activation is the one moment when "the two sides are actually connected right now".
+            self.pushFaceStyle(self.config.config.watchFaceStyle ?? BotFaceStyle.calm.rawValue)
             log.info("session activated: paired=\(paired) installed=\(installed) reachable=\(reachable)")
         }
     }

@@ -40,6 +40,10 @@ enum L10n {
         static var close: String { NSLocalizedString("common.close", comment: "") }
         static var openSettings: String { NSLocalizedString("common.open_settings", comment: "") }
         static var tryAgain: String { NSLocalizedString("common.try_again", comment: "") }
+        /// Generic back. For pages that are **not pushed** and get no system back chevron.
+        static var back: String {
+            NSLocalizedString("common.back", value: "Back", comment: "Generic back button")
+        }
         static var none: String { NSLocalizedString("common.none", comment: "") }
         static var recording: String { NSLocalizedString("common.recording", comment: "") }
         static var keepForeground: String { NSLocalizedString("common.keep_foreground", comment: "") }
@@ -92,6 +96,25 @@ enum L10n {
         static var autoTranscribeFooter: String { NSLocalizedString("asr.auto_transcribe_footer", comment: "") }
         static var localVAD: String { NSLocalizedString("asr.local_vad", comment: "") }
         static var localVADFooter: String { NSLocalizedString("asr.local_vad_footer", comment: "") }
+        // ★ 2026-10-15: Background keep-alive toggle + transcription queue status.
+        //
+        // Wording rule: **never say "silent audio"**. Users don't need to know how we keep the process alive;
+        // what they need to judge is "will it keep going after I switch away" and "will it drain the battery / make strange noises".
+        static var backgroundKeepAlive: String { NSLocalizedString("asr.background_keep_alive", comment: "") }
+        static var backgroundKeepAliveFooter: String { NSLocalizedString("asr.background_keep_alive_footer", comment: "") }
+        static var queueTitle: String { NSLocalizedString("asr.queue_title", comment: "") }
+        static func queueRunning(_ n: Int) -> String {
+            String(format: NSLocalizedString("asr.queue_running", comment: ""), n)
+        }
+        static func queueWaiting(_ n: Int) -> String {
+            String(format: NSLocalizedString("asr.queue_waiting", comment: ""), n)
+        }
+        static func queueStuck(_ n: Int) -> String {
+            String(format: NSLocalizedString("asr.queue_stuck", comment: ""), n)
+        }
+        static func queueStuckDetail(_ name: String, _ attempts: Int, _ reason: String) -> String {
+            String(format: NSLocalizedString("asr.queue_stuck_detail", comment: ""), name, attempts, reason)
+        }
         static var azureSpeech: String { NSLocalizedString("asr.azure_speech", comment: "") }
         static var azurePurposeFooter: String { NSLocalizedString("asr.azure_purpose_footer", comment: "") }
         static var azureHowToGetKey: String { NSLocalizedString("asr.azure_how_to_get_key", comment: "") }
@@ -222,6 +245,99 @@ enum L10n {
     // MARK: - LLM
 
     enum LLM {
+        // MARK: Reasons a call fails (★ 2026-10-15)
+        //
+        // These used to be **hardcoded in English inside `LLMCompletionError.errorDescription`**;
+        // the Chinese UI would pop up "No API key configured for the active provider." —
+        // users could neither understand it nor tell where to fix it. Now everything is localised, and
+        // **the channel name is included**: "No API key configured for Open Router."
+        static var errorNoProvider: String {
+            NSLocalizedString("llm.error.no_provider", value: "No LLM provider is selected.",
+                              comment: "LLM error: no provider chosen")
+        }
+        static func errorNoModel(_ label: String) -> String {
+            String(format: NSLocalizedString("llm.error.no_model", value: "%@ has no model selected.",
+                                             comment: "LLM error: provider selected but no model"), label)
+        }
+        static func errorNoAPIKey(_ label: String) -> String {
+            String(format: NSLocalizedString("llm.error.no_api_key", value: "%@ has no API key configured.",
+                                             comment: "LLM error: cloud provider without a key"), label)
+        }
+        static func errorNoEndpoint(_ label: String) -> String {
+            String(format: NSLocalizedString("llm.error.no_endpoint", value: "%@ has no endpoint URL.",
+                                             comment: "LLM error: self-hosted provider without an endpoint"), label)
+        }
+        static func errorHTTP(_ code: Int, _ message: String) -> String {
+            let trimmed = message.count > 400 ? String(message.prefix(400)) + "…" : message
+            return String(format: NSLocalizedString("llm.error.http", value: "HTTP %d: %@",
+                                                    comment: "LLM error: non-2xx response"), code, trimmed)
+        }
+        static func errorDecoding(_ message: String) -> String {
+            String(format: NSLocalizedString("llm.error.decoding", value: "Couldn't read the response: %@",
+                                             comment: "LLM error: response body did not match the expected shape"), message)
+        }
+        static var errorEmptyResponse: String {
+            NSLocalizedString("llm.error.empty", value: "The model returned nothing.",
+                              comment: "LLM error: 200 OK but empty text")
+        }
+        /// The entire chain failed. **List the reason for every channel** — reporting only the last one would
+        /// send users digging into the fallback channel (local Ollama) when the real culprit is the missing key on the first channel.
+        static func errorAllProvidersFailed(_ detail: String) -> String {
+            String(format: NSLocalizedString("llm.error.all_failed",
+                                             value: "Every LLM provider failed:\n%@",
+                                             comment: "LLM error: the whole fallback chain failed; detail is one line per provider"),
+                   detail)
+        }
+        static var errorBadEndpointURL: String {
+            NSLocalizedString("llm.error.bad_url", value: "The endpoint URL isn't valid.",
+                              comment: "LLM error: URL(string:) refused the endpoint")
+        }
+        static var errorMissingChoices: String {
+            NSLocalizedString("llm.error.missing_choices", value: "The response has no choices[0].message.content.",
+                              comment: "LLM error: OpenAI-compatible body shape mismatch")
+        }
+        static var errorMissingContent: String {
+            NSLocalizedString("llm.error.missing_content", value: "The response has no content[].",
+                              comment: "LLM error: Anthropic body shape mismatch")
+        }
+        static var errorMissingCandidates: String {
+            NSLocalizedString("llm.error.missing_candidates", value: "The response has no candidates[0].content.parts.",
+                              comment: "LLM error: Gemini body shape mismatch")
+        }
+        /// The one-line explanation shown after the primary channel died and the fallback took over. **Must say it**:
+        /// the user set A but B is doing the work; without an explanation it becomes "is it even using my configuration?"
+        static func fellBack(_ primary: String, _ used: String) -> String {
+            String(format: NSLocalizedString("llm.fell_back",
+                                             value: "%@ wasn't usable — this result came from %@.",
+                                             comment: "Notice: the primary LLM provider failed and a fallback produced the result"),
+                   primary, used)
+        }
+        /// The long transcription went through "chunk → merge".
+        static func chunkedNote(_ count: Int) -> String {
+            String(format: NSLocalizedString("llm.chunked_note",
+                                             value: "Long transcript — processed in %d parts and merged.",
+                                             comment: "Notice: the transcript was too long for one request"), count)
+        }
+        /// Label for the button that promotes the fallback channel to primary in one tap.
+        ///
+        /// ★ 2026-10-15: a health check that only "says something" isn't enough. The root cause observed in practice was
+        /// `primary = openRouter` with no `api_key` in that entry — what the user actually wanted was
+        /// local Ollama, and there is exactly one correct fix; making him dig through four pages to find a dropdown
+        /// is pure busywork.
+        static func adoptAsPrimary(_ provider: String) -> String {
+            String(format: NSLocalizedString("llm.adopt_as_primary",
+                                             value: "Use %@ as the primary provider",
+                                             comment: "Button: switch the primary LLM provider to the given one, which is already configured"),
+                   provider)
+        }
+        /// The entry in the Picker for "this is the current one, but it isn't fully configured".
+        static func unconfigured(_ provider: String) -> String {
+            String(format: NSLocalizedString("llm.unconfigured",
+                                             value: "%@ (not configured)",
+                                             comment: "Picker entry: this is the current primary provider but it lacks credentials/endpoint"),
+                   provider)
+        }
+
         static var activeProviderFooter: String { NSLocalizedString("llm.active_provider_footer", comment: "") }
         static var apiKey: String { NSLocalizedString("llm.api_key", comment: "") }
         static var model: String { NSLocalizedString("llm.model", comment: "") }
@@ -386,6 +502,208 @@ enum L10n {
         }
         static let recordedOnWatch = NSLocalizedString("library.recorded_on_watch", comment: "")
 
+        // MARK: Multi-select / batch actions / knowledge base search
+        //
+        // ★ 2026-10-15: The user asked for "long-press selection in the library, with batch export or deletion;
+        // plus a knowledge-base search over items already transcribed to text or with a generated summary".
+        //
+        // ⚠️ Same as the source identifier below: always `static var` (runtime language switching) + `value:` inline
+        // English fallback (the .lproj files only cover en / zh-Hans; the other 9 languages rely on it to keep
+        // raw key literals from leaking into the UI).
+        /// The button that enters multi-select mode.
+        static var select: String {
+            NSLocalizedString("library.select", value: "Select", comment: "Toolbar button: enter multi-select")
+        }
+        static var selectAll: String {
+            NSLocalizedString("library.select_all", value: "Select All", comment: "Multi-select: select every clip")
+        }
+        static var deselectAll: String {
+            NSLocalizedString("library.deselect_all", value: "Deselect All", comment: "Multi-select: clear the selection")
+        }
+        /// ★ Seventh revision, 2026-10-15: the select-all button now shows the count.
+        ///
+        /// The user's own words included "select-all is inconvenient to use". The old button just said "Select All"; before tapping,
+        /// users had no idea how many rows it would check (especially after filtering by device or searching); only afterwards did they see below
+        /// "12 selected". Moving the number onto the button makes "how many will be selected" visible at a glance.
+        static func selectAllWithCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("library.select_all_count", value: "Select All (%d)",
+                                           comment: "Multi-select: select all, with how many clips that covers"),
+                count
+            )
+        }
+        static func selectedCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "library.selected_count", value: "%d selected",
+                    comment: "Multi-select: how many clips are ticked"
+                ),
+                count
+            )
+        }
+        static var export: String {
+            NSLocalizedString("library.export", value: "Export", comment: "Multi-select: export the ticked clips")
+        }
+        static var exportPreparing: String {
+            NSLocalizedString("library.export_preparing", value: "Preparing export…",
+                              comment: "Shown while staging files for the share sheet")
+        }
+        static var exportFailed: String {
+            NSLocalizedString("library.export_failed", value: "Export Failed", comment: "")
+        }
+        /// Select-all produced nothing to copy (every selected file happened to vanish). Should be unreachable,
+        /// but there **must** be a string for it: otherwise this branch would pop "Export failed" up as the **body**.
+        static var exportEmpty: String {
+            NSLocalizedString("library.export_empty", value: "Nothing to export.",
+                              comment: "Bulk export produced no files at all")
+        }
+        // ★ Sixth revision, 2026-10-15: the banner for an export that's ready (finished in the background, waiting to be shared).
+        //
+        // The wording deliberately **avoids mentioning "background"** — users don't need to know we keep the process alive with silent audio;
+        // the only two things they want confirmed are "is the last batch ready" and "what do I tap now to send it out".
+        static var exportReady: String {
+            NSLocalizedString("library.export_ready", value: "Your last export is ready",
+                              comment: "Banner: a previously started export finished and is waiting to be shared")
+        }
+        static func exportReadyTitle(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("library.export_ready_title", value: "%d clips",
+                                          comment: "Name given to a staged export: how many clips it contains"),
+                count
+            )
+        }
+        static func exportReadyFiles(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("library.export_ready_files", value: "%d files",
+                                          comment: "How many files the staged export contains"),
+                count
+            )
+        }
+        static var exportReadyFooter: String {
+            NSLocalizedString(
+                "library.export_ready_footer",
+                value: "The files are already on this phone — tap the row to share them. Starting a new export replaces this copy, and it's cleaned up automatically after 3 days.",
+                comment: "Footer explaining the staged-export banner"
+            )
+        }
+        static var clearExportStaging: String {
+            NSLocalizedString("library.clear_export_staging", value: "Delete exported files",
+                              comment: "Button: discard the staged export copies to free up space")
+        }
+        static var deleteSelectedTitle: String {
+            NSLocalizedString("library.delete_selected_title", value: "Delete Selected Clips?",
+                              comment: "Confirmation title for bulk delete")
+        }
+        static func deleteSelectedMessage(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "library.delete_selected_message",
+                    value: "Audio, transcript and summary for %d clip(s) move to Recently Deleted. You can recover them for 30 days.",
+                    comment: "Confirmation body for bulk delete"
+                ),
+                count
+            )
+        }
+        static var deleting: String {
+            NSLocalizedString("library.deleting", value: "Deleting…", comment: "Bulk delete in progress")
+        }
+        static var deleteFailed: String {
+            NSLocalizedString("library.delete_failed", value: "Delete Failed", comment: "")
+        }
+        /// Placeholder in the search field. Deliberately omits the word "search" — the prompt must say **what range is being searched**.
+        static var searchPrompt: String {
+            NSLocalizedString("library.search_prompt", value: "Transcripts & summaries",
+                              comment: "Search field placeholder — says what is searched, not just 'Search'")
+        }
+        static var searchScopeKnowledge: String {
+            NSLocalizedString("library.search_scope_knowledge", value: "Knowledge",
+                              comment: "Search scope: only clips that have a transcript or summary")
+        }
+        static var searchScopeAll: String {
+            NSLocalizedString("library.search_scope_all", value: "All",
+                              comment: "Search scope: titles/filenames as well")
+        }
+        static var searchEmptyTitle: String {
+            NSLocalizedString("library.search_empty_title", value: "No Matches", comment: "")
+        }
+        static var searchEmptyMessage: String {
+            NSLocalizedString(
+                "library.search_empty_message",
+                value: "No clip's transcript or summary contains that. Switch to All to search titles too.",
+                comment: "Empty state body for the knowledge search"
+            )
+        }
+        /// Accessibility reading for the "summary generated" badge on a list row.
+        static var hasSummary: String {
+            NSLocalizedString("library.has_summary", value: "Summary", comment: "Badge: clip has a generated summary")
+        }
+        /// Accessibility reading for the "transcription available" badge on a list row.
+        ///
+        /// ★ Added 2026-10-15: that green pill badge has always been there but never had a label —
+        /// VoiceOver read it as just "image", which is as good as unreadable. Once the summary badge was added
+        /// the two sit side by side and a missing label became all the more conspicuous.
+        static var hasTranscript: String {
+            NSLocalizedString("library.has_transcript", value: "Transcript",
+                              comment: "Badge: clip has a transcript")
+        }
+
+        // MARK: Unread red dot / grouping by time and device (★ 2026-10-15, second round)
+        //
+        // Again always `static var` + `value:` inline English fallback; see the source-identifier note above for why.
+        /// Accessibility reading for the unread red dot.
+        static var unread: String {
+            NSLocalizedString("library.unread", value: "Unread",
+                              comment: "Accessibility label for the unread dot on a library row")
+        }
+        /// The section header's "how many clips from this device are still unopened".
+        static func unreadCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "library.unread_count", value: "%d unread",
+                    comment: "Section header: how many clips on this device are still unopened"
+                ),
+                count
+            )
+        }
+        /// Accessibility reading / menu title for the device filter menu in the toolbar.
+        static var filterDevices: String {
+            NSLocalizedString("library.filter_devices", value: "Filter by device",
+                              comment: "Toolbar menu: restrict the list to one device")
+        }
+        static var filterAllDevices: String {
+            NSLocalizedString("library.filter_all_devices", value: "All devices", comment: "")
+        }
+        /// Short count ("12 items" / "12 clips"), for section headers and the filter menu.
+        ///
+        /// Why not reuse `Recordings.clipCount(count, size)`: that one is "12 recordings · 25 GB",
+        /// too long for a section header; and the size is composed separately in the two places (the section header counts **all buckets**,
+        /// the menu counts **all devices**, and neither equals the total of a single section).
+        static func shortCount(_ count: Int) -> String {
+            let format = count == 1
+                ? NSLocalizedString("library.short_count_one", value: "%d clip",
+                                    comment: "Short clip count, singular")
+                : NSLocalizedString("library.short_count_other", value: "%d clips",
+                                    comment: "Short clip count, plural")
+            return String(format: format, count)
+        }
+        // MARK: Time section titles
+        //
+        // Older months are **not here** — that would require localised month names in 12 languages. Instead use
+        // `DateFormatter`'s template format (`setLocalizedDateFormatFromTemplate("yMMMM")`)
+        // and let the system assemble it per locale — word order and wording can then never be wrong.
+        static var bucketToday: String {
+            NSLocalizedString("library.bucket_today", value: "Today", comment: "Time section header")
+        }
+        static var bucketYesterday: String {
+            NSLocalizedString("library.bucket_yesterday", value: "Yesterday", comment: "Time section header")
+        }
+        static var bucketThisWeek: String {
+            NSLocalizedString("library.bucket_this_week", value: "This week", comment: "Time section header")
+        }
+        static var bucketThisMonth: String {
+            NSLocalizedString("library.bucket_this_month", value: "This month", comment: "Time section header")
+        }
+
         // MARK: Source Identifier — 'Who recorded this?' in the list
         //
         // ⚠️ Always use `static var` instead of `static let`: this file supports **runtime language switching**
@@ -441,6 +759,150 @@ enum L10n {
         }
     }
 
+    // MARK: - Trash
+    //
+    // ★ 2026-10-15: The user asked for "a trash feature in Settings to protect against accidental deletion,
+    // with a 30-day protection period and automatic deletion after 30 days". It lives in the phone app's Settings —
+    // deletion already happens on the phone (multi-select delete in the library, delete on the detail page), and only here
+    // does it cover every entry point.
+    //
+    // ⚠️ Again always `static var` + `value:` inline English fallback.
+    enum Trash {
+        /// Title of the row in Settings, and also the trash page's navigation title.
+        static var title: String {
+            NSLocalizedString("trash.title", value: "Recently Deleted",
+                              comment: "Settings row + page title for the recycle bin")
+        }
+        /// The Settings row title. Kept separate from `title` so the Chinese can write "trash" out in full,
+        /// while the page title can be a bit longer — they currently share the same value, but the seam is kept.
+        static var settingsRow: String {
+            NSLocalizedString("trash.settings_row", value: "Recently Deleted", comment: "")
+        }
+        static var emptyTitle: String {
+            NSLocalizedString("trash.empty_title", value: "Nothing Deleted", comment: "")
+        }
+        static var emptyMessage: String {
+            NSLocalizedString("trash.empty_message",
+                              value: "Recordings you delete are kept here first.",
+                              comment: "Empty state for the recycle bin")
+        }
+        /// The protection-period note at the bottom of the page.
+        static func retentionFooter(_ days: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "trash.retention_footer",
+                    value: "Items are kept for %d days, then deleted automatically.",
+                    comment: "Recycle bin footer explaining the retention window"
+                ),
+                days
+            )
+        }
+        /// The "days remaining" on each row.
+        static func daysLeft(_ days: Int) -> String {
+            String(
+                format: NSLocalizedString("trash.days_left", value: "%d days left",
+                                          comment: "Recycle bin row: time before auto-delete"),
+                days
+            )
+        }
+        /// "Deleted on" (followed by the date).
+        static var deletedOn: String {
+            NSLocalizedString("trash.deleted_on", value: "Deleted",
+                              comment: "Prefix before the deletion date on a trash row")
+        }
+        static var restore: String {
+            NSLocalizedString("trash.restore", value: "Recover", comment: "Swipe action")
+        }
+        static var deleteForever: String {
+            NSLocalizedString("trash.delete_forever", value: "Delete Now",
+                              comment: "Swipe action: remove from the recycle bin for good")
+        }
+        static var deleteForeverTitle: String {
+            NSLocalizedString("trash.delete_forever_title", value: "Delete Now?",
+                              comment: "Confirmation title for permanently deleting one item")
+        }
+        static var deleteForeverMessage: String {
+            NSLocalizedString("trash.delete_forever_message",
+                              value: "This item will be removed for good. This can't be undone.",
+                              comment: "Confirmation body for permanently deleting one item")
+        }
+        static var emptyAll: String {
+            NSLocalizedString("trash.empty_all", value: "Delete All", comment: "")
+        }
+        static var emptyAllTitle: String {
+            NSLocalizedString("trash.empty_all_title", value: "Empty Recently Deleted?",
+                              comment: "")
+        }
+        static func emptyAllMessage(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "trash.empty_all_message",
+                    value: "%d item(s) will be removed for good. This can't be undone.",
+                    comment: "Confirmation body for emptying the whole recycle bin"
+                ),
+                count
+            )
+        }
+        static var restoreFailedTitle: String {
+            NSLocalizedString("trash.restore_failed_title", value: "Couldn't Recover", comment: "")
+        }
+        static var restoreFailedMessage: String {
+            NSLocalizedString("trash.restore_failed_message",
+                              value: "The files for this item are no longer in Recently Deleted.",
+                              comment: "")
+        }
+        // The small "what's inside" tags on each trash row.
+        static var artefactAudio: String {
+            NSLocalizedString("trash.artefact_audio", value: "Audio", comment: "")
+        }
+        static var artefactTranscript: String {
+            NSLocalizedString("trash.artefact_transcript", value: "Transcript", comment: "")
+        }
+        static var artefactSummary: String {
+            NSLocalizedString("trash.artefact_summary", value: "Summary", comment: "")
+        }
+
+        // MARK: Multi-select (★ fourteenth revision 2026-10-16: user — "trash supports multi-select, select-all, restore, or delete")
+        //
+        // ⚠️ Always `static var` + `value:` inline English fallback (only the en / zh-Hans
+        // .lproj files were added; same reason as `Library.sourceCard`).
+        /// The toolbar button that enters/exits multi-select mode.
+        static var select: String {
+            NSLocalizedString("trash.select", value: "Select", comment: "Trash toolbar: enter multi-select mode")
+        }
+        /// The "Select All / Deselect All" button in multi-select mode — its label switches with the state.
+        static var selectAll: String {
+            NSLocalizedString("trash.select_all", value: "Select All", comment: "Trash multi-select toolbar")
+        }
+        static var deselectAll: String {
+            NSLocalizedString("trash.deselect_all", value: "Deselect All", comment: "Trash multi-select toolbar, shown when everything is already ticked")
+        }
+        /// The "Restore" button at the bottom of multi-select mode.
+        static func restoreSelected(_ count: Int) -> String {
+            String(format: NSLocalizedString("trash.restore_selected",
+                                             value: "Recover %d",
+                                             comment: "Trash multi-select bottom bar; %d is how many are ticked"),
+                   count)
+        }
+        /// The "Delete" button at the bottom of multi-select mode.
+        static func deleteSelected(_ count: Int) -> String {
+            String(format: NSLocalizedString("trash.delete_selected",
+                                             value: "Delete %d",
+                                             comment: "Trash multi-select bottom bar; %d is how many are ticked"),
+                   count)
+        }
+        static var deleteSelectedTitle: String {
+            NSLocalizedString("trash.delete_selected_title", value: "Delete for Good?",
+                              comment: "Confirmation title for permanently deleting the ticked items")
+        }
+        static func deleteSelectedMessage(_ count: Int) -> String {
+            String(format: NSLocalizedString("trash.delete_selected_message",
+                                             value: "%d item(s) will be removed for good. This can't be undone.",
+                                             comment: "Confirmation body; %d is how many are ticked"),
+                   count)
+        }
+    }
+
     // MARK: - Apple Watch
     //
     // Also compiled into the watch target — see `project.yml`.
@@ -457,18 +919,147 @@ enum L10n {
         static var pendingHeader: String { NSLocalizedString("watch.pending_header", comment: "") }
         static var sending: String { NSLocalizedString("watch.sending", comment: "") }
         static var waiting: String { NSLocalizedString("watch.waiting", comment: "") }
+        /// The "how many clips haven't been transferred yet" on the thin note at the bottom of the home screen.
+        ///
+        /// ★ Fourth revision, 2026-10-15: the pending-transfer list was collapsed from a long column on the home screen into a single strip at the bottom,
+        /// with details pushed into their own page (otherwise it would shove the ring off-centre; see the top of `WatchRecorderView`).
+        /// So this needs a **short phrase with a number**; `pendingHeader` ("Pending transfer") won't do.
+        static func pendingCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "watch.pending_count", value: "%d to send",
+                    comment: "Watch home: compact pill at the bottom showing how many clips are still uploading"
+                ),
+                count
+            )
+        }
+        /// The "shake to start recording" toggle in Settings.
+        static var shakeToRecord: String {
+            NSLocalizedString("watch.shake_to_record", value: "Shake to Record",
+                              comment: "Watch settings: shake the wrist to start/stop recording")
+        }
+        /// The explanatory line under that toggle.
+        static var shakeToRecordHint: String {
+            NSLocalizedString(
+                "watch.shake_to_record_hint",
+                value: "Shake your wrist to start, shake again to stop",
+                comment: "Watch settings: explains the shake gesture"
+            )
+        }
+
+        /// The "two-finger tap to start/stop recording" toggle in Settings (shown on watchOS 11+ only).
+        ///
+        /// ⚠️ The wording deliberately says "pinch index finger and thumb together" instead of copying Apple's "Double Tap":
+        /// that's the exact gesture the user asked for, and a literal "double tap" would be confused with "tap the screen twice" —
+        /// this is an **in-air** gesture, not a touch. Apple's own Chinese name for it is also "two-finger tap".
+        static var pinchToRecord: String {
+            NSLocalizedString("watch.pinch_to_record", value: "Double Tap to Record",
+                              comment: "Watch settings: pinch index finger and thumb to start/stop recording")
+        }
+        /// The explanatory line under that toggle.
+        static var pinchToRecordHint: String {
+            NSLocalizedString(
+                "watch.pinch_to_record_hint",
+                value: "Tap index finger and thumb together to start, again to stop",
+                comment: "Watch settings: explains the double-tap gesture"
+            )
+        }
+
+        // MARK: Home screen bot (★ seventh revision 2026-10-16)
+        //
+        // The center of the home screen swapped the ring button for a blinking bot face. The user's words:
+        // "like the Grok Bot, with two eyes... remove the recording button on the current home screen and make it a lively bot;
+        // recording starts only after long-pressing its eye for 2s".
+        //
+        // ⚠️ The `holdToRecord` hint **cannot be skipped**. "Hold for 2 seconds" is an **invisible** interaction:
+        //    without it, first-time users will tap once, find nothing happens, and give up.
+        static var holdToRecord: String {
+            NSLocalizedString("watch.hold_to_record", value: "Hold 2s to record",
+                              comment: "Watch home: caption under the bot face, explains the long-press gesture")
+        }
+        /// A line read by screen readers while recording (visually the home screen shows the timer, no text).
+        static var recordingBusy: String {
+            NSLocalizedString("watch.recording_busy", value: "Recording",
+                              comment: "Watch home: accessibility value while a take is running")
+        }
+
+        // MARK: Side swipe menus + quick menu settings (★ seventh revision 2026-10-16)
+        //
+        // User's words: "the 4 menus should appear by swiping left or right... the quick-recording menu bar on the watch
+        // needs a place to add quick menu settings; that setting is a component you tap to add inside the watch's Wi-Fi
+        // menu bar".
+        /// The row in Settings, and also the title of the selection page.
+        static var quickMenu: String {
+            NSLocalizedString("watch.quick_menu", value: "Quick Menu",
+                              comment: "Watch settings: which items show in the home screen's side menus")
+        }
+        static var quickMenuHint: String {
+            NSLocalizedString("watch.quick_menu_hint", value: "Swipe left or right on the home screen",
+                              comment: "Watch settings: subtitle explaining where these items appear")
+        }
+        /// The dashed entry at the bottom of the menu page.
+        static var quickMenuAdd: String {
+            NSLocalizedString("watch.quick_menu_add", value: "Add a shortcut",
+                              comment: "Watch home: dashed entry at the bottom of a side menu")
+        }
+        /// Empty state when one side's menu has nothing checked.
+        static var quickMenuEmpty: String {
+            NSLocalizedString("watch.quick_menu_empty", value: "No shortcuts here yet",
+                              comment: "Watch home: a side menu with nothing enabled")
+        }
+        /// Note at the bottom of the selection page. **Must make clear "where to look after checking"** — back on the home screen you have to swipe sideways
+        /// to see it; without this line users will think checking did nothing.
+        static var quickMenuFooter: String {
+            NSLocalizedString(
+                "watch.quick_menu_footer",
+                value: "Enabled items appear when you swipe left or right from the home screen.",
+                comment: "Watch quick-menu settings: footer explaining where the items show up"
+            )
+        }
+        /// Empty state of the pending-transfer queue page (this page can now be reached directly from the menu, so "empty" is normal).
+        static var queueEmpty: String {
+            NSLocalizedString("watch.queue_empty", value: "Nothing to send",
+                              comment: "Watch queue page: empty state")
+        }
+
+        // The small print under each row on the selection page. One sentence saying "what you'll see inside".
+        static var menuHintAppearance: String {
+            NSLocalizedString("watch.menu_hint_appearance", value: "Colour, gradient and breathing",
+                              comment: "Watch quick menu: what the Appearance page holds")
+        }
+        static var menuHintHistory: String {
+            NSLocalizedString("watch.menu_hint_history", value: "Which recordings reached the phone",
+                              comment: "Watch quick menu: what the Transfers page holds")
+        }
+        static var menuHintLanguage: String {
+            NSLocalizedString("watch.menu_hint_language", value: "Language used on the watch",
+                              comment: "Watch quick menu: what the Language page holds")
+        }
+        static var menuHintSettings: String {
+            NSLocalizedString("watch.menu_hint_settings", value: "Gestures, version, reset",
+                              comment: "Watch quick menu: what the Settings page holds")
+        }
+        static var menuHintQueue: String {
+            NSLocalizedString("watch.menu_hint_queue", value: "Clips still waiting to upload",
+                              comment: "Watch quick menu: what the queue page holds")
+        }
+        static var menuHintAbout: String {
+            NSLocalizedString("watch.menu_hint_about", value: "Build number on the watch",
+                              comment: "Watch quick menu: what the version page holds")
+        }
 
         // MARK: Ring appearance (directly called on the watch face)
         //
         // ⚠️ Always use `static var` (switches language at runtime) + provide inline English fallback via `value:`
         // (Only en / zh-Hans .lproj files were added). Reasoning is the same as for `Library.sourceCard`.
-        /// Title for the "Color" item in the menu.
-        static var styleColor: String {
-            NSLocalizedString("watch.style_color", value: "Color", comment: "Ring style menu: solid color")
-        }
-        /// The "Gradient" item in the menu.
-        static var styleGradient: String {
-            NSLocalizedString("watch.style_gradient", value: "Gradient", comment: "Ring style menu: gradient fill")
+        /// Title of the top-left page. It now holds three things — **color + gradient + breathing light** —
+        /// so it's called "Appearance" rather than "Color" — keeping the old name would make users think the breathing light was removed.
+        ///
+        /// ★ Fifth revision, 2026-10-15: the old `styleColor` ("Color") was merged in along with the breathing light;
+        /// both became this; the `watch.style_color` key has been removed from both .strings files.
+        static var styleAppearance: String {
+            NSLocalizedString("watch.style_appearance", value: "Appearance",
+                              comment: "Corner menu: colour + gradient + breathing, merged into one page")
         }
         /// The "Breathing" item in the menu.
         static var styleBreathing: String {
@@ -478,11 +1069,9 @@ enum L10n {
         static var styleReset: String {
             NSLocalizedString("watch.style_reset", value: "Reset", comment: "Ring style menu: restore the default look")
         }
-        static var styleGradientOff: String {
-            NSLocalizedString("watch.style_gradient_off", value: "Solid", comment: "Gradient menu: flat single colour")
-        }
-        static var styleGradientOn: String {
-            NSLocalizedString("watch.style_gradient_on", value: "Gradient", comment: "Gradient menu: two-colour blend")
+        /// Title of the "Settings" page inside the corner badge (version + restore defaults).
+        static var menuSettings: String {
+            NSLocalizedString("watch.menu_settings", value: "Settings", comment: "Corner menu: settings page title")
         }
         static var styleBreathingOff: String {
             NSLocalizedString("watch.style_breathing_off", value: "Off", comment: "Breathing speed: none")
@@ -495,6 +1084,39 @@ enum L10n {
         }
         static var styleBreathingFast: String {
             NSLocalizedString("watch.style_breathing_fast", value: "Fast", comment: "Breathing speed: fast")
+        }
+
+        // MARK: Transfer history (★ fifth revision 2026-10-15, top-right corner badge)
+        //
+        // User: "the top right is the watch's transfer history". One word per status,
+        // and the words must be short — a row on the watch only fits a dozen or so characters.
+        /// Title of the top-right page.
+        static var transferHistory: String {
+            NSLocalizedString("watch.transfer_history", value: "Transfers",
+                              comment: "Corner menu: history of clips handed to the iPhone")
+        }
+        static var transferEmpty: String {
+            NSLocalizedString("watch.transfer_empty", value: "No recordings sent yet",
+                              comment: "Transfer history: empty state")
+        }
+        static var transferClear: String {
+            NSLocalizedString("watch.transfer_clear", value: "Clear History",
+                              comment: "Transfer history: toolbar button that empties the log")
+        }
+        /// Handed to the WatchConnectivity queue, not yet on its way.
+        static var transferQueued: String {
+            NSLocalizedString("watch.transfer_queued", value: "Queued", comment: "Transfer state")
+        }
+        /// Delivered by the system to the phone's daemon, but the phone app hasn't confirmed writing to disk.
+        static var transferDelivered: String {
+            NSLocalizedString("watch.transfer_delivered", value: "Waiting", comment: "Transfer state: handed to the phone, not confirmed")
+        }
+        /// The phone app has confirmed it's stored — only at this point is the local copy on the watch deleted.
+        static var transferStored: String {
+            NSLocalizedString("watch.transfer_stored", value: "Saved", comment: "Transfer state: confirmed written by the iPhone app")
+        }
+        static var transferFailed: String {
+            NSLocalizedString("watch.transfer_failed", value: "Failed", comment: "Transfer state")
         }
 
         // These must remain computed: runtime language switching swaps the
@@ -516,6 +1138,77 @@ enum L10n {
         static var statusRecording: String { NSLocalizedString("watch.status_recording", comment: "") }
         static var statusTransferring: String { NSLocalizedString("watch.status_transferring", comment: "") }
         static var statusOutOfRange: String { NSLocalizedString("watch.status_out_of_range", comment: "") }
+
+        // MARK: Recording home screen (★ fourteenth revision 2026-10-16)
+        //
+        // ⚠️ With `value:` inline English fallback (only the en / zh-Hans .lproj files were added).
+        /// The hint shown when heart rate can't be read. At that moment the wave is a **flat, motionless line**,
+        /// and without an explanation it reads as "broken" (see the fourteenth-revision note at the top of `WatchVoiceWave`).
+        ///
+        /// ⚠️ Deliberately **short**: it shares a line with the byte count, and a long string would shrink the whole line into illegibility.
+        static var notWorn: String {
+            NSLocalizedString("watch.not_worn", value: "Not worn",
+                              comment: "Watch recorder caption when no heart rate is available — the watch isn't being worn")
+        }
+    }
+
+    // MARK: - Watch home screen expression (★ thirteenth revision 2026-10-16)
+
+    /// The expression picker in iPhone Settings (a row in the "Apple Watch" section).
+    ///
+    /// ## Why the name doesn't mention color / theme
+    /// This page picks **shape only** (how the eyes curve, how they tilt, how wide they open). Color is chosen on the watch's
+    /// "Appearance" page and has nothing to do with this — the phone has no idea which color the watch picked
+    /// (that's a watch-local preference), so previews on this page are always drawn in the foreground color, never pretending to be
+    /// the color on the watch.
+    ///
+    /// ⚠️ Always `static var` (runtime language switching) + `value:` inline English fallback
+    /// (only the en / zh-Hans .lproj files were added; same reason as `Library.sourceCard`).
+    enum Face {
+        /// Title of the Settings row, and the picker's page title.
+        static var title: String {
+            NSLocalizedString("face.title", value: "Home Face",
+                              comment: "Settings row + picker title: which expression the watch's home face wears")
+        }
+        /// The explanation under the Settings row.
+        static var rowFooter: String {
+            NSLocalizedString("face.row_footer", value: "Choose the expression the watch shows on its home screen.",
+                              comment: "Settings row footer: what the home face setting does")
+        }
+        /// The explanation at the bottom of the picker page.
+        static var footer: String {
+            NSLocalizedString("face.footer", value: "The face still blinks and looks around on its own. Tap it on the watch to see another expression.",
+                              comment: "Face picker footer: the chosen expression is the resting face, not the only one")
+        }
+
+        // Names for the nine levels. **Short**, because they appear in list rows on both the watch and the phone.
+        static var calm: String {
+            NSLocalizedString("face.calm", value: "Calm", comment: "Watch face expression: the default, plain eyes")
+        }
+        static var happy: String {
+            NSLocalizedString("face.happy", value: "Happy", comment: "Watch face expression: eyes curving up into a smile")
+        }
+        static var sad: String {
+            NSLocalizedString("face.sad", value: "Sad", comment: "Watch face expression: eyes drooping downwards")
+        }
+        static var wide: String {
+            NSLocalizedString("face.wide", value: "Wide", comment: "Watch face expression: eyes opened wide")
+        }
+        static var squint: String {
+            NSLocalizedString("face.squint", value: "Squint", comment: "Watch face expression: eyes narrowed to a slit")
+        }
+        static var angry: String {
+            NSLocalizedString("face.angry", value: "Angry", comment: "Watch face expression: eyes slanting inwards")
+        }
+        static var shy: String {
+            NSLocalizedString("face.shy", value: "Shy", comment: "Watch face expression: flat, wide eyes tipped inwards")
+        }
+        static var listen: String {
+            NSLocalizedString("face.listen", value: "Listening", comment: "Watch face expression: tall narrow eyes")
+        }
+        static var scan: String {
+            NSLocalizedString("face.scan", value: "Scanning", comment: "Watch face expression: very narrow tall slits")
+        }
     }
 
     // MARK: - Device Files
@@ -1125,6 +1818,24 @@ enum L10n {
         static var exportAsWAV: String { NSLocalizedString("clip_detail.export_as_wav", value: "Export as WAV (PCM)", comment: "WAV export option — uncompressed audio") }
         static var exportFormatFooter: String { NSLocalizedString("clip_detail.export_format_footer", value: "M4A is compressed and plays anywhere. WAV is uncompressed — larger, but it's the format transcription and editing tools expect.", comment: "Footer explaining the two audio export formats") }
         static var exporting: String { NSLocalizedString("clip_detail.exporting", comment: "") }
+        /// ★ Sixth revision, 2026-10-15: the previous export is ready; tap this row to share it.
+        ///
+        /// The only reason this row exists is to **save a re-run** — transcoding a large file can wait until the user
+        /// switches away ("so leaving doesn't mean waiting all over again"). So the copy says "Exported" outright, not
+        /// the vague "Share audio".
+        static var exportReady: String {
+            NSLocalizedString("clip_detail.export_ready", value: "Exported — tap to share",
+                              comment: "Row shown when this clip's export already finished and is waiting to be shared")
+        }
+        static func exportReadyFiles(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("clip_detail.export_ready_files", value: "%d file(s)",
+                                          comment: "How many files the staged export contains"),
+                count
+            )
+        }
+        /// Clears the staging copy (**leaves the original in the library untouched**).
+        static var clearExportStaging: String { L10n.Library.clearExportStaging }
         static var mindMap: String { NSLocalizedString("clip_detail.mind_map", value: "Mind Map", comment: "Mind map view built from the summary's headings and lists") }
         static var mindMapLevel: String { NSLocalizedString("clip_detail.mind_map_level", value: "Branches", comment: "How many levels of the summary the mind map draws") }
         static var mindMapFit: String { NSLocalizedString("clip_detail.mind_map_fit", value: "Fit", comment: "Button that scales the mind map to fill the screen") }
@@ -1133,11 +1844,11 @@ enum L10n {
         static var mindMapExpandAll: String { NSLocalizedString("clip_detail.mind_map_expand_all", value: "Expand all", comment: "Toolbar button that opens every folded branch of the mind map") }
         static var mindMapCollapseAll: String { NSLocalizedString("clip_detail.mind_map_collapse_all", value: "Collapse all", comment: "Toolbar button that folds the mind map back to its top-level branches") }
         static var deleteAudio: String { NSLocalizedString("clip_detail.delete_audio", value: "Delete Audio", comment: "Deletes only the audio file, keeping transcript and summary") }
-        static var deleteAudioMessage: String { NSLocalizedString("clip_detail.delete_audio_message", value: "Deletes only the audio file. The transcript and summary are kept. This can't be undone.", comment: "") }
+        static var deleteAudioMessage: String { NSLocalizedString("clip_detail.delete_audio_message", value: "The audio file moves to Recently Deleted. The transcript and summary are kept. You can recover it for 30 days.", comment: "") }
         static var deleteTranscript: String { NSLocalizedString("clip_detail.delete_transcript", value: "Delete Transcript", comment: "Deletes only the transcript, keeping audio and summary") }
-        static var deleteTranscriptMessage: String { NSLocalizedString("clip_detail.delete_transcript_message", value: "Deletes the transcript and its translation. The audio and summary are kept. This can't be undone.", comment: "") }
+        static var deleteTranscriptMessage: String { NSLocalizedString("clip_detail.delete_transcript_message", value: "The transcript and its translation move to Recently Deleted. The audio and summary are kept. You can recover them for 30 days.", comment: "") }
         static var deleteSummary: String { NSLocalizedString("clip_detail.delete_summary", value: "Delete Summary", comment: "Deletes only the summary, keeping audio and transcript") }
-        static var deleteSummaryMessage: String { NSLocalizedString("clip_detail.delete_summary_message", value: "Deletes the summary and its translation. The audio and transcript are kept. This can't be undone.", comment: "") }
+        static var deleteSummaryMessage: String { NSLocalizedString("clip_detail.delete_summary_message", value: "The summary and its translation move to Recently Deleted. The audio and transcript are kept. You can recover them for 30 days.", comment: "") }
         static var deleteIndependentFooter: String { NSLocalizedString("clip_detail.delete_independent_footer", value: "Audio, transcript and summary are deleted independently — removing one leaves the others untouched.", comment: "") }
         static func speaker(_ id: String) -> String {
             String(format: NSLocalizedString("clip_detail.speaker", comment: ""), id)
@@ -1561,7 +2272,77 @@ enum L10n {
             String(format: NSLocalizedString("summarize.summarizing_with", comment: ""), provider)
         }
         static var searchTemplates: String { NSLocalizedString("summarize.search_templates", comment: "") }
+        // ★ Seventh revision, 2026-10-15: the template picker changed from "rows of text" to "a tile grid + overview page".
+        //
+        // User's words: "the summary templates shouldn't be plain text; suggest showing the current structure as blocks, and tapping
+        // one gives an overall overview". So the tile keeps only the name (to see "what's available"), while the description and
+        // the full prompt move to the overview page (to see "what it produces when tapped").
+        //
+        // ⚠️ All `static var` + inline English fallback: same reason as the `Library` batch —
+        // the .lproj files only cover en / zh-Hans; the other 9 languages rely on `value:` to keep key literals out.
+        static func templateCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("summarize.template_count", value: "%d templates",
+                                          comment: "Template grid: how many templates are in this category"),
+                count
+            )
+        }
+        static var builtInBadge: String {
+            NSLocalizedString("summarize.builtin_badge", value: "Built-in",
+                              comment: "Template card/overview: shipped with the app")
+        }
+        static var customBadge: String {
+            NSLocalizedString("summarize.custom_badge", value: "Mine",
+                              comment: "Template card/overview: created by the user")
+        }
+        /// Title of the "what this template does" section on the overview page.
+        static var templateAbout: String {
+            NSLocalizedString("summarize.template_about", value: "What it produces",
+                              comment: "Overview page: label above the template's one-line description")
+        }
+        /// Title of the full-prompt section on the overview page.
+        static var templatePromptLabel: String {
+            NSLocalizedString("summarize.template_prompt_label", value: "Prompt",
+                              comment: "Overview page: label above the template's full prompt text")
+        }
+        /// The primary button at the bottom of the overview page.
+        static var useTemplate: String {
+            NSLocalizedString("summarize.use_template", value: "Summarize with this template",
+                              comment: "Overview page: primary button that starts the summary")
+        }
+        /// The back button at the top-left of the overview page (this page isn't pushed, so the system shows no back chevron).
+        static var backToTemplates: String {
+            NSLocalizedString("summarize.back_to_templates", value: "Templates",
+                              comment: "Overview page: back button, returns to the template grid")
+        }
+        /// Overview page subtitle (an extra info slot beyond category + item count). Currently used only for accessibility.
+        static var templateOverviewTitle: String {
+            NSLocalizedString("summarize.template_overview_title", value: "Template",
+                              comment: "Overview page: navigation title when the template has no name")
+        }
+        /// Empty state when a template search finds nothing. **Must exist** — once the tile grid search comes up empty the page is blank,
+        /// and users will think the page failed to load.
+        static var noMatchingTemplates: String {
+            NSLocalizedString("summarize.no_matching_templates",
+                              value: "No templates match your search",
+                              comment: "Template grid: search returned nothing")
+        }
         static var truncatedWarning: String { NSLocalizedString("summarize.truncated_warning", comment: "Shown when the model hit its output cap") }
+        /// Chunk progress: "chunk %1$d of %2$d". Numbers are monospaced so the row doesn't jitter when digit counts change.
+        static func chunkProgress(_ done: Int, _ total: Int) -> String {
+            String(format: NSLocalizedString("summarize.chunk_progress", value: "Part %1$d of %2$d",
+                                             comment: "Summarize sheet: progress while a long transcript is processed in parts"),
+                   done, total)
+        }
+        /// Pre-flight health-check notice: the primary channel is unusable, but there is a fallback.
+        ///
+        /// `gap` is already a complete sentence like "No API key configured for Open Router.",
+        /// so this only has to append "who will serve as the fallback".
+        static func preflightFallback(_ gap: String, _ fallback: String) -> String {
+            String(format: NSLocalizedString("summarize.preflight_fallback",
+                                             value: "%1$@ It will fall back to %2$@.",
+                                             comment: "Summarize sheet: the active provider is unusable, a fallback will be used"), gap, fallback)
+        }
         static var addTemplate: String { NSLocalizedString("summarize.add_template", comment: "") }
         static var clone: String { NSLocalizedString("summarize.clone", comment: "") }
         static var category: String { NSLocalizedString("summarize.category", comment: "") }
@@ -1617,6 +2398,183 @@ enum L10n {
         static var researchDiscussion: String { NSLocalizedString("template.research_discussion", comment: "") }
         static var brainstormSynthesis: String { NSLocalizedString("template.brainstorm_synthesis", comment: "") }
         static var interviewSummary: String { NSLocalizedString("template.interview_summary", comment: "") }
+    }
+
+    // MARK: - Jobs (background task overview)
+
+    /// The **overview** strings for the four kinds of long-running jobs (twelfth revision, 2026-10-16).
+    ///
+    /// This layer only solves "being visible": scheduling for summary / translation / format conversion lives in `JobQueue`,
+    /// transcription still lives in `TranscriptionService`, but both appear in one list on the overview page.
+    ///
+    /// ⚠️ Keep the wording consistent with the `ASR.queue_*` batch: **never say "silent audio"**. What users want
+    ///    to judge is "will it keep going after I switch away", not how we keep the process alive.
+    enum Jobs {
+
+        // MARK: Kinds of jobs (`JobKind.title`)
+
+        static var kindTranscribe: String {
+            NSLocalizedString("jobs.kind_transcribe", value: "Transcription",
+                              comment: "Task list: an ASR transcription job")
+        }
+        static var kindSummarize: String {
+            NSLocalizedString("jobs.kind_summarize", value: "Summary",
+                              comment: "Task list: a summary-generation job")
+        }
+        static var kindTranslate: String {
+            NSLocalizedString("jobs.kind_translate", value: "Translation",
+                              comment: "Task list: a translation job")
+        }
+        static var kindExport: String {
+            NSLocalizedString("jobs.kind_export", value: "Audio export",
+                              comment: "Task list: an audio format-conversion job")
+        }
+
+        // MARK: Subtitles (`Job.detail`)
+
+        static func detailTranslatedTranscript(_ language: String) -> String {
+            String(format: NSLocalizedString("jobs.detail_translated_transcript",
+                                             value: "Transcript → %@",
+                                             comment: "Task list subtitle: translating the transcript into this language"),
+                   language)
+        }
+        static func detailTranslatedSummary(_ language: String) -> String {
+            String(format: NSLocalizedString("jobs.detail_translated_summary",
+                                             value: "Summary → %@",
+                                             comment: "Task list subtitle: translating the summary into this language"),
+                   language)
+        }
+
+        // MARK: Source is gone (`JobSourceMissing`)
+
+        static var sourcePrompt: String {
+            NSLocalizedString("jobs.source_prompt", value: "The summary prompt",
+                              comment: "JobSourceMissing subject: the job recorded no prompt")
+        }
+        static var sourceLanguage: String {
+            NSLocalizedString("jobs.source_language", value: "The target language",
+                              comment: "JobSourceMissing subject: the job recorded no target language")
+        }
+        static var sourceFormat: String {
+            NSLocalizedString("jobs.source_format", value: "The export format",
+                              comment: "JobSourceMissing subject: the job recorded no export format")
+        }
+        static var sourceAudio: String {
+            NSLocalizedString("jobs.source_audio", value: "The audio file",
+                              comment: "JobSourceMissing subject: the recording's audio is gone")
+        }
+        static var sourceTranscript: String {
+            NSLocalizedString("jobs.source_transcript", value: "The transcript",
+                              comment: "JobSourceMissing subject: the transcript is gone")
+        }
+        static var sourceSummary: String {
+            NSLocalizedString("jobs.source_summary", value: "The summary",
+                              comment: "JobSourceMissing subject: the summary is gone")
+        }
+        /// "This thing no longer exists". **Not** "job failed" — it's the kind that can **never succeed'',
+        /// so the queue wipes it straight from the ledger instead of wasting three attempts.
+        static func sourceMissing(_ what: String) -> String {
+            String(format: NSLocalizedString("jobs.source_missing",
+                                             value: "%@ is no longer available.",
+                                             comment: "Shown when a queued task's source file has been deleted"),
+                   what)
+        }
+        static var noRunner: String {
+            NSLocalizedString("jobs.no_runner", value: "This kind of task isn't supported in this build.",
+                              comment: "Internal error: no runner registered for a job kind")
+        }
+
+        // MARK: Overview page
+
+        static var pageTitle: String {
+            NSLocalizedString("jobs.page_title", value: "Background tasks",
+                              comment: "Task center: navigation title")
+        }
+        static var empty: String {
+            NSLocalizedString("jobs.empty",
+                              value: "Nothing here right now. Summaries, translations and audio conversions you start will show up on this page.",
+                              comment: "Task center: empty state")
+        }
+        static var sectionActive: String {
+            NSLocalizedString("jobs.section_active", value: "In progress",
+                              comment: "Task center: section header for unfinished jobs")
+        }
+        static var sectionFinished: String {
+            NSLocalizedString("jobs.section_finished", value: "Finished",
+                              comment: "Task center: section header for finished jobs")
+        }
+        static var clearFinished: String {
+            NSLocalizedString("jobs.clear_finished", value: "Clear finished",
+                              comment: "Task center: button that removes finished rows")
+        }
+        static var footer: String {
+            NSLocalizedString("jobs.footer",
+                              value: "These tasks keep running when you switch away or lock your phone. If the app is closed, they pick up again the next time you open it.",
+                              comment: "Task center: explanation of background continuation")
+        }
+        /// The "you're free to go" line shown right after it's started.
+        static var canLeaveHint: String {
+            NSLocalizedString("jobs.can_leave_hint",
+                              value: "You can leave this screen — it keeps running in the background.",
+                              comment: "Shown under a running task: the user does not have to stay on the page")
+        }
+
+        // MARK: Status
+
+        static var statusWaiting: String {
+            NSLocalizedString("jobs.status_waiting", value: "Waiting", comment: "Job status chip")
+        }
+        static var statusRunning: String {
+            NSLocalizedString("jobs.status_running", value: "Running", comment: "Job status chip")
+        }
+        static var statusDone: String {
+            NSLocalizedString("jobs.status_done", value: "Done", comment: "Job status chip")
+        }
+        static var statusGaveUp: String {
+            NSLocalizedString("jobs.status_gave_up", value: "Gave up",
+                              comment: "Job status chip: exhausted its retries")
+        }
+        static func attempts(_ attempts: Int, _ max: Int) -> String {
+            String(format: NSLocalizedString("jobs.attempts", value: "Attempt %1$d of %2$d",
+                                             comment: "Job row: how many tries have been used"),
+                   attempts, max)
+        }
+        static func progress(_ done: Int, _ total: Int) -> String {
+            String(format: NSLocalizedString("jobs.progress", value: "Part %1$d of %2$d",
+                                             comment: "Job row: chunked progress"),
+                   done, total)
+        }
+
+        // MARK: Inline actions
+
+        static var retry: String {
+            NSLocalizedString("jobs.retry", value: "Try again", comment: "Job row: retry action")
+        }
+        static var cancel: String {
+            NSLocalizedString("jobs.cancel", value: "Cancel", comment: "Job row: cancel action")
+        }
+        static var remove: String {
+            NSLocalizedString("jobs.remove", value: "Remove", comment: "Job row: dismiss this row")
+        }
+
+        // MARK: Entry points (settings page / detail page)
+
+        static var openQueue: String {
+            NSLocalizedString("jobs.open_queue", value: "Background tasks",
+                              comment: "Settings row: opens the task center")
+        }
+        static var openQueueFooter: String {
+            NSLocalizedString("jobs.open_queue_footer",
+                              value: "Summaries, translations and audio conversions carry on after you leave the app.",
+                              comment: "Settings row footer: what the task center is for")
+        }
+        /// The light toast shown when enqueueing succeeds.
+        static func enqueuedToast(_ kind: String) -> String {
+            String(format: NSLocalizedString("jobs.enqueued_toast",
+                                             value: "%@ added to background tasks.",
+                                             comment: "Toast shown right after a task is queued"),
+                   kind)
+        }
     }
 }
 
