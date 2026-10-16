@@ -8,9 +8,24 @@ private let log = Logger(subsystem: "com.nomily.app.ios", category: "config")
 /// gated behind a debounce to avoid thrashing while a slider is dragged.
 @MainActor
 final class ConfigService: ObservableObject {
-    @Published var config: AppConfig
+    @Published var config: AppConfig {
+        didSet { syncBackgroundKeeper() }
+    }
 
     private var debounce: Task<Void, Never>?
+
+    /// 把"后台保活"开关镜像给 `BackgroundKeeper`。
+    ///
+    /// 挂在 `didSet` 而不是"写盘成功之后"：这个开关要**即时**生效 ——
+    /// 用户把它关掉，哪怕此刻正有一条转录在跑，那段静音音频也该立刻停
+    /// （那正是他关它的意思）。写盘那边有 250 ms 去抖，等它太久。
+    ///
+    /// 注意：`didSet` 在 `init` 里那次赋值**不会**触发，所以冷启动时
+    /// 由 `TranscriptionService.init` 再同步一次，不然"上次就关着"的
+    /// 状态要等到用户碰一次设置才生效。
+    private func syncBackgroundKeeper() {
+        BackgroundKeeper.shared.audioKeepAliveEnabled = config.backgroundKeepAliveEnabled
+    }
 
     init() {
         var loaded = Self.loadFromDisk() ?? .empty

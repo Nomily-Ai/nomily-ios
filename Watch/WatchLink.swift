@@ -47,8 +47,15 @@ final class WatchLink: NSObject, ObservableObject {
         guard !queuedNames.contains(name) else { return }
         WCSession.default.transferFile(url, metadata: [WatchLinkMessage.fileNameKey: name])
         refreshQueue()
+        // ★ 记账。大小在这里取（文件还在），`didFinish` 那一步就取不到了。
+        WatchTransferLog.shared.noteQueued(name: name, bytes: Self.fileSize(of: url))
         log.info("queued \(name, privacy: .public) for the iPhone")
         #endif
+    }
+
+    /// 文件字节数。取不到就 0 —— 记录里显示 0 KB 好过整条不出现。
+    private static func fileSize(of url: URL) -> Int64 {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
     }
 
 #if targetEnvironment(simulator)
@@ -114,6 +121,18 @@ final class WatchLink: NSObject, ObservableObject {
             WCSession.default.outstandingFileTransfers.map { $0.file.fileURL.lastPathComponent }
         )
     }
+
+    /// 收下手机推来的"首页表情"。
+    ///
+    /// ★ 十三改新增。这是手机上**唯一**会主动推给手表的外观设置，
+    /// 理由与选型（为什么走 `updateApplicationContext`）写在
+    /// `WatchLinkMessage.faceStyleKey` 那段。
+    ///
+    /// ⚠️ 不认识的值会被 `WatchFaceStore.apply` 静默丢掉（两端版本可以不一致），
+    ///    所以这里不判合法性、也不报错 —— 那是 store 的事，这里只管搬运。
+    private func apply(remoteContext context: [String: Any]) {
+        WatchFaceStore.shared.apply(context[WatchLinkMessage.faceStyleKey] as? String)
+    }
 }
 
 extension WatchLink: WCSessionDelegate {
@@ -123,8 +142,15 @@ extension WatchLink: WCSessionDelegate {
         error: (any Error)?
     ) {
         let activated = activationState == .activated
+        // ★ 十三改：手机最后推来的那份 context 就躺在 `receivedApplicationContext`
+        //   里等着 —— 冷启动时先把它读一遍，否则表上的脸会先画默认表情、
+        //   一直等到手机下一次推送才跳成用户选的那一档。
+        //   （手机侧同样在激活时读 `receivedApplicationContext` 拿录音状态，
+        //    见 `WatchSyncService`。）
+        let pending = session.receivedApplicationContext
         Task { @MainActor in
             self.refreshQueue()
+            self.apply(remoteContext: pending)
             if activated { self.onActivated?() }
         }
     }
@@ -134,8 +160,21 @@ extension WatchLink: WCSessionDelegate {
         Task { @MainActor in
             log.info("iPhone stored \(name, privacy: .public)")
             self.deliveredNames.remove(name)
+            WatchTransferLog.shared.noteStored(name: name)
             self.onStored?(name)
         }
+    }
+
+    /// 手机推来的"当前值"（★ 十三改：现在是首页表情）。
+    ///
+    /// ⚠️ 和手表自己那条 `updateApplicationContext`（录音状态）**不会**打架：
+    ///    application context 是**按方向各有一个槽位**的，手表发出去的不会
+    ///    被手机发进来的覆盖。
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveApplicationContext applicationContext: [String: Any]
+    ) {
+        Task { @MainActor in self.apply(remoteContext: applicationContext) }
     }
 
     nonisolated func session(
@@ -146,6 +185,10 @@ extension WatchLink: WCSessionDelegate {
         let name = fileTransfer.file.fileURL.lastPathComponent
         Task { @MainActor in
             self.refreshQueue()
+            // ★ 失败也要记账。这是**唯一**能看到失败原因的时机 ——
+            //    `didFinish` 的 `error` 以前只写进 os_log，而手表上读不到日志，
+            //    用户看到的只是"那条一直卡在待传里"。
+            WatchTransferLog.shared.noteFinished(name: name, error: error)
             guard error == nil else {
                 log.error("transfer of \(name, privacy: .public) failed: \(String(describing: error), privacy: .public)")
                 return

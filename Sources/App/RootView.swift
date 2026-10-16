@@ -248,6 +248,27 @@ struct RootView: View {
             // way a button-press start shows up in the UI.
             await pollDeviceInfo()
         }
+        // ★ 2026-10-15：回到前台时，把上次没干完的转录接着跑。
+        //
+        // 为什么要这个点（`AppEnvironment.init` 已经挂过一次了）：进程在后台
+        // 被系统咔嚓掉时，`init` 那条路**根本没机会跑** —— 因为那是"下一次
+        // 冷启动"。但还有更常见的一种：进程**没死**，只是任务在挂起期间
+        // 被 URLSession 断掉了，此时用户切回来，`init` 不会再跑一次。
+        // 挂在 `scenePhase` 上两种情况都能盖住，且不依赖任何持久化标记。
+        //
+        // 重入由 `TranscriptionService.startDrainIfNeeded` 挡着，重复调安全。
+        //
+        // ★ 2026-10-16 十二改：这里同时把摘要 / 翻译 / 格式转换那条队列也
+        // resume 一下（`env.jobs.resume()`）。两处 resume 的理由完全对称：
+        // 只挂 `init` 会漏掉"进程活着、任务被断掉"那半边；只挂这里会漏掉
+        // "进程被杀、用户重新冷启动"那半边。两处的重入都由各自的
+        // `startDrainIfNeeded` 挡着。
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                env.transcription.resumePending()
+                env.jobs.resume()
+            }
+        }
     }
 
     private func pollDeviceInfo() async {

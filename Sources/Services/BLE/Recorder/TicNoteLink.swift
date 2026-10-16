@@ -2639,7 +2639,10 @@ extension TicNoteLink: LiveAudioSource {
             }
 
             if Date() >= nextWriteAt, let request = pump.nextRequest() {
-                try? write(request)
+                // `_ =` 是给编译器的：这条支路本身就是 best-effort（拉流的
+                // 写失败由下一次 `nextFrame` 超时暴露出来，这里无处可报），
+                // 但把 `try?` 的结果丢掉会留一条 "result of 'try?' is unused" 告警。
+                _ = try? write(request)
             }
 
             guard let frame = try? await nextFrame(timeout: 1.0) else {

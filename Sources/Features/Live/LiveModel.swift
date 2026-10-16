@@ -1,4 +1,3 @@
-import AVFoundation
 import Foundation
 import os.log
 
@@ -275,9 +274,6 @@ final class LiveModel: ObservableObject {
     }
     private var library: Library?
     private var config: ConfigService?
-
-    private var silentPlayer: AVAudioPlayer?
-    private var interruptionObserver: NSObjectProtocol?
 
     var statusText: String {
         if isPaused { return L10n.Live.paused }
@@ -1045,7 +1041,10 @@ final class LiveModel: ObservableObject {
         defer { translateInFlight = nil }
         do {
             let result = try await LLMCompletionService.translate(
-                text: source, targetLanguage: target, config: config.config)
+                text: source, targetLanguage: target, config: config.config,
+                // 实时翻译**不**走兜底链：这是一条每几秒一次的循环，
+                // 退到一个纯 CPU 的本机模型只会越积越多，不如老实报错。
+                allowFallback: false)
             let cleaned = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleaned.isEmpty else { return }
             // While waiting for the LLM, the user may have restarted the session — look up by id again first,
@@ -1067,7 +1066,10 @@ final class LiveModel: ObservableObject {
         lastPartialTranslateAt = Date()
         do {
             let result = try await LLMCompletionService.translate(
-                text: source, targetLanguage: target, config: config.config)
+                text: source, targetLanguage: target, config: config.config,
+                // 实时翻译**不**走兜底链：这是一条每几秒一次的循环，
+                // 退到一个纯 CPU 的本机模型只会越积越多，不如老实报错。
+                allowFallback: false)
             let cleaned = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleaned.isEmpty else { return }
             // Only paste it if partial hasn't been replaced by final and the text is still the same as just now,
@@ -1335,7 +1337,6 @@ final class LiveModel: ObservableObject {
             }
         }
         let deviceFileName = deviceFile?.name
-        let deviceSize = deviceFile?.size ?? 0
 
         let name: String
         if attachedToExistingRecording {
@@ -1523,83 +1524,24 @@ final class LiveModel: ObservableObject {
     // MARK: - Background keep-alive
 
     /// Called by LiveView when scenePhase transitions to .background.
-    /// Starts a silent looping AVAudioPlayer so iOS keeps the app alive
-    /// (audio background mode) and BLE notifications keep firing
-    /// (bluetooth-central background mode).
+    ///
+    /// 录音期间切到后台得活着：`audio` 后台模式让音频不断、`bluetooth-central`
+    /// 让 BLE 通知继续到 —— 但这两样都只是在**进程没被挂起**的前提下才有用。
+    /// 真正顶住挂起的是 `BackgroundKeeper` 那层循环静音音频。
     func sceneDidBackground() {
         guard isRunning else { return }
-        activateBackgroundAudio()
+        BackgroundKeeper.shared.acquire(.recording)
     }
 
     /// Called by LiveView when scenePhase transitions to .active.
     func sceneDidForeground() {
-        deactivateBackgroundAudio()
+        BackgroundKeeper.shared.release(.recording)
     }
 
-    private func activateBackgroundAudio() {
-        guard silentPlayer == nil else { return }
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, options: .mixWithOthers)
-            try session.setActive(true)
-            let player = try AVAudioPlayer(data: silentWavData(), fileTypeHint: AVFileType.wav.rawValue)
-            player.numberOfLoops = -1
-            player.volume = 0
-            player.play()
-            silentPlayer = player
-            observeInterruptions()
-            log.info("background audio: activated")
-        } catch {
-            log.warning("background audio: activate failed: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-
+    /// 录音停止 / 出错收尾也要调（见 `stop()` 与错误路径）。不调的话，
+    /// "在后台把录音停了"会让令牌一直被占着 —— 静音音频就白放到用户
+    /// 下次回到前台，白白多耗一格电。
     private func deactivateBackgroundAudio() {
-        guard silentPlayer != nil else { return }
-        silentPlayer?.stop()
-        silentPlayer = nil
-        if let obs = interruptionObserver {
-            NotificationCenter.default.removeObserver(obs)
-            interruptionObserver = nil
-        }
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        log.info("background audio: deactivated")
-    }
-
-    private func observeInterruptions() {
-        interruptionObserver = NotificationCenter.default.addObserver(
-            forName: AVAudioSession.interruptionNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let type = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                  type == AVAudioSession.InterruptionType.ended.rawValue else { return }
-            Task { @MainActor [weak self] in
-                guard let self, self.isRunning, self.silentPlayer == nil else { return }
-                self.activateBackgroundAudio()
-            }
-        }
-    }
-
-    // 1 second of silence: 8 kHz mono 16-bit PCM WAV (16 044 bytes).
-    // Tiny enough to keep in memory; looped so it never stops.
-    private func silentWavData() -> Data {
-        let sampleRate: UInt32 = 8000
-        let numSamples: UInt32 = sampleRate
-        let dataSize = numSamples * 2
-        var d = Data()
-        func u32le(_ v: UInt32) { d.append(contentsOf: withUnsafeBytes(of: v.littleEndian) { Array($0) }) }
-        func u16le(_ v: UInt16) { d.append(contentsOf: withUnsafeBytes(of: v.littleEndian) { Array($0) }) }
-        d.append(contentsOf: [0x52,0x49,0x46,0x46]) // "RIFF"
-        u32le(36 + dataSize)
-        d.append(contentsOf: [0x57,0x41,0x56,0x45]) // "WAVE"
-        d.append(contentsOf: [0x66,0x6D,0x74,0x20]) // "fmt "
-        u32le(16); u16le(1); u16le(1)                // PCM, mono
-        u32le(sampleRate); u32le(sampleRate * 2)     // sample rate, byte rate
-        u16le(2); u16le(16)                          // block align, bits/sample
-        d.append(contentsOf: [0x64,0x61,0x74,0x61]) // "data"
-        u32le(dataSize)
-        d.append(Data(count: Int(dataSize)))
-        return d
+        BackgroundKeeper.shared.release(.recording)
     }
 }

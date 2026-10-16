@@ -190,6 +190,32 @@ final class WatchSyncService: NSObject, ObservableObject {
         lastWatchHeartbeat = Date(timeIntervalSince1970: beat)
     }
 
+    // MARK: - 首页表情（★ 2026-10-16 十三改）
+
+    /// 用户在设置里换了"手表首页眼睛的表情" —— 立刻推给手表。
+    ///
+    /// ⚠️ **刻意不判可达性**（`session.isReachable`）：不可达时
+    ///    `updateApplicationContext` 会把这份 context 留在 daemon 里，
+    ///    等表下一次醒来再交出去。判了可达性反而会把"手表此刻在后台"当成失败，
+    ///    于是用户改完设置、抬腕发现没变。
+    func sendFaceStyle(_ tag: String) {
+        pushFaceStyle(tag)
+    }
+
+    /// 手表上正在用的那一档 —— 激活时重推一次，把"手表侧存的和手机侧不一致"
+    /// 这个窗口关掉（用户换过手机、手表重装过、或上一次推送没送到）。
+    private func pushFaceStyle(_ tag: String) {
+        guard WCSession.isSupported() else { return }
+        do {
+            try WCSession.default.updateApplicationContext([WatchLinkMessage.faceStyleKey: tag])
+            log.info("face style pushed: \(tag, privacy: .public)")
+        } catch {
+            // 会话还没激活时会走到这里。激活回调里还会再推一次，所以这一次
+            // 失败并不致命 —— 记一笔就够了，不要弹任何东西给用户。
+            log.error("face style push failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
     /// Called with the file already copied out of the WatchConnectivity inbox.
     private func didImport(_ url: URL, size: Int) {
         library.recordDownload(name: url.lastPathComponent, size: size, transport: "watch")
@@ -206,7 +232,11 @@ final class WatchSyncService: NSObject, ObservableObject {
         // swallowed because the user accepted the duration floor when they
         // turned the toggle on.
         Task.detached { @MainActor in
-            _ = try? await self.transcription.transcribe(fileURL: url, enforceMinDuration: true)
+            // ★ 2026-10-15：改走**队列**并等它出队。
+            //   走队列 ⇒ 先落盘再开跑，App 被杀掉后下次启动会照这份清单续上；
+            //   等出队 ⇒ 下面那句 `libraryDidChange` 仍是在转录真的落地之后
+            //   才发，资料库列表才能一次就把转录文本带出来。
+            await self.transcription.enqueueAndWait(fileURL: url, enforceMinDuration: true)
             NotificationCenter.default.post(name: .libraryDidChange, object: nil)
         }
     }
@@ -232,6 +262,10 @@ extension WatchSyncService: WCSessionDelegate {
             self.isWatchAppInstalled = installed
             self.isReachable = reachable
             self.apply(watchState: pending)
+            // ★ 十三改：顺手把"首页表情"重推一次。手机的这份设置**只**存在
+            //   手机这边，手表没有别的途径拿到它；而手表可能刚重装、刚换机、
+            //   或者上一次推送时它不在。激活是"两边现在确实通着"的唯一时刻。
+            self.pushFaceStyle(self.config.config.watchFaceStyle ?? BotFaceStyle.calm.rawValue)
             log.info("session activated: paired=\(paired) installed=\(installed) reachable=\(reachable)")
         }
     }

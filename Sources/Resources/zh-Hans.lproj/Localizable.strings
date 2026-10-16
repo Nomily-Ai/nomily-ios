@@ -10,6 +10,7 @@
 "common.close" = "关闭";
 "common.open_settings" = "打开设置";
 "common.try_again" = "再试一次";
+"common.back" = "返回";
 "common.none" = "无";
 "common.recording" = "录音中";
 "common.keep_foreground" = "请保持此页面在前台 — 切换到其他 App 将中断传输（无法断点续传）";
@@ -36,6 +37,13 @@
 "asr.auto_transcribe_footer" = "下载完成后自动运行转录。短于最小时长的片段将被跳过。如已配置，另一个服务会作为备用方案自动启用。";
 "asr.local_vad" = "上传前去除静音";
 "asr.local_vad_footer" = "在本机上检测人声活动，将静音段去掉后再发送到转录服务，可降低上传量和转录费用。";
+"asr.background_keep_alive" = "切到后台也继续转录";
+"asr.background_keep_alive_footer" = "开着时，切走或锁屏后转录仍会继续跑完，不会停下。关掉后只保留约 30 秒的收尾时间，长录音切到后台会中断。无论开关如何，都不会发出声音。";
+"asr.queue_title" = "转录队列";
+"asr.queue_running" = "进行中 %d";
+"asr.queue_waiting" = "等待 %d";
+"asr.queue_stuck" = "已放弃 %d";
+"asr.queue_stuck_detail" = "%@ 试了 %d 次仍未成功，已停止重试：%@";
 "asr.azure_speech" = "Azure Speech";
 "asr.azure_purpose_footer" = "Azure Speech 用于录音转文字、实时转录和实时翻译。需使用你自己的 Azure 密钥，音频会发送至 Microsoft 处理，可能产生费用。AI 摘要不由它生成，摘要使用另行配置的 LLM 服务。";
 "asr.local_server" = "本地语音识别服务器";
@@ -71,6 +79,24 @@
 "llm.api_key_optional" = "API 密钥（可选）";
 "llm.no_provider" = "未配置大语言模型服务";
 "llm.no_provider_message" = "请先配置大语言模型服务并选择当前使用的服务。";
+
+/* 大模型调用失败的原因（2026-10-15 新增）。%@ 一律是通道的显示名。 */
+"llm.error.no_provider" = "没有选择大模型通道。";
+"llm.error.no_model" = "%@ 还没选模型。";
+"llm.error.no_api_key" = "%@ 没有配置 API Key。";
+"llm.error.no_endpoint" = "%@ 还没填接口地址。";
+"llm.error.http" = "HTTP %d：%@";
+"llm.error.decoding" = "返回内容无法解析：%@";
+"llm.error.empty" = "对方返回了空内容。";
+"llm.error.all_failed" = "所有大模型通道都失败了：\n%@";
+"llm.error.bad_url" = "接口地址不是合法的 URL。";
+"llm.error.missing_choices" = "返回体里没有 choices[0].message.content。";
+"llm.error.missing_content" = "返回体里没有 content[]。";
+"llm.error.missing_candidates" = "返回体里没有 candidates[0].content.parts。";
+"llm.fell_back" = "「%@」不可用，这次结果来自「%@」。";
+"llm.chunked_note" = "内容较长，已分成 %d 段分别处理后合并。";
+"llm.adopt_as_primary" = "改用「%@」作为主通道";
+"llm.unconfigured" = "%@（未配置）";
 
 /* Azure 设置指南 */
 "azure_guide.title" = "Azure Speech 设置";
@@ -190,6 +216,8 @@
 "clip_detail.export" = "导出";
 "clip_detail.export_as_m4a" = "导出为 M4A (AAC)";
 "clip_detail.exporting" = "导出中…";
+"clip_detail.export_ready" = "已导出，点这里分享";
+"clip_detail.export_ready_files" = "%d 个文件";
 "clip_detail.export_audio" = "导出音频";
 "clip_detail.export_as_wav" = "导出为 WAV（无损 PCM）";
 "clip_detail.export_format_footer" = "M4A 体积小、到哪都能播；WAV 不压缩，文件更大，但转录与剪辑工具认的就是它。";
@@ -339,7 +367,18 @@
 "summarize.error" = "错误";
 "summarize.summarizing_with" = "正在使用 %@ 生成摘要...";
 "summarize.search_templates" = "搜索模板";
+"summarize.template_count" = "%d 个模板";
+"summarize.builtin_badge" = "内置";
+"summarize.custom_badge" = "我的";
+"summarize.template_about" = "这个模板会产出什么";
+"summarize.template_prompt_label" = "提示词全文";
+"summarize.use_template" = "用这个模板生成摘要";
+"summarize.back_to_templates" = "模板";
+"summarize.template_overview_title" = "模板";
+"summarize.no_matching_templates" = "没有找到匹配的模板";
 "summarize.truncated_warning" = "模型达到了输出上限，这段结果是被截断的。可以换更短的转写内容或输出更少的模板再试。";
+"summarize.chunk_progress" = "第 %1$d/%2$d 段";
+"summarize.preflight_fallback" = "%1$@ 会自动改用 %2$@。";
 "summarize.add_template" = "添加模板";
 "summarize.clone" = "复制";
 "summarize.category" = "分类";
@@ -475,11 +514,11 @@
 "devices.auto_reconnect" = "自动重连";
 "devices.auto_reconnect_footer" = "开启后，设备意外断开（例如关机后再开机）时，App 会自动重连最近使用的设备。关闭后需手动点击顶部的连接标识重连。";
 "clip_detail.delete_audio" = "删除音频";
-"clip_detail.delete_audio_message" = "仅删除音频文件，转录与摘要会保留。此操作不可撤销。";
+"clip_detail.delete_audio_message" = "音频文件会先移到「回收站」，转录与摘要保留，30 天内可以恢复。";
 "clip_detail.delete_transcript" = "删除转录";
-"clip_detail.delete_transcript_message" = "删除转录文本及其翻译，音频与摘要会保留。此操作不可撤销。";
+"clip_detail.delete_transcript_message" = "转录文本及其翻译会先移到「回收站」，音频与摘要保留，30 天内可以恢复。";
 "clip_detail.delete_summary" = "删除摘要";
-"clip_detail.delete_summary_message" = "删除摘要及其翻译，音频与转录会保留。此操作不可撤销。";
+"clip_detail.delete_summary_message" = "摘要及其翻译会先移到「回收站」，音频与转录保留，30 天内可以恢复。";
 "clip_detail.delete_independent_footer" = "音频、转录、摘要各自独立删除——删除其中一项不会影响其余两项。";
 "devices.clear_transcripts" = "清除转录";
 "devices.clear_transcripts_message" = "删除所有转录文本及其翻译，音频与摘要会保留。此操作不可撤销。";
@@ -512,6 +551,41 @@
 "library.source_phone" = "本机";
 "library.source_imported" = "导入";
 "library.source_accessibility" = "来源：%@";
+"library.select" = "选择";
+"library.select_all" = "全选";
+"library.deselect_all" = "取消全选";
+"library.select_all_count" = "全选（%d 条）";
+"library.selected_count" = "已选 %d 条";
+"library.export" = "导出";
+"library.export_preparing" = "正在准备导出…";
+"library.export_failed" = "导出失败";
+"library.export_empty" = "没有可导出的内容。";
+"library.export_ready" = "上次导出已完成";
+"library.export_ready_title" = "%d 条录音";
+"library.export_ready_files" = "%d 个文件";
+"library.export_ready_footer" = "文件已经存在这台手机上，点上面那一行就能分享。开始新的导出会替换这一份，放着不动 3 天后自动清理。";
+"library.clear_export_staging" = "清理导出文件";
+"library.delete_selected_title" = "删除选中的录音？";
+"library.delete_selected_message" = "%d 条录音的音频、转录与摘要会先移到「回收站」，30 天内可以恢复。";
+"library.deleting" = "正在删除…";
+"library.delete_failed" = "删除失败";
+"library.search_prompt" = "搜索转录与摘要";
+"library.search_scope_knowledge" = "知识库";
+"library.search_scope_all" = "全部";
+"library.search_empty_title" = "没有找到";
+"library.search_empty_message" = "没有任何一条的转录或摘要包含这个词。切到「全部」还可以按标题搜。";
+"library.has_summary" = "已生成摘要";
+"library.has_transcript" = "已转录";
+"library.unread" = "未读";
+"library.unread_count" = "%d 条未读";
+"library.filter_devices" = "筛选设备";
+"library.filter_all_devices" = "全部设备";
+"library.short_count_one" = "%d 条";
+"library.short_count_other" = "%d 条";
+"library.bucket_today" = "今天";
+"library.bucket_yesterday" = "昨天";
+"library.bucket_this_week" = "本周";
+"library.bucket_this_month" = "本月";
 "watch.recorder_title" = "手表";
 "watch.ready" = "准备就绪";
 "watch.record" = "开始录音";
@@ -519,18 +593,42 @@
 "watch.mic_denied" = "请在设置中允许使用麦克风。";
 "watch.record_failed" = "无法开始录音：%@";
 "watch.pending_header" = "等待同步到 iPhone";
+"watch.pending_count" = "%d 项待传";
+"watch.shake_to_record" = "摇一摇开始录音";
+"watch.shake_to_record_hint" = "用力晃动手腕开始，再晃一下停止";
+"watch.pinch_to_record" = "双指互点录音";
+"watch.pinch_to_record_hint" = "食指与拇指捏合一下开始，再捏一下停止";
+"watch.hold_to_record" = "长按 2 秒开始录音";
+"watch.recording_busy" = "录音中";
+"watch.quick_menu" = "快捷菜单";
+"watch.quick_menu_hint" = "在首页左右滑动查看";
+"watch.quick_menu_add" = "添加快捷菜单";
+"watch.quick_menu_empty" = "这里还没有快捷菜单";
+"watch.quick_menu_footer" = "勾选的项目会在首页往左或往右滑动时出现。";
+"watch.queue_empty" = "没有待传的录音";
+"watch.menu_hint_appearance" = "颜色、渐变与呼吸灯";
+"watch.menu_hint_history" = "哪些录音已经传到手机";
+"watch.menu_hint_language" = "手表上使用的语言";
+"watch.menu_hint_settings" = "手势、版本、恢复默认";
+"watch.menu_hint_queue" = "还没传走的录音";
+"watch.menu_hint_about" = "手表上的构建号";
 "watch.sending" = "正在发送…";
 "watch.waiting" = "尚未发送";
-"watch.style_color" = "颜色";
-"watch.style_gradient" = "渐变";
+"watch.style_appearance" = "外观";
 "watch.style_breathing" = "呼吸灯";
 "watch.style_reset" = "恢复默认";
-"watch.style_gradient_off" = "纯色";
-"watch.style_gradient_on" = "渐变";
+"watch.menu_settings" = "设置";
 "watch.style_breathing_off" = "关";
 "watch.style_breathing_slow" = "慢";
 "watch.style_breathing_medium" = "中";
 "watch.style_breathing_fast" = "快";
+"watch.transfer_history" = "传输记录";
+"watch.transfer_empty" = "还没有传出过录音";
+"watch.transfer_clear" = "清空记录";
+"watch.transfer_queued" = "排队中";
+"watch.transfer_delivered" = "待确认";
+"watch.transfer_stored" = "已入库";
+"watch.transfer_failed" = "失败";
 "watch.settings_title" = "Apple Watch";
 "watch.status_installed" = "已安装";
 "watch.status_not_installed" = "未安装";
@@ -865,3 +963,93 @@
 "template_desc.email_thread_summary" = "快速梳理多封邮件往来的起因、过程与最终结论";
 "template_desc.long_article_to_slide_deck_outline" = "根据长篇文章或报告，快速生成演示文稿的结构大纲";
 "template_desc.turning_scattered_notes_into_a_to_do_list" = "从零散的随手笔记中，梳理出明确的任务清单";
+
+/* ── 回收站（2026-10-15 新增）──────────────────────────────────────── */
+"trash.title" = "回收站";
+"trash.settings_row" = "回收站";
+"trash.empty_title" = "没有已删除的录音";
+"trash.empty_message" = "删除的录音会先放在这里保留 30 天，随时可以恢复。";
+"trash.retention_footer" = "这里的条目保留 %d 天，到期自动删除。";
+"trash.days_left" = "还剩 %d 天";
+"trash.deleted_on" = "删除于";
+"trash.restore" = "恢复";
+"trash.delete_forever" = "立即删除";
+"trash.delete_forever_title" = "立即删除？";
+"trash.delete_forever_message" = "这条会被彻底删除，无法恢复。";
+"trash.empty_all" = "全部删除";
+"trash.empty_all_title" = "清空回收站？";
+"trash.empty_all_message" = "这 %d 条会被彻底删除，无法恢复。";
+"trash.restore_failed_title" = "恢复失败";
+"trash.restore_failed_message" = "这条的文件已经不在回收站里了。";
+"trash.artefact_audio" = "音频";
+"trash.artefact_transcript" = "转录";
+"trash.artefact_summary" = "摘要";
+
+/* ===== 后台任务（2026-10-16 十二改）=====
+   摘要 / 翻译 / 音频转换改成入队执行，切走之后也能接着跑，所以需要一个地方
+   让用户看得见它们。文案口径同 asr.queue_*：只说"切走还会继续"，
+   不讲我们是怎么在后台把进程顶住的。 */
+
+"jobs.kind_transcribe" = "转录";
+"jobs.kind_summarize" = "摘要";
+"jobs.kind_translate" = "翻译";
+"jobs.kind_export" = "音频转换";
+
+"jobs.detail_translated_transcript" = "转录 → %@";
+"jobs.detail_translated_summary" = "摘要 → %@";
+
+"jobs.source_prompt" = "摘要提示词";
+"jobs.source_language" = "目标语言";
+"jobs.source_format" = "导出格式";
+"jobs.source_audio" = "音频文件";
+"jobs.source_transcript" = "转录文本";
+"jobs.source_summary" = "摘要文本";
+"jobs.source_missing" = "%@已经不在了。";
+"jobs.no_runner" = "当前版本不支持这类任务。";
+
+"jobs.page_title" = "后台任务";
+"jobs.empty" = "现在没有任务。你发起的摘要、翻译和音频转换会显示在这一页。";
+"jobs.section_active" = "进行中";
+"jobs.section_finished" = "已完成";
+"jobs.clear_finished" = "清除已完成";
+"jobs.footer" = "这些任务在你切到别的 App 或锁屏之后会继续跑；App 被系统结束的话，下次打开会自动接着跑。";
+"jobs.can_leave_hint" = "你可以离开这一页，它会在后台继续跑。";
+
+"jobs.status_waiting" = "排队中";
+"jobs.status_running" = "进行中";
+"jobs.status_done" = "已完成";
+"jobs.status_gave_up" = "已放弃";
+"jobs.attempts" = "第 %1$d/%2$d 次尝试";
+"jobs.progress" = "第 %1$d/%2$d 段";
+
+"jobs.retry" = "重试";
+"jobs.cancel" = "取消";
+"jobs.remove" = "移除";
+
+"jobs.open_queue" = "后台任务";
+"jobs.open_queue_footer" = "摘要、翻译和音频转换在你离开 App 之后也会继续。";
+"jobs.enqueued_toast" = "%@已加入后台任务。";
+
+// MARK: - 手表首页表情（2026-10-16 十三改：iPhone 设置里选）
+"face.title" = "首页表情";
+"face.row_footer" = "选择手表首页那张脸摆哪个表情。";
+"face.footer" = "这张脸自己还会眨眼、还会东张西望。在手表上轻点它一下，它会再演一个别的表情。";
+"face.calm" = "平静";
+"face.happy" = "笑眼";
+"face.sad" = "垂眼";
+"face.wide" = "圆睁";
+"face.squint" = "眯眼";
+"face.angry" = "斜瞪";
+"face.shy" = "害羞";
+"face.listen" = "聆听";
+"face.scan" = "扫视";
+
+// MARK: - 回收站多选 + 手表未佩戴提示（2026-10-16 十四改）
+"trash.select" = "选择";
+"trash.select_all" = "全选";
+"trash.deselect_all" = "取消全选";
+"trash.restore_selected" = "恢复 %d 条";
+"trash.delete_selected" = "删除 %d 条";
+"trash.delete_selected_title" = "彻底删除？";
+"trash.delete_selected_message" = "%d 条将被永久删除，无法撤销。";
+"watch.not_worn" = "未佩戴手表";

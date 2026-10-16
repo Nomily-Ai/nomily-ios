@@ -56,8 +56,17 @@ enum AudioExporter {
     /// `AVAssetExportSession`. Writes to a fresh file under the app's
     /// temporary directory; iOS purges `tmp/` on its own, and the
     /// returned URL should be handed straight to a share sheet.
-    static func exportAsM4A(source: URL, suggestedName: String) async throws -> URL {
-        let outputURL = FileManager.default.temporaryDirectory
+    ///
+    /// `directory` 覆盖输出位置。★ 2026-10-15 六改：导出改成落在
+    /// `ExportCenter` 的暂存目录里（**不是 `tmp`**）—— 用户可能导完就切走了，
+    /// 回来再分享；而 `tmp` 会被 iOS 随时清掉，那一下文件就没了。
+    /// 不传时保持老行为（`tmp`），给"转个格式马上用"的内部调用方（ASR 前置转码）。
+    static func exportAsM4A(
+        source: URL,
+        suggestedName: String,
+        directory: URL? = nil
+    ) async throws -> URL {
+        let outputURL = (directory ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("\(suggestedName).m4a")
         try? FileManager.default.removeItem(at: outputURL)
 
@@ -101,8 +110,12 @@ enum AudioExporter {
     /// The whole transcode runs on a detached task: `AVAssetReader`'s copy
     /// loop is synchronous, and a 30-minute clip would otherwise block the
     /// main thread for the duration.
-    static func exportAsWAV(source: URL, suggestedName: String) async throws -> URL {
-        let outputURL = FileManager.default.temporaryDirectory
+    static func exportAsWAV(
+        source: URL,
+        suggestedName: String,
+        directory: URL? = nil
+    ) async throws -> URL {
+        let outputURL = (directory ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("\(suggestedName).wav")
 
         let work = Task.detached(priority: .userInitiated) { () throws -> URL in
@@ -112,10 +125,15 @@ enum AudioExporter {
     }
 
     /// Dispatch helper so callers don't have to know which format is which.
-    static func export(_ format: AudioExportFormat, source: URL, suggestedName: String) async throws -> URL {
+    static func export(
+        _ format: AudioExportFormat,
+        source: URL,
+        suggestedName: String,
+        directory: URL? = nil
+    ) async throws -> URL {
         switch format {
-        case .m4a: return try await exportAsM4A(source: source, suggestedName: suggestedName)
-        case .wav: return try await exportAsWAV(source: source, suggestedName: suggestedName)
+        case .m4a: return try await exportAsM4A(source: source, suggestedName: suggestedName, directory: directory)
+        case .wav: return try await exportAsWAV(source: source, suggestedName: suggestedName, directory: directory)
         }
     }
 

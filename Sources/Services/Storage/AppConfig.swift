@@ -15,6 +15,11 @@ struct AppConfig: Codable, Equatable {
     var autoDeleteAfterTransfer: Bool
     var autoTranscribeAfterDownload: Bool
     var localVADEnabled: Bool
+    /// 后台保活。开着时，转录/摘要这类长任务在 App 切到后台后用一段循环
+    /// 静音音频顶住进程，不让 iOS 把它挂起（挂在 `BackgroundKeeper` 上）。
+    /// 关掉后只剩 `beginBackgroundTask` 那 ~30 秒宽限 —— 短活照样跑完，
+    /// 长的会断。给开关是因为"用静音音频骗后台"这件事用户应该有权拒绝。
+    var backgroundKeepAliveEnabled: Bool
     /// When on, the app reconnects to the most recent device by itself after
     /// an unexpected drop (device powered off/on, out of range). When off the
     /// app stays disconnected until the user taps the connection pill.
@@ -35,6 +40,17 @@ struct AppConfig: Codable, Equatable {
     /// an English UI on first launch. Tags outside `AppLanguage.supported`
     /// resolve to English (`AppLanguage.resolve`).
     var appLanguage: String?
+    /// 手表首页那张脸摆哪个表情 —— `BotFaceStyle.rawValue`。
+    ///
+    /// **`nil` = 没选过**，等价于 `calm`（十三改之前那张脸的样子）。
+    /// 和 `appLanguage` 一样，这里存的是**裸 tag**，不是枚举：
+    /// `AppConfig` 是纯磁盘 schema，把 UI 层的枚举类型拖进来会让它跟着
+    /// 一起编译进不需要它的地方（这个文件在 `Sources/`，而表情库在
+    /// `Sources/Services/Watch/`）。
+    ///
+    /// ⚠️ 这一份**只存在手机这边**，手表上那份是推过去之后它自己存的
+    /// （见 `WatchFaceStore`）。两边都是"最新一版覆盖"，没有同步冲突可言。
+    var watchFaceStyle: String?
     /// Backlog size (in KB) above which the Wi-Fi fast-transfer button
     /// is offered on the device-files screen. 0 disables the suggestion
     /// and the button never appears.
@@ -50,6 +66,7 @@ struct AppConfig: Codable, Equatable {
         autoDeleteAfterTransfer: true,
         autoTranscribeAfterDownload: false,
         localVADEnabled: true,
+        backgroundKeepAliveEnabled: true,
         autoReconnectEnabled: true,
         cloudEgressConsented: false,
         isDeveloperMode: false
@@ -65,6 +82,7 @@ struct AppConfig: Codable, Equatable {
         case autoDeleteAfterTransfer = "auto_delete_after_transfer"
         case autoTranscribeAfterDownload = "auto_transcribe_after_download"
         case localVADEnabled = "local_vad_enabled"
+        case backgroundKeepAliveEnabled = "background_keep_alive_enabled"
         case autoReconnectEnabled = "auto_reconnect_enabled"
         case cloudEgressConsented = "cloud_egress_consented"
         case isDeveloperMode = "developer_mode"
@@ -72,6 +90,7 @@ struct AppConfig: Codable, Equatable {
         case lastTargetLang = "last_target_lang"
         case lastSummaryLang = "last_summary_lang"
         case appLanguage = "app_language"
+        case watchFaceStyle = "watch_face_style"
         case fastTransferThresholdKB = "fast_transfer_threshold_kb"
     }
 
@@ -91,6 +110,7 @@ struct AppConfig: Codable, Equatable {
         self.autoDeleteAfterTransfer = try c.decodeIfPresent(Bool.self, forKey: .autoDeleteAfterTransfer) ?? true
         self.autoTranscribeAfterDownload = try c.decodeIfPresent(Bool.self, forKey: .autoTranscribeAfterDownload) ?? false
         self.localVADEnabled = try c.decodeIfPresent(Bool.self, forKey: .localVADEnabled) ?? true
+        self.backgroundKeepAliveEnabled = try c.decodeIfPresent(Bool.self, forKey: .backgroundKeepAliveEnabled) ?? true
         self.autoReconnectEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoReconnectEnabled) ?? true
         self.cloudEgressConsented = try c.decodeIfPresent(Bool.self, forKey: .cloudEgressConsented) ?? false
         self.isDeveloperMode = try c.decodeIfPresent(Bool.self, forKey: .isDeveloperMode) ?? false
@@ -98,6 +118,7 @@ struct AppConfig: Codable, Equatable {
         self.lastTargetLang = try c.decodeIfPresent(String.self, forKey: .lastTargetLang)
         self.lastSummaryLang = try c.decodeIfPresent(String.self, forKey: .lastSummaryLang)
         self.appLanguage = try c.decodeIfPresent(String.self, forKey: .appLanguage)
+        self.watchFaceStyle = try c.decodeIfPresent(String.self, forKey: .watchFaceStyle)
         self.fastTransferThresholdKB = try c.decodeIfPresent(Int.self, forKey: .fastTransferThresholdKB) ?? 512
     }
 
@@ -111,6 +132,7 @@ struct AppConfig: Codable, Equatable {
         autoDeleteAfterTransfer: Bool,
         autoTranscribeAfterDownload: Bool = false,
         localVADEnabled: Bool = true,
+        backgroundKeepAliveEnabled: Bool = true,
         autoReconnectEnabled: Bool = true,
         cloudEgressConsented: Bool = false,
         isDeveloperMode: Bool = false,
@@ -118,6 +140,7 @@ struct AppConfig: Codable, Equatable {
         lastTargetLang: String? = nil,
         lastSummaryLang: String? = nil,
         appLanguage: String? = nil,
+        watchFaceStyle: String? = nil,
         fastTransferThresholdKB: Int = 512
     ) {
         self.asrProviders = asrProviders
@@ -129,6 +152,7 @@ struct AppConfig: Codable, Equatable {
         self.autoDeleteAfterTransfer = autoDeleteAfterTransfer
         self.autoTranscribeAfterDownload = autoTranscribeAfterDownload
         self.localVADEnabled = localVADEnabled
+        self.backgroundKeepAliveEnabled = backgroundKeepAliveEnabled
         self.autoReconnectEnabled = autoReconnectEnabled
         self.cloudEgressConsented = cloudEgressConsented
         self.isDeveloperMode = isDeveloperMode
@@ -136,6 +160,7 @@ struct AppConfig: Codable, Equatable {
         self.lastTargetLang = lastTargetLang
         self.lastSummaryLang = lastSummaryLang
         self.appLanguage = appLanguage
+        self.watchFaceStyle = watchFaceStyle
         self.fastTransferThresholdKB = fastTransferThresholdKB
     }
 

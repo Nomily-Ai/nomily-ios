@@ -10,6 +10,7 @@
 "common.close" = "Close";
 "common.open_settings" = "Open Settings";
 "common.try_again" = "Try Again";
+"common.back" = "Back";
 "common.none" = "None";
 "common.recording" = "Recording";
 "common.keep_foreground" = "Keep this screen in the foreground — going to the background will interrupt the transfer.";
@@ -36,6 +37,13 @@
 "asr.auto_transcribe_footer" = "Transcription runs after each download. Clips shorter than the minimum duration are skipped. Another provider is used as fallback when configured.";
 "asr.local_vad" = "Strip silence before upload";
 "asr.local_vad_footer" = "Voice activity detection runs on-device and removes silent stretches before sending audio to the transcription provider. Cuts upload size and ASR cost.";
+"asr.background_keep_alive" = "Keep transcribing in the background";
+"asr.background_keep_alive_footer" = "When on, transcription keeps running to completion after you switch away or lock the screen. When off, only about 30 seconds of wrap-up time is granted and a long clip will be interrupted. Either way, no sound is played.";
+"asr.queue_title" = "Transcription queue";
+"asr.queue_running" = "%d running";
+"asr.queue_waiting" = "%d waiting";
+"asr.queue_stuck" = "%d given up";
+"asr.queue_stuck_detail" = "%@ failed %d times and stopped retrying: %@";
 "asr.azure_speech" = "Azure Speech";
 "asr.azure_purpose_footer" = "Azure Speech powers transcription, live transcription and live translation. It uses your own Azure key; audio is sent to Microsoft for processing and may incur charges. It does not generate AI summaries — those use the LLM service you configure separately.";
 "asr.local_server" = "Local ASR Server";
@@ -71,6 +79,24 @@
 "llm.api_key_optional" = "API Key (optional)";
 "llm.no_provider" = "No LLM Provider";
 "llm.no_provider_message" = "Set up an LLM provider and select an Active Provider.";
+
+/* LLM call failures (added 2026-10-15). %@ is always a provider's display name. */
+"llm.error.no_provider" = "No LLM provider is selected.";
+"llm.error.no_model" = "%@ has no model selected.";
+"llm.error.no_api_key" = "%@ has no API key configured.";
+"llm.error.no_endpoint" = "%@ has no endpoint URL.";
+"llm.error.http" = "HTTP %d: %@";
+"llm.error.decoding" = "Couldn't read the response: %@";
+"llm.error.empty" = "The model returned nothing.";
+"llm.error.all_failed" = "Every LLM provider failed:\n%@";
+"llm.error.bad_url" = "The endpoint URL isn't valid.";
+"llm.error.missing_choices" = "The response has no choices[0].message.content.";
+"llm.error.missing_content" = "The response has no content[].";
+"llm.error.missing_candidates" = "The response has no candidates[0].content.parts.";
+"llm.fell_back" = "%@ wasn't usable — this result came from %@.";
+"llm.chunked_note" = "Long transcript — processed in %d parts and merged.";
+"llm.adopt_as_primary" = "Use %@ as the primary provider";
+"llm.unconfigured" = "%@ (not configured)";
 
 /* Azure Setup Guide */
 "azure_guide.title" = "Azure Speech Setup";
@@ -189,6 +215,8 @@
 "clip_detail.export" = "Export";
 "clip_detail.export_as_m4a" = "Export as M4A (AAC)";
 "clip_detail.exporting" = "Exporting\u2026";
+"clip_detail.export_ready" = "Exported — tap to share";
+"clip_detail.export_ready_files" = "%d file(s)";
 "clip_detail.export_audio" = "Export Audio";
 "clip_detail.export_as_wav" = "Export as WAV (PCM)";
 "clip_detail.export_format_footer" = "M4A is compressed and plays anywhere. WAV is uncompressed — larger, but it's the format transcription and editing tools expect.";
@@ -411,7 +439,18 @@
 "summarize.error" = "Error";
 "summarize.summarizing_with" = "Summarizing with %@...";
 "summarize.search_templates" = "Search templates";
+"summarize.template_count" = "%d templates";
+"summarize.builtin_badge" = "Built-in";
+"summarize.custom_badge" = "Mine";
+"summarize.template_about" = "What it produces";
+"summarize.template_prompt_label" = "Prompt";
+"summarize.use_template" = "Summarize with this template";
+"summarize.back_to_templates" = "Templates";
+"summarize.template_overview_title" = "Template";
+"summarize.no_matching_templates" = "No templates match your search";
 "summarize.truncated_warning" = "The model hit its output limit, so this result is cut off. Try a shorter transcript or a template that asks for less.";
+"summarize.chunk_progress" = "Part %1$d of %2$d";
+"summarize.preflight_fallback" = "%1$@ It will fall back to %2$@.";
 "summarize.add_template" = "Add Template";
 "summarize.clone" = "Clone";
 "summarize.category" = "Category";
@@ -475,11 +514,11 @@
 "devices.auto_reconnect" = "Auto-Reconnect";
 "devices.auto_reconnect_footer" = "When on, the app reconnects to your most recent device by itself after an unexpected disconnect — for example after the device is powered off and on again. When off, tap the connection pill at the top to reconnect manually.";
 "clip_detail.delete_audio" = "Delete Audio";
-"clip_detail.delete_audio_message" = "Deletes only the audio file. The transcript and summary are kept. This can't be undone.";
+"clip_detail.delete_audio_message" = "The audio file moves to Recently Deleted. The transcript and summary are kept. You can recover it for 30 days.";
 "clip_detail.delete_transcript" = "Delete Transcript";
-"clip_detail.delete_transcript_message" = "Deletes the transcript and its translation. The audio and summary are kept. This can't be undone.";
+"clip_detail.delete_transcript_message" = "The transcript and its translation move to Recently Deleted. The audio and summary are kept. You can recover them for 30 days.";
 "clip_detail.delete_summary" = "Delete Summary";
-"clip_detail.delete_summary_message" = "Deletes the summary and its translation. The audio and transcript are kept. This can't be undone.";
+"clip_detail.delete_summary_message" = "The summary and its translation move to Recently Deleted. The audio and transcript are kept. You can recover them for 30 days.";
 "clip_detail.delete_independent_footer" = "Audio, transcript and summary are deleted independently — removing one leaves the others untouched.";
 "devices.clear_transcripts" = "Clear Transcripts";
 "devices.clear_transcripts_message" = "Deletes every transcript and its translation. Audio and summaries are kept. This can't be undone.";
@@ -512,6 +551,41 @@
 "library.source_phone" = "This iPhone";
 "library.source_imported" = "Imported";
 "library.source_accessibility" = "Source: %@";
+"library.select" = "Select";
+"library.select_all" = "Select All";
+"library.deselect_all" = "Deselect All";
+"library.select_all_count" = "Select All (%d)";
+"library.selected_count" = "%d selected";
+"library.export" = "Export";
+"library.export_preparing" = "Preparing export…";
+"library.export_failed" = "Export Failed";
+"library.export_empty" = "Nothing to export.";
+"library.export_ready" = "Your last export is ready";
+"library.export_ready_title" = "%d clips";
+"library.export_ready_files" = "%d files";
+"library.export_ready_footer" = "The files are already on this phone — tap the row above to share them. Starting a new export replaces this copy, and it's cleaned up automatically after 3 days.";
+"library.clear_export_staging" = "Delete exported files";
+"library.delete_selected_title" = "Delete Selected Clips?";
+"library.delete_selected_message" = "Audio, transcript and summary for %d clip(s) move to Recently Deleted. You can recover them for 30 days.";
+"library.deleting" = "Deleting…";
+"library.delete_failed" = "Delete Failed";
+"library.search_prompt" = "Transcripts & summaries";
+"library.search_scope_knowledge" = "Knowledge";
+"library.search_scope_all" = "All";
+"library.search_empty_title" = "No Matches";
+"library.search_empty_message" = "No clip's transcript or summary contains that. Switch to All to search titles too.";
+"library.has_summary" = "Summary";
+"library.has_transcript" = "Transcript";
+"library.unread" = "Unread";
+"library.unread_count" = "%d unread";
+"library.filter_devices" = "Filter by device";
+"library.filter_all_devices" = "All devices";
+"library.short_count_one" = "%d clip";
+"library.short_count_other" = "%d clips";
+"library.bucket_today" = "Today";
+"library.bucket_yesterday" = "Yesterday";
+"library.bucket_this_week" = "This week";
+"library.bucket_this_month" = "This month";
 "watch.recorder_title" = "Watch";
 "watch.ready" = "Ready";
 "watch.record" = "Record";
@@ -519,6 +593,39 @@
 "watch.mic_denied" = "Allow microphone access in Settings.";
 "watch.record_failed" = "Couldn't start recording: %@";
 "watch.pending_header" = "Waiting for iPhone";
+"watch.pending_count" = "%d to send";
+"watch.shake_to_record" = "Shake to Record";
+"watch.shake_to_record_hint" = "Shake your wrist to start, shake again to stop";
+"watch.pinch_to_record" = "Double Tap to Record";
+"watch.pinch_to_record_hint" = "Tap index finger and thumb together to start, again to stop";
+"watch.hold_to_record" = "Hold 2s to record";
+"watch.recording_busy" = "Recording";
+"watch.quick_menu" = "Quick Menu";
+"watch.quick_menu_hint" = "Swipe left or right on the home screen";
+"watch.quick_menu_add" = "Add a shortcut";
+"watch.quick_menu_empty" = "No shortcuts here yet";
+"watch.quick_menu_footer" = "Enabled items appear when you swipe left or right from the home screen.";
+"watch.queue_empty" = "Nothing to send";
+"watch.menu_hint_appearance" = "Colour, gradient and breathing";
+"watch.menu_hint_history" = "Which recordings reached the phone";
+"watch.menu_hint_language" = "Language used on the watch";
+"watch.menu_hint_settings" = "Gestures, version, reset";
+"watch.menu_hint_queue" = "Clips still waiting to upload";
+"watch.menu_hint_about" = "Build number on the watch";
+"watch.style_appearance" = "Appearance";
+"watch.style_breathing" = "Breathing";
+"watch.style_reset" = "Reset";
+"watch.style_breathing_off" = "Off";
+"watch.style_breathing_slow" = "Slow";
+"watch.style_breathing_medium" = "Medium";
+"watch.style_breathing_fast" = "Fast";
+"watch.transfer_history" = "Transfers";
+"watch.transfer_empty" = "No recordings sent yet";
+"watch.transfer_clear" = "Clear History";
+"watch.transfer_queued" = "Queued";
+"watch.transfer_delivered" = "Waiting";
+"watch.transfer_stored" = "Saved";
+"watch.transfer_failed" = "Failed";
 "watch.sending" = "Sending…";
 "watch.waiting" = "Not sent yet";
 "watch.settings_title" = "Apple Watch";
@@ -855,3 +962,92 @@
 "template_desc.email_thread_summary" = "Quickly organizes the origin, process, and final outcome of a multi-email exchange";
 "template_desc.long_article_to_slide_deck_outline" = "Quickly generates a presentation structure outline from a long article or report";
 "template_desc.turning_scattered_notes_into_a_to_do_list" = "Organizes clear task lists from scattered, off-the-cuff notes";
+
+/* ── Recently Deleted / recycle bin (added 2026-10-15) ─────────────── */
+"trash.title" = "Recently Deleted";
+"trash.settings_row" = "Recently Deleted";
+"trash.empty_title" = "Nothing Deleted";
+"trash.empty_message" = "Recordings you delete are kept here for 30 days, so you can always put one back.";
+"trash.retention_footer" = "Items are kept for %d days, then deleted automatically.";
+"trash.days_left" = "%d days left";
+"trash.deleted_on" = "Deleted";
+"trash.restore" = "Recover";
+"trash.delete_forever" = "Delete Now";
+"trash.delete_forever_title" = "Delete Now?";
+"trash.delete_forever_message" = "This item will be removed for good. This can't be undone.";
+"trash.empty_all" = "Delete All";
+"trash.empty_all_title" = "Empty Recently Deleted?";
+"trash.empty_all_message" = "%d item(s) will be removed for good. This can't be undone.";
+"trash.restore_failed_title" = "Couldn't Recover";
+"trash.restore_failed_message" = "The files for this item are no longer in Recently Deleted.";
+"trash.artefact_audio" = "Audio";
+"trash.artefact_transcript" = "Transcript";
+"trash.artefact_summary" = "Summary";
+
+/* ===== Background tasks (2026-10-16, twelfth pass) =====
+   Summaries / translations / audio conversions are queued and can carry on
+   after the user leaves the app, so they need a place to be seen. */
+
+"jobs.kind_transcribe" = "Transcription";
+"jobs.kind_summarize" = "Summary";
+"jobs.kind_translate" = "Translation";
+"jobs.kind_export" = "Audio export";
+
+"jobs.detail_translated_transcript" = "Transcript → %@";
+"jobs.detail_translated_summary" = "Summary → %@";
+
+"jobs.source_prompt" = "The summary prompt";
+"jobs.source_language" = "The target language";
+"jobs.source_format" = "The export format";
+"jobs.source_audio" = "The audio file";
+"jobs.source_transcript" = "The transcript";
+"jobs.source_summary" = "The summary";
+"jobs.source_missing" = "%@ is no longer available.";
+"jobs.no_runner" = "This kind of task isn't supported in this build.";
+
+"jobs.page_title" = "Background tasks";
+"jobs.empty" = "Nothing here right now. Summaries, translations and audio conversions you start will show up on this page.";
+"jobs.section_active" = "In progress";
+"jobs.section_finished" = "Finished";
+"jobs.clear_finished" = "Clear finished";
+"jobs.footer" = "These tasks keep running when you switch away or lock your phone. If the app is closed, they pick up again the next time you open it.";
+"jobs.can_leave_hint" = "You can leave this screen — it keeps running in the background.";
+
+"jobs.status_waiting" = "Waiting";
+"jobs.status_running" = "Running";
+"jobs.status_done" = "Done";
+"jobs.status_gave_up" = "Gave up";
+"jobs.attempts" = "Attempt %1$d of %2$d";
+"jobs.progress" = "Part %1$d of %2$d";
+
+"jobs.retry" = "Try again";
+"jobs.cancel" = "Cancel";
+"jobs.remove" = "Remove";
+
+"jobs.open_queue" = "Background tasks";
+"jobs.open_queue_footer" = "Summaries, translations and audio conversions carry on after you leave the app.";
+"jobs.enqueued_toast" = "%@ added to background tasks.";
+
+// MARK: - 手表首页表情（2026-10-16 十三改：iPhone 设置里选）
+"face.title" = "Home Face";
+"face.row_footer" = "Choose the expression the watch shows on its home screen.";
+"face.footer" = "The face still blinks and looks around on its own. Tap it on the watch to see another expression.";
+"face.calm" = "Calm";
+"face.happy" = "Happy";
+"face.sad" = "Sad";
+"face.wide" = "Wide";
+"face.squint" = "Squint";
+"face.angry" = "Angry";
+"face.shy" = "Shy";
+"face.listen" = "Listening";
+"face.scan" = "Scanning";
+
+// MARK: - 回收站多选 + 手表未佩戴提示（2026-10-16 十四改）
+"trash.select" = "Select";
+"trash.select_all" = "Select All";
+"trash.deselect_all" = "Deselect All";
+"trash.restore_selected" = "Recover %d";
+"trash.delete_selected" = "Delete %d";
+"trash.delete_selected_title" = "Delete for Good?";
+"trash.delete_selected_message" = "%d item(s) will be removed for good. This can't be undone.";
+"watch.not_worn" = "Not worn";

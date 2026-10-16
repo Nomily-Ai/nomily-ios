@@ -193,11 +193,6 @@ struct RecordingsView: View {
     private static func buildLibraryItem(for name: String) async -> LibraryItem? {
         let url = StorageLocations.decryptedDir.appendingPathComponent(name)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        let attrs = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-        let size = Int64(attrs?.fileSize ?? 0)
-        let mtime = attrs?.contentModificationDate ?? Date()
-        let txt = StorageLocations.transcriptURLs(for: name).txt
-        let hasTranscript = FileManager.default.fileExists(atPath: txt.path)
         let duration: Double?
         if url.pathExtension.lowercased() == "opus" {
             duration = OpusOgg.duration(ofOggOpusAt: url)
@@ -205,11 +200,7 @@ struct RecordingsView: View {
             let d = (try? await AVURLAsset(url: url).load(.duration).seconds) ?? 0
             duration = (d.isFinite && d > 0) ? d : nil
         }
-        let titleURL = StorageLocations.titleURL(for: name)
-        let customTitle: String? = (try? String(contentsOf: titleURL, encoding: .utf8))
-            .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        return LibraryItem(name: name, url: url, size: size, modifiedAt: mtime,
-                           duration: duration, hasTranscript: hasTranscript, customTitle: customTitle)
+        return LibraryItem.readFromDisk(name: name, duration: duration)
     }
 }
 
@@ -858,7 +849,10 @@ final class DeviceFilesModel: ObservableObject {
                    case .ready(let decryptedURL, _) = saved {
                     let transcription = env.transcription
                     Task.detached { @MainActor in
-                        _ = try? await transcription.transcribe(
+                        // ★ 2026-10-15：走**队列**而不是直接跑。先落盘再开跑 ⇒
+                        //   App 被杀掉后下次启动还能接着来；失败按 2/8/30 秒
+                        //   退避自动重试。见 `TranscriptionService.enqueue`。
+                        transcription.enqueue(
                             fileURL: decryptedURL,
                             enforceMinDuration: true
                         )

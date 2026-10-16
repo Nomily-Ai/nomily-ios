@@ -40,6 +40,10 @@ enum L10n {
         static var close: String { NSLocalizedString("common.close", comment: "") }
         static var openSettings: String { NSLocalizedString("common.open_settings", comment: "") }
         static var tryAgain: String { NSLocalizedString("common.try_again", comment: "") }
+        /// 通用返回。给那些**不是 push 进去**、系统不给返回箭头的页面用。
+        static var back: String {
+            NSLocalizedString("common.back", value: "Back", comment: "Generic back button")
+        }
         static var none: String { NSLocalizedString("common.none", comment: "") }
         static var recording: String { NSLocalizedString("common.recording", comment: "") }
         static var keepForeground: String { NSLocalizedString("common.keep_foreground", comment: "") }
@@ -92,6 +96,25 @@ enum L10n {
         static var autoTranscribeFooter: String { NSLocalizedString("asr.auto_transcribe_footer", comment: "") }
         static var localVAD: String { NSLocalizedString("asr.local_vad", comment: "") }
         static var localVADFooter: String { NSLocalizedString("asr.local_vad_footer", comment: "") }
+        // ★ 2026-10-15：后台保活开关 + 转录队列状态。
+        //
+        // 文案口径：**别写"静音音频"**。用户不需要知道我们是怎么把进程顶住的，
+        // 他要的判断是"切走之后还会不会继续"以及"会不会费电/出什么怪声"。
+        static var backgroundKeepAlive: String { NSLocalizedString("asr.background_keep_alive", comment: "") }
+        static var backgroundKeepAliveFooter: String { NSLocalizedString("asr.background_keep_alive_footer", comment: "") }
+        static var queueTitle: String { NSLocalizedString("asr.queue_title", comment: "") }
+        static func queueRunning(_ n: Int) -> String {
+            String(format: NSLocalizedString("asr.queue_running", comment: ""), n)
+        }
+        static func queueWaiting(_ n: Int) -> String {
+            String(format: NSLocalizedString("asr.queue_waiting", comment: ""), n)
+        }
+        static func queueStuck(_ n: Int) -> String {
+            String(format: NSLocalizedString("asr.queue_stuck", comment: ""), n)
+        }
+        static func queueStuckDetail(_ name: String, _ attempts: Int, _ reason: String) -> String {
+            String(format: NSLocalizedString("asr.queue_stuck_detail", comment: ""), name, attempts, reason)
+        }
         static var azureSpeech: String { NSLocalizedString("asr.azure_speech", comment: "") }
         static var azurePurposeFooter: String { NSLocalizedString("asr.azure_purpose_footer", comment: "") }
         static var azureHowToGetKey: String { NSLocalizedString("asr.azure_how_to_get_key", comment: "") }
@@ -222,6 +245,99 @@ enum L10n {
     // MARK: - LLM
 
     enum LLM {
+        // MARK: 调用失败的原因（★ 2026-10-15）
+        //
+        // 原来这些是**英文硬编码在 `LLMCompletionError.errorDescription` 里**的，
+        // 中文界面上弹出一句 "No API key configured for the active provider." ——
+        // 用户既看不懂，也指不出该去哪儿补。现在全部走本地化，并且
+        // **带上通道名**："Open Router 没有配置 API Key。"
+        static var errorNoProvider: String {
+            NSLocalizedString("llm.error.no_provider", value: "No LLM provider is selected.",
+                              comment: "LLM error: no provider chosen")
+        }
+        static func errorNoModel(_ label: String) -> String {
+            String(format: NSLocalizedString("llm.error.no_model", value: "%@ has no model selected.",
+                                             comment: "LLM error: provider selected but no model"), label)
+        }
+        static func errorNoAPIKey(_ label: String) -> String {
+            String(format: NSLocalizedString("llm.error.no_api_key", value: "%@ has no API key configured.",
+                                             comment: "LLM error: cloud provider without a key"), label)
+        }
+        static func errorNoEndpoint(_ label: String) -> String {
+            String(format: NSLocalizedString("llm.error.no_endpoint", value: "%@ has no endpoint URL.",
+                                             comment: "LLM error: self-hosted provider without an endpoint"), label)
+        }
+        static func errorHTTP(_ code: Int, _ message: String) -> String {
+            let trimmed = message.count > 400 ? String(message.prefix(400)) + "…" : message
+            return String(format: NSLocalizedString("llm.error.http", value: "HTTP %d: %@",
+                                                    comment: "LLM error: non-2xx response"), code, trimmed)
+        }
+        static func errorDecoding(_ message: String) -> String {
+            String(format: NSLocalizedString("llm.error.decoding", value: "Couldn't read the response: %@",
+                                             comment: "LLM error: response body did not match the expected shape"), message)
+        }
+        static var errorEmptyResponse: String {
+            NSLocalizedString("llm.error.empty", value: "The model returned nothing.",
+                              comment: "LLM error: 200 OK but empty text")
+        }
+        /// 整条链都失败了。**每个通道的原因都要列出来** —— 只报最后一条会
+        /// 让用户去查兜底通道（本机 Ollama），而真凶是第一通道没配 Key。
+        static func errorAllProvidersFailed(_ detail: String) -> String {
+            String(format: NSLocalizedString("llm.error.all_failed",
+                                             value: "Every LLM provider failed:\n%@",
+                                             comment: "LLM error: the whole fallback chain failed; detail is one line per provider"),
+                   detail)
+        }
+        static var errorBadEndpointURL: String {
+            NSLocalizedString("llm.error.bad_url", value: "The endpoint URL isn't valid.",
+                              comment: "LLM error: URL(string:) refused the endpoint")
+        }
+        static var errorMissingChoices: String {
+            NSLocalizedString("llm.error.missing_choices", value: "The response has no choices[0].message.content.",
+                              comment: "LLM error: OpenAI-compatible body shape mismatch")
+        }
+        static var errorMissingContent: String {
+            NSLocalizedString("llm.error.missing_content", value: "The response has no content[].",
+                              comment: "LLM error: Anthropic body shape mismatch")
+        }
+        static var errorMissingCandidates: String {
+            NSLocalizedString("llm.error.missing_candidates", value: "The response has no candidates[0].content.parts.",
+                              comment: "LLM error: Gemini body shape mismatch")
+        }
+        /// 主通道挂了、兜底顶上之后给用户的一行说明。**必须说**：
+        /// 用户设的是 A，结果 B 在干活，不说明就成了"它到底用没用我的配置"。
+        static func fellBack(_ primary: String, _ used: String) -> String {
+            String(format: NSLocalizedString("llm.fell_back",
+                                             value: "%@ wasn't usable — this result came from %@.",
+                                             comment: "Notice: the primary LLM provider failed and a fallback produced the result"),
+                   primary, used)
+        }
+        /// 长转录走了"分段 → 合并"。
+        static func chunkedNote(_ count: Int) -> String {
+            String(format: NSLocalizedString("llm.chunked_note",
+                                             value: "Long transcript — processed in %d parts and merged.",
+                                             comment: "Notice: the transcript was too long for one request"), count)
+        }
+        /// 一键把兜底通道扶正成主通道的按钮文案。
+        ///
+        /// ★ 2026-10-15：体检只"说一句"是不够的。实测到的根因是
+        /// `primary = openRouter` 而那段没有 `api_key` —— 用户想用的其实是
+        /// 本机 Ollama，正确的修法只有一条，让他自己去翻四个页面找一个下拉框
+        /// 纯粹是折腾。
+        static func adoptAsPrimary(_ provider: String) -> String {
+            String(format: NSLocalizedString("llm.adopt_as_primary",
+                                             value: "Use %@ as the primary provider",
+                                             comment: "Button: switch the primary LLM provider to the given one, which is already configured"),
+                   provider)
+        }
+        /// Picker 里那个"当前是它、但它没配全"的条目。
+        static func unconfigured(_ provider: String) -> String {
+            String(format: NSLocalizedString("llm.unconfigured",
+                                             value: "%@ (not configured)",
+                                             comment: "Picker entry: this is the current primary provider but it lacks credentials/endpoint"),
+                   provider)
+        }
+
         static var activeProviderFooter: String { NSLocalizedString("llm.active_provider_footer", comment: "") }
         static var apiKey: String { NSLocalizedString("llm.api_key", comment: "") }
         static var model: String { NSLocalizedString("llm.model", comment: "") }
@@ -386,7 +502,209 @@ enum L10n {
         }
         static let recordedOnWatch = NSLocalizedString("library.recorded_on_watch", comment: "")
 
-        // MARK: Source Identifier — 'Who recorded this?' in the list
+        // MARK: 多选 / 批量操作 / 知识库检索
+        //
+        // ★ 2026-10-15：用户要求"资料库支持长按选择，可以批量导出或删除；
+        // 再增加一个已经转录成文本或已生成摘要的知识库检索"。
+        //
+        // ⚠️ 同下面的来源标识：一律 `static var`（运行时切语言）+ `value:` 内联
+        // 英文兜底（.lproj 只补 en / zh-Hans，其余 9 个语言靠它挡住
+        // key 字面量漏到界面上）。
+        /// 进入多选模式的那颗按钮。
+        static var select: String {
+            NSLocalizedString("library.select", value: "Select", comment: "Toolbar button: enter multi-select")
+        }
+        static var selectAll: String {
+            NSLocalizedString("library.select_all", value: "Select All", comment: "Multi-select: select every clip")
+        }
+        static var deselectAll: String {
+            NSLocalizedString("library.deselect_all", value: "Deselect All", comment: "Multi-select: clear the selection")
+        }
+        /// ★ 2026-10-15 七改：全选按钮带上条数。
+        ///
+        /// 用户原话里有"全部勾选不方便人选择"。原来的按钮只说"全选"，用户点之前
+        /// 不知道会勾上多少条（筛过设备、搜过词之后尤其没底）；点完才在下面看到
+        /// "已选 12 条"。把数字搬到按钮上，"会选几条"一眼可见。
+        static func selectAllWithCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("library.select_all_count", value: "Select All (%d)",
+                                           comment: "Multi-select: select all, with how many clips that covers"),
+                count
+            )
+        }
+        static func selectedCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "library.selected_count", value: "%d selected",
+                    comment: "Multi-select: how many clips are ticked"
+                ),
+                count
+            )
+        }
+        static var export: String {
+            NSLocalizedString("library.export", value: "Export", comment: "Multi-select: export the ticked clips")
+        }
+        static var exportPreparing: String {
+            NSLocalizedString("library.export_preparing", value: "Preparing export…",
+                              comment: "Shown while staging files for the share sheet")
+        }
+        static var exportFailed: String {
+            NSLocalizedString("library.export_failed", value: "Export Failed", comment: "")
+        }
+        /// 全选之后什么都没能拷出来（选中的文件刚好都消失了）。正常碰不到，
+        /// 但**必须有**一句文案：否则这个分支会拿着"导出失败"当**正文**弹出来。
+        static var exportEmpty: String {
+            NSLocalizedString("library.export_empty", value: "Nothing to export.",
+                              comment: "Bulk export produced no files at all")
+        }
+        // ★ 2026-10-15 六改：导出已就绪（后台导完、等着分享）那一条横幅。
+        //
+        // 文案刻意**不提"后台"** —— 用户不需要知道我们是靠静音音频把进程顶住的，
+        // 他要的确认只有两件："上次那批好了没有"和"我现在点什么能把它发出去"。
+        static var exportReady: String {
+            NSLocalizedString("library.export_ready", value: "Your last export is ready",
+                              comment: "Banner: a previously started export finished and is waiting to be shared")
+        }
+        static func exportReadyTitle(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("library.export_ready_title", value: "%d clips",
+                                          comment: "Name given to a staged export: how many clips it contains"),
+                count
+            )
+        }
+        static func exportReadyFiles(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("library.export_ready_files", value: "%d files",
+                                          comment: "How many files the staged export contains"),
+                count
+            )
+        }
+        static var exportReadyFooter: String {
+            NSLocalizedString(
+                "library.export_ready_footer",
+                value: "The files are already on this phone — tap the row to share them. Starting a new export replaces this copy, and it's cleaned up automatically after 3 days.",
+                comment: "Footer explaining the staged-export banner"
+            )
+        }
+        static var clearExportStaging: String {
+            NSLocalizedString("library.clear_export_staging", value: "Delete exported files",
+                              comment: "Button: discard the staged export copies to free up space")
+        }
+        static var deleteSelectedTitle: String {
+            NSLocalizedString("library.delete_selected_title", value: "Delete Selected Clips?",
+                              comment: "Confirmation title for bulk delete")
+        }
+        static func deleteSelectedMessage(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "library.delete_selected_message",
+                    value: "Audio, transcript and summary for %d clip(s) move to Recently Deleted. You can recover them for 30 days.",
+                    comment: "Confirmation body for bulk delete"
+                ),
+                count
+            )
+        }
+        static var deleting: String {
+            NSLocalizedString("library.deleting", value: "Deleting…", comment: "Bulk delete in progress")
+        }
+        static var deleteFailed: String {
+            NSLocalizedString("library.delete_failed", value: "Delete Failed", comment: "")
+        }
+        /// 搜索框里的提示。刻意不写"搜索"两个字 —— 提示词要说清**搜的是什么范围**。
+        static var searchPrompt: String {
+            NSLocalizedString("library.search_prompt", value: "Transcripts & summaries",
+                              comment: "Search field placeholder — says what is searched, not just 'Search'")
+        }
+        static var searchScopeKnowledge: String {
+            NSLocalizedString("library.search_scope_knowledge", value: "Knowledge",
+                              comment: "Search scope: only clips that have a transcript or summary")
+        }
+        static var searchScopeAll: String {
+            NSLocalizedString("library.search_scope_all", value: "All",
+                              comment: "Search scope: titles/filenames as well")
+        }
+        static var searchEmptyTitle: String {
+            NSLocalizedString("library.search_empty_title", value: "No Matches", comment: "")
+        }
+        static var searchEmptyMessage: String {
+            NSLocalizedString(
+                "library.search_empty_message",
+                value: "No clip's transcript or summary contains that. Switch to All to search titles too.",
+                comment: "Empty state body for the knowledge search"
+            )
+        }
+        /// 列表行上"已生成摘要"那枚徽标的无障碍读法。
+        static var hasSummary: String {
+            NSLocalizedString("library.has_summary", value: "Summary", comment: "Badge: clip has a generated summary")
+        }
+        /// 列表行上"已有转录"那枚徽标的无障碍读法。
+        ///
+        /// ★ 2026-10-15 补：那颗绿气泡徽标一直在，但从来没挂过 label ——
+        /// VoiceOver 读到它只是一句"image"，等于没读。加了摘要徽标之后
+        /// 两颗并排出现，缺一个更显眼。
+        static var hasTranscript: String {
+            NSLocalizedString("library.has_transcript", value: "Transcript",
+                              comment: "Badge: clip has a transcript")
+        }
+
+        // MARK: 未读红点 / 按时间与设备归类（★ 2026-10-15 第二轮）
+        //
+        // 同样一律 `static var` + `value:` 内联英文兜底，理由见上面来源标识那段。
+        /// 未读红点的无障碍读法。
+        static var unread: String {
+            NSLocalizedString("library.unread", value: "Unread",
+                              comment: "Accessibility label for the unread dot on a library row")
+        }
+        /// 分节头上"这台设备还有几条没打开"。
+        static func unreadCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "library.unread_count", value: "%d unread",
+                    comment: "Section header: how many clips on this device are still unopened"
+                ),
+                count
+            )
+        }
+        /// 工具栏里那个设备筛选菜单的无障碍读法 / 菜单标题。
+        static var filterDevices: String {
+            NSLocalizedString("library.filter_devices", value: "Filter by device",
+                              comment: "Toolbar menu: restrict the list to one device")
+        }
+        static var filterAllDevices: String {
+            NSLocalizedString("library.filter_all_devices", value: "All devices", comment: "")
+        }
+        /// 短计数（"12 条" / "12 clips"），给分节头和筛选菜单用。
+        ///
+        /// 为什么不复用 `Recordings.clipCount(count, size)`：那个是"12 条录音 · 25 GB"，
+        /// 放在分节头里太长；而且大小在这两处是分开拼的（分节头要算**桶总数**，
+        /// 菜单要算**设备总数**，两者都不等于单个分节的合计）。
+        static func shortCount(_ count: Int) -> String {
+            let format = count == 1
+                ? NSLocalizedString("library.short_count_one", value: "%d clip",
+                                    comment: "Short clip count, singular")
+                : NSLocalizedString("library.short_count_other", value: "%d clips",
+                                    comment: "Short clip count, plural")
+            return String(format: format, count)
+        }
+        // MARK: 时间分节的标题
+        //
+        // 更早的月份**不在这里** —— 那要 12 个语言的本地化月名，直接用
+        // `DateFormatter` 的模板化格式（`setLocalizedDateFormatFromTemplate("yMMMM")`）
+        // 让系统按区域拼，语序和用词都不会错。
+        static var bucketToday: String {
+            NSLocalizedString("library.bucket_today", value: "Today", comment: "Time section header")
+        }
+        static var bucketYesterday: String {
+            NSLocalizedString("library.bucket_yesterday", value: "Yesterday", comment: "Time section header")
+        }
+        static var bucketThisWeek: String {
+            NSLocalizedString("library.bucket_this_week", value: "This week", comment: "Time section header")
+        }
+        static var bucketThisMonth: String {
+            NSLocalizedString("library.bucket_this_month", value: "This month", comment: "Time section header")
+        }
+
+        // MARK: 来源标识 —— 列表里"这条是谁录的"
         //
         // ⚠️ Always use `static var` instead of `static let`: this file supports **runtime language switching**
         // (see the comment in the `Watch` section — `static let` permanently caches the first language).
@@ -441,6 +759,150 @@ enum L10n {
         }
     }
 
+    // MARK: - 回收站
+    //
+    // ★ 2026-10-15：用户要求"在设置里面增加一个回收站的功能防止误删，
+    // 30 天的保护期，30 天后自动删除"。放在手机 App 的设置里 ——
+    // 删除动作本来就发生在手机上（资料库多选删、详情页删），只有放这儿
+    // 才盖得住所有入口。
+    //
+    // ⚠️ 同样一律 `static var` + `value:` 内联英文兜底。
+    enum Trash {
+        /// 设置页里那一行的标题，也是回收站页的导航标题。
+        static var title: String {
+            NSLocalizedString("trash.title", value: "Recently Deleted",
+                              comment: "Settings row + page title for the recycle bin")
+        }
+        /// 设置页那行标题。跟 `title` 分开是为了让中文能写全"回收站"，
+        /// 而页面标题也能长一点 —— 目前两者同值，留着这个口子。
+        static var settingsRow: String {
+            NSLocalizedString("trash.settings_row", value: "Recently Deleted", comment: "")
+        }
+        static var emptyTitle: String {
+            NSLocalizedString("trash.empty_title", value: "Nothing Deleted", comment: "")
+        }
+        static var emptyMessage: String {
+            NSLocalizedString("trash.empty_message",
+                              value: "Recordings you delete are kept here first.",
+                              comment: "Empty state for the recycle bin")
+        }
+        /// 页面底部的保护期说明。
+        static func retentionFooter(_ days: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "trash.retention_footer",
+                    value: "Items are kept for %d days, then deleted automatically.",
+                    comment: "Recycle bin footer explaining the retention window"
+                ),
+                days
+            )
+        }
+        /// 每条上的"还剩几天"。
+        static func daysLeft(_ days: Int) -> String {
+            String(
+                format: NSLocalizedString("trash.days_left", value: "%d days left",
+                                          comment: "Recycle bin row: time before auto-delete"),
+                days
+            )
+        }
+        /// "删除于"（后面跟日期）。
+        static var deletedOn: String {
+            NSLocalizedString("trash.deleted_on", value: "Deleted",
+                              comment: "Prefix before the deletion date on a trash row")
+        }
+        static var restore: String {
+            NSLocalizedString("trash.restore", value: "Recover", comment: "Swipe action")
+        }
+        static var deleteForever: String {
+            NSLocalizedString("trash.delete_forever", value: "Delete Now",
+                              comment: "Swipe action: remove from the recycle bin for good")
+        }
+        static var deleteForeverTitle: String {
+            NSLocalizedString("trash.delete_forever_title", value: "Delete Now?",
+                              comment: "Confirmation title for permanently deleting one item")
+        }
+        static var deleteForeverMessage: String {
+            NSLocalizedString("trash.delete_forever_message",
+                              value: "This item will be removed for good. This can't be undone.",
+                              comment: "Confirmation body for permanently deleting one item")
+        }
+        static var emptyAll: String {
+            NSLocalizedString("trash.empty_all", value: "Delete All", comment: "")
+        }
+        static var emptyAllTitle: String {
+            NSLocalizedString("trash.empty_all_title", value: "Empty Recently Deleted?",
+                              comment: "")
+        }
+        static func emptyAllMessage(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "trash.empty_all_message",
+                    value: "%d item(s) will be removed for good. This can't be undone.",
+                    comment: "Confirmation body for emptying the whole recycle bin"
+                ),
+                count
+            )
+        }
+        static var restoreFailedTitle: String {
+            NSLocalizedString("trash.restore_failed_title", value: "Couldn't Recover", comment: "")
+        }
+        static var restoreFailedMessage: String {
+            NSLocalizedString("trash.restore_failed_message",
+                              value: "The files for this item are no longer in Recently Deleted.",
+                              comment: "")
+        }
+        // 回收站每行上那几枚"里面有什么"的小标签。
+        static var artefactAudio: String {
+            NSLocalizedString("trash.artefact_audio", value: "Audio", comment: "")
+        }
+        static var artefactTranscript: String {
+            NSLocalizedString("trash.artefact_transcript", value: "Transcript", comment: "")
+        }
+        static var artefactSummary: String {
+            NSLocalizedString("trash.artefact_summary", value: "Summary", comment: "")
+        }
+
+        // MARK: 多选（★ 2026-10-16 十四改：用户"回收站支持多选全选选择恢复或者是删除"）
+        //
+        // ⚠️ 一律 `static var` + 带 `value:` 内联英文兜底（只补 en / zh-Hans 两份
+        // .lproj，理由同 `Library.sourceCard`）。
+        /// 工具栏里进/出多选模式的那个按钮。
+        static var select: String {
+            NSLocalizedString("trash.select", value: "Select", comment: "Trash toolbar: enter multi-select mode")
+        }
+        /// 多选模式下"全选 / 全不选"那颗按钮 —— 文案随状态切。
+        static var selectAll: String {
+            NSLocalizedString("trash.select_all", value: "Select All", comment: "Trash multi-select toolbar")
+        }
+        static var deselectAll: String {
+            NSLocalizedString("trash.deselect_all", value: "Deselect All", comment: "Trash multi-select toolbar, shown when everything is already ticked")
+        }
+        /// 多选模式底部那颗"恢复"。
+        static func restoreSelected(_ count: Int) -> String {
+            String(format: NSLocalizedString("trash.restore_selected",
+                                             value: "Recover %d",
+                                             comment: "Trash multi-select bottom bar; %d is how many are ticked"),
+                   count)
+        }
+        /// 多选模式底部那颗"删除"。
+        static func deleteSelected(_ count: Int) -> String {
+            String(format: NSLocalizedString("trash.delete_selected",
+                                             value: "Delete %d",
+                                             comment: "Trash multi-select bottom bar; %d is how many are ticked"),
+                   count)
+        }
+        static var deleteSelectedTitle: String {
+            NSLocalizedString("trash.delete_selected_title", value: "Delete for Good?",
+                              comment: "Confirmation title for permanently deleting the ticked items")
+        }
+        static func deleteSelectedMessage(_ count: Int) -> String {
+            String(format: NSLocalizedString("trash.delete_selected_message",
+                                             value: "%d item(s) will be removed for good. This can't be undone.",
+                                             comment: "Confirmation body; %d is how many are ticked"),
+                   count)
+        }
+    }
+
     // MARK: - Apple Watch
     //
     // Also compiled into the watch target — see `project.yml`.
@@ -457,18 +919,147 @@ enum L10n {
         static var pendingHeader: String { NSLocalizedString("watch.pending_header", comment: "") }
         static var sending: String { NSLocalizedString("watch.sending", comment: "") }
         static var waiting: String { NSLocalizedString("watch.waiting", comment: "") }
+        /// 首页底部那条细提示上的"还有几条没传走"。
+        ///
+        /// ★ 2026-10-15 四改：待传列表从首页一列长列表收成底部一条，
+        /// 详情点进独立一页（不然它会把圆环顶偏，见 `WatchRecorderView` 顶部）。
+        /// 所以这里需要一个**带数字的短句**，`pendingHeader`（"待传输"）不行。
+        static func pendingCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "watch.pending_count", value: "%d to send",
+                    comment: "Watch home: compact pill at the bottom showing how many clips are still uploading"
+                ),
+                count
+            )
+        }
+        /// 设置里的"摇一摇开始录音"开关。
+        static var shakeToRecord: String {
+            NSLocalizedString("watch.shake_to_record", value: "Shake to Record",
+                              comment: "Watch settings: shake the wrist to start/stop recording")
+        }
+        /// 上面那个开关底下的一行说明。
+        static var shakeToRecordHint: String {
+            NSLocalizedString(
+                "watch.shake_to_record_hint",
+                value: "Shake your wrist to start, shake again to stop",
+                comment: "Watch settings: explains the shake gesture"
+            )
+        }
+
+        /// 设置里的"双指互点开/关录音"开关（watchOS 11+ 才显示）。
+        ///
+        /// ⚠️ 文案刻意写"食指与拇指捏合"而不是照搬 Apple 的 "Double Tap"：
+        /// 用户点名要的就是这个动作，而中文里的"双击"会和"点屏幕两下"混淆 ——
+        /// 这是**隔空**动作，不是触摸。Apple 自己的中文叫法也是"双指互点"。
+        static var pinchToRecord: String {
+            NSLocalizedString("watch.pinch_to_record", value: "Double Tap to Record",
+                              comment: "Watch settings: pinch index finger and thumb to start/stop recording")
+        }
+        /// 上面那个开关底下的一行说明。
+        static var pinchToRecordHint: String {
+            NSLocalizedString(
+                "watch.pinch_to_record_hint",
+                value: "Tap index finger and thumb together to start, again to stop",
+                comment: "Watch settings: explains the double-tap gesture"
+            )
+        }
+
+        // MARK: 首页 Bot（★ 2026-10-16 七改）
+        //
+        // 首页正中从圆环按钮换成了一张会眨眼的 Bot 脸。用户原话：
+        // "类似 Grok Bot 一样，两个眼睛……把当前首页的录音按钮去掉改成 bot 一样
+        // 生动的，通过长按点击它的眼睛 2s 才开始录音"。
+        //
+        // ⚠️ `holdToRecord` 这行提示**不能省**。"长按 2 秒"是一个**隐形**的交互：
+        //    没有它，第一次用的人只会戳一下、发现没反应、然后放弃。
+        static var holdToRecord: String {
+            NSLocalizedString("watch.hold_to_record", value: "Hold 2s to record",
+                              comment: "Watch home: caption under the bot face, explains the long-press gesture")
+        }
+        /// 录音中给读屏软件念的一句（视觉上首页显示的是计时，没有字）。
+        static var recordingBusy: String {
+            NSLocalizedString("watch.recording_busy", value: "Recording",
+                              comment: "Watch home: accessibility value while a take is running")
+        }
+
+        // MARK: 两侧滑动菜单 + 快捷菜单设置（★ 2026-10-16 七改）
+        //
+        // 用户原话："4 个菜单需要往左或者往右滑在出现……需要在手表的快捷录音的
+        // 手表的菜单栏里面出现可以添加快捷的菜单设置，这个设置是在手表的 wifi
+        // 那个菜单栏里面进行点击添加的组件"。
+        /// 设置页里那一行，也是勾选页的标题。
+        static var quickMenu: String {
+            NSLocalizedString("watch.quick_menu", value: "Quick Menu",
+                              comment: "Watch settings: which items show in the home screen's side menus")
+        }
+        static var quickMenuHint: String {
+            NSLocalizedString("watch.quick_menu_hint", value: "Swipe left or right on the home screen",
+                              comment: "Watch settings: subtitle explaining where these items appear")
+        }
+        /// 菜单页底部那个虚线入口。
+        static var quickMenuAdd: String {
+            NSLocalizedString("watch.quick_menu_add", value: "Add a shortcut",
+                              comment: "Watch home: dashed entry at the bottom of a side menu")
+        }
+        /// 一侧菜单一项都没勾时的空态。
+        static var quickMenuEmpty: String {
+            NSLocalizedString("watch.quick_menu_empty", value: "No shortcuts here yet",
+                              comment: "Watch home: a side menu with nothing enabled")
+        }
+        /// 勾选页底部说明。**必须讲清"勾完去哪看"** —— 勾完回首页是要往旁边滑
+        /// 才看得到的，不讲这一句，用户会以为勾了没生效。
+        static var quickMenuFooter: String {
+            NSLocalizedString(
+                "watch.quick_menu_footer",
+                value: "Enabled items appear when you swipe left or right from the home screen.",
+                comment: "Watch quick-menu settings: footer explaining where the items show up"
+            )
+        }
+        /// 待传队列页的空态（这一页现在能从菜单直接进来，"空"是常态）。
+        static var queueEmpty: String {
+            NSLocalizedString("watch.queue_empty", value: "Nothing to send",
+                              comment: "Watch queue page: empty state")
+        }
+
+        // 勾选页里每一行底下的小字。一句话说清"点进去能看到什么"。
+        static var menuHintAppearance: String {
+            NSLocalizedString("watch.menu_hint_appearance", value: "Colour, gradient and breathing",
+                              comment: "Watch quick menu: what the Appearance page holds")
+        }
+        static var menuHintHistory: String {
+            NSLocalizedString("watch.menu_hint_history", value: "Which recordings reached the phone",
+                              comment: "Watch quick menu: what the Transfers page holds")
+        }
+        static var menuHintLanguage: String {
+            NSLocalizedString("watch.menu_hint_language", value: "Language used on the watch",
+                              comment: "Watch quick menu: what the Language page holds")
+        }
+        static var menuHintSettings: String {
+            NSLocalizedString("watch.menu_hint_settings", value: "Gestures, version, reset",
+                              comment: "Watch quick menu: what the Settings page holds")
+        }
+        static var menuHintQueue: String {
+            NSLocalizedString("watch.menu_hint_queue", value: "Clips still waiting to upload",
+                              comment: "Watch quick menu: what the queue page holds")
+        }
+        static var menuHintAbout: String {
+            NSLocalizedString("watch.menu_hint_about", value: "Build number on the watch",
+                              comment: "Watch quick menu: what the version page holds")
+        }
 
         // MARK: Ring appearance (directly called on the watch face)
         //
-        // ⚠️ Always use `static var` (switches language at runtime) + provide inline English fallback via `value:`
-        // (Only en / zh-Hans .lproj files were added). Reasoning is the same as for `Library.sourceCard`.
-        /// Title for the "Color" item in the menu.
-        static var styleColor: String {
-            NSLocalizedString("watch.style_color", value: "Color", comment: "Ring style menu: solid color")
-        }
-        /// The "Gradient" item in the menu.
-        static var styleGradient: String {
-            NSLocalizedString("watch.style_gradient", value: "Gradient", comment: "Ring style menu: gradient fill")
+        // ⚠️ 一律 `static var`（运行时切语言）+ 带 `value:` 内联英文兜底
+        // （只补了 en / zh-Hans 两份 .lproj）。理由同 `Library.sourceCard`。
+        /// 左上那一页的标题。它现在装的是**颜色 + 渐变 + 呼吸灯**三样，
+        /// 所以叫"外观"而不是"颜色" —— 沿用旧名字会让用户以为呼吸灯被删了。
+        ///
+        /// ★ 2026-10-15 五改：原来的 `styleColor`（"颜色"）随呼吸灯并进来
+        /// 一起改成了这个；`watch.style_color` 这个键已从两份 .strings 移除。
+        static var styleAppearance: String {
+            NSLocalizedString("watch.style_appearance", value: "Appearance",
+                              comment: "Corner menu: colour + gradient + breathing, merged into one page")
         }
         /// The "Breathing" item in the menu.
         static var styleBreathing: String {
@@ -478,11 +1069,9 @@ enum L10n {
         static var styleReset: String {
             NSLocalizedString("watch.style_reset", value: "Reset", comment: "Ring style menu: restore the default look")
         }
-        static var styleGradientOff: String {
-            NSLocalizedString("watch.style_gradient_off", value: "Solid", comment: "Gradient menu: flat single colour")
-        }
-        static var styleGradientOn: String {
-            NSLocalizedString("watch.style_gradient_on", value: "Gradient", comment: "Gradient menu: two-colour blend")
+        /// 角标里"设置"那一页的标题（版本 + 恢复默认）。
+        static var menuSettings: String {
+            NSLocalizedString("watch.menu_settings", value: "Settings", comment: "Corner menu: settings page title")
         }
         static var styleBreathingOff: String {
             NSLocalizedString("watch.style_breathing_off", value: "Off", comment: "Breathing speed: none")
@@ -495,6 +1084,39 @@ enum L10n {
         }
         static var styleBreathingFast: String {
             NSLocalizedString("watch.style_breathing_fast", value: "Fast", comment: "Breathing speed: fast")
+        }
+
+        // MARK: 传输记录（★ 2026-10-15 五改，右上角角标）
+        //
+        // 用户："右上角就是手表的传输记录"。四个状态各一个词，
+        // 词要短 —— 表上一行只放得下十来个字。
+        /// 右上角那一页的标题。
+        static var transferHistory: String {
+            NSLocalizedString("watch.transfer_history", value: "Transfers",
+                              comment: "Corner menu: history of clips handed to the iPhone")
+        }
+        static var transferEmpty: String {
+            NSLocalizedString("watch.transfer_empty", value: "No recordings sent yet",
+                              comment: "Transfer history: empty state")
+        }
+        static var transferClear: String {
+            NSLocalizedString("watch.transfer_clear", value: "Clear History",
+                              comment: "Transfer history: toolbar button that empties the log")
+        }
+        /// 已交进 WatchConnectivity 队列，还没出门。
+        static var transferQueued: String {
+            NSLocalizedString("watch.transfer_queued", value: "Queued", comment: "Transfer state")
+        }
+        /// 系统已投给手机守护进程，但手机 App 还没确认写盘。
+        static var transferDelivered: String {
+            NSLocalizedString("watch.transfer_delivered", value: "Waiting", comment: "Transfer state: handed to the phone, not confirmed")
+        }
+        /// 手机 App 已确认入库 —— 只有到这一步，手表上的本地副本才会删掉。
+        static var transferStored: String {
+            NSLocalizedString("watch.transfer_stored", value: "Saved", comment: "Transfer state: confirmed written by the iPhone app")
+        }
+        static var transferFailed: String {
+            NSLocalizedString("watch.transfer_failed", value: "Failed", comment: "Transfer state")
         }
 
         // These must remain computed: runtime language switching swaps the
@@ -516,6 +1138,77 @@ enum L10n {
         static var statusRecording: String { NSLocalizedString("watch.status_recording", comment: "") }
         static var statusTransferring: String { NSLocalizedString("watch.status_transferring", comment: "") }
         static var statusOutOfRange: String { NSLocalizedString("watch.status_out_of_range", comment: "") }
+
+        // MARK: 录音首页（★ 2026-10-16 十四改）
+        //
+        // ⚠️ 带 `value:` 内联英文兜底（只补了 en / zh-Hans 两份 .lproj）。
+        /// 读不到心率时的提示。那条波此时是一条**不动的平线**，
+        /// 不解释的话会被读成"坏了"（见 `WatchVoiceWave` 顶部"十四改"）。
+        ///
+        /// ⚠️ 刻意**短**：它和字节数挤在同一行，长了会把整行缩到看不清。
+        static var notWorn: String {
+            NSLocalizedString("watch.not_worn", value: "Not worn",
+                              comment: "Watch recorder caption when no heart rate is available — the watch isn't being worn")
+        }
+    }
+
+    // MARK: - 手表首页表情（★ 2026-10-16 十三改）
+
+    /// iPhone 设置里的那个表情选择器（"Apple Watch"那一区里的一行）。
+    ///
+    /// ## 为什么名字里不带颜色 / 主题
+    /// 这一页选的**只有形状**（眼睛怎么弯、怎么斜、睁多大）。颜色是手表上
+    /// "外观"那一页选的，跟这里无关 —— 手机根本不知道手表选了哪个颜色
+    /// （那是手表本地偏好），所以这一页的预览一律用前景色画，不假装是
+    /// 表上那个颜色。
+    ///
+    /// ⚠️ 一律 `static var`（运行时切语言）+ 带 `value:` 内联英文兜底
+    /// （只补了 en / zh-Hans 两份 .lproj，理由同 `Library.sourceCard`）。
+    enum Face {
+        /// 设置页那一行的标题，也是选择器的页标题。
+        static var title: String {
+            NSLocalizedString("face.title", value: "Home Face",
+                              comment: "Settings row + picker title: which expression the watch's home face wears")
+        }
+        /// 设置页那一行下面的说明。
+        static var rowFooter: String {
+            NSLocalizedString("face.row_footer", value: "Choose the expression the watch shows on its home screen.",
+                              comment: "Settings row footer: what the home face setting does")
+        }
+        /// 选择器页底部的说明。
+        static var footer: String {
+            NSLocalizedString("face.footer", value: "The face still blinks and looks around on its own. Tap it on the watch to see another expression.",
+                              comment: "Face picker footer: the chosen expression is the resting face, not the only one")
+        }
+
+        // 九档的名字。**短**，因为它们在表上和手机上都是列表行里的词。
+        static var calm: String {
+            NSLocalizedString("face.calm", value: "Calm", comment: "Watch face expression: the default, plain eyes")
+        }
+        static var happy: String {
+            NSLocalizedString("face.happy", value: "Happy", comment: "Watch face expression: eyes curving up into a smile")
+        }
+        static var sad: String {
+            NSLocalizedString("face.sad", value: "Sad", comment: "Watch face expression: eyes drooping downwards")
+        }
+        static var wide: String {
+            NSLocalizedString("face.wide", value: "Wide", comment: "Watch face expression: eyes opened wide")
+        }
+        static var squint: String {
+            NSLocalizedString("face.squint", value: "Squint", comment: "Watch face expression: eyes narrowed to a slit")
+        }
+        static var angry: String {
+            NSLocalizedString("face.angry", value: "Angry", comment: "Watch face expression: eyes slanting inwards")
+        }
+        static var shy: String {
+            NSLocalizedString("face.shy", value: "Shy", comment: "Watch face expression: flat, wide eyes tipped inwards")
+        }
+        static var listen: String {
+            NSLocalizedString("face.listen", value: "Listening", comment: "Watch face expression: tall narrow eyes")
+        }
+        static var scan: String {
+            NSLocalizedString("face.scan", value: "Scanning", comment: "Watch face expression: very narrow tall slits")
+        }
     }
 
     // MARK: - Device Files
@@ -1125,6 +1818,24 @@ enum L10n {
         static var exportAsWAV: String { NSLocalizedString("clip_detail.export_as_wav", value: "Export as WAV (PCM)", comment: "WAV export option — uncompressed audio") }
         static var exportFormatFooter: String { NSLocalizedString("clip_detail.export_format_footer", value: "M4A is compressed and plays anywhere. WAV is uncompressed — larger, but it's the format transcription and editing tools expect.", comment: "Footer explaining the two audio export formats") }
         static var exporting: String { NSLocalizedString("clip_detail.exporting", comment: "") }
+        /// ★ 2026-10-15 六改：上次那一份已经导好了，点这一行去分享。
+        ///
+        /// 这一行存在的唯一理由是**省掉一次重跑** —— 大文件转码能等到用户
+        /// 切走（"防止退出需要重新等待"）。所以文案直接说"已导出"，而不是
+        /// 含糊的"分享音频"。
+        static var exportReady: String {
+            NSLocalizedString("clip_detail.export_ready", value: "Exported — tap to share",
+                              comment: "Row shown when this clip's export already finished and is waiting to be shared")
+        }
+        static func exportReadyFiles(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("clip_detail.export_ready_files", value: "%d file(s)",
+                                          comment: "How many files the staged export contains"),
+                count
+            )
+        }
+        /// 清掉中转副本（**不动**资料库里的原件）。
+        static var clearExportStaging: String { L10n.Library.clearExportStaging }
         static var mindMap: String { NSLocalizedString("clip_detail.mind_map", value: "Mind Map", comment: "Mind map view built from the summary's headings and lists") }
         static var mindMapLevel: String { NSLocalizedString("clip_detail.mind_map_level", value: "Branches", comment: "How many levels of the summary the mind map draws") }
         static var mindMapFit: String { NSLocalizedString("clip_detail.mind_map_fit", value: "Fit", comment: "Button that scales the mind map to fill the screen") }
@@ -1133,11 +1844,11 @@ enum L10n {
         static var mindMapExpandAll: String { NSLocalizedString("clip_detail.mind_map_expand_all", value: "Expand all", comment: "Toolbar button that opens every folded branch of the mind map") }
         static var mindMapCollapseAll: String { NSLocalizedString("clip_detail.mind_map_collapse_all", value: "Collapse all", comment: "Toolbar button that folds the mind map back to its top-level branches") }
         static var deleteAudio: String { NSLocalizedString("clip_detail.delete_audio", value: "Delete Audio", comment: "Deletes only the audio file, keeping transcript and summary") }
-        static var deleteAudioMessage: String { NSLocalizedString("clip_detail.delete_audio_message", value: "Deletes only the audio file. The transcript and summary are kept. This can't be undone.", comment: "") }
+        static var deleteAudioMessage: String { NSLocalizedString("clip_detail.delete_audio_message", value: "The audio file moves to Recently Deleted. The transcript and summary are kept. You can recover it for 30 days.", comment: "") }
         static var deleteTranscript: String { NSLocalizedString("clip_detail.delete_transcript", value: "Delete Transcript", comment: "Deletes only the transcript, keeping audio and summary") }
-        static var deleteTranscriptMessage: String { NSLocalizedString("clip_detail.delete_transcript_message", value: "Deletes the transcript and its translation. The audio and summary are kept. This can't be undone.", comment: "") }
+        static var deleteTranscriptMessage: String { NSLocalizedString("clip_detail.delete_transcript_message", value: "The transcript and its translation move to Recently Deleted. The audio and summary are kept. You can recover them for 30 days.", comment: "") }
         static var deleteSummary: String { NSLocalizedString("clip_detail.delete_summary", value: "Delete Summary", comment: "Deletes only the summary, keeping audio and transcript") }
-        static var deleteSummaryMessage: String { NSLocalizedString("clip_detail.delete_summary_message", value: "Deletes the summary and its translation. The audio and transcript are kept. This can't be undone.", comment: "") }
+        static var deleteSummaryMessage: String { NSLocalizedString("clip_detail.delete_summary_message", value: "The summary and its translation move to Recently Deleted. The audio and transcript are kept. You can recover them for 30 days.", comment: "") }
         static var deleteIndependentFooter: String { NSLocalizedString("clip_detail.delete_independent_footer", value: "Audio, transcript and summary are deleted independently — removing one leaves the others untouched.", comment: "") }
         static func speaker(_ id: String) -> String {
             String(format: NSLocalizedString("clip_detail.speaker", comment: ""), id)
@@ -1561,7 +2272,77 @@ enum L10n {
             String(format: NSLocalizedString("summarize.summarizing_with", comment: ""), provider)
         }
         static var searchTemplates: String { NSLocalizedString("summarize.search_templates", comment: "") }
+        // ★ 2026-10-15 七改：模板选择页从"一行行文字"改成"块状网格 + 概览页"。
+        //
+        // 用户原话："摘要模板里面不要直接文字，建议按照块显示当前结构，然后点击
+        // 进去就是一个总体的概览"。所以块上只留名字（看清"有哪些"），说明与
+        // 提示词全文挪进概览页（看"点下去会产出什么"）。
+        //
+        // ⚠️ 全部 `static var` + 内联英文兜底：同 `Library` 段那批的理由 ——
+        // .lproj 只补 en / zh-Hans，其余 9 个语言靠 `value:` 挡住 key 字面量。
+        static func templateCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("summarize.template_count", value: "%d templates",
+                                          comment: "Template grid: how many templates are in this category"),
+                count
+            )
+        }
+        static var builtInBadge: String {
+            NSLocalizedString("summarize.builtin_badge", value: "Built-in",
+                              comment: "Template card/overview: shipped with the app")
+        }
+        static var customBadge: String {
+            NSLocalizedString("summarize.custom_badge", value: "Mine",
+                              comment: "Template card/overview: created by the user")
+        }
+        /// 概览页里"这个模板是干什么的"那一段的标题。
+        static var templateAbout: String {
+            NSLocalizedString("summarize.template_about", value: "What it produces",
+                              comment: "Overview page: label above the template's one-line description")
+        }
+        /// 概览页里提示词全文那一段的标题。
+        static var templatePromptLabel: String {
+            NSLocalizedString("summarize.template_prompt_label", value: "Prompt",
+                              comment: "Overview page: label above the template's full prompt text")
+        }
+        /// 概览页底部的主按钮。
+        static var useTemplate: String {
+            NSLocalizedString("summarize.use_template", value: "Summarize with this template",
+                              comment: "Overview page: primary button that starts the summary")
+        }
+        /// 概览页左上角的返回（这一页不是 push 进去的，系统不给返回箭头）。
+        static var backToTemplates: String {
+            NSLocalizedString("summarize.back_to_templates", value: "Templates",
+                              comment: "Overview page: back button, returns to the template grid")
+        }
+        /// 概览页副标题（分类 + 条数之外的补充信息位）。目前只在无障碍里用。
+        static var templateOverviewTitle: String {
+            NSLocalizedString("summarize.template_overview_title", value: "Template",
+                              comment: "Overview page: navigation title when the template has no name")
+        }
+        /// 模板搜不到东西时的空态。**必须有** —— 块状网格搜空之后整页是白的，
+        /// 用户会以为页面加载坏了。
+        static var noMatchingTemplates: String {
+            NSLocalizedString("summarize.no_matching_templates",
+                              value: "No templates match your search",
+                              comment: "Template grid: search returned nothing")
+        }
         static var truncatedWarning: String { NSLocalizedString("summarize.truncated_warning", comment: "Shown when the model hit its output cap") }
+        /// 分段进度："第 %1$d/%2$d 段"。数字用等宽，免得位数变化时那行在抖。
+        static func chunkProgress(_ done: Int, _ total: Int) -> String {
+            String(format: NSLocalizedString("summarize.chunk_progress", value: "Part %1$d of %2$d",
+                                             comment: "Summarize sheet: progress while a long transcript is processed in parts"),
+                   done, total)
+        }
+        /// 开工前的体检提示：主通道不能用，但有兜底。
+        ///
+        /// `gap` 已经是"Open Router 没有配置 API Key。"这样一句完整的话，
+        /// 所以这里只负责把"将会用谁兜底"接上去。
+        static func preflightFallback(_ gap: String, _ fallback: String) -> String {
+            String(format: NSLocalizedString("summarize.preflight_fallback",
+                                             value: "%1$@ It will fall back to %2$@.",
+                                             comment: "Summarize sheet: the active provider is unusable, a fallback will be used"), gap, fallback)
+        }
         static var addTemplate: String { NSLocalizedString("summarize.add_template", comment: "") }
         static var clone: String { NSLocalizedString("summarize.clone", comment: "") }
         static var category: String { NSLocalizedString("summarize.category", comment: "") }
@@ -1617,6 +2398,183 @@ enum L10n {
         static var researchDiscussion: String { NSLocalizedString("template.research_discussion", comment: "") }
         static var brainstormSynthesis: String { NSLocalizedString("template.brainstorm_synthesis", comment: "") }
         static var interviewSummary: String { NSLocalizedString("template.interview_summary", comment: "") }
+    }
+
+    // MARK: - Jobs（后台任务总览）
+
+    /// 四类长任务的**总览**文案（2026-10-16 十二改）。
+    ///
+    /// 这一层只解决"看得见"：摘要 / 翻译 / 格式转换的调度在 `JobQueue`，
+    /// 转录仍在 `TranscriptionService`，但两者在总览页里摆进同一个列表。
+    ///
+    /// ⚠️ 文案口径与 `ASR.queue_*` 那批保持一致：**别写"静音音频"**。用户要的
+    ///    判断是"我切走之后它还会不会继续"，不是我们怎么把进程顶住的。
+    enum Jobs {
+
+        // MARK: 活的种类（`JobKind.title`）
+
+        static var kindTranscribe: String {
+            NSLocalizedString("jobs.kind_transcribe", value: "Transcription",
+                              comment: "Task list: an ASR transcription job")
+        }
+        static var kindSummarize: String {
+            NSLocalizedString("jobs.kind_summarize", value: "Summary",
+                              comment: "Task list: a summary-generation job")
+        }
+        static var kindTranslate: String {
+            NSLocalizedString("jobs.kind_translate", value: "Translation",
+                              comment: "Task list: a translation job")
+        }
+        static var kindExport: String {
+            NSLocalizedString("jobs.kind_export", value: "Audio export",
+                              comment: "Task list: an audio format-conversion job")
+        }
+
+        // MARK: 副标题（`Job.detail`）
+
+        static func detailTranslatedTranscript(_ language: String) -> String {
+            String(format: NSLocalizedString("jobs.detail_translated_transcript",
+                                             value: "Transcript → %@",
+                                             comment: "Task list subtitle: translating the transcript into this language"),
+                   language)
+        }
+        static func detailTranslatedSummary(_ language: String) -> String {
+            String(format: NSLocalizedString("jobs.detail_translated_summary",
+                                             value: "Summary → %@",
+                                             comment: "Task list subtitle: translating the summary into this language"),
+                   language)
+        }
+
+        // MARK: 源头不见了（`JobSourceMissing`）
+
+        static var sourcePrompt: String {
+            NSLocalizedString("jobs.source_prompt", value: "The summary prompt",
+                              comment: "JobSourceMissing subject: the job recorded no prompt")
+        }
+        static var sourceLanguage: String {
+            NSLocalizedString("jobs.source_language", value: "The target language",
+                              comment: "JobSourceMissing subject: the job recorded no target language")
+        }
+        static var sourceFormat: String {
+            NSLocalizedString("jobs.source_format", value: "The export format",
+                              comment: "JobSourceMissing subject: the job recorded no export format")
+        }
+        static var sourceAudio: String {
+            NSLocalizedString("jobs.source_audio", value: "The audio file",
+                              comment: "JobSourceMissing subject: the recording's audio is gone")
+        }
+        static var sourceTranscript: String {
+            NSLocalizedString("jobs.source_transcript", value: "The transcript",
+                              comment: "JobSourceMissing subject: the transcript is gone")
+        }
+        static var sourceSummary: String {
+            NSLocalizedString("jobs.source_summary", value: "The summary",
+                              comment: "JobSourceMissing subject: the summary is gone")
+        }
+        /// "这东西已经不在了"。**不是**"任务失败" —— 它是**永远不会成功**的那
+        /// 一种，所以队列直接把它从台账里抹掉，不会白试三次。
+        static func sourceMissing(_ what: String) -> String {
+            String(format: NSLocalizedString("jobs.source_missing",
+                                             value: "%@ is no longer available.",
+                                             comment: "Shown when a queued task's source file has been deleted"),
+                   what)
+        }
+        static var noRunner: String {
+            NSLocalizedString("jobs.no_runner", value: "This kind of task isn't supported in this build.",
+                              comment: "Internal error: no runner registered for a job kind")
+        }
+
+        // MARK: 总览页
+
+        static var pageTitle: String {
+            NSLocalizedString("jobs.page_title", value: "Background tasks",
+                              comment: "Task center: navigation title")
+        }
+        static var empty: String {
+            NSLocalizedString("jobs.empty",
+                              value: "Nothing here right now. Summaries, translations and audio conversions you start will show up on this page.",
+                              comment: "Task center: empty state")
+        }
+        static var sectionActive: String {
+            NSLocalizedString("jobs.section_active", value: "In progress",
+                              comment: "Task center: section header for unfinished jobs")
+        }
+        static var sectionFinished: String {
+            NSLocalizedString("jobs.section_finished", value: "Finished",
+                              comment: "Task center: section header for finished jobs")
+        }
+        static var clearFinished: String {
+            NSLocalizedString("jobs.clear_finished", value: "Clear finished",
+                              comment: "Task center: button that removes finished rows")
+        }
+        static var footer: String {
+            NSLocalizedString("jobs.footer",
+                              value: "These tasks keep running when you switch away or lock your phone. If the app is closed, they pick up again the next time you open it.",
+                              comment: "Task center: explanation of background continuation")
+        }
+        /// 发起之后那句"你可以走了"。
+        static var canLeaveHint: String {
+            NSLocalizedString("jobs.can_leave_hint",
+                              value: "You can leave this screen — it keeps running in the background.",
+                              comment: "Shown under a running task: the user does not have to stay on the page")
+        }
+
+        // MARK: 状态
+
+        static var statusWaiting: String {
+            NSLocalizedString("jobs.status_waiting", value: "Waiting", comment: "Job status chip")
+        }
+        static var statusRunning: String {
+            NSLocalizedString("jobs.status_running", value: "Running", comment: "Job status chip")
+        }
+        static var statusDone: String {
+            NSLocalizedString("jobs.status_done", value: "Done", comment: "Job status chip")
+        }
+        static var statusGaveUp: String {
+            NSLocalizedString("jobs.status_gave_up", value: "Gave up",
+                              comment: "Job status chip: exhausted its retries")
+        }
+        static func attempts(_ attempts: Int, _ max: Int) -> String {
+            String(format: NSLocalizedString("jobs.attempts", value: "Attempt %1$d of %2$d",
+                                             comment: "Job row: how many tries have been used"),
+                   attempts, max)
+        }
+        static func progress(_ done: Int, _ total: Int) -> String {
+            String(format: NSLocalizedString("jobs.progress", value: "Part %1$d of %2$d",
+                                             comment: "Job row: chunked progress"),
+                   done, total)
+        }
+
+        // MARK: 行内操作
+
+        static var retry: String {
+            NSLocalizedString("jobs.retry", value: "Try again", comment: "Job row: retry action")
+        }
+        static var cancel: String {
+            NSLocalizedString("jobs.cancel", value: "Cancel", comment: "Job row: cancel action")
+        }
+        static var remove: String {
+            NSLocalizedString("jobs.remove", value: "Remove", comment: "Job row: dismiss this row")
+        }
+
+        // MARK: 入口（设置页 / 详情页）
+
+        static var openQueue: String {
+            NSLocalizedString("jobs.open_queue", value: "Background tasks",
+                              comment: "Settings row: opens the task center")
+        }
+        static var openQueueFooter: String {
+            NSLocalizedString("jobs.open_queue_footer",
+                              value: "Summaries, translations and audio conversions carry on after you leave the app.",
+                              comment: "Settings row footer: what the task center is for")
+        }
+        /// 入队成功的轻提示。
+        static func enqueuedToast(_ kind: String) -> String {
+            String(format: NSLocalizedString("jobs.enqueued_toast",
+                                             value: "%@ added to background tasks.",
+                                             comment: "Toast shown right after a task is queued"),
+                   kind)
+        }
     }
 }
 

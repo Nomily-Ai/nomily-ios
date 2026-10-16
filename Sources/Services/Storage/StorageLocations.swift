@@ -71,7 +71,28 @@ enum StorageLocations {
         root.appendingPathComponent("summarize_templates.json", isDirectory: false)
     }
 
-    /// Where the on-disk diagnostic log goes.
+    /// 待办转录队列（跨启动存活）。
+    ///
+    /// 落在 `root` 而不是 `decryptedDir`：它不是某条录音的产物，而是"还没
+    /// 干完的活"的清单。放在 `decryptedDir` 里会被"删录音"顺手带走，而队列
+    /// 本身会自己校验对应的音频还在不在 —— 让删录音与删队列各管各的。
+    static var transcriptionQueueURL: URL {
+        root.appendingPathComponent("transcription-queue.json", isDirectory: false)
+    }
+
+    /// 摘要 / 翻译 / 导出三类长任务的落盘台账（跨启动存活）。
+    ///
+    /// ★ 2026-10-16 十二改：与 `transcriptionQueueURL` **并列**而不是合并 ——
+    /// 转录那条队列有自己的 624 行管线与一套已经跑通的语义，把它并进来是拿
+    /// "唯一能用的那条路"去换一个更漂亮的抽象；见 `JobQueue` 顶部那段。
+    ///
+    /// 落点选在 `root`（同 `transcriptionQueueURL`）：它是"还没干完的活"的
+    /// 清单，不是某条录音的产物 —— 放进 `decryptedDir` 会被"删录音"顺手带走。
+    static var jobsQueueURL: URL {
+        root.appendingPathComponent("jobs-queue.json", isDirectory: false)
+    }
+
+    /// 落盘诊断流水的落点。
     ///
     /// ⚠️ Deliberately **not via `root`** (that is the app group container). `--domain-type` of `xcrun devicectl`
     /// separates "app sandbox" and "app group container" into two kinds; landing in the sandbox's

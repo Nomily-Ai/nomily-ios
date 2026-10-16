@@ -15,14 +15,29 @@ enum RecordingName {
         return f
     }()
 
-    private static let display: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        // .medium time style includes seconds (e.g. "9:42:07 PM"); .short omits
-        // them. QA asked for the recording timestamp to show H:M:S, not just H:M.
-        f.timeStyle = .medium
-        return f
-    }()
+    /// The "Apr 15, 2026 at 9:42:07 PM" title.
+    ///
+    /// ★ 2026-10-16 十三改：**跟着 App 语言走**（`AppLocale`），不再是
+    /// 设备语言。这一处是全 App 最要紧的日期格式化点 ——
+    /// `LibraryItem.displayTitle` 用它，而 `displayTitle` 在十八处被引用
+    /// （列表、详情页标题、玩家、思维导图、回收站、导出文件名…）。
+    /// 以前它是 `static let`，locale 默认取 `Locale.current`，
+    /// 于是"In-app 选英文"之后界面全英文、**录音的年月日还是中文**。
+    ///
+    /// ⚠️ 这是**共享文件**（ios / watch / watchControls 之外的三个 target 里的
+    ///    两个都编它，见 `project.yml`），改它要保证 `AppLocale` 在两端都存在
+    ///    —— 它在 `Sources/Services/Localization/AppLanguage.swift` 里，
+    ///    那个文件同样列在 `nomily_watch` 的 sources 下。
+    ///    下面的 `parser` 则**必须**保持 `en_US_POSIX`：它解析的是**文件名**，
+    ///    跟着语言变会让同一个文件在不同语言下解析出不同的日期。
+    private static var display: DateFormatter {
+        AppLocale.formatter("recording.display_title") { f in
+            f.dateStyle = .medium
+            // .medium time style includes seconds (e.g. "9:42:07 PM"); .short
+            // omits them. QA asked for the recording timestamp to show H:M:S.
+            f.timeStyle = .medium
+        }
+    }
 
     static func displayTitle(for filename: String) -> String {
         guard let date = date(from: filename) else { return filename }

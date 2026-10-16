@@ -63,6 +63,101 @@ enum AppLanguage {
     }
 }
 
+// MARK: - The Locale that dates and numbers follow
+
+/// The `Locale` the UI formats dates and numbers in.
+///
+/// ## Why this can't be left to `Locale.current`
+///
+/// `LocalizationService` swaps the *strings* — it re-points `Bundle.main` at the
+/// chosen `.lproj`. Nothing about that touches `Locale.current`, which is
+/// **the device's** language and has no idea an in-app picker exists. So
+/// choosing "English" inside the app translated every label and left every
+/// timestamp in the phone's language — the "语音的年月日还是中文" report.
+///
+/// Worse, the two halves drift in a way that's easy to miss: the *labels* flip
+/// instantly, so it looks like it worked. You only notice on the dates.
+///
+/// This is the single source of truth for the formatting half. `AppLanguage`
+/// decides *which* language; `AppLocale` hands out the `Locale` for it.
+///
+/// ## Why a generation counter rather than a plain `static let`
+///
+/// `DateFormatter` construction is expensive and these run inside list rows, so
+/// they get cached — and a `static let` cache would freeze the device locale
+/// forever. Every language change bumps `generation`; a cache entry built on an
+/// older generation is discarded the next time it's asked for. Caching stays,
+/// and it becomes reactive.
+///
+/// ⚠️ Views don't need to do anything for this to work: both roots re-key their
+/// subtree on the language (`LocalizedRoot` / `LocalizedWatchRoot`), so the
+/// cache is consulted again on the very next body evaluation.
+enum AppLocale {
+
+    /// What formatters should use right now.
+    ///
+    /// Stays on `autoupdatingCurrent` while the picker is on "follow system", so
+    /// we inherit the device language *and* any region change the system makes
+    /// while the app is running.
+    private(set) static var current: Locale = .autoupdatingCurrent
+
+    /// Bumped on every change; cache entries compare against it.
+    private(set) static var generation = 0
+
+    private static var cache: [String: (generation: Int, formatter: DateFormatter)] = [:]
+
+    /// Points formatting at `tag`, or back at the device when `tag` is `nil`.
+    ///
+    /// Idempotent: re-setting the same language is a no-op, so the two roots
+    /// (phone and watch) can call it freely without churning the caches.
+    static func set(_ tag: String?) {
+        let next: Locale
+        if let tag, !tag.isEmpty {
+            next = Locale(identifier: AppLanguage.resolve(tag))
+        } else {
+            next = .autoupdatingCurrent
+        }
+        guard next.identifier != current.identifier else { return }
+        current = next
+        generation &+= 1
+    }
+
+    /// A `DateFormatter` configured by `configure`, cached per `key` and rebuilt
+    /// whenever the language changes.
+    ///
+    /// ⚠️ `configure` runs with `locale` **already set** — that ordering matters
+    /// for `setLocalizedDateFormatFromTemplate`, which bakes the pattern using
+    /// the formatter's locale *at call time*. A template computed before the
+    /// locale was set silently keeps the device's month names forever, which is
+    /// exactly the bug this file exists to fix.
+    static func formatter(_ key: String, _ configure: (DateFormatter) -> Void) -> DateFormatter {
+        if let hit = cache[key], hit.generation == generation { return hit.formatter }
+        let f = DateFormatter()
+        f.locale = current
+        configure(f)
+        cache[key] = (generation, f)
+        return f
+    }
+
+    /// One-shot formatting for the sites that interpolate a date into a string
+    /// rather than holding on to a formatter (`Text(someDate.formatted(…))`).
+    ///
+    /// ⚠️ Those sites look locale-aware but aren't: `date.formatted(date:time:)`
+    /// reads `Locale.current`, **not** the SwiftUI environment — only
+    /// `Text(date, format:)` consults the environment, and the call has already
+    /// been evaluated by the time `Text` sees a `String`.
+    static func string(
+        from date: Date,
+        dateStyle: DateFormatter.Style,
+        timeStyle: DateFormatter.Style
+    ) -> String {
+        formatter("style.\(dateStyle.rawValue).\(timeStyle.rawValue)") {
+            $0.dateStyle = dateStyle
+            $0.timeStyle = timeStyle
+        }.string(from: date)
+    }
+}
+
 // MARK: - Runtime language switching
 
 /// Swaps the bundle `NSLocalizedString` reads from, so picking a language
@@ -99,12 +194,16 @@ final class LocalizationService: ObservableObject {
     init(selected: String?) {
         self.selected = selected
         Bundle.applyLanguage(selected)
+        // 两个半边都要拨：字符串走 `Bundle`，日期/数字走 `Locale`。
+        // 只拨一边 = "界面是英文、时间还是中文"，见 `AppLocale` 顶部那段。
+        AppLocale.set(selected)
     }
 
     func select(_ tag: String?) {
         guard tag != selected else { return }
         selected = tag
         Bundle.applyLanguage(tag)
+        AppLocale.set(tag)
     }
 }
 

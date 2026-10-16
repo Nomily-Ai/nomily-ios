@@ -46,7 +46,7 @@ targets:
         # Must track `nomily_watch`'s build number — watchOS refuses to install
         # a companion whose version doesn't match its host, and an embedded
         # watch app one build ahead is enough to trip it. Bump both or neither.
-        CFBundleVersion: "7"
+        CFBundleVersion: "27"
         # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
         # appropriate when the app's crypto use is exempt from US export
         # documentation requirements:
@@ -134,6 +134,11 @@ targets:
       # Shared so the Action Button intent exists on both sides: the iPhone
       # needs it to author the shortcut, the watch needs it to run one.
       - path: Sources/Services/Watch/RecordingIntent.swift
+      # ★ 2026-10-16 十三改：首页表情的**表情库**。两端共用不是为省代码，是
+      # 正确性要求 —— iPhone 的设置里那个选择器要摆预览，预览和表上真正
+      # 画出来的那张脸必须是**同一段代码**，否则用户会在手机上挑中一个笑眼、
+      # 抬腕发现是垂眼。素材来源与几何参数都写在这个文件顶部。
+      - path: Sources/Services/Watch/BotFaceStyle.swift
       - path: Sources/Services/Storage/RecordingName.swift
       - path: Sources/App/L10n.swift
       # Runtime language switching. Compiled into the watch too (2026-10-15) so
@@ -145,6 +150,15 @@ targets:
       - path: Sources/Services/Localization/AppLanguage.swift
       - path: Sources/Resources
         buildPhase: resources
+    dependencies:
+      # ★ 2026-10-16 八改：控制中心的快捷录音控件。
+      # 内容是 watchOS 26 才有的 Control Widget（理由见
+      # `WatchControls/NomilyWatchControls.swift` 顶部）。
+      # ⚠️ 必须嵌在 **watch App** 里，不是嵌在 iPhone App 里 —— watchOS 的扩展
+      #    跟着它所属的 App 走，而且苹果规定"两端都有 App 时只有 watch 端的控件
+      #    会被控制中心认"。
+      - target: nomily_watch_controls
+        embed: true
     info:
       path: Watch/Info.plist
       properties:
@@ -152,10 +166,25 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         # Must track the iPhone app's build number — watchOS refuses to install
         # a companion whose version doesn't match its host.
-        CFBundleVersion: "7"
+        CFBundleVersion: "27"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.nomily.app
         NSMicrophoneUsageDescription: Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.
+        # ★ 2026-10-16 十一改：录音时那条音波跟着实测心率跳，所以要读心率。
+        # ⚠️ 文案要写清"只读、不外传"：HealthKit 的授权页会原样把这段话摆给用户，
+        #    而"一个录音机为什么要读我心率"是用户当场会问的问题 —— 答案得在这句话里。
+        #
+        # ★★ 2026-10-16 十五改：**这条文案和下面那条 entitlement 暂时留着，
+        #    但代码里已经没有任何地方会去申请它**（用户："不要走心率来"）。
+        #    留着是**刻意**的：删掉 entitlement 会改变 App ID 的能力集合，
+        #    于是又得走一趟门户重签描述文件 —— 换来的只是"少一条不会显示的文案"。
+        #    ⚠️ 代价要记住：如果哪天真的决定不要 HealthKit 了，这里是**两处**
+        #    （`NSHealthShareUsageDescription` + `com.apple.developer.healthkit`），
+        #    删了之后第一次构建会因为描述文件过期而失败，那是预期行为。
+        NSHealthShareUsageDescription: Nomily AI reads your current heart rate while recording, so the waveform on the watch face beats in time with your own pulse. It never reads any other health data and never leaves your devices.
+        # ⚠️ 只需要 `NSHealthShareUsageDescription`（读）。**不写 `NSHealthUpdateUsageDescription`**
+        #    —— 这个 App 从不往健康里写东西，声明了反而会让授权页多出一项写权限，
+        #    用户看到"要写入"会直接拒掉。
         # Background audio on watchOS is UIBackgroundModes, same as iOS.
         # WKBackgroundModes is a different key — it names `WKExtendedRuntimeSession`
         # types (workout-processing, self-care, mindfulness, …) and does not
@@ -164,6 +193,19 @@ targets:
         # there risks installd rejecting the bundle outright.
         UIBackgroundModes:
           - audio
+    # ★ 2026-10-16 十一改：读心率要 HealthKit entitlement。
+    #
+    # ⚠️ 加在 **watch target** 上，不是 iPhone 上：真正读心率的是表上那个 App，
+    #    iPhone 侧一次都没碰过 HealthKit。跟着 iPhone 一起去申请反而会让
+    #    「这个录音 App 要读我健康数据」多出一个莫名其妙的来源。
+    #
+    # ⚠️ 这条会改变 App ID `com.nomily.app.watchkitapp` 的能力集合，所以
+    #    `-allowProvisioningUpdates` 得去门户上把 HealthKit 打开、
+    #    再重签一份 watchOS 描述文件。第一次构建会慢一点，报错时先看这一句。
+    entitlements:
+      path: Watch/nomily_watch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nomily.app.watchkitapp
@@ -182,5 +224,66 @@ targets:
         # ★ 2026-10-12: together with `nomily_ios`, the signing config is written into the spec (reasons above).
         #   The watch needs a **different** watchOS profile (bundle id is
         #   `com.nomily.app.watchkitapp`, not `com.nomily.app`), but uses the **same team**.
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 96S46YT5TP
+
+  # ★ 2026-10-16 八改：控制中心的快捷录音控件（watchOS 26+）。
+  #
+  # 为什么必须是**独立 target**：WidgetKit 的控件只能活在一个 app-extension 里，
+  # 没有"把控件直接写在 App target 里"这条路。而扩展不是 App、不能自己装，
+  # 它靠 `nomily_watch` 那侧 embed 进到表上。
+  #
+  # ⚠️ 部署目标写 26.0，**不跟着** `nomily_watch` 的 10.0：Control Widget 这一套
+  #    在手表上是 26.0 起步（iOS 侧才是 18.0，同一套 API 晚了一个大版本）。
+  #    跟着 10.0 走会"编译期过不了可用性检查 / 就算压过去控件在 25.x 上也不出现"。
+  #    完整理由见 `WatchControls/NomilyWatchControls.swift` 顶部。
+  #
+  # ⚠️ bundle id 必须是 `nomily_watch` 的**子前缀**（`…watchkitapp.controls`）。
+  #    扩展的 bundle id 不继承宿主的话，装到表上会被 installd 直接拒掉。
+  nomily_watch_controls:
+    type: app-extension
+    platform: watchOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: WatchControls
+      # 复用操作按钮那个 intent —— 控件的动作就是它，不编进来没法写。
+      # 这个文件两端的 App 也各编了一份，第四份看着冗余，但 `#if os(...)` 早就把
+      # iPhone / watch 的差异分干净了，内容完全一致。为省一个文件抽成 SPM 包不划算。
+      - path: Sources/Services/Watch/RecordingIntent.swift
+      # 只要那几个 `.lproj`：控件的名字与说明走 `LocalizedStringResource(key, defaultValue:)`，
+      # key 得在**扩展自己的 bundle** 里查得到，否则中文表上会静默退回英文默认值。
+      # 刻意排掉 Assets.xcassets 与那两个网页用的 js/css —— 控件由系统上色、不需要
+      # 资源目录，那三个文件在这儿纯属陪跑。
+      - path: Sources/Resources
+        buildPhase: resources
+        excludes:
+          - "Assets.xcassets"
+          - "*.js"
+          - "*.css"
+    info:
+      path: WatchControls/Info.plist
+      properties:
+        CFBundleDisplayName: Nomily AI
+        CFBundleShortVersionString: "1.0.0"
+        # 必须与父 App 一致 —— 嵌入式二进制的版本号和宿主不一致时，watchOS 会把
+        # 整个 App 一起拒装。
+        CFBundleVersion: "27"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nomily.app.watchkitapp.controls
+        TARGETED_DEVICE_FAMILY: "4"
+        WATCHOS_DEPLOYMENT_TARGET: "26.0"
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_DEBUG_DYLIB: NO
+        # 扩展不单独安装，只跟着 watch App 走。
+        SKIP_INSTALL: YES
+        # 扩展不许用"只有 App 才能用"的 API。
+        APPLICATION_EXTENSION_API_ONLY: YES
+        # ★ 用来在**共享源码**里把"只该属于 App 的东西"摘出去。目前只有一处：
+        #   `RecordingIntent.swift` 里的 `NomilyWatchShortcuts` —— App Shortcuts
+        #   只在 App 里注册，扩展里再注册一遍会让"Record with Nomily"多出一个来源。
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) NOMILY_WIDGET_EXTENSION"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 96S46YT5TP

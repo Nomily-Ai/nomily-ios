@@ -5,12 +5,27 @@ struct SettingsView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var watch: WatchSyncService
     @EnvironmentObject private var localization: LocalizationService
+    /// 后台任务队列。单独注入的理由见 `NomilyApp` 里 `.environmentObject`
+    /// 那一段：嵌套 `ObservableObject` 的 `@Published` 不会让只观察父对象的
+    /// 视图失效，走 `env.jobs` 的话入口那颗数字永远停在旧值上。
+    @EnvironmentObject private var jobs: JobQueue
+    /// 回收站里躺着的条数要显示在那一行右边，所以得观察它 —— 在详情页删了
+    /// 一条再回到设置页，数字要跟着变。
+    @ObservedObject private var trash = ClipTrash.shared
     @State private var versionTapCount = 0
     @State private var versionTapResetTask: Task<Void, Never>?
     @State private var devModeToast: String?
 
     private static let tapsToToggle = 7
     private static let tapsBeforeHint = 3
+
+    /// 还没干完的活：摘要 / 翻译 / 格式转换（`jobs`）+ 转录（`transcription`）。
+    ///
+    /// 两类**都算**：入口那颗数字回答的是"后台还有没有东西在忙"，把转录漏掉
+    /// 会让人在只排着转录的时候看到一个空白的入口，以为这一页是空的。
+    private var busyJobCount: Int {
+        jobs.unfinishedCount + env.transcription.pending.count
+    }
 
     var body: some View {
         Form {
@@ -20,6 +35,42 @@ struct SettingsView: View {
                 NavigationLink(L10n.Settings.recordings) { RecordingsSettingsView() }
                 NavigationLink(L10n.Settings.summarizeTemplates) { SummarizeTemplatesView() }
                 NavigationLink(L10n.Settings.devicesAndLibrary) { DevicesLibraryView() }
+                // 回收站紧挨着"设备与资料库"：它管的正是资料库里那些条目，
+                // 放在这一区里、语言之前。只在里面真有东西时才显示条数 ——
+                // 一个常驻的"0"会被读成"这里有 0 个东西坏了"。
+                NavigationLink {
+                    TrashView()
+                } label: {
+                    HStack {
+                        Text(L10n.Trash.settingsRow)
+                        Spacer()
+                        if !trash.items.isEmpty {
+                            Text("\(trash.items.count)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                // ★ 2026-10-16 十二改：四类长任务的**总览**。
+                //
+                // 放在这一区而不是塞进"录音设置"：四类活里转录属于录音、
+                // 摘要与翻译属于 LLM、格式转换属于资料库 —— 它不属于其中
+                // 任何一区，硬塞进某一区，用户得先猜是哪一区才找得到。
+                //
+                // 右边那颗数字只在真有活没干完时出现（同上面回收站那一行）：
+                // 常驻的"0"会被读成"有 0 个东西坏了"。
+                NavigationLink {
+                    TaskCenterView()
+                } label: {
+                    HStack {
+                        Text(L10n.Jobs.openQueue)
+                        Spacer()
+                        if busyJobCount > 0 {
+                            Text("\(busyJobCount)")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
+                }
                 // Language sits last, right above About: it belongs to none of
                 // the four feature areas above, and slotting it among them
                 // would break their order. The row shows the current choice so
@@ -59,17 +110,116 @@ struct SettingsView: View {
     /// but that's exactly why it needs explaining. iOS installs it on its own
     /// only when "Automatic App Install" is on, and otherwise leaves it sitting
     /// in the Watch app's Available Apps list with no notification.
+    ///
+    /// ★ 2026-10-16 十三改：这一区多了一行**首页表情**（当时是独立一行 +
+    /// 独立 Section）。
+    ///
+    /// ★★ 2026-10-16 十五改：那两行**合并成一行**（用户原话："将 watch 的首页
+    ///   表情添加到Nomily AI APP 的手表设置里面，点击 apple watch 里面就是菜单栏，
+    ///   将已安装的则点击进入设置表情，合并而不是独立出一个手表的表情菜单栏，
+    ///   然后如果未安装点击则跳转手机 watch app"）。
+    ///
+    /// 于是这一行现在按**手表 App 装没装**分岔：
+    ///   · **已装** —— `NavigationLink` 进表情选择器，右侧显示当前那一档的名字；
+    ///   · **没装**（含没配对手表）—— 变成一个按钮，点一下**跳到 iPhone 上的
+    ///     「Watch」App**，装它在那儿（右侧仍是原来的状态文字，再多一个"外跳"角标）。
+    ///
+    /// ⚠️ 为什么合并是对的：安装状态和表情设置本来就是**同一个对象**的两件事，
+    ///    分成两行之后，用户在"未安装"那一行看不到任何出路 —— 那一行只能看，
+    ///    不能点，而"怎么办"写在 footer 的一长段说明里。合并之后"这一行点了会
+    ///    发生什么"和"它现在的状态"落在同一个位置上。
+    ///
+    /// ⚠️ 判断用 `isWatchAppInstalled` **且** `isActivated`：激活完成之前那个
+    ///    flag 一定是 `false`（见 `WatchSyncService` 顶部），只看它会把启动后
+    ///    头几秒误判成"没装"，于是用户点一下就被甩到 Watch App 去。
     private var watchSection: some View {
         Section {
-            HStack {
-                Label(L10n.Watch.settingsTitle, systemImage: "applewatch")
-                Spacer()
-                Text(watchStatus)
-                    .foregroundStyle(.secondary)
-            }
+            watchRow
         } footer: {
-            Text(watchFooter)
+            // 两句话各管各的：一句说这一行现在是什么（选表情），
+            // 一句说手表那边现在是什么状态（装没装 / 连没连）。
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.Face.rowFooter)
+                Text(watchFooter)
+            }
         }
+    }
+
+    /// 这一区唯一的那一行。三种形态见 `watchSection` 上面那段。
+    @ViewBuilder
+    private var watchRow: some View {
+        if watch.isActivated, watch.isPaired, watch.isWatchAppInstalled {
+            NavigationLink {
+                WatchFacePickerView()
+            } label: {
+                watchRowLabel(trailing: chosenFaceTitle, leavesTheApp: false)
+            }
+        } else if watch.isActivated, isWatchAppReachableOnThisOS {
+            // 没装（或没配对）—— 点一下去 Watch App 处理。没配对时也走这里：
+            // Watch App 正是配对的地方。
+            //
+            // ⚠️ 这一支要求 `isActivated`：激活之前 `isWatchAppInstalled` 必然是
+            //    `false`，那时给按钮的话，用户在启动后头几秒点一下会被甩去
+            //    Watch App —— 而手表 App 其实早就装好了。那几秒里老实当一个
+            //    只读的状态行（"检测中…"）。
+            Button(action: openWatchApp) {
+                watchRowLabel(trailing: watchStatus, leavesTheApp: true)
+            }
+            // ⚠️ `.plain` 而不是默认样式：默认会把整行的文字和图标签染成蓝色，
+            //    那样这一行会在字体大小、粗细上和上下每一行都不一样。
+            .buttonStyle(.plain)
+        } else {
+            // 还没激活，或者 iOS 16 上这个功能永远不可能就绪
+            // （见 `isWatchAppReachableOnThisOS`）：老实当一个只读的状态行，
+            // 不要给一个点了没用的按钮。
+            watchRowLabel(trailing: watchStatus, leavesTheApp: false)
+        }
+    }
+
+    /// 那一行的内容。`trailing` 是右边的状态/当前值。
+    ///
+    /// ⚠️ 图标用 `Label` 而不是 `Image` + `Text` 两段：`Label` 会自动把符号
+    ///    对齐到文字基线，手写两段则要在不同动态字体下自己调。
+    private func watchRowLabel(trailing: String, leavesTheApp: Bool) -> some View {
+        HStack {
+            Label(L10n.Watch.settingsTitle, systemImage: "applewatch")
+            Spacer()
+            Text(trailing)
+                .foregroundStyle(.secondary)
+            if leavesTheApp {
+                // 一个"会跳到别的 App"的角标。没有它，这一行看起来和上面那些
+                // `NavigationLink` 一样，用户点完发现"整个 App 被切走了"会懵。
+                Image(systemName: "arrow.up.forward.app")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    /// 打开 iPhone 上的「Watch」App —— 手表 App 没装时，用户得去那里点安装。
+    ///
+    /// ## 为什么不用 `canOpenURL`
+    /// `itms-watchs://` 是系统 App 的私有 scheme，没写进 `LSApplicationQueriesSchemes`
+    /// 时 `canOpenURL` **一定**回 `false`（这是 iOS 9 起的查询限制）——
+    /// 用它做前置判断会让这个按钮在所有设备上都是死的。所以直接 `open`，
+    /// 拿它的完成回调判断成没成。
+    private func openWatchApp() {
+        guard let url = URL(string: "itms-watchs://") else { return }
+        UIApplication.shared.open(url, options: [:]) { opened in
+            guard !opened,
+                  let fallback = URL(string: UIApplication.openSettingsURLString)
+            else { return }
+            // 打不开（比如 iPad 上没有 Watch App）就退到**本 App 的设置页**：
+            // 那里至少能翻到"麦克风"之类的权限。总比"点了没反应"强。
+            UIApplication.shared.open(fallback)
+        }
+    }
+
+    /// 那一行右边显示的名字 —— 当前这一档的本地化名。
+    ///
+    /// 和语言那一行同款：不必点进去就知道现在是哪个。
+    private var chosenFaceTitle: String {
+        (BotFaceStyle.decode(configService.config.watchFaceStyle) ?? .calm).title
     }
 
     /// The bundled watch app needs watchOS 10, and watchOS 10 only pairs with
@@ -199,6 +349,8 @@ struct SettingsView: View {
 
 struct ASRProvidersView: View {
     @EnvironmentObject private var configService: ConfigService
+    /// 2026-10-15：为了读转录队列的状态（`pending` / `inFlight`）。
+    @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     @State private var azureVerify: VerifyState = .idle
     /// Active connectivity test for the local server (added 2026-10-13).
@@ -318,9 +470,74 @@ struct ASRProvidersView: View {
                     InfoTip(text: L10n.ASR.localVADFooter)
                 }
             }
+
+            // ★ 2026-10-15：后台保活。
+            Toggle(isOn: Binding(
+                get: { configService.config.backgroundKeepAliveEnabled },
+                set: { configService.config.backgroundKeepAliveEnabled = $0; configService.scheduleSave() }
+            )) {
+                HStack(spacing: 4) {
+                    Text(L10n.ASR.backgroundKeepAlive)
+                    InfoTip(text: L10n.ASR.backgroundKeepAliveFooter)
+                }
+            }
+
+            // 队列状态只有在真有活排着的时候才出现 —— 空着的时候多加一行
+            // 只是噪音（而且会让人以为"是不是坏了"）。
+            if !env.transcription.pending.isEmpty {
+                queueStatusRow
+            }
         } header: {
             Text(L10n.ASR.transcription)
         }
+    }
+
+    /// 「还有几条没转录完」。
+    ///
+    /// 为什么值得占一行：这个队列是**跨启动**的。用户可能压根不记得自己昨天
+    /// 传过几条录音在等转录，而那些活要么正悄悄跑着、要么已经试满三次悄悄
+    /// 放弃了 —— 不说的话，两种都只能从"资料库里那条录音始终没有转录文本"
+    /// 反推出来，而"没有转录"和"转录失败"在列表里长得一模一样。
+    private var queueStatusRow: some View {
+        let pending = env.transcription.pending
+        let running = pending.filter { $0.attempts < TranscriptionService.maxAttempts }.count
+        let stuck = pending.count - running
+        let inFlight = env.transcription.inFlight.count
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                if inFlight > 0 {
+                    ProgressView().controlSize(.mini)
+                }
+                Text(L10n.ASR.queueTitle)
+                Spacer(minLength: 8)
+                Text(
+                    [
+                        inFlight > 0 ? L10n.ASR.queueRunning(inFlight) : nil,
+                        running - inFlight > 0 ? L10n.ASR.queueWaiting(running - inFlight) : nil,
+                        stuck > 0 ? L10n.ASR.queueStuck(stuck) : nil,
+                    ]
+                    .compactMap { $0 }
+                    .joined(separator: " · ")
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            }
+            // 只报**第一条**放弃的：报全部会把这个 Section 撑成一屏，
+            // 而用户此刻要的是"知道有东西卡住了"，不是逐条读错误。
+            if stuck > 0,
+               let first = pending.first(where: { $0.attempts >= TranscriptionService.maxAttempts }) {
+                Text(L10n.ASR.queueStuckDetail(
+                    first.name,
+                    first.attempts,
+                    first.lastError ?? ""
+                ))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     private var azureSection: some View {
@@ -625,24 +842,73 @@ struct LLMProvidersView: View {
         configService.config.llmProviders.configuredProviders
     }
 
+    /// 主通道配不全的原因。非 nil ⇒ 上面那个 Picker 会显示成"没选"。
+    ///
+    /// ★ 2026-10-15：这个状态实测真的发生过 —— `primary = "openRouter"`，
+    /// 而 `open_router` 段里连 `api_key` 都没有。而 Picker 只列出**配全了**
+    /// 的通道，于是标签对不上、界面看起来只是"什么都没选"，一点线索都没有；
+    /// 用户只会看到每次摘要都先失败一次再兜底。
+    private var primaryGap: String? {
+        guard let primary = configService.config.llmProviders.primary, !primary.isEmpty else {
+            return nil
+        }
+        return LLMCompletionService.configGap(primary, configService.config)
+    }
+
     var body: some View {
         Form {
-            if !configured.isEmpty {
+            if !configured.isEmpty || primaryGap != nil {
                 Section {
-                    Picker(selection: Binding(
-                        get: { configService.config.llmProviders.primary ?? "" },
-                        set: {
-                            configService.config.llmProviders.primary = $0.isEmpty ? nil : $0
-                            configService.scheduleSave()
+                    if !configured.isEmpty {
+                        Picker(selection: Binding(
+                            get: { configService.config.llmProviders.primary ?? "" },
+                            set: {
+                                configService.config.llmProviders.primary = $0.isEmpty ? nil : $0
+                                configService.scheduleSave()
+                            }
+                        )) {
+                            Text(L10n.Common.none).tag("")
+                            // ★ 2026-10-15：主通道配不全时它**不在** `configured`
+                            //   里，于是没有任何 tag 等于当前 selection，Picker 会
+                            //   渲染成"什么都没选" —— 用户看到的只是一个空白的
+                            //   下拉框，而真正的原因是旁边那条橙色提示。
+                            //   补一个带"未配置"标注的条目，选中态才落得下来。
+                            if let primary = configService.config.llmProviders.primary,
+                               !primary.isEmpty,
+                               !configured.contains(where: { $0.key == primary }) {
+                                Text(L10n.LLM.unconfigured(
+                                    LLMCompletionService.providerLabel(primary)
+                                )).tag(primary)
+                            }
+                            ForEach(configured, id: \.key) { Text($0.label).tag($0.key) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(L10n.ASR.activeProvider)
+                                InfoTip(text: L10n.LLM.activeProviderFooter)
+                            }
                         }
-                    )) {
-                        Text(L10n.Common.none).tag("")
-                        ForEach(configured, id: \.key) { Text($0.label).tag($0.key) }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(L10n.ASR.activeProvider)
-                            InfoTip(text: L10n.LLM.activeProviderFooter)
+                    }
+
+                    // 配不全时补上原因 + 一键改用兜底。一键这件事在这里最值：
+                    // 用户既然点进了这一页，他要的就是"把它改对"，而不是
+                    // 自己判断该填哪个框、或者该换个通道。
+                    if let gap = primaryGap {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label(gap, systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                            if let fix = LLMCompletionService.suggestedPrimary(configService.config) {
+                                Button(L10n.LLM.adoptAsPrimary(
+                                    LLMCompletionService.providerLabel(fix)
+                                )) {
+                                    configService.config.llmProviders.primary = fix
+                                    configService.scheduleSave()
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
                         }
+                        .padding(.vertical, 2)
                     }
                 }
             }

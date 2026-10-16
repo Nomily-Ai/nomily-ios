@@ -45,6 +45,10 @@ final class WatchLanguageStore: ObservableObject {
         // Applied before the first frame: everything below reads `L10n`, which
         // goes through `Bundle.main`.
         Bundle.applyLanguage(stored)
+        // ★ 2026-10-16 十三改：**两个半边都要拨**。`Bundle` 管字符串，
+        //   `Locale` 管日期/数字 —— 只拨前者的表现是"界面英文、传输记录里
+        //   的时间还是中文"（手机那边同款问题，见 `AppLocale` 顶部那段）。
+        AppLocale.set(stored)
     }
 
     func select(_ tag: String?) {
@@ -56,6 +60,7 @@ final class WatchLanguageStore: ObservableObject {
             defaults.removeObject(forKey: Self.defaultsKey)
         }
         Bundle.applyLanguage(tag)
+        AppLocale.set(tag)
     }
 }
 

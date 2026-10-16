@@ -70,6 +70,23 @@ final class Library: ObservableObject {
         entries[Self.key(name: name, deviceSerial: deviceSerial)]
     }
 
+    /// 按**落盘文件名**取出原始记录（键 + 值）。
+    ///
+    /// 为什么需要它：回收站恢复时要把"已从设备下过"这条凭据**原样**补回去，
+    /// 而 `source(forLocalName:)` 只给得出"哪台设备"，给不出 `transport` /
+    /// `size`，也给不出设备那边的原始文件名 —— 三者少一个，
+    /// `recordDownload(size:transport:…)` 就补不回同一条键。
+    ///
+    /// 是 O(n) 线性扫：只在下一次删除/恢复时调一次，而 1900 条的字典遍历
+    /// 是微秒级；反过来要给 `localName` 再养一张反向索引，得多维护一份
+    /// 会漂的副本。
+    func rawEntry(forLocalName localName: String) -> (key: String, entry: Entry)? {
+        for (key, entry) in entries where (entry.localName ?? key) == localName {
+            return (key, entry)
+        }
+        return nil
+    }
+
     // MARK: mutations
 
     /// Record a successful transfer. The raw bytes should already be on disk
@@ -106,6 +123,23 @@ final class Library: ObservableObject {
     func forget(_ name: String) {
         entries.removeValue(forKey: name)
         entries = entries.filter { $0.value.localName != name }
+        rebuildSourceIndex()
+        saveNow()
+    }
+
+    /// 按**落盘文件名**忘掉一条。
+    ///
+    /// 与 `forget(_:)` 的差别只是键的形状：设备下载那条记录的键是
+    /// `serial::name`，而列表拿到的是落盘名（`entry.localName`）—— 两者
+    /// **不是**同一个字符串，用第一个重载会靠"顺手再按 localName 过滤一遍"
+    /// 才碰巧删掉。批量删除走这个，语义直白，也不依赖那个巧合。
+    ///
+    /// ⚠️ 批量删除**必须**调它：这张表是"这条已经从设备下过了"的唯一凭据，
+    /// 留下残留会让同一条录音再也下载不回来（`isDownloaded` 一直为真）。
+    func forget(localName: String) {
+        entries = entries.filter {
+            ($0.value.localName ?? $0.key) != localName
+        }
         rebuildSourceIndex()
         saveNow()
     }
