@@ -468,6 +468,13 @@ struct WatchBotFace: View {
                 // "the screen is full but recording never starts" -- both make the user stop trusting this action.
                 withAnimation(.linear(duration: Self.holdSeconds)) { holdProgress = 1 }
             } else {
+                // ⚠️ Do not collapse the **successful** hold path here: `onEnded` has already taken that over
+                //    with a 0.5-second fade-out. Collapsing it again here (0.16 seconds) would yank the color patch away
+                //    over 0.16 seconds -- the user's "fill the whole screen **then** see the wave" would become
+                //    "a flash of white."
+                //    The leftover `holdProgress` / `sweepFading` need no attention: on the next press
+                //    that `if pressing` branch zeroes them **without animation**.
+                guard !sweepFading else { return }
                 withAnimation(.easeOut(duration: 0.16)) { holdProgress = 0 }
             }
         }
