@@ -613,11 +613,8 @@
 "watch.menu_hint_queue" = "Clips still waiting to upload";
 "watch.menu_hint_about" = "Build number on the watch";
 "watch.style_appearance" = "Appearance";
-"watch.style_gradient" = "Gradient";
 "watch.style_breathing" = "Breathing";
 "watch.style_reset" = "Reset";
-"watch.style_gradient_off" = "Solid";
-"watch.style_gradient_on" = "Gradient";
 "watch.style_breathing_off" = "Off";
 "watch.style_breathing_slow" = "Slow";
 "watch.style_breathing_medium" = "Medium";

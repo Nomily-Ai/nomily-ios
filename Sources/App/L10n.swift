@@ -1021,10 +1021,6 @@ enum L10n {
             NSLocalizedString("watch.style_appearance", value: "Appearance",
                               comment: "Corner menu: colour + gradient + breathing, merged into one page")
         }
-        /// The "Gradient" item in the menu.
-        static var styleGradient: String {
-            NSLocalizedString("watch.style_gradient", value: "Gradient", comment: "Ring style menu: gradient fill")
-        }
         /// The "Breathing" item in the menu.
         static var styleBreathing: String {
             NSLocalizedString("watch.style_breathing", value: "Breathing", comment: "Ring style menu: pulsing glow")
@@ -1036,12 +1032,6 @@ enum L10n {
         /// Title of the "Settings" page inside the corner badge (version + restore defaults).
         static var menuSettings: String {
             NSLocalizedString("watch.menu_settings", value: "Settings", comment: "Corner menu: settings page title")
-        }
-        static var styleGradientOff: String {
-            NSLocalizedString("watch.style_gradient_off", value: "Solid", comment: "Gradient menu: flat single colour")
-        }
-        static var styleGradientOn: String {
-            NSLocalizedString("watch.style_gradient_on", value: "Gradient", comment: "Gradient menu: two-colour blend")
         }
         static var styleBreathingOff: String {
             NSLocalizedString("watch.style_breathing_off", value: "Off", comment: "Breathing speed: none")

@@ -23,9 +23,14 @@ import SwiftUI
 // The language page reuses `WatchLanguageView` (which also handles rebuilding `LocalizedWatchRoot`),
 // rather than duplicating it here.
 
-// MARK: - Appearance (color + gradient + breathing light)
+// MARK: - Appearance (color + breathing light)
 
-/// Appearance page: palette + gradient + breathing light speed.
+/// Appearance page: color + breathing light speed.
+///
+/// ★ Ninth revision, 2026-10-16: **the gradient is gone** (user: "remove the gradient"), so this page lost a row.
+/// The remaining "color" now has a much clearer scope — it's **the color of the eye on the home screen**
+/// (along with the waveform while recording, the side menu icons, and the recording timer line). The user's words:
+/// "the color setting in the watch is the color of the eye bot".
 ///
 /// ★ Fifth revision, 2026-10-15: the breathing light **merged in** (user: "move the breathing light speed from the top right into
 /// the top-left menu"). All three answer "what does the ring look like"; splitting them across two corner badges only makes users
@@ -52,14 +57,12 @@ struct WatchColorStyleView: View {
                         Button {
                             store.style.palette = palette
                         } label: {
+                            // ★ Ninth revision: the swatch became a **solid** dot (it used to be a two-tone vertical linear gradient).
+                            // For one, the "gradient" dimension has been removed (see `WatchRingStyle`);
+                            // for another, the question this swatch answers got simpler —
+                            // "if you pick this, what color is the home screen's eye" — one color says it all.
                             Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: palette.colors,
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
+                                .fill(palette.solid)
                                 .frame(width: 26, height: 26)
                                 .overlay(
                                     Circle().strokeBorder(
@@ -73,12 +76,9 @@ struct WatchColorStyleView: View {
                     }
                 }
 
-                // Gradient. Two capsules, same set as the breathing-light row.
-                pillRow([false, true].map { on in
-                    (label: on ? L10n.Watch.styleGradientOn : L10n.Watch.styleGradientOff,
-                     selected: store.style.gradient == on,
-                     action: { store.style.gradient = on })
-                })
+                // ★ Ninth revision: the "Gradient" row (the solid / gradient capsule pair) is deleted entirely —
+                // user: "remove the gradient". The space it held now goes to the breathing light, and the page reads cleaner:
+                // a page with just two things left: "which color" and "how fast the breathing light".
 
                 // ★ Breathing light speed. **That small heading is a must**: `off/slow/medium/fast` on its own
                 // can't say what it controls (the gradient row's "solid/gradient" speaks for itself,
@@ -101,9 +101,10 @@ struct WatchColorStyleView: View {
 
     /// A row of equal-width capsule selectors.
     ///
-    /// Extracted because the gradient and breathing light rows **must look exactly identical** — on the watch face, two rows of
-    /// selection controls differing in the slightest (corner radius, spacing, selected background) read as two
-    /// different controls, and users will assume their behavior differs too.
+    /// ★ After the ninth revision its only caller is the **breathing light** (the gradient's caller was deleted).
+    /// It wasn't inlined away because this capsule row's shape (equal width, rounded, theme-color fill when selected)
+    /// is the sole exemplar of the "selector" concept on this page; keeping it as a named component
+    /// is easier to recognize than kneading it into `body`.
     private func pillRow(
         _ options: [(label: String, selected: Bool, action: () -> Void)]
     ) -> some View {

@@ -15,6 +15,26 @@ struct PendingClip: Identifiable {
     var displayTitle: String { RecordingName.displayTitle(for: name) }
 }
 
+/// The live level the waveform needs while recording.
+///
+/// ★ added in the 2026-10-16 ninth revision (user: "when recording starts it should be a waveform like the heart rate").
+///
+/// ## Why not two separate values
+/// It could have been split into `level: Float` + `tick: Int` as two `@Published`s, but then every tick
+/// would fire two rounds of object changes. Combining them into one `Equatable` struct means the view side needs just one
+/// `onChange(of: meter)`.
+///
+/// ## ⚠️ `tick` isn't superfluous
+/// **When quiet, `level` is always 0, so `onChange(of: level)` never fires at all** —
+/// and the waveform would freeze there, killing the "heartbeat". With a monotonically increasing `tick`, the waveform advances
+/// one slot per tick and keeps moving even when quiet.
+struct WatchAudioMeter: Equatable {
+    /// The instantaneous level normalised to 0...1.
+    var level: Float = 0
+    /// A monotonically increasing sample index. See the block above — its only reason to exist is so that "something changes" even when quiet.
+    var tick: Int = 0
+}
+
 /// Wrist recorder. AAC-in-M4A at 24 kHz mono / 48 kbps — roughly 21 MB/hour,
 /// which is the balance the Ultra prototype settled on between speech clarity
 /// and multi-hour sessions.
@@ -28,6 +48,9 @@ final class WatchRecorderModel: NSObject, ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var currentBytes: Int64 = 0
+    /// The live level while recording, for the home screen's waveform. **It only changes while recording** —
+    /// it's zeroed on stop, so the idle state doesn't push the view to redraw a dozen times a second.
+    @Published private(set) var meter = WatchAudioMeter()
     @Published private(set) var pending: [PendingClip] = []
     @Published var errorMessage: String?
 
@@ -42,6 +65,19 @@ final class WatchRecorderModel: NSObject, ObservableObject {
     /// be free, frequent enough that the phone can call the state stale after
     /// three missed beats and still be talking about seconds, not minutes.
     private static let heartbeatInterval: TimeInterval = 10
+
+    /// The level meter's sampling interval — 12.5Hz.
+    ///
+    /// ★ 2026-10-16 revision nine: this meter used to tick at **1 second** (just to refresh the timer). A 1-second refresh rate
+    /// can't draw a waveform: the waveform would only move one slot per tick, looking like a slideshow rather than sound.
+    ///
+    /// ⚠️ 12.5Hz is a considered trade-off: faster (30Hz) is indistinguishable to the eye on a 40mm watch, yet more than
+    /// doubles the redraw cost; slower starts to feel juddery, "jumping a slot at a time".
+    private static let meterInterval: TimeInterval = 0.08
+
+    /// The reciprocal of `meterInterval`. Used to pick the "once a second" part of the work (timer, byte count)
+    /// out of the 12.5Hz tick.
+    private static let meterTicksPerSecond = 12
 
     /// Felt, not heard. `.start` / `.stop` are the workout-style haptics, and
     /// those drive the speaker as well as the Taptic Engine — an audible beep
@@ -142,10 +178,14 @@ final class WatchRecorderModel: NSObject, ObservableObject {
                 AVEncoderBitRateKey: 48_000,
                 AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
             ])
+            // ★ 2026-10-16 revision nine: enable the level meter. Left off, `averagePower` always returns -160,
+            //   the home screen's waveform becomes a dead line — when its one job is exactly to prove "it's recording".
+            newRecorder.isMeteringEnabled = true
             guard newRecorder.record() else { throw RecorderError.couldNotStart }
             recorder = newRecorder
             elapsed = 0
             currentBytes = 0
+            meter = WatchAudioMeter()
             isRecording = true
             startedAt = Date()
             WKInterfaceDevice.current().play(Self.confirmation)
@@ -166,6 +206,9 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         timer?.invalidate()
         timer = nil
         isRecording = false
+        // Zero it rather than leave the last slot: after stopping, the home screen must switch back to the eyes immediately,
+        // and keeping a level value would make the waveform flash once before it disappears.
+        meter = WatchAudioMeter()
         startedAt = nil
         try? AVAudioSession.sharedInstance().setActive(false)
         WKInterfaceDevice.current().play(Self.confirmation)
@@ -189,9 +232,19 @@ final class WatchRecorderModel: NSObject, ObservableObject {
 
     private func startTimer() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        // ⚠️ This counter is **for the closure**: the tick rate is 12.5Hz, but the timer and byte count
+        //    only need to be once a second (`size(of:)` does a stat on the file, and running it 12 times for nothing is wasteful,
+        //    and the displayed granularity is seconds anyway).
+        var ticks = 0
+        timer = Timer.scheduledTimer(
+            withTimeInterval: Self.meterInterval,
+            repeats: true
+        ) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let recorder = self.recorder else { return }
+                ticks += 1
+                self.sampleMeter(recorder, tick: ticks)
+                guard ticks % Self.meterTicksPerSecond == 0 else { return }
                 self.elapsed = recorder.currentTime
                 self.currentBytes = Self.size(of: recorder.url)
                 if Date().timeIntervalSince(self.lastPush) >= Self.heartbeatInterval {
@@ -199,6 +252,27 @@ final class WatchRecorderModel: NSObject, ObservableObject {
                 }
             }
         }
+    }
+
+    /// Read the level once and write it into `meter`.
+    ///
+    /// ## Why dBFS is clamped at -50
+    /// `averagePower` gives **dBFS** (0 = full scale, the more negative the quieter). On the watch, talking softly
+    /// from tens of centimetres away lands around -50dB, while a quiet room's noise floor is below -65dB.
+    /// Putting the floor at -50 keeps the noise floor from drawing any wave — otherwise the line would jitter constantly and the user would think
+    /// the microphone is picking something up.
+    ///
+    /// ## Why it rises fast and falls slow
+    /// The first syllable of speech must shoot up **immediately** (or the user will suspect nothing was recorded), but if it
+    /// fell back within 80ms a single syllable would be torn into several fragments of noise. So the rise follows directly, and the fall slides
+    /// at a fixed speed — 0.14 per slot, about 0.6 seconds to slide from full scale back to the floor.
+    private func sampleMeter(_ recorder: AVAudioRecorder, tick: Int) {
+        recorder.updateMeters()
+        let db = recorder.averagePower(forChannel: 0)
+        let floorDb: Float = -50
+        let raw = max(0, min(1, (db - floorDb) / -floorDb))
+        let next = raw > meter.level ? raw : max(raw, meter.level - 0.14)
+        meter = WatchAudioMeter(level: next, tick: tick)
     }
 
     private func fail(_ error: Error) {

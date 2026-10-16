@@ -11,38 +11,35 @@ import SwiftUI
 // The little robot: **hold it for 2 seconds** to start, and a tap while recording stops.
 //
 // ─────────────────────────────────────────────────────────────────────────
-// ★★ 2026-10-16 revision eight (user feedback on real hardware): "no green, just make the frame two eyes"
+// ## How this face is put together (the conclusion after three revisions)
 //
-// The revision-seven version had a **rounded-square face plate** (`RoundedRectangle` filled with `style.centerFill`),
-// with the two eyes layered in the middle of the plate. On real hardware it was immediately wrong: that plate followed the palette chosen on the "Appearance" page,
-// and the default palette (the Health app's three colors) produced a colored square framing the two eyes --
-// the user's exact words were "no green, just make the frame two eyes."
+// ★ Revision eight: removed the **rounded-square plate**. The user's exact words were "no green, just make the frame two eyes"
+// -- with that plate it was a colored square framing the eyes, more like an app icon than a face.
+// Grok backs this up too: their robot is **two white bars on a black background**, and the basic structure is
+// "simple geometric shapes + a pair of expressive eyes" (their own words in the official design write-up), with no face frame.
 //
-// So revision eight did a piece of **subtraction**:
-//   · **Remove the plate entirely**, leaving only the two eyes. Grok's robot is, after all, two white bars on a black background
-//     with no face frame; a frame actually makes it look like an app icon.
-//   · **From now on this takes no color from the palette at all** -- the eyes, the charge ring and the recording glow are all white.
-//     The `style` parameter was therefore **deleted outright**, not forgotten.
-//
-// ⚠️ This is a **deliberate reversal**: revision seven specifically wrote "the face's color follows `WatchRingStyle`,
-//    and after a color change the home screen must update immediately." After seeing the actual result, what the user wanted was no color --
-//    the palette still governs the two side menus' icons and the recording timer line, it just no longer governs this face.
-//    Do not "helpfully" wire the color back in.
+// ★ Revision nine: **color comes back to the eyes, but only halfway** -- the value still comes from the palette chosen on the "Appearance" page,
+// but only as a **solid color** (`palette.solid`), no more gradient (user: "the color set in the watch
+// should be the color of the eye bot, drop the gradient"). So this now takes a `tint: Color`,
+// not a whole `WatchRingStyle`: this face needs only a color, and handing it a whole style struct
+// would turn "will it actually use the gradient / breathing light" into a question to re-confirm every time.
 //
 // ─────────────────────────────────────────────────────────────────────────
 // ## Blinking is the whole point of this face
 // A motionless eye is no different from a dot. What makes it "alive" is these few things:
 //
-//   · **Slow natural blinking** -- close fast, pause for a beat, open a little more slowly, then **rest for several seconds**.
+//   · **Occasionally blink once** -- close fast, pause for a beat, open a little more slowly, then **rest for a long time**.
 //     Human blinks are never a constant-rate open and close; a constant rate immediately reads as mechanical (for the phase-by-phase description see the
 //     end of the file, `BlinkPhase`). Each cycle also packs in one "double blink," the most common rhythm in real people.
-//     ⚠️ Revision eight **halved the speed** of the whole rhythm: revision seven's cycle was 4.6 seconds and it blinked twice every time,
-//        which on real hardware read as "it is blinking constantly." Now a cycle is about 8.1 seconds (see `BlinkPhase` for details).
+//     ⚠️ Revision nine slowed the rhythm **down again by more than double**: after seeing revision eight on real hardware the user said
+//        "the eyes should not keep blinking," but immediately added "**not no blinking**" --
+//        what they want is "blink calmly once in a while," not "dead-fish eyes." The new cycle is about **19.1 seconds**
+//        (revision seven 4.63s → revision eight 8.12s → revision nine 19.12s; the ledger is in `BlinkPhase`).
 //   · **Breathing** -- the whole pair of eyes slowly inflates and deflates (plus or minus 1.8%, once every 3.6 seconds). The amplitude must be small:
 //     any larger and it looks like it is pulsing; it should be small enough that "you can't say what is moving, but it is alive."
-//     it too was slowed down in revision eight (it used to be 2.6 seconds).
-//   · **Listening while recording** -- the eyes open one size larger, the two eyes drift out of phase, plus a layer of white glow.
-//     There is no room on the watch face for a "recording" line; these are that line.
+//   · **Swap in a waveform while recording** (`WatchVoiceWave`) -- user: "when recording starts it should be
+//     a waveform just like heart rate." So the recording state is **not a variant of the eyes**, it is another form:
+//     the peak height is the microphone's real level, and when quiet a "thump-tick" base shape keeps a heartbeat-like rhythm.
 //   · **The charge ring while holding** -- while the finger stays down, a 2-second progress arc runs around the outside of the eyes. Without it,
 //     the user does not know how long to press, nor whether that press was even picked up.
 //
@@ -63,10 +60,20 @@ import SwiftUI
 struct WatchBotFace: View {
     /// The face's **nominal** side length (excluding the charge ring outside).
     ///
-    /// ⚠️ After revision eight it is no longer the "plate side length" (the plate is gone), but the **bounding-size reference**
-    /// for the eye group -- all proportions are still taken from it, so changing watches needs no recalculation.
+    /// ⚠️ After revision eight it is no longer the "plate side length" (the plate is gone), but the **bounding-size
+    /// reference** for the eyes/waveform -- all proportions are still taken from it, so changing watches needs no recalculation.
     let size: CGFloat
     let isRecording: Bool
+    /// The color of the eyes (and of the waveform while recording).
+    ///
+    /// The source is the **solid color** from the palette chosen on the "Appearance" page (`WatchRingStyle.palette.solid`).
+    /// ⚠️ Pass only a color, not a whole `WatchRingStyle`: see the "revision nine" paragraph at the top of the file.
+    let tint: Color
+    /// The live level while recording, forwarded to `WatchVoiceWave`.
+    ///
+    /// ⚠️ The idle state does not use it -- it is passed all the way to `WatchVoiceWave`, and that view only exists
+    /// in the recording state, so level changes while idle do not drag this face into redrawing.
+    let meter: WatchAudioMeter
     /// Number of times tapped while idle. The home screen adds 1, and this does one "bounce."
     ///
     /// ⚠️ Why not just expose a `poke()` method for the home screen to call: `WatchBotFace` is a value type,
@@ -95,8 +102,6 @@ struct WatchBotFace: View {
     @State private var breathe = false
     /// The bounce amount when poked. 0 = original state.
     @State private var poke: CGFloat = 0
-    /// Used for the two eyes' drift while recording.
-    @State private var sway = false
     /// Hold progress 0...1.
     @State private var holdProgress: CGFloat = 0
     /// Whether a finger is currently pressed on the eyes. Driven by `LongPressGesture.updating`.
@@ -133,8 +138,6 @@ struct WatchBotFace: View {
     private var eyeHeight: CGFloat { size * 0.375 }
     /// The gap **between** the two eyes (not the centre-to-centre distance).
     private var eyeGap: CGFloat { size * 0.235 }
-    /// The amplitude of the eyes' drift while recording.
-    private var swayAmount: CGFloat { size * 0.022 }
 
     var body: some View {
         // Use a `Button` instead of a bare view: `handGestureShortcut` (Double Tap)
@@ -146,15 +149,16 @@ struct WatchBotFace: View {
         Button(action: handlePrimaryAction) {
             ZStack {
                 holdRing
-                eyes
+                figure
                     .scaleEffect(figureScale)
                     .animation(.spring(response: 0.34, dampingFraction: 0.62), value: isRecording)
             }
             // Leave room outside for the charge ring.
             .frame(width: size * 1.14, height: size * 1.14)
             // ★ Added in revision eight, **not optional**: with the plate gone, `Button` by default treats only the drawn
-            //   shape as the hit area, i.e. those two capsules. A 2-second hold needs a steady press, and with the hit area
-            //   shrunk like that the user feels "I clearly pressed it but nothing happened."
+            //   shape as the hit area, i.e. those two capsules (or that wave while recording).
+            //   A 2-second hold needs a steady press, and with the hit area shrunk like that the user feels
+            //   "I clearly pressed it but nothing happened."
             //   Add a square hit area that makes the whole `frame` tappable.
             .contentShape(Rectangle())
         }
@@ -193,15 +197,14 @@ struct WatchBotFace: View {
             }
         }
         .onChange(of: isRecording) { _, recording in
-            // While recording, park the breathing at the "flat" position: the eyes are already enlarged + drifting,
-            // and stacking another slow inflate-deflate on top makes it look like it is shaking.
+            // While recording, park the breathing at the "flat" position: that waveform has its own rhythm (a heartbeat),
+            // and stacking another slow inflate-deflate makes two cycles fight each other.
+            //
+            // ⚠️ Before revision nine there was also a `sway` here (the two eyes drifting out of phase). The recording state
+            //    is now swapped entirely for a waveform, the eyes are simply absent, and that state was deleted along with it.
             if recording {
                 withAnimation(.linear(duration: 0.25)) { breathe = false }
-                withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
-                    sway = true
-                }
             } else {
-                sway = false
                 startIdleMotion()
             }
         }
@@ -209,7 +212,6 @@ struct WatchBotFace: View {
             if reduced {
                 // Dimmed: stop everything at the rest position. See the paragraph at the top of the file.
                 withAnimation(.linear(duration: 0.2)) { breathe = false }
-                sway = false
             } else if !isRecording {
                 startIdleMotion()
             }
@@ -276,10 +278,13 @@ struct WatchBotFace: View {
     /// ⚠️ Revision eight pulled the breathing amplitude in to plus or minus 1.8% (from plus or minus 3.5%). With the cycle slowed, the same amplitude
     ///    covers less distance per second but lingers longer, so it actually looks more "swollen"; adjusting both together
     ///    is what keeps it "slow and steady," while slowing only the cycle turns it into "slowly swelling."
+    ///
+    /// ⚠️ The recording state is 1 (no shrink, no grow). Revision seven's version grew another 1.06 while recording, which was for
+    ///    "open the eyes one size larger"; after revision nine swapped the recording state for a waveform, that wave's height **is the level itself**,
+    ///    and multiplying by another factor would make "the amplitude you see" and "the real volume" stop being the same thing.
     private var figureScale: CGFloat {
         var s: CGFloat = (dimmed || isRecording) ? 1 : (breathe ? 1.028 : 0.992)
         s *= 1 + poke * 0.05
-        if isRecording { s *= 1.06 }
         return s
     }
 
@@ -287,7 +292,7 @@ struct WatchBotFace: View {
     ///
     /// Why this feedback: if a tap does nothing at all, the user assumes "maybe I have to hold it,"
     /// and starts trying random things; a bounce both says "I got it" and, because it is **clearly not** the recording look
-    /// (recording enlarges + glows + changes the eyes), will not be mistaken for having started recording.
+    /// (recording swaps in a whole bouncing waveform) and will not be mistaken for having already started recording.
     private func pokeOnce() {
         guard !isRecording, !dimmed else { return }
         withAnimation(.spring(response: 0.22, dampingFraction: 0.5)) { poke = 1 }
@@ -297,29 +302,35 @@ struct WatchBotFace: View {
         }
     }
 
-    // MARK: - The eyes
-    //
-    // ⚠️ Before revision eight there was still a `face` layer here (rounded-square plate + `overlay` eyes).
-    //    It was deleted outright -- for the reason see the "revision eight" paragraph at the top of the file.
+    // MARK: - The face
 
-    /// The two eyes. While recording they drift up and down out of phase -- that slight offset is where the "listening" look comes from;
-    /// if both eyes moved in phase it would look like the whole face is nodding.
+    /// **Which form this face is currently in**.
+    ///
+    /// Only two branches, and they are mutually exclusive -- this is exactly Grok's approach of "one figure, several states,
+    /// no separate indicator light for the state": idle is eyes, recording is a waveform.
+    /// There is nowhere on the watch face to put another "recording" line; this switch is itself that line.
+    @ViewBuilder
+    private var figure: some View {
+        if isRecording {
+            WatchVoiceWave(meter: meter, size: size, tint: tint)
+        } else {
+            eyes
+        }
+    }
+
+    /// The two eyes.
+    ///
+    /// ⚠️ Revision eight deleted the "out-of-phase drift while recording" scheme (back then the recording state was still a variant of the eyes).
+    ///    Revision nine swapped the whole recording state for a waveform, the eyes are simply absent, and the `sway` state was deleted along with it
+    ///    -- not forgotten.
     private var eyes: some View {
         HStack(spacing: eyeGap) {
             eye
-                .offset(y: isRecording ? (sway ? -swayAmount : swayAmount) : 0)
             eye
-                .offset(y: isRecording ? (sway ? swayAmount : -swayAmount) : 0)
         }
         // As a group the eyes sit a little above the geometric center. Exactly centered looks "head down" --
         // the eyes on a human face sit above the midline anyway.
         .offset(y: -size * 0.03)
-        // The white glow while recording. The most space-efficient way to say "working," and it takes no color --
-        // after revision eight this face is purely monochrome (see the top of the file).
-        .shadow(
-            color: isRecording ? Color.white.opacity(0.65) : .clear,
-            radius: isRecording ? 9 : 0
-        )
     }
 
     /// One eye.
@@ -333,21 +344,19 @@ struct WatchBotFace: View {
             eyeShape
         } else {
             eyeShape
-                // Natural blinking. For the rhythm see `BlinkPhase` at the end of the file.
+                // Occasionally blink once. For the rhythm see `BlinkPhase` at the end of the file.
                 .phaseAnimator(BlinkPhase.allCases) { view, phase in
                     view.scaleEffect(y: phase.openness, anchor: .center)
                 } animation: { phase in
                     phase.animation
                 }
-                // One size larger while recording.
-                .scaleEffect(y: isRecording ? 1.12 : 1)
         }
     }
 
-    /// A white capsule. **Takes no color from the palette** -- see the "revision eight" paragraph at the top of the file.
+    /// Uses the color chosen on the "Appearance" page, **solid** (revision nine dropped the gradient).
     private var eyeShape: some View {
         Capsule()
-            .fill(Color.white)
+            .fill(tint)
             .frame(width: eyeWidth, height: eyeHeight)
     }
 
@@ -356,16 +365,16 @@ struct WatchBotFace: View {
     /// The 2-second progress arc during a hold. **It appears only while pressed** (`holdProgress > 0`),
     /// and vanishes the instant you let go -- it is one-time feedback, not permanent decoration.
     ///
-    /// ⚠️ After revision eight it is **white** (it used to take the palette's `solid`). This ring is system-level
-    ///    progress feedback, unrelated to "which theme color the user picked"; and with the plate already gone, a colored arc
-    ///    hanging all alone outside the eyes would be more jarring.
+    /// ⚠️ Revision eight briefly made it white (that was when the whole face was colorless). After revision nine brought color back to the eyes,
+    ///    this ring follows `tint` too -- so the whole face has just one color,
+    ///    rather than two systems, "colored eyes plus a white arc."
     @ViewBuilder
     private var holdRing: some View {
         if holdProgress > 0.002 {
             Circle()
                 .trim(from: 0, to: holdProgress)
                 .stroke(
-                    Color.white.opacity(0.9),
+                    tint.opacity(0.9),
                     style: StrokeStyle(lineWidth: max(3, size * 0.035), lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
@@ -429,21 +438,31 @@ struct PrimaryHandGesture: ViewModifier {
 // the **fixed** structure of "occasionally blinking twice" -- that is what actually characterizes a real person's blink rhythm.
 //
 // ─────────────────────────────────────────────────────────────────────────
-// ★★ 2026-10-16 revision eight: halve the speed of the whole cycle (user feedback on real hardware: "the blinking is too fast now, slow the rhythm down")
+// ## Three versions, three slow-downs (this phase list was changed twice; the ledger stays here)
 //
-// Revision seven's cycle was **4.63 seconds**, and it **blinked twice in every round** -- meaning two open-close pairs every 4.6 seconds.
-// Watching it for a few seconds on real hardware reads as "it is blinking constantly," not "it is alive."
+// | version | cycle | user feedback |
+// |---|---|---|
+// | revision seven | 4.63s | first version |
+// | revision eight | 8.12s | "the blinking is too fast, slow the rhythm down" |
+// | **revision nine** | **19.12s** | "the eyes should not keep blinking"... "**not no blinking**" |
 //
-// Revision eight pulled three things at once:
-//   · `rest` + `settle` (the two hold segments) from 2.3 + 1.6 to **3.2 + 3.8**;
-//   · a single open-close from 85/130ms to **140/220ms** (a real human eye closing takes only
-//     100~150ms -- revision seven's version was a "flash," not a "close");
-//   · the gap between the double blinks from 260ms to 340ms.
-// The new cycle is ≈ **8.12 seconds**, about double the old one.
+// Revision seven blinked twice in every round, meaning two open-close pairs every 4.6 seconds -- watching it for a few seconds reads as
+// "it is blinking constantly," not "it is alive." Revision eight slowed the open-close itself too (85/130ms → 140/220ms,
+// a real human eye closing takes about 100~150ms; revision seven's version was really a "flash," not a "close").
+//
+// That sentence in revision nine **hinges on the second half**: what the user wants is "blink calmly once in a while," **not to delete blinking**.
+// So the structure did not move a single cell (still "one double blink inserted between the singles"), only the two rest segments were stretched proportionally:
+// `rest` 3.2 → **7.0**, `settle` 3.8 → **11.0**. There is still one
+// "double blink" per cycle -- which is precisely the evidence of "not dead-fish eyes."
 //
 // ⚠️ Stretching only the resting and not the open-close gives a "frozen still → snap" look -- because the relative rhythm
 //    is unchanged. To be "slow" you have to slow everything **proportionally**, which is the payoff of describing it phase by phase in the first place:
 //    every number is out in the open, so you can change only the ones that need changing.
+//
+// ⚠️ Stop pushing it further. Revision seven to eight was ×1.75, revision eight to nine was ×2.35 -- doubling it again gets close to
+//    once every 30 seconds, which is no longer "blinking occasionally" but "looks broken." If it really still feels too noisy,
+//    what should change is **the double blink** (drop the three phases `pause`/`shutAgain`/`openAgain`),
+//    not stretching the rest any further.
 private enum BlinkPhase: CaseIterable {
     /// Open, resting.
     case rest
@@ -475,14 +494,14 @@ private enum BlinkPhase: CaseIterable {
     /// Each phase's duration = the duration of that phase's animation.
     var animation: Animation {
         switch self {
-        case .rest:      return .linear(duration: 3.2)
+        case .rest:      return .linear(duration: 7.0)
         case .shut:      return .easeIn(duration: 0.14)
         case .hold:      return .linear(duration: 0.09)
         case .open:      return .easeOut(duration: 0.22)
         case .pause:     return .linear(duration: 0.34)
         case .shutAgain: return .easeIn(duration: 0.13)
         case .openAgain: return .easeOut(duration: 0.20)
-        case .settle:    return .linear(duration: 3.8)
+        case .settle:    return .linear(duration: 11.0)
         }
     }
 }

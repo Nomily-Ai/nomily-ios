@@ -39,6 +39,27 @@ import WatchKit
 /// * **No green / just make the frame two eyes** -- the Bot's rounded-square plate is deleted outright, leaving only the two
 ///   eyes; and this face **no longer takes any color from the palette**, it's all white (reasons at the top of `WatchBotFace`).
 ///
+/// ─────────────────────────────────────────────────────────────────────────
+/// ★★ 2026-10-16 revision nine (user feedback on real hardware):
+///
+/// > `inside the watch the eyes shouldn't keep blinking; when recording starts it should be a waveform just like heart rate,
+/// >  not "never blink", you can go look at grok bot and their expression library,
+/// >  and the color in the watch settings should be the color of the eye bot, drop the gradient`
+///
+/// * **The eyes shouldn't keep blinking** (but "**not never blink**") -- the `BlinkPhase` cycle stretches from
+///   8.12 seconds out to about **19.12 seconds**. The structure is untouched (still "one rapid double-blink between two rests"),
+///   only the two rest periods are stretched proportionally -- we want "a calm occasional blink", not "a dead-fish stare".
+/// * **While recording swap in a waveform** (`WatchVoiceWave`): the peak height follows the microphone's **real level**
+///   (`isMeteringEnabled`, only turned on in `WatchRecorderModel` this round; the sample rate
+///   goes 1Hz → **12.5Hz**), and while quiet a "boom-tick" base keeps up a heartbeat-like rhythm.
+///   The recording state is no longer "a variant of the eyes" but another form altogether -- which is exactly following Grok's
+///   "don't give the state its own indicator light; let the character's motion express it all".
+/// * **Color comes back to the eyes** -- but only **a single solid color** (`WatchRingStyle.tint`).
+///   Revision eight's wholesale removal of color removed the plate and the gradient, not color itself.
+/// * **Drop the gradient** -- the `gradient` dimension in `WatchRingStyle` is deleted entirely; the appearance page loses a row;
+///   the swatches become solid-color dots; and the menu icons go from "cycling through the palette" to the same color
+///   (cycling gave the three-color palette's 2nd entry a neon green -- one of the sources of last round's "green" complaint).
+///
 /// Three things change at once:
 ///
 /// * **The ring button in the middle becomes a Bot face** (`WatchBotFace`). The ring's "one tap starts recording"
@@ -201,14 +222,19 @@ struct WatchRecorderView: View {
             WatchBotFace(
                 size: Self.dialSide * Self.botFraction,
                 isRecording: model.isRecording,
+                tint: styleStore.style.tint,
+                meter: model.meter,
                 pokeTick: pokeTick,
                 handGestureEnabled: prefs.pinchToRecord,
                 onTap: handleTap,
                 onHold: beginRecordingByHold,
                 onToggle: handleToggle
             )
-            // ⚠️ After revision eight there is **no** `style:` parameter any more -- this face no longer takes colors from the palette
-            //    (user: "no green"). See the passage at the top of `WatchBotFace`; don't wire it back in.
+            // ⚠️ Revision nine wired color back in, but **only a single solid color**: `tint` is the color picked on the "appearance"
+            //    page (user: "the color in the watch settings should be the color of the eye bot,
+            //    drop the gradient"). Revision eight removed it wholesale at one point -- what it removed was **the plate and the gradient**,
+            //    not color itself; don't pass the whole `style` struct in again, that would turn
+            //    "does this face use the breathing light" into a question you have to re-confirm every time.
 
             caption
 
@@ -232,7 +258,7 @@ struct WatchRecorderView: View {
                 Text(WatchFormat.bytes(model.currentBytes))
             }
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(styleStore.style.palette.solid)
+            .foregroundStyle(styleStore.style.tint)
             .lineLimit(1)
             .minimumScaleFactor(0.7)
         } else {
@@ -293,11 +319,11 @@ struct WatchRecorderView: View {
                         .multilineTextAlignment(.center)
                 }
             } else {
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                ForEach(items) { item in
                     NavigationLink {
                         item.destination
                     } label: {
-                        menuTile(item, tintIndex: index)
+                        menuTile(item)
                     }
                     .buttonStyle(.plain)
                 }
@@ -311,13 +337,18 @@ struct WatchRecorderView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// A menu item. The icon takes its color from the palette (cycling) -- so the two side menus are themselves
-    /// part of the current color scheme rather than identical gray blocks.
-    private func menuTile(_ item: WatchHomeMenu, tintIndex: Int) -> some View {
+    /// A menu item.
+    ///
+    /// ★ Revision nine: the icon color goes from "cycling through the palette" to **all using the same color**
+    /// (`WatchRingStyle.tint`). The reason is that this round fixed "one theme = one color" solid
+    /// (see the top of `WatchRingStyle`) -- with cycling, the three-color palette (`activity`) would give
+    /// the 2nd menu item that neon green, so under one theme the face is one color while
+    /// the menu is another. That's one of the sources of last round's "green" complaint.
+    private func menuTile(_ item: WatchHomeMenu) -> some View {
         HStack(spacing: 8) {
             Image(systemName: item.symbol)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(menuTint(tintIndex))
+                .foregroundStyle(styleStore.style.tint)
                 .frame(width: 28, height: 28)
                 .background(Circle().fill(Color.white.opacity(0.13)))
             Text(item.title)
@@ -366,13 +397,6 @@ struct WatchRecorderView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(L10n.Watch.quickMenuAdd)
-    }
-
-    /// Icon color for the `index`-th menu item. Cycles through the palette without going out of bounds.
-    private func menuTint(_ index: Int) -> Color {
-        let cs = styleStore.style.palette.colors
-        guard !cs.isEmpty else { return Color(white: 0.75) }
-        return cs[index % cs.count]
     }
 
     // MARK: - Horizontal paging
@@ -476,7 +500,7 @@ struct WatchRecorderView: View {
                         .font(.system(size: 9, weight: .bold))
                 }
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(styleStore.style.palette.solid)
+                .foregroundStyle(styleStore.style.tint)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
                 .background(Capsule().fill(Color.white.opacity(0.12)))

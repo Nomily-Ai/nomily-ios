@@ -615,12 +615,9 @@
 "watch.sending" = "正在发送…";
 "watch.waiting" = "尚未发送";
 "watch.style_appearance" = "外观";
-"watch.style_gradient" = "渐变";
 "watch.style_breathing" = "呼吸灯";
 "watch.style_reset" = "恢复默认";
 "watch.menu_settings" = "设置";
-"watch.style_gradient_off" = "纯色";
-"watch.style_gradient_on" = "渐变";
 "watch.style_breathing_off" = "关";
 "watch.style_breathing_slow" = "慢";
 "watch.style_breathing_medium" = "中";

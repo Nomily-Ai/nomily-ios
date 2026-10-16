@@ -92,62 +92,53 @@ enum WatchBreathing: String, CaseIterable, Identifiable, Codable {
 }
 
 /// A persistable appearance.
+///
+/// ★ Ninth revision, 2026-10-16: **the "gradient" dimension was removed** (user: "remove the gradient").
+///
+/// The original three dimensions were colour / gradient / breathing light, where "gradient" governed "whether the centre disc is filled with a solid colour or
+/// a two-colour linear gradient". It was deleted entirely because there's hardly anything left for it to govern:
+///   · the home screen face lost its base plate in the eighth revision, and in the ninth the eyes take only a **solid colour**;
+///   · nothing in any UI uses `WatchRingControl`'s ring now (see the top of that file);
+///   · the only visible use left is the small preview on the appearance page — not worth keeping a switch for one preview.
+///
+/// ⚠️ Deleting a property **does not** make old saves undecodable: Swift's synthesised `init(from:)` ignores
+///    extra keys in the JSON, so old data holding `"gradient": true` still reads the other two items fine.
+///    That's exactly why it's safe to delete outright here instead of leaving a `deprecated` shell.
 struct WatchRingStyle: Equatable, Codable {
     /// Defaults to the Health ring's three colours (see `WatchRingPalette.activity`).
     var palette: WatchRingPalette = .activity
-    /// Whether the center uses a gradient (off = solid color).
-    var gradient: Bool = true
     var breathing: WatchBreathing = .off
 
     static let `default` = WatchRingStyle()
 
+    /// **The one** colour of this theme.
+    ///
+    /// ★ After the ninth revision "a theme has exactly one colour" is a settled conclusion, no longer "pick an endpoint from three colours":
+    /// it is used for the home screen eyes, the waveform while recording, the side-menu icons, and the recording timer line.
+    /// Funnelling it into this one property means there can no longer be cases of "one place uses `colors[0]`, another uses
+    /// `colors[1]`", where one theme has several colours (that drift is exactly why in the last round
+    /// the user saw a green menu icon while the face was another colour).
+    var tint: Color { palette.solid }
+
     /// Fill of the center disc.
     ///
-    /// The three-colour palette uses only the **first and last colours**: squeezing a three-stop linear gradient into that small centre disc looks muddy,
-    /// and the diagonal magenta→cyan gradient is the clean look "the centre of an activity ring" should have.
-    var centerFill: AnyShapeStyle {
-        let cs = palette.colors
-        let pair = cs.count > 2 ? [cs[0], cs[cs.count - 1]] : cs
-        return gradient
-            ? AnyShapeStyle(
-                LinearGradient(
-                    colors: pair,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            : AnyShapeStyle(palette.solid)
-    }
+    /// ⚠️ It now always equals `tint`. Why it isn't deleted so callers can just use `tint`:
+    ///    both `WatchRingControl` and the appearance-page preview use it with the semantics of "the centre disc",
+    ///    so if the centre ever really gets a different way of being drawn, one place is enough to change.
+    var centerFill: Color { tint }
 
-    /// Ring color while recording. Supplies the `AngularGradient` when gradient is on.
-    var ringColors: [Color] { gradient ? palette.colors : [palette.solid] }
-
-    /// The ring's colour gradient.
+    /// The ring's colour.
     ///
-    /// ⚠️ `WatchRingControl`'s main ring and the colour page's small preview **share this one copy** —
-    /// write it twice and they'll drift; and the subscript out-of-bounds trap is worth guarding exactly once, here.
+    /// ⚠️ What comes back is still an `AngularGradient` rather than a `Color`: the only caller is
+    ///    `.stroke(_:style:)`, and a solid colour would lose the "a touch of opacity at each end" layer of same-hue shading
+    ///    altogether. That isn't a gradient, it's a sense of depth.
     ///
-    /// * Three colours or more (`activity`): spread the three colours around one lap of the ring — that's the activity ring's
-    ///   "three colours readable in one lap" look;
-    /// * Single/double colour: first colour + end colour + each end's own reduced opacity; with a single colour it degrades to
-    ///   "same colour at both ends", equivalent to the original solid look.
-    ///
-    /// Deliberately **not** indexing `ringColors[1]`: with the gradient off the array has one element,
-    /// and the subscript would go straight out of bounds.
+    /// ⚠️ There used to be a branch here for "the three-colour palette spreading three colours around the ring" (that was the activity-ring look).
+    ///    With the gradient removed it's useless — spreading three colours is itself a kind of gradient.
     var ringAngularGradient: AngularGradient {
-        let colors = ringColors
-        if colors.count > 2 {
-            return AngularGradient(
-                colors: colors,
-                center: .center,
-                startAngle: .degrees(-90),
-                endAngle: .degrees(270)
-            )
-        }
-        let from = colors.first ?? palette.solid
-        let to = colors.count > 1 ? colors[1] : from
+        let c = tint
         return AngularGradient(
-            colors: [from.opacity(0.55), from, to, to.opacity(0.75)],
+            colors: [c.opacity(0.55), c, c, c.opacity(0.75)],
             center: .center,
             startAngle: .degrees(-90),
             endAngle: .degrees(270)
