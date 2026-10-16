@@ -226,7 +226,14 @@ struct WatchRecorderView: View {
         } message: { message in
             Text(message)
         }
-        .onAppear { syncShakeDetector() }
+        .onAppear {
+            syncShakeDetector()
+            // ★ Revision eleven: request heart-rate permission here, **not when recording starts**.
+            //   popping the system permission page at that moment would likely interrupt the recording just begun; popping it when the home screen appears,
+            //   the user hasn't started recording yet, so interrupting costs nothing.
+            //   ⚠️ The system only actually shows the page the first time; after that this method can safely be called every time.
+            model.prepareHeartRate()
+        }
         // Stop sampling when leaving this page: keeping the accelerometer on is a big line on the battery bill,
         // and this page only comes to the foreground when you raise your wrist.
         .onDisappear { shake.stop() }
@@ -246,6 +253,12 @@ struct WatchRecorderView: View {
                 isRecording: model.isRecording,
                 tint: styleStore.style.tint,
                 meter: model.meter,
+                // ★ Revision eleven: live heart rate, deciding how fast the waveform moves.
+                bpm: model.heartRate,
+                // ★ Revision eleven: while recording the timer shows right by the wave (user: "with the recording time attached below").
+                elapsedText: model.isRecording
+                    ? WatchFormat.compactDuration(model.elapsed)
+                    : nil,
                 pokeTick: pokeTick,
                 handGestureEnabled: prefs.pinchToRecord,
                 onTap: handleTap,
@@ -266,17 +279,30 @@ struct WatchRecorderView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// The small line below the face. While idle it's a usage hint; while recording it's the timer + byte count.
+    /// The small line below the face. While idle it's a usage hint; while recording it's the **heart rate + byte count**.
     ///
     /// ⚠️ While idle that hint **cannot be dropped**. "Hold for 2 seconds" is an **invisible** interaction --
     /// without the hint, a first-time user just pokes once, finds nothing happens, and gives up.
+    ///
+    /// ★ Revision eleven: **the recording timer moves below the wave** (see `WatchBotFace.elapsedText`),
+    /// so this no longer shows the time, and shows the live heart rate instead.
+    ///
+    /// ⚠️ Why **show** the heart rate at all (the user didn't ask): this round did something
+    ///    that "doesn't count if you can't see it" -- by eye you can't tell "72" from "75" by how fast the wave moves.
+    ///    Without the reading on screen the user can never confirm whether the heart rate is actually working, and will just keep asking.
+    ///    With the number there, one glance says "got a reading / no reading".
+    ///    **When there's no heart rate the whole item disappears** (rather than showing 0), which is itself the clearest failure signal.
     @ViewBuilder
     private var caption: some View {
         if model.isRecording {
             HStack(spacing: 5) {
-                Text(WatchFormat.compactDuration(model.elapsed))
-                    .monospacedDigit()
-                Text("·")
+                if let bpm = model.heartRate {
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("\(Int(bpm.rounded()))")
+                        .monospacedDigit()
+                    Text("·")
+                }
                 Text(WatchFormat.bytes(model.currentBytes))
             }
             .font(.system(size: 12, weight: .semibold))

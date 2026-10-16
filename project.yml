@@ -46,7 +46,7 @@ targets:
         # Must track `nomily_watch`'s build number — watchOS refuses to install
         # a companion whose version doesn't match its host, and an embedded
         # watch app one build ahead is enough to trip it. Bump both or neither.
-        CFBundleVersion: "20"
+        CFBundleVersion: "21"
         # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
         # appropriate when the app's crypto use is exempt from US export
         # documentation requirements:
@@ -161,10 +161,17 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         # Must track the iPhone app's build number — watchOS refuses to install
         # a companion whose version doesn't match its host.
-        CFBundleVersion: "20"
+        CFBundleVersion: "21"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.nomily.app
         NSMicrophoneUsageDescription: Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.
+        # ★ 2026-10-16 revision eleven: while recording the waveform follows the measured heart rate, so it needs to read heart rate.
+        # ⚠️ The copy must make "read-only, not shared" clear: the HealthKit authorisation sheet shows this text to the user verbatim,
+        #    and "why does a voice recorder need to read my heart rate" is the question the user will ask on the spot — the answer has to be in that sentence.
+        NSHealthShareUsageDescription: Nomily AI reads your current heart rate while recording, so the waveform on the watch face beats in time with your own pulse. It never reads any other health data and never leaves your devices.
+        # ⚠️ Only `NSHealthShareUsageDescription` (read) is needed. **`NSHealthUpdateUsageDescription` is not written**
+        #    — this App never writes to Health, and declaring it would only add a write permission to the authorisation sheet,
+        #    and a user seeing "wants to write" would refuse outright.
         # Background audio on watchOS is UIBackgroundModes, same as iOS.
         # WKBackgroundModes is a different key — it names `WKExtendedRuntimeSession`
         # types (workout-processing, self-care, mindfulness, …) and does not
@@ -173,6 +180,19 @@ targets:
         # there risks installd rejecting the bundle outright.
         UIBackgroundModes:
           - audio
+    # ★ 2026-10-16 revision eleven: reading heart rate needs the HealthKit entitlement.
+    #
+    # ⚠️ Added to the **watch target**, not the iPhone: it's the App on the watch that actually reads heart rate,
+    #    and the iPhone side never touches HealthKit once. Requesting it on the iPhone too would only give
+    #    "this voice-recorder App wants to read my health data" one more inexplicable source.
+    #
+    # ⚠️ This changes the capability set of App ID `com.nomily.app.watchkitapp`, so
+    #    `-allowProvisioningUpdates` has to go to the portal, enable HealthKit,
+    #    and re-sign a watchOS provisioning profile. The first build will be slower; when it errors, look at this line first.
+    entitlements:
+      path: Watch/nomily_watch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nomily.app.watchkitapp
@@ -234,7 +254,7 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         # Must match the parent App — when an embedded binary's version numbers differ from the host's, watchOS
         # refuses to install the whole App.
-        CFBundleVersion: "20"
+        CFBundleVersion: "21"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

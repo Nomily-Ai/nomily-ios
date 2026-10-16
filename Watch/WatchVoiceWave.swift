@@ -17,6 +17,27 @@ import SwiftUI
 //   · **The little bumps when it's quiet** (`beat`) are the "heart rate" half: they make sure that **even with no sound you can tell
 //     it's working**, rather than a flat line that looks broken.
 //
+// ─────────────────────────────────────────────────────────────────────────
+// ★★ 2026-10-16 revision 11 (user's words:
+//    "when recording, the rises and falls should overall follow the personal real-time heart rate the watch picks up"):
+//
+// **That "heart rate" is no longer a generic value, but your own heart rate.**
+//
+// The re-9/re-10 table was "ten slots = 0.8 seconds ≈ 75 bpm" — an average adult's resting heart rate,
+// but **not this person's rate right now**. Now we take the watch-measured
+// `bpm` from `WatchHeartRateMonitor` and use it to decide how fast the table runs: each tick advances `bpm / 75` slots.
+//
+// ⚠️ So on this table **a slot is no longer a fixed beat**; it's just a "shape template".
+//    At 60bpm the whole wave is slower, at 150bpm faster — but the **proportions** of "boom-tick" are always the same.
+//    This split is deliberate: shape stays shape (this table), speed stays speed (the measured heart rate).
+//
+// ⚠️ When the heart rate can't be read (no permission / no reading on the watch) it falls back to `restingBPM = 75` —
+//    that is, **it degrades to the re-10 behaviour**. So the worst case here is only "same as before",
+//    never "can't read it, so nothing gets drawn".
+//
+// ℹ️ To get the heart rate to truly "per-second", the only route is starting an `HKWorkoutSession`; for the cost see
+//    the block at the top of `WatchHeartRateMonitor` (it spells out why we didn't take that route).
+//
 // ⚠️ The level is **real** (`AVAudioRecorder.isMeteringEnabled`), not a decorative animation.
 //    It's worth being strict here: a purely random fake waveform keeps bouncing merrily even when the mic picks up no sound at all,
 //    and the user watches this wave precisely to confirm **it's recording**. For that purpose a fake waveform is a liability.
@@ -42,9 +63,23 @@ struct WatchVoiceWave: View {
     let size: CGFloat
     /// The wave's colour. It follows the colour chosen on the "Appearance" page (the same source as the eyes).
     let tint: Color
+    /// The watch-measured heart rate (bpm). `nil` = not read yet, fall back to `restingBPM`.
+    ///
+    /// ★ 2026-10-16 revision eleven (user: "the rises and falls should overall follow your personal real-time heart rate as the watch reads it").
+    /// It does exactly one job: **setting the period of the heartbeat base shape**. The spike height is still the mic's
+    /// real level, and the two don't interfere — see the block at the top of the file.
+    let bpm: Double?
 
     /// The level history inside the scrolling window, with the newest slot on the right.
     @State private var samples: [CGFloat]
+
+    /// How far the heartbeat base shape has travelled. **A fraction**, not an integer index.
+    ///
+    /// ⚠️ This is the key that makes "follows the heart rate" work. It used to advance **a whole slot** per tick,
+    ///    which pinned the period at 10 slots × 80ms = 0.8 seconds = 75 bpm.
+    ///    Now each tick advances `bpm / 75` slots — a heart rate of 60 advances 0.8 slots (slower),
+    ///    150 advances 2 slots (faster). Whole-slot stepping can't do this, because the advance has to be continuous.
+    @State private var beatPhase: Double = 0
 
     /// How many slots fit on one screen. 34 slots ÷ 12.5Hz ≈ 2.7 seconds.
     ///
@@ -52,8 +87,15 @@ struct WatchVoiceWave: View {
     ///    too few and it looks noisy. 34 is the setting where "you can see the rises and falls at a glance, and it really is moving left".
     private static let sampleCount = 34
 
-    /// The heartbeat template for when it's quiet. One slot = one 12.5Hz beat = 80ms, ten slots = 0.8 seconds ≈ 75 bpm
-    /// — exactly the resting-heart-rate range, which is the user's "like a heart rate".
+    /// The resting value used when the heart rate can't be read.
+    ///
+    /// 75 bpm is the average adult's resting range, and also the tempo the re-10 table **originally** hard-coded
+    /// — in other words, when the heart rate can't be read this degrades to exactly the re-10 behaviour, no worse.
+    private static let restingBPM: Double = 75
+
+    /// The heartbeat template for when it's quiet. **One slot = one 12.5Hz beat = 80ms**, and ten slots at
+    /// `restingBPM` (75) come to exactly 0.8 seconds — so this table is naturally the "75 bpm" shape.
+    /// Change the heart rate, not the table — what changes is **how fast it runs** (`beatPhase`).
     ///
     /// The shape is **boom-tick**: slot 2 is a tall peak (ventricular contraction), slot 7 a shorter
     /// second sound, and the rest a baseline near 0. This looks far more like a heart rate than "every slot the same height".
@@ -66,10 +108,11 @@ struct WatchVoiceWave: View {
         0.04, 0.15, 0.07, 0.04, 0.03,
     ]
 
-    init(meter: WatchAudioMeter, size: CGFloat, tint: Color) {
+    init(meter: WatchAudioMeter, size: CGFloat, tint: Color, bpm: Double?) {
         self.meter = meter
         self.size = size
         self.tint = tint
+        self.bpm = bpm
         _samples = State(initialValue: Array(repeating: 0, count: Self.sampleCount))
     }
 
@@ -120,14 +163,40 @@ struct WatchVoiceWave: View {
     }
 
     /// Advance one slot. **Driven by `tick`**, not by `level` — see the `WatchAudioMeter` block.
+    ///
+    /// ★ Revision 11: the heartbeat base shape is no longer fixed at 75; it now follows the measured heart rate.
     private func advance(using meter: WatchAudioMeter) {
-        let pulse = Self.beat[meter.tick % Self.beat.count]
+        let pulse = nextBeatSample()
         var next = samples
         next.append(max(CGFloat(meter.level), pulse))
         if next.count > Self.sampleCount {
             next.removeFirst(next.count - Self.sampleCount)
         }
         samples = next
+    }
+
+    /// Push the heartbeat base shape forward one slot and return that slot's height.
+    ///
+    /// ## Where the advance amount comes from
+    /// This table's ten slots come to exactly 0.8 seconds at 75bpm. So "each tick advances `bpm / 75` slots"
+    /// is equivalent to "one full heartbeat = `10 / (bpm/75)` slots = `0.8 × 75 / bpm` seconds = `60/bpm` seconds"
+    /// — that is, **sixty seconds divided by the heart rate**, which is precisely the definition of heart rate. So the formula isn't fudged.
+    ///
+    /// ## ⚠️ Why interpolate between slots instead of rounding
+    /// At a heart rate of 72 each tick advances 0.96 slots — rounding would turn that into "sometimes 1 slot, sometimes 0",
+    /// and the wave's speed would stutter, like dropped frames. Interpolation keeps the advance continuous, so your eyes see only
+    /// the tempo smoothly speed up or slow down.
+    private func nextBeatSample() -> CGFloat {
+        let rate = (bpm ?? Self.restingBPM) / Self.restingBPM
+        beatPhase += rate
+        let span = Double(Self.beat.count)
+        beatPhase = beatPhase.truncatingRemainder(dividingBy: span)
+
+        let lower = Int(beatPhase)
+        let fraction = CGFloat(beatPhase - Double(lower))
+        let a = Self.beat[lower % Self.beat.count]
+        let b = Self.beat[(lower + 1) % Self.beat.count]
+        return a + (b - a) * fraction
     }
 
     /// The line width is derived from `size`, not hard-coded — 40mm to 49mm differ by 40pt, and a hard-coded value would be wrong on one of them.

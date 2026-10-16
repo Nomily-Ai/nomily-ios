@@ -51,10 +51,24 @@ final class WatchRecorderModel: NSObject, ObservableObject {
     /// The live level while recording, for the home screen's waveform. **It only changes while recording** —
     /// it's zeroed on stop, so the idle state doesn't push the view to redraw a dozen times a second.
     @Published private(set) var meter = WatchAudioMeter()
+    /// The watch-measured heart rate while recording (bpm). **`nil` when there's none** — the view side uses it to decide
+    /// the waveform's heartbeat rhythm (see `WatchVoiceWave`), falling back to a resting value when nil.
+    ///
+    /// ★ 2026-10-16 revision eleven (user: "the rises and falls should overall follow your personal real-time heart rate as the watch reads it").
+    ///
+    /// ⚠️ Kept here rather than in the view: `WatchRecorderView` is already
+    ///    `@EnvironmentObject var model`, so the view redraws automatically when the model changes. If the heart rate hung off
+    ///    another `ObservableObject`, the view would have to observe one more object,
+    ///    or forward `objectWillChange` — no need for that extra layer.
+    ///    The measurement source itself is in `WatchHeartRateMonitor`; this is just its outlet.
+    @Published private(set) var heartRate: Double?
     @Published private(set) var pending: [PendingClip] = []
     @Published var errorMessage: String?
 
     private let link: WatchLink
+    /// Heart-rate sampling. Started and stopped in `start()` / `stop()`, following recording —
+    /// touching HealthKit while idle would just waste battery.
+    private let heart = WatchHeartRateMonitor()
     private var recorder: AVAudioRecorder?
     private var timer: Timer?
     private var intentObserver: NSObjectProtocol?
@@ -111,7 +125,17 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         // queued because the session wasn't live yet, or one the app died
         // before delivering — gets another shot as soon as the link is up.
         link.onActivated = { [weak self] in self?.resendPending() }
+        // As soon as a heart-rate reading arrives it's written into `heartRate`, and the view follows automatically.
+        heart.onUpdate = { [weak self] bpm in self?.heartRate = bpm }
         reloadPending()
+    }
+
+    /// Request read permission for heart rate. **Called once by the home screen when it appears**, unrelated to recording.
+    ///
+    /// ⚠️ Why not have `start()` request it along the way: popping the system authorisation sheet at that moment would likely interrupt
+    ///    the just-started recording. The full reasoning is written on `WatchHeartRateMonitor.prepare()`.
+    func prepareHeartRate() {
+        heart.prepare()
     }
 
     deinit {
@@ -188,6 +212,12 @@ final class WatchRecorderModel: NSObject, ObservableObject {
             meter = WatchAudioMeter()
             isRecording = true
             startedAt = Date()
+            // ★ revision eleven: start/stop heart-rate sampling with recording. Placed here (after recording has **really started**)
+            //   rather than earlier: if `record()` fails, sampling shouldn't be started for nothing.
+            //
+            // ⚠️ Start and stop must come in pairs, in the same place as `isRecording` — put them elsewhere and you get
+            //    an invisible battery leak like "still polling HealthKit after recording finished".
+            heart.follow()
             WKInterfaceDevice.current().play(Self.confirmation)
             startTimer()
             pushState()
@@ -209,6 +239,11 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         // Zero it rather than leave the last slot: after stopping, the home screen must switch back to the eyes immediately,
         // and keeping a level value would make the waveform flash once before it disappears.
         meter = WatchAudioMeter()
+        // ★ revision eleven: same for heart rate — stop sampling (don't let the Timer spin for nothing) and clear the value.
+        //   Clearing it lets the "next recording" start from a clean state; `WatchHeartRateMonitor`
+        //   keeps the smoothed value internally, so the next one won't really start from zero either.
+        heart.unfollow()
+        heartRate = nil
         startedAt = nil
         try? AVAudioSession.sharedInstance().setActive(false)
         WKInterfaceDevice.current().play(Self.confirmation)

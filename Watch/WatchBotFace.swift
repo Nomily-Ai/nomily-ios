@@ -131,6 +131,20 @@ struct WatchBotFace: View {
     /// ⚠️ The idle state does not use it -- it is passed all the way to `WatchVoiceWave`, and that view only exists
     /// in the recording state, so level changes while idle do not drag this face into redrawing.
     let meter: WatchAudioMeter
+    /// The heart rate measured by the watch while recording (bpm), forwarded all the way to `WatchVoiceWave` to set the rhythm.
+    ///
+    /// ★ Added in revision eleven (user: "the overall rise and fall should follow your personal real-time heart rate from the watch").
+    /// ⚠️ This face **does not read** this value itself, it only carries it -- the sampling and starting/stopping are both
+    ///    inside `WatchHeartRateMonitor`, and the face should not know HealthKit exists.
+    let bpm: Double?
+    /// The timer shown **directly below** the waveform while recording (`mm:ss`). Pass `nil` while idle.
+    ///
+    /// ★ Added in revision eleven (user: "attach the recording time below if recording has started").
+    ///
+    /// ⚠️ Why pass a string in from outside rather than passing a `TimeInterval` in and formatting it here:
+    ///    the formatting rules (whether hours appear, whether to pad) belong to the home screen's `WatchFormat`,
+    ///    and this only handles placement. Passing a string means the face still does not understand the concept of "time."
+    let elapsedText: String?
     /// Number of times tapped while idle. The home screen adds 1, and this does one "bounce."
     ///
     /// ⚠️ Why not just expose a `poke()` method for the home screen to call: `WatchBotFace` is a value type,
@@ -519,10 +533,29 @@ struct WatchBotFace: View {
     /// Only two branches, and they are mutually exclusive -- this is exactly Grok's approach of "one figure, several states,
     /// no separate indicator light for the state": idle is eyes, recording is a waveform.
     /// There is nowhere on the watch face to put another "recording" line; this switch is itself that line.
+    ///
+    /// ★ Revision eleven: the recording state goes from "just a wave" to "wave + a timer line directly below." What the user wants is
+    /// "attach the recording time below" -- the timer must **hug the wave**, not sit half a face away in the
+    /// home screen's little caption line. So it is rendered here instead, no longer part of the home screen's `caption`.
+    ///
+    /// ⚠️ Using a `VStack` re-centers the whole group inside the face frame, which means the wave sits **slightly higher** than before
+    /// (the extra line takes about 8pt). This shift happens only **at the same moment** as the "eyes → wave" switch,
+    /// and at that moment the whole picture is being swapped anyway, so it is invisible. Do not write a pile of offsets just to erase it
+    /// -- that would turn "where exactly is the wave" into something you have to compute.
     @ViewBuilder
     private var figure: some View {
         if isRecording {
-            WatchVoiceWave(meter: meter, size: size, tint: tint)
+            VStack(spacing: 6) {
+                WatchVoiceWave(meter: meter, size: size, tint: tint, bpm: bpm)
+
+                if let elapsedText {
+                    Text(elapsedText)
+                        // Monospaced digits: otherwise the whole line jitters left and right when the seconds go from 9 to 10.
+                        .monospacedDigit()
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(tint)
+                }
+            }
         } else {
             eyes
         }
