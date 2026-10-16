@@ -710,11 +710,18 @@ struct LibraryView: View {
 
     /// "2026年8月" / "August 2026". Assemble it per locale from the system's template format;
     /// gluing on the words "year" and "month" yourself is wrong in all 10 other languages.
-    private static let monthFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate("yMMMM")
-        return f
-    }()
+    ///
+    /// ★ 2026-10-16 revision 13: the locale comes from `AppLocale` (**set the locale first, then call the template**).
+    ///
+    /// ⚠️ This used to be a `static let`, and two independent problems stacked up:
+    ///    ① the locale defaulted to `Locale.current` (the device language), so choosing English in the App had no effect;
+    ///    ② `setLocalizedDateFormatFromTemplate` **bakes** the template into a concrete format string at the
+    ///       **moment of the call**, using the formatter's locale at the time —
+    ///       so even if the locale is changed later the template isn't recomputed. The formatter must be rebuilt,
+    ///       which is exactly what `AppLocale.formatter(_:_:)`'s per-language-generation caching is for.
+    private static var monthFormatter: DateFormatter {
+        AppLocale.formatter("library.bucket_month") { $0.setLocalizedDateFormatFromTemplate("yMMMM") }
+    }
 
     // MARK: - Device filter
 
@@ -1307,11 +1314,16 @@ private struct LibraryRow: View {
     /// not opened yet — a red dot hangs before the title.
     var isUnread: Bool = false
 
-    private static let shortDate: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "MM-dd HH:mm"
-        return f
-    }()
+    /// For the few with a customised title, the date is appended after the source badge.
+    ///
+    /// ★ 2026-10-16 revision 13: this used to be a **hard-coded** `"MM-dd HH:mm"`.
+    /// A hard-coded template is simply wrong in other languages (German wants "17.04.", Japanese "4月17日"),
+    /// and it's the last place in the whole App where "the date doesn't follow the App language".
+    /// Switch to the system template `yMMMd jm` — `j` is "the locale's preferred hour cycle",
+    /// so English/Arabic use 12-hour and Chinese/Japanese/German use 24-hour, with no need to decide yourself.
+    private static var shortDate: DateFormatter {
+        AppLocale.formatter("library.row_date") { $0.setLocalizedDateFormatFromTemplate("yMMMd jm") }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {

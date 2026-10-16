@@ -262,12 +262,16 @@ struct WatchTransferHistoryView: View {
 
     /// Times are **absolute**. Relative time ("5 minutes ago") is meaningless here —
     /// what users come here asking is "when did that one from this morning transfer".
-    private static let stamp: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .short
-        f.timeStyle = .short
-        return f
-    }()
+    ///
+    /// ★ Thirteenth revision, 2026-10-16: the locale comes from `AppLocale`. The watch can now pick its language too
+    /// (`WatchLanguageStore`), and this page's time used to follow the **watch system language**,
+    /// so after "English on the watch" the menus went all-English while this page's time stayed Chinese.
+    private static var stamp: DateFormatter {
+        AppLocale.formatter("watch.transfer_stamp") { f in
+            f.dateStyle = .short
+            f.timeStyle = .short
+        }
+    }
 }
 
 // MARK: - Settings

@@ -110,17 +110,45 @@ struct SettingsView: View {
     /// but that's exactly why it needs explaining. iOS installs it on its own
     /// only when "Automatic App Install" is on, and otherwise leaves it sitting
     /// in the Watch app's Available Apps list with no notification.
+    ///
+    /// ★ 2026-10-16 revision thirteen: this section gained a **Home Face** row. It is the first
+    /// appearance setting written by the iPhone and read by the watch (colour / shortcut menu / language are all still watch-local),
+    /// so it gets its own Section + its own footer rather than crowding the install explanation below.
     private var watchSection: some View {
-        Section {
-            HStack {
-                Label(L10n.Watch.settingsTitle, systemImage: "applewatch")
-                Spacer()
-                Text(watchStatus)
-                    .foregroundStyle(.secondary)
+        Group {
+            Section {
+                NavigationLink {
+                    WatchFacePickerView()
+                } label: {
+                    HStack {
+                        Label(L10n.Face.title, systemImage: "eyes")
+                        Spacer()
+                        Text(chosenFaceTitle)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } footer: {
+                Text(L10n.Face.rowFooter)
             }
-        } footer: {
-            Text(watchFooter)
+
+            Section {
+                HStack {
+                    Label(L10n.Watch.settingsTitle, systemImage: "applewatch")
+                    Spacer()
+                    Text(watchStatus)
+                        .foregroundStyle(.secondary)
+                }
+            } footer: {
+                Text(watchFooter)
+            }
         }
+    }
+
+    /// The name shown on the right of that row — the localised name of the current option.
+    ///
+    /// Same as the language row: you know what's set without tapping in.
+    private var chosenFaceTitle: String {
+        (BotFaceStyle.decode(configService.config.watchFaceStyle) ?? .calm).title
     }
 
     /// The bundled watch app needs watchOS 10, and watchOS 10 only pairs with

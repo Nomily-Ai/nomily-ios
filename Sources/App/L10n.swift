@@ -1100,6 +1100,65 @@ enum L10n {
         static var statusOutOfRange: String { NSLocalizedString("watch.status_out_of_range", comment: "") }
     }
 
+    // MARK: - Watch home screen expression (★ thirteenth revision 2026-10-16)
+
+    /// The expression picker in iPhone Settings (a row in the "Apple Watch" section).
+    ///
+    /// ## Why the name doesn't mention color / theme
+    /// This page picks **shape only** (how the eyes curve, how they tilt, how wide they open). Color is chosen on the watch's
+    /// "Appearance" page and has nothing to do with this — the phone has no idea which color the watch picked
+    /// (that's a watch-local preference), so previews on this page are always drawn in the foreground color, never pretending to be
+    /// the color on the watch.
+    ///
+    /// ⚠️ Always `static var` (runtime language switching) + `value:` inline English fallback
+    /// (only the en / zh-Hans .lproj files were added; same reason as `Library.sourceCard`).
+    enum Face {
+        /// Title of the Settings row, and the picker's page title.
+        static var title: String {
+            NSLocalizedString("face.title", value: "Home Face",
+                              comment: "Settings row + picker title: which expression the watch's home face wears")
+        }
+        /// The explanation under the Settings row.
+        static var rowFooter: String {
+            NSLocalizedString("face.row_footer", value: "Choose the expression the watch shows on its home screen.",
+                              comment: "Settings row footer: what the home face setting does")
+        }
+        /// The explanation at the bottom of the picker page.
+        static var footer: String {
+            NSLocalizedString("face.footer", value: "The face still blinks and looks around on its own. Tap it on the watch to see another expression.",
+                              comment: "Face picker footer: the chosen expression is the resting face, not the only one")
+        }
+
+        // Names for the nine levels. **Short**, because they appear in list rows on both the watch and the phone.
+        static var calm: String {
+            NSLocalizedString("face.calm", value: "Calm", comment: "Watch face expression: the default, plain eyes")
+        }
+        static var happy: String {
+            NSLocalizedString("face.happy", value: "Happy", comment: "Watch face expression: eyes curving up into a smile")
+        }
+        static var sad: String {
+            NSLocalizedString("face.sad", value: "Sad", comment: "Watch face expression: eyes drooping downwards")
+        }
+        static var wide: String {
+            NSLocalizedString("face.wide", value: "Wide", comment: "Watch face expression: eyes opened wide")
+        }
+        static var squint: String {
+            NSLocalizedString("face.squint", value: "Squint", comment: "Watch face expression: eyes narrowed to a slit")
+        }
+        static var angry: String {
+            NSLocalizedString("face.angry", value: "Angry", comment: "Watch face expression: eyes slanting inwards")
+        }
+        static var shy: String {
+            NSLocalizedString("face.shy", value: "Shy", comment: "Watch face expression: flat, wide eyes tipped inwards")
+        }
+        static var listen: String {
+            NSLocalizedString("face.listen", value: "Listening", comment: "Watch face expression: tall narrow eyes")
+        }
+        static var scan: String {
+            NSLocalizedString("face.scan", value: "Scanning", comment: "Watch face expression: very narrow tall slits")
+        }
+    }
+
     // MARK: - Device Files
 
     enum DeviceFiles {

@@ -1027,3 +1027,17 @@
 "jobs.open_queue" = "Background tasks";
 "jobs.open_queue_footer" = "Summaries, translations and audio conversions carry on after you leave the app.";
 "jobs.enqueued_toast" = "%@ added to background tasks.";
+
+// MARK: - 手表首页表情（2026-10-16 十三改：iPhone 设置里选）
+"face.title" = "Home Face";
+"face.row_footer" = "Choose the expression the watch shows on its home screen.";
+"face.footer" = "The face still blinks and looks around on its own. Tap it on the watch to see another expression.";
+"face.calm" = "Calm";
+"face.happy" = "Happy";
+"face.sad" = "Sad";
+"face.wide" = "Wide";
+"face.squint" = "Squint";
+"face.angry" = "Angry";
+"face.shy" = "Shy";
+"face.listen" = "Listening";
+"face.scan" = "Scanning";

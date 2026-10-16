@@ -27,12 +27,15 @@ struct TrashView: View {
     @State private var showPurgeAll = false
     @State private var restoreFailed = false
 
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        return f
-    }()
+    /// ★ Thirteenth revision, 2026-10-16: follows the **app language** (`AppLocale`), not the device language.
+    /// It used to be a `static let`, with locale defaulting to `Locale.current` — after choosing English in the app
+    /// this column of times was still Chinese (another source of that "voice year/month/day" feedback).
+    private static var dateFormatter: DateFormatter {
+        AppLocale.formatter("trash.row_date") { f in
+            f.dateStyle = .medium
+            f.timeStyle = .short
+        }
+    }
 
     var body: some View {
         Group {

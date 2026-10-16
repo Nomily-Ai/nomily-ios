@@ -66,6 +66,28 @@ import SwiftUI
 //    keep blinking" two rounds in a row, and when the "reference mechanism" conflicts with the "user constraint" the user wins: copy the mechanism, tighten the numbers.)
 //
 // ─────────────────────────────────────────────────────────────────────────
+// ★★ 2026-10-16 revision thirteen (user's words: "the Nomily AI app's settings need one more
+//    namely a setting for the watch home screen eyes' expression, bringing the expressions of the gork bot on github into
+//    the Nomily ai settings with support for putting in their expressions"):
+//
+// Revision twelve's five expressions are **read-only**: a tap draws one at random and plays it once, and the user cannot choose.
+// This round promoted "expression" from a **behavior** to a **setting**:
+//
+//   · The expression library (nine tiers) moved to `Sources/Services/Watch/BotFaceStyle.swift` --
+//     a file **shared by both ends**, so the preview in the picker on the iPhone and the face actually drawn on the watch
+//     **are necessarily the same code**, and cannot drift.
+//   · This face takes one more `style`: the **persistent** tier, chosen by the user on the iPhone and
+//     pushed over via `WatchConnectivity` (see `WatchFaceStore` / `WatchLink`).
+//   · The pool on a tap goes from "a hard-coded five tiers" to "the eight tiers in the library other than the persistent one" --
+//     drawing a tier the same as the persistent one equals "the tap did nothing," which is exactly the complaint revision twelve was fixing.
+//
+// ⚠️ **The two private types `EyeMood` and `EyeCurve` were deleted outright** (the former was revision twelve's read-only
+//    expression pool, the latter the shape of that arc). Their contents are now in the shared file, named
+//    `BotFaceStyle` and `BotFaceEyeCurve`. Keeping the old copy would be to allow "what is drawn on the watch"
+//    and "what is previewed on the phone" to go their separate ways -- and writing the geometry twice is the kind of drift that is hardest to spot
+//    and does the most harm (the user picks a smiling eye on the phone and, raising their wrist, finds a drooping eye).
+//
+// ─────────────────────────────────────────────────────────────────────────
 // ## The things that make this face "alive" (after revision twelve)
 //
 //   · **Gaze drift** (`runGazeLoop`, **this is the main idle motion**) -- the two eyes **as a whole**
@@ -77,9 +99,12 @@ import SwiftUI
 //     open to a 1.08 overshoot (80ms) → fall back to 1 over 150ms. **300ms** total, mostly single blinks,
 //     14% chance of adding one more after 70ms. The interval draws from **two tiers** at random (mostly 3.5~6.5 seconds,
 //     22% chance of inserting a 10~18 second stretch), see `nextBlinkGap()`.
-//   · **A tap gives an expression** (`EyeMood`) -- one of five is drawn and played once: ∩ arched smiling eye / ∪ drooping eye /
-//     wide-open / squint / angry glare. This is the **only** action that "actually changes the eye shape";
-//     there is still well over half of that 20-slot library in the reference implementation that cannot be brought over, for the reason see the `EyeMood` paragraph below
+//   · **What the idle state looks like is up to the user** (`style`, ★ revision thirteen) -- nine tiers of expressions are chosen
+//     in the iPhone settings (`BotFaceStyle`), and the chosen tier persists on this face.
+//   · **A tap gives an expression** (`BotFaceStyle.tapPool`) -- one tier is drawn from the library and played once,
+//     then withdrawn to the persistent tier. This is the **only** action that "actually changes the eye shape";
+//     there is still well over half of that 20-slot library in the reference implementation that cannot be brought over, for the reason see the top of
+//     `Sources/Services/Watch/BotFaceStyle.swift`
 //     (put simply: a round-tipped vertical bar has only four dimensions it can express).
 //   · **Breathing** -- the whole pair of eyes slowly inflates and deflates (plus or minus 1.8%, once every 3.6 seconds). The amplitude must be small:
 //     any larger and it looks like it is pulsing; it should be small enough that "you can't say what is moving, but it is alive."
@@ -154,6 +179,12 @@ struct WatchBotFace: View {
     /// reference** for the eyes/waveform -- all proportions are still taken from it, so changing watches needs no recalculation.
     let size: CGFloat
     let isRecording: Bool
+    /// The **persistent** expression on the home screen. The user chooses it in the iPhone settings, and it is pushed
+    /// over via WatchConnectivity (★ added in revision thirteen, see the paragraph at the top of the file).
+    ///
+    /// ⚠️ It is "what the idle state looks like," **not** "what a tap plays" -- the latter is still a one-shot
+    ///    `mood`, see `playRandomMood()`.
+    let style: BotFaceStyle
     /// The color of the eyes (and of the waveform while recording).
     ///
     /// The source is the **solid color** from the palette chosen on the "Appearance" page (`WatchRingStyle.palette.solid`).
@@ -229,10 +260,13 @@ struct WatchBotFace: View {
     ///    the main act became that random expression (`mood`), and this only gives a close-up response.
     ///    Leaving it at 5% would read again as the "single eye wobble" the user described (see `figureScale`).
     @State private var poke: CGFloat = 0
-    /// The expression drawn on a tap. `nil` = idle (a pair of vertical capsules).
+    /// The expression drawn on a tap. `nil` = idle (draw the `style` tier).
     ///
     /// ★ Added in revision twelve (user: "the eyes need to have various expressions on a light touch rather than a single eye wobble").
-    @State private var mood: EyeMood?
+    /// ★ Revision thirteen: the type changed from the private `EyeMood` to the shared `BotFaceStyle` -- reading it directly
+    ///   makes it the same enum as "the tier chosen in settings," so the pool can be "the other tiers in the library besides the persistent one,"
+    ///   rather than a separate list that has to be maintained alongside the library.
+    @State private var mood: BotFaceStyle?
     /// The handle for the expression's `Task`.
     ///
     /// ⚠️ When tapping twice in a row it must **cancel the previous one first**: the two `Task`s each sleep 0.8 seconds and then leave,
@@ -328,16 +362,17 @@ struct WatchBotFace: View {
 
     // MARK: Proportions
     //
-    // Everything is derived as a proportion of `size`, never hard-coded -- the watch screen width differs by 40pt from 40mm to 49mm,
-    // so hard-coding any single number would be off on at least one size.
+    // ★ Revision thirteen: the eyes' size and spacing **moved to `BotFaceMetrics`** (the shared file
+    // `Sources/Services/Watch/BotFaceStyle.swift`）。
     //
-    // ⚠️ Revision eight **enlarged the eyes** by one step (width 0.185 → 0.235, height 0.285 → 0.375).
-    //    The old sizes were calculated to go with the plate: with a plate the eyes were just "a pattern on the board," so a bit smaller
-    //    still held up. Once the plate is gone the eyes are the whole face, and at the old size they look small and empty.
-    private var eyeWidth: CGFloat { size * 0.235 }
-    private var eyeHeight: CGFloat { size * 0.375 }
-    /// The gap **between** the two eyes (not the centre-to-centre distance).
-    private var eyeGap: CGFloat { size * 0.235 }
+    // ⚠️ The reason for the move is not tidying up, it is **necessary**: the expression picker on the iPhone has to lay out a preview,
+    //    and "how big the eye in the preview is" and "how big the eye on the watch is" must be **the same formula** --
+    //    written separately, the user's chosen expression and what they see on real hardware would not be in proportion, and that kind of inconsistency
+    //    is extremely hard to spot across two screens of different sizes.
+    //
+    // ℹ️ Revision eight once enlarged the eyes by one step (width 0.185 → 0.235, height 0.285 → 0.375):
+    //    the old sizes were calculated to go with the rounded-square plate, and once the plate was gone the eyes were the whole face,
+    //    so at the old size they looked small and empty. Those numbers are now `BotFaceMetrics`'s defaults.
 
     var body: some View {
         // Use a `Button` instead of a bare view: `handGestureShortcut` (Double Tap)
@@ -662,7 +697,14 @@ struct WatchBotFace: View {
     ///    an expression for a long time).
     private func playRandomMood() {
         moodTask?.cancel()
-        guard let next = EyeMood.allCases.randomElement() else { return }
+        // ★ Revision thirteen: the pool = **the expression library minus the persistent tier** (`BotFaceStyle.tapPool`).
+        //
+        // ⚠️ Revision twelve's list was a hard-coded five tiers; now the library is nine tiers and the user can choose which one is persistent,
+        //    so a hard-coded list would immediately go wrong: the user picks `shy` as persistent, but the pool still
+        //    has only those five tiers -- so `shy` can never be played, while "drawing the same tier as the persistent one"
+        //    (which looks like nothing happened) becomes possible instead. Computing it from the library avoids both problems.
+        let pool = BotFaceStyle.tapPool(excluding: style)
+        guard let next = pool.randomElement() else { return }
         moodTask = Task {
             withAnimation(.spring(response: 0.26, dampingFraction: 0.72)) { mood = next }
             try? await Task.sleep(nanoseconds: 820_000_000)
@@ -719,81 +761,33 @@ struct WatchBotFace: View {
     /// ⚠️ Revision eight deleted the "out-of-phase drift while recording" scheme (back then the recording state was still a variant of the eyes).
     ///    Revision nine swapped the whole recording state for a waveform, the eyes are simply absent, and the `sway` state was deleted along with it
     ///    -- not forgotten.
+    ///
+    /// ★★ Revision thirteen: the whole **drawing method** for the eyes moved into `BotFacePair` (the shared file).
+    ///    Only two things "only this face knows" are left here: rise it a little (`eyeRise`),
+    ///    and translate it toward the gaze (`gaze`).
+    ///    ⚠️ The drawing method had to move -- the picker on the iPhone has to lay out the preview with the same code.
+    ///      Written separately, "the smiling eye chosen on the phone" and "the smiling eye drawn on the watch" would eventually differ.
     private var eyes: some View {
-        HStack(spacing: eyeGap) {
-            // ★ Revision twelve: the two eyes each know whether they are the "right eye." `EyeMood.tilt` writes only one
-            //   number (the left eye's), and the right eye takes its negation -- so "the two eyes slanting symmetrically" (an angry face)
-            //   needs only one number to express, rather than writing an angle for each eye.
-            //   ⚠️ What is meant here is **the symmetry of the eye shape itself**, which is a different thing from the `gaze`
-            //      below (the whole pair translating together); do not mix them up.
-            eye(mirrored: false)
-            eye(mirrored: true)
-        }
+        BotFacePair(
+            // The tier played by a tap takes priority; if there is none, fall back to the user's chosen persistent tier.
+            style: mood ?? style,
+            size: size,
+            tint: tint,
+            openness: openness
+        )
         // As a group the eyes sit a little above the geometric center. Exactly centered looks "head down" --
         // the eyes on a human face sit above the midline anyway.
-        .offset(y: -size * 0.03)
+        .offset(y: BotFaceMetrics.eyeRise(size))
         // Gaze. Stacked on top of the "rise" on the line above (the two `offset`s are added).
         .offset(x: gaze.width, y: gaze.height)
     }
 
-    /// One eye.
-    ///
-    /// Opening/closing is squashed from the center with `scaleEffect(y:)`, not by changing `frame(height:)` --
-    /// changing the height makes the eye "grow from the bottom up," whereas a real eyelid comes down **from both sides at once**.
-    ///
-    /// ★ Revision ten replaces `phaseAnimator` with reading `openness` directly. Revision eight/nine's phase-by-phase
-    /// description was deleted outright, for the reason see "why `phaseAnimator` is no longer used" at the top of the file.
-    /// The dimmed branch needs no separate check either: `startIdleMotion()` resets `openness`
-    /// to 1, so when dimmed this is naturally a static open-eyed face.
-    ///
-    /// ★ Revision twelve: both **drawing methods** (capsule + arc) sit inside at once, cross-fading via `opacity`,
-    /// rather than picking one with `if/else`. The reason is that `if/else` swaps **view identity**,
-    /// and the frame it swaps on gives only a hard cut (the view is removed and another inserted), whereas these two precisely need
-    /// a smooth transition -- what the user should see is "the eye squints into an arc," not "it flashed."
-    ///
-    /// ⚠️ The outer `frame` is **fixed** (`eyeWidth × eyeHeight`) and does not follow the expression.
-    ///   With it fixed: the `HStack`'s spacing does not change with the expression (the two eyes' spacing suddenly widening is more conspicuous than the expression
-    ///   itself), and both drawing methods have the same alignment reference.
-    ///   Anything beyond this box is not clipped -- `frame` does not clip, only `.clipped()` does.
-    private func eye(mirrored: Bool) -> some View {
-        let current = mood
-        let widthScale = current?.scaleX ?? 1
-        let isArc = current?.isArc ?? false
-
-        return ZStack {
-            eyeShape(widthScale: widthScale, heightScale: current?.scaleY ?? 1)
-                .opacity(isArc ? 0 : 1)
-            eyeArc(up: current?.arcUp ?? true, widthScale: widthScale)
-                .opacity(isArc ? 1 : 0)
-        }
-        .frame(width: eyeWidth, height: eyeHeight)
-        .rotationEffect(.degrees(mirrored ? -(current?.tilt ?? 0) : (current?.tilt ?? 0)))
-        .scaleEffect(y: openness, anchor: .center)
-    }
-
     /// The eyes for the idle state, and for the expressions that "do not change shape": a round-tipped vertical bar.
     ///
-    /// Uses the color chosen on the "Appearance" page, **solid** (revision nine dropped the gradient).
-    private func eyeShape(widthScale: CGFloat, heightScale: CGFloat) -> some View {
-        Capsule()
-            .fill(tint)
-            .frame(width: eyeWidth * widthScale, height: eyeHeight * heightScale)
-    }
-
-    /// The arc for the arched smiling eye (∩) / drooping eye (∪).
-    ///
-    /// ⚠️ height = `eyeHeight × 0.44`, thickness = `eyeHeight × 0.20` (about 20pt tall and
-    ///    9pt thick on 40mm). **It must not be drawn thin**: a thin arc on the watch face reads as an eyebrow, or a scratch;
-    ///    only thick enough to approach the thickness of a closed eye does it read as "this is a smiling eye."
-    ///    This is also why `EyeCurve` is a "stroke" rather than a "fill" -- so the thickness can be adjusted on its own.
-    private func eyeArc(up: Bool, widthScale: CGFloat) -> some View {
-        EyeCurve(up: up)
-            .stroke(
-                tint,
-                style: StrokeStyle(lineWidth: eyeHeight * 0.20, lineCap: .round)
-            )
-            .frame(width: eyeWidth * widthScale, height: eyeHeight * 0.44)
-    }
+    /// ⚠️ Revision thirteen: this pair of methods (`eyeShape` / `eyeArc`) **moved entirely to
+    ///    `BotFaceEye`** (the shared file `Sources/Services/Watch/BotFaceStyle.swift`),
+    ///    along with the decision to "cross-fade via `opacity` rather than pick one with `if/else`."
+    ///    For the reason for the move see the `eyes` paragraph -- the picker on the iPhone has to lay out the preview with the same code.
 
     // MARK: - The charge ring
 
@@ -823,130 +817,16 @@ struct WatchBotFace: View {
     }
 }
 
-// MARK: - Expressions (★ 2026-10-16 added in revision twelve)
+// MARK: - Expressions (★ 2026-10-16 added in revision twelve, moved away in revision thirteen)
 //
-// The user's exact words: "the eyes need to have various expressions on a light touch rather than a single eye wobble."
+// Revision twelve's five expressions (`EyeMood`) and the shape of that arc (`EyeCurve`) both **moved to the shared file**
+// `Sources/Services/Watch/BotFaceStyle.swift`, and are now called `BotFaceStyle`
+// and `BotFaceEyeCurve`, expanded from five tiers to nine.
 //
-// ## Where the assets come from
-// The `aora-bot` expression library (`mood-mates/src/core/geometry.js`) has **20 eye-shape
-// slots**: `calm / calm2 / happy / happy2 / wide / wide2 / closed / closed2 /
-// sleepy / squint / squint2 / angry / angry2 / scan / scan2 / scan3 /
-// listen / listen2 / shy / sad`. Each slot is a set of parameters
-// `{ w, h, bend, taper, slope, shift }`。
-//
-// ## Why only five could be brought over
-// An eye here is a `Capsule` (a round-tipped vertical bar), not a bendable path. In the reference implementation
-// `bend` / `taper` describe "how this eye line bends and how its ends taper" --
-// that needs a shape capable of drawing an arbitrary curve. So the dimensions expressible here are only four:
-//
-//   · **height** (`scaleY`) -- open wide / squint
-//   · **width** (`scaleX`)
-//   · **tilt** (`tilt`) -- slant
-//   · **straight / curved** (`isArc`) -- the two curved ones swap in an `EyeCurve` stroke
-//
-// So the five below were "selected" from the 20 slots, not accepted wholesale.
-//
-// ## ⚠️ Two rules kept when choosing
-// 1. **Distinguishable at a glance.** In the reference implementation the difference between `calm` and `calm2` is width ×0.96, height ×1.05
-//    -- 4% / 5%, not much more than the idle breathing (plus or minus 1.8%). Put into this pool, tapping five times in a row
-//    might land on the "indistinguishable" two tiers four times, and the user concludes "tapping does nothing."
-//    ⇒ The five that get drawn must be **recognizable as different expressions from half a meter away**.
-// 2. **They cannot be "closed eyes."** The `closed` / `sleepy` tiers would collide with **blinking** on the watch --
-//    the user could not tell "it is blinking at me" from "it switched to sleeping." So they are not in the pool.
-private enum EyeMood: CaseIterable {
-    /// ∩ arched smiling eye. The reference implementation's `happy`: `{ w: ×1.05, h: ×0.5, bend: 0.62, taper: 1.15 }`.
-    case happy
-    /// ∪ drooping eye. The reference implementation's `sad` tier -- the same arc flipped over, a "deflated" eye.
-    case sad
-    /// Wide-open. The reference implementation's `wide`: `{ w: ×1.12, h: ×1.3, bend: 0, taper: 0.8 }`.
-    case wide
-    /// Squint. The reference implementation's `squint` tier (height compressed to about a third).
-    case squint
-    /// Angry glare. The reference implementation's `angry`: `{ slope: -0.5, shift: 0.3 }` -- the inner side pressed down.
-    case angry
-
-    /// The eye width multiplier.
-    var scaleX: CGFloat {
-        switch self {
-        case .happy:  return 1.06
-        case .sad:    return 1.00
-        case .wide:   return 1.06
-        case .squint: return 1.04
-        case .angry:  return 1.00
-        }
-    }
-
-    /// The eye height multiplier (relative to the idle `0.375 × size` vertical bar).
-    ///
-    /// ⚠️ The two arc shapes **ignore** this value -- the arc's height is set by `eyeArc` itself (`0.44 ×`),
-    ///    because "multiplying a 20pt-tall arc by 0.5" would turn it into an almost invisible thin line,
-    ///    rather than "a squint." So these two tiers are given 1, letting the arc keep its own shape.
-    var scaleY: CGFloat {
-        switch self {
-        case .happy, .sad: return 1
-        case .wide:        return 1.24
-        case .squint:      return 0.34
-        case .angry:       return 0.80
-        }
-    }
-
-    /// How many degrees the **left eye** turns; the right eye takes the negative (see `eye(mirrored:)`), so the two eyes
-    /// are automatically symmetric.
-    ///
-    /// ## Why it is negative
-    /// The screen's y-axis points down, so **a positive angle = clockwise**. The left eye turns −12° (counterclockwise) ⇒
-    /// the top end of this vertical bar tilts **outward** (further from the midline) and the bottom end tilts **inward** --
-    /// so the two eyes **converge toward the midline at the bottom**, and the brow forms a "∧".
-    ///
-    /// ⚠️ This direction is the entire source of "angry"; written the other way it becomes a different expression:
-    ///    · bottom ends converging (−12°) = "∧" = angry brows (inner ends pressed down);
-    ///    · top ends converging (+12°) = "∨" = that is aggrieved / pitiful, not angry.
-    ///    So **do not casually flip this number to positive** -- before changing it, draw the two bars on paper first.
-    ///
-    /// ⚠️ More important is "the two eyes are **opposite**" itself: both eyes turning the same direction (`///`)
-    ///    is not angry, it is a squint. In the reference implementation `slope` is signed, for the same reason.
-    var tilt: Double {
-        switch self {
-        case .angry: return -12
-        default:     return 0
-        }
-    }
-
-    /// Whether it is drawn as an arc (arched smiling eye / drooping eye).
-    var isArc: Bool { self == .happy || self == .sad }
-
-    /// Whether the arc arches up or down.
-    var arcUp: Bool { self == .happy }
-}
-
-/// An arc bowing up (∩) or down (∪).
-///
-/// ★ Added in revision twelve; it is the only tier in the whole expression set that **changes shape** (the other four are scaling/rotation).
-///
-/// ⚠️ Use a quadratic Bézier rather than `Circle().trim(from:to:)`: `trim`'s start position and drawing
-///    direction hang on SwiftUI's "y axis down, angles clockwise" convention, which is the easiest place to
-///    go wrong and the hardest to read when changing the drawing. Writing "both ends on the midline, the apex raised to the edge" with control points is
-///    **self-evident** -- the formulas in the two comment lines below can be verified directly.
-private struct EyeCurve: Shape {
-    /// `true` = ∩ (smile), `false` = ∪ (droop).
-    let up: Bool
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        // The midpoint of a quadratic Bézier is B(0.5) = ¼P₀ + ½P₁ + ¼P₂. To have the midpoint land exactly on the edge
-        // (the `minY` when bowing up), the control point must sit one more height **outside the box**:
-        //   0.5·maxY + 0.5·P₁.y = minY  ⇒  P₁.y = 2·minY − maxY
-        // the two ends are pinned to the other edge, so the arc exactly fills the whole `rect`.
-        let anchor = up ? rect.maxY : rect.minY
-        let controlY = up ? rect.minY - rect.height : rect.maxY + rect.height
-        path.move(to: CGPoint(x: rect.minX, y: anchor))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: anchor),
-            control: CGPoint(x: rect.midX, y: controlY)
-        )
-        return path
-    }
-}
+// ⚠️ The reason for the move is not tidying up, it is **necessary**: a new expression picker was added to the iPhone settings,
+//    and it has to lay out a preview; the preview and real hardware must be **the same code**. Written separately, the user would see
+//    a smiling eye on the phone and, raising their wrist, find a drooping eye -- and that kind of drift is the hardest to spot.
+//    Where the assets come from, why only nine could be brought over, and the three rules kept when choosing, are all written in that file.
 
 // MARK: - Double Tap
 //

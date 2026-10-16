@@ -257,7 +257,19 @@ struct ClipDetailView: View {
                                 .foregroundStyle(.secondary)
                                 .fixedSize()
                         }
-                        Text(item.recordedAt.formatted(date: .abbreviated, time: .shortened))
+                        // ★ Thirteenth revision, 2026-10-16: `.formatted(date:time:)` **doesn't read**
+                        //   the locale from the SwiftUI environment — it takes `Locale.current`,
+                        //   and this string is computed before `Text` ever sees it
+                        //   (only `Text(date, format:)` reads the environment).
+                        //   So this goes through `AppLocale` explicitly, following the app's language.
+                        //
+                        // ⚠️ The old `.abbreviated` / `.shortened` were
+                        //   `Date.FormatStyle` symbols, not `DateFormatter.Style`
+                        //   ones — the latter only takes none/short/medium/long/full.
+                        //   Equivalent mapping: `.abbreviated → .medium`, `.shortened → .short`.
+                        Text(AppLocale.string(from: item.recordedAt,
+                                              dateStyle: .medium,
+                                              timeStyle: .short))
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .fixedSize()

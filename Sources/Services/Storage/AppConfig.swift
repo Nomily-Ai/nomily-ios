@@ -40,6 +40,17 @@ struct AppConfig: Codable, Equatable {
     /// an English UI on first launch. Tags outside `AppLanguage.supported`
     /// resolve to English (`AppLanguage.resolve`).
     var appLanguage: String?
+    /// Which expression the watch home-screen face shows — `BotFaceStyle.rawValue`.
+    ///
+    /// **`nil` = never chosen**, equivalent to `calm` (what the face looked like before the thirteenth revision).
+    /// Like `appLanguage`, this stores a **bare tag**, not an enum:
+    /// `AppConfig` is a pure disk schema; dragging the UI layer's enum type in would get it compiled
+    /// into places that don't need it (this file is in `Sources/`, while the expression library is in
+    /// `Sources/Services/Watch/`）。
+    ///
+    /// ⚠️ This copy **exists only on the phone side**; the watch's copy is the one it stores itself after the push
+    /// (see `WatchFaceStore`). Both sides are "newest version wins", so there's no sync conflict to speak of.
+    var watchFaceStyle: String?
     /// Backlog size (in KB) above which the Wi-Fi fast-transfer button
     /// is offered on the device-files screen. 0 disables the suggestion
     /// and the button never appears.
@@ -79,6 +90,7 @@ struct AppConfig: Codable, Equatable {
         case lastTargetLang = "last_target_lang"
         case lastSummaryLang = "last_summary_lang"
         case appLanguage = "app_language"
+        case watchFaceStyle = "watch_face_style"
         case fastTransferThresholdKB = "fast_transfer_threshold_kb"
     }
 
@@ -106,6 +118,7 @@ struct AppConfig: Codable, Equatable {
         self.lastTargetLang = try c.decodeIfPresent(String.self, forKey: .lastTargetLang)
         self.lastSummaryLang = try c.decodeIfPresent(String.self, forKey: .lastSummaryLang)
         self.appLanguage = try c.decodeIfPresent(String.self, forKey: .appLanguage)
+        self.watchFaceStyle = try c.decodeIfPresent(String.self, forKey: .watchFaceStyle)
         self.fastTransferThresholdKB = try c.decodeIfPresent(Int.self, forKey: .fastTransferThresholdKB) ?? 512
     }
 
@@ -127,6 +140,7 @@ struct AppConfig: Codable, Equatable {
         lastTargetLang: String? = nil,
         lastSummaryLang: String? = nil,
         appLanguage: String? = nil,
+        watchFaceStyle: String? = nil,
         fastTransferThresholdKB: Int = 512
     ) {
         self.asrProviders = asrProviders
@@ -146,6 +160,7 @@ struct AppConfig: Codable, Equatable {
         self.lastTargetLang = lastTargetLang
         self.lastSummaryLang = lastSummaryLang
         self.appLanguage = appLanguage
+        self.watchFaceStyle = watchFaceStyle
         self.fastTransferThresholdKB = fastTransferThresholdKB
     }
 

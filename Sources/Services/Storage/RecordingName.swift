@@ -15,14 +15,29 @@ enum RecordingName {
         return f
     }()
 
-    private static let display: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        // .medium time style includes seconds (e.g. "9:42:07 PM"); .short omits
-        // them. QA asked for the recording timestamp to show H:M:S, not just H:M.
-        f.timeStyle = .medium
-        return f
-    }()
+    /// The "Apr 15, 2026 at 9:42:07 PM" title.
+    ///
+    /// ★ 2026-10-16 thirteenth revision: **follows the app language** (`AppLocale`), no longer
+    /// the device language. This is the single most important date-formatting point in the whole app —
+    /// `LibraryItem.displayTitle` uses it, and `displayTitle` is referenced in eighteen places
+    /// (the list, detail-page title, player, mind map, trash, export file names…).
+    /// It used to be `static let`, with locale defaulting to `Locale.current`,
+    /// so after "picking English in-app" the UI was all English while **the recording's year/month/day stayed Chinese**.
+    ///
+    /// ⚠️ This is a **shared file** (two of the three targets besides ios / watch / watchControls
+    ///    both compile it; see `project.yml`); changing it requires ensuring `AppLocale` exists on both ends
+    ///    — it is in `Sources/Services/Localization/AppLanguage.swift`,
+    ///    and that file is likewise listed under `nomily_watch`'s sources.
+    ///    The `parser` below, meanwhile, **must** stay `en_US_POSIX`: it parses **file names**,
+    ///    and following the language would make the same file parse to different dates in different languages.
+    private static var display: DateFormatter {
+        AppLocale.formatter("recording.display_title") { f in
+            f.dateStyle = .medium
+            // .medium time style includes seconds (e.g. "9:42:07 PM"); .short
+            // omits them. QA asked for the recording timestamp to show H:M:S.
+            f.timeStyle = .medium
+        }
+    }
 
     static func displayTitle(for filename: String) -> String {
         guard let date = date(from: filename) else { return filename }

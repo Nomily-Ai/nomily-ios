@@ -121,6 +121,18 @@ final class WatchLink: NSObject, ObservableObject {
             WCSession.default.outstandingFileTransfers.map { $0.file.fileURL.lastPathComponent }
         )
     }
+
+    /// Take in the "home-screen expression" pushed from the phone.
+    ///
+    /// ★ Added in the thirteenth revision. This is the **only** appearance setting on the phone that actively pushes to the watch;
+    /// the reasoning and the choice (why it goes through `updateApplicationContext`) are written in
+    /// the block at `WatchLinkMessage.faceStyleKey`.
+    ///
+    /// ⚠️ Unrecognised values are silently dropped by `WatchFaceStore.apply` (the two ends' versions may differ),
+    ///    so this validates nothing and reports nothing — that's the store's business; here we just move it along.
+    private func apply(remoteContext context: [String: Any]) {
+        WatchFaceStore.shared.apply(context[WatchLinkMessage.faceStyleKey] as? String)
+    }
 }
 
 extension WatchLink: WCSessionDelegate {
@@ -130,8 +142,15 @@ extension WatchLink: WCSessionDelegate {
         error: (any Error)?
     ) {
         let activated = activationState == .activated
+        // ★ Thirteenth revision: the last context the phone pushed is lying in `receivedApplicationContext`
+        //   waiting — read it once on a cold launch, otherwise the face on the watch draws the default expression first and
+        //   sits there until the phone's next push, only then jumping to the style the user chose.
+        //   (The phone side likewise reads `receivedApplicationContext` on activation to get the recording state,
+        //    see `WatchSyncService`.)
+        let pending = session.receivedApplicationContext
         Task { @MainActor in
             self.refreshQueue()
+            self.apply(remoteContext: pending)
             if activated { self.onActivated?() }
         }
     }
@@ -144,6 +163,18 @@ extension WatchLink: WCSessionDelegate {
             WatchTransferLog.shared.noteStored(name: name)
             self.onStored?(name)
         }
+    }
+
+    /// The "current value" pushed from the phone (★ thirteenth revision: now the home-screen expression).
+    ///
+    /// ⚠️ It **won't** fight the watch's own `updateApplicationContext` (the recording state):
+    ///    application context has **one slot per direction**, so what the watch sends out won't
+    ///    be overwritten by what the phone sends in.
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveApplicationContext applicationContext: [String: Any]
+    ) {
+        Task { @MainActor in self.apply(remoteContext: applicationContext) }
     }
 
     nonisolated func session(

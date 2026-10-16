@@ -46,7 +46,7 @@ targets:
         # Must track `nomily_watch`'s build number — watchOS refuses to install
         # a companion whose version doesn't match its host, and an embedded
         # watch app one build ahead is enough to trip it. Bump both or neither.
-        CFBundleVersion: "23"
+        CFBundleVersion: "24"
         # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
         # appropriate when the app's crypto use is exempt from US export
         # documentation requirements:
@@ -134,6 +134,11 @@ targets:
       # Shared so the Action Button intent exists on both sides: the iPhone
       # needs it to author the shortcut, the watch needs it to run one.
       - path: Sources/Services/Watch/RecordingIntent.swift
+      # ★ 2026-10-16 revision thirteen: the home-face **expression library**. Sharing it across both ends isn't to save code, it's
+      # a correctness requirement — the picker in the iPhone settings needs to show previews, and the preview and the face actually
+      # drawn on the watch must be **the same code**, otherwise the user picks a smiling eye on the phone
+      # and finds a droopy one on raising the wrist. The asset sources and geometry parameters are written at the top of this file.
+      - path: Sources/Services/Watch/BotFaceStyle.swift
       - path: Sources/Services/Storage/RecordingName.swift
       - path: Sources/App/L10n.swift
       # Runtime language switching. Compiled into the watch too (2026-10-15) so
@@ -161,7 +166,7 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         # Must track the iPhone app's build number — watchOS refuses to install
         # a companion whose version doesn't match its host.
-        CFBundleVersion: "23"
+        CFBundleVersion: "24"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.nomily.app
         NSMicrophoneUsageDescription: Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.
@@ -254,7 +259,7 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         # Must match the parent App — when an embedded binary's version numbers differ from the host's, watchOS
         # refuses to install the whole App.
-        CFBundleVersion: "23"
+        CFBundleVersion: "24"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

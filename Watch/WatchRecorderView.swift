@@ -119,6 +119,11 @@ struct WatchRecorderView: View {
     @ObservedObject private var prefs = WatchRecordingPrefs.shared
     /// Which items go on the two side menus. Tick one in the settings page and this page has to re-lay-out at once.
     @ObservedObject private var menuPrefs = WatchMenuPreferences.shared
+    /// The home screen's resident expression. **Decided by the iPhone's settings** and pushed over via `WatchLink`
+    /// (★ revision thirteen). The reason for `@ObservedObject`, same as `styleStore` above:
+    /// after the phone pushes a new value, this page has to switch along with it immediately, and `WatchBotFace` is a
+    /// plain `View`, so SwiftUI won't know on its own to redraw.
+    @ObservedObject private var faceStore = WatchFaceStore.shared
     /// ⚠️ It has to be `@State`, not `let`: this `View` struct is re-constructed on every redraw,
     /// and a `let` would create a fresh detector every time (the sampler gets swapped out the moment it starts, so it never takes effect).
     /// `@State` keeps it in SwiftUI's storage and initializes it only once.
@@ -251,6 +256,8 @@ struct WatchRecorderView: View {
             WatchBotFace(
                 size: Self.dialSide * Self.botFraction,
                 isRecording: model.isRecording,
+                // ★ Revision thirteen: which expression to wear while idle is decided by the iPhone's settings.
+                style: faceStore.style,
                 tint: styleStore.style.tint,
                 meter: model.meter,
                 // ★ Revision eleven: live heart rate, deciding how fast the waveform moves.

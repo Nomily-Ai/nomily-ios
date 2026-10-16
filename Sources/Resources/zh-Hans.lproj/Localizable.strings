@@ -1029,3 +1029,17 @@
 "jobs.open_queue" = "后台任务";
 "jobs.open_queue_footer" = "摘要、翻译和音频转换在你离开 App 之后也会继续。";
 "jobs.enqueued_toast" = "%@已加入后台任务。";
+
+// MARK: - 手表首页表情（2026-10-16 十三改：iPhone 设置里选）
+"face.title" = "首页表情";
+"face.row_footer" = "选择手表首页那张脸摆哪个表情。";
+"face.footer" = "这张脸自己还会眨眼、还会东张西望。在手表上轻点它一下，它会再演一个别的表情。";
+"face.calm" = "平静";
+"face.happy" = "笑眼";
+"face.sad" = "垂眼";
+"face.wide" = "圆睁";
+"face.squint" = "眯眼";
+"face.angry" = "斜瞪";
+"face.shy" = "害羞";
+"face.listen" = "聆听";
+"face.scan" = "扫视";

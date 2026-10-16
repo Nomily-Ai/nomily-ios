@@ -64,6 +64,49 @@ import SwiftUI
 //    so the height can go up a bit without sacrificing that discipline.
 //
 // ─────────────────────────────────────────────────────────────────────────
+// ★★ 2026-10-16 revision 13 (user's words: "and after the watch starts recording, the recording's up-and-down should be more
+//    obvious; right now the up-and-down isn't enough and doesn't take up the watch's share of the screen"):
+//
+// This round changes **a structural problem**, not one more bump of the numbers.
+//
+// ## Where the problem is: the baseline is on the centre line, but values are only drawn upward
+//
+// The re-12 table more than doubled the amplitude (0.34 → 0.52), and the user still said "not enough". The reason isn't the number,
+// it's **geometry**: the baseline is drawn at the canvas's **centre line** (`mid = height / 2`), while the curve only grows **upward**
+// (`y = mid − clamped × reach`). So the "up-and-down" **has no second half at all** —
+// that half of the canvas is always empty, and the vertical space any level can actually use is only **half** the canvas.
+// Adding more to the numbers won't help either: at best it fills that half.
+//
+// ## The fix: drop the baseline to the bottom of the canvas
+//
+// | | revision 12 | revision 13 | actual height on 40mm |
+// |---|---|---|---|
+// | baseline | centre line `height/2` | **bottom** (leaving half a line width) | 0pt → about 55pt of usable travel |
+// | canvas height | `0.44 × size` | **`0.68 × size`** | 52pt → 81pt |
+// | canvas width | `1.06 × size` | **`1.10 × size`** | 126pt → 131pt (screen width 162pt) |
+// | heartbeat main peak | `0.52` × half the canvas | `0.52` × **the whole canvas** | about 12pt → about 42pt |
+//
+// ⇒ The same level, the same `beat` table, now travels **about three and a half times** as far. This is the
+//   "obvious" and "share of the screen" the user wanted.
+//
+// ⚠️ **Not one slot of the `beat` table changed.** The table describes "shape" (the relative heights of the boom-tick two beats),
+//    and once the canvas is taller the same shape automatically grows taller and bigger — which also confirms the re-12 judgement:
+//    for bigger, what should change is the **canvas**, not the table (the re-12 comment says exactly that; back then I
+//    only did half of it: raised the canvas but left the baseline on the centre line).
+//
+// ## Two other things that came along
+//
+//   · **Centre line → bottom line**. The faint axis moves to the baseline too. Its job is unchanged ("no sound"
+//     and "this thing is broken" must be distinguishable), but its position changes from "dead centre" to "bottom edge".
+//   · **A very faint fill below the curve**. Revision 12 had only a line, so when quiet, on an 81pt-tall
+//     canvas it was a thin line hugging the bottom, and its "share of the screen" was still tiny. Add this fill and
+//     the **area** follows the level — loud makes the whole block open up and you can see at a glance that "it's eating sound".
+//     This is the cheapest step toward "looks bigger" that does least damage to the semantics (the fill height still
+//     equals the real level exactly, with no fake data introduced).
+//
+// ⚠️ The re-12 discipline "don't push the base shape to full scale" **still holds**: full height is reserved for the real level,
+//    and now it's **shape** that tells them apart (a heartbeat is an isolated 1~2-slot spike, speech a continuous 5~15-slot plateau).
+// ─────────────────────────────────────────────────────────────────────────
 // ## Why keep a short history instead of drawing only the instantaneous value
 // A heart-rate-style trace is "a line that scrolls left over time", not a bar jumping up and down. So you need a little
 // history (`sampleCount` slots), appending one slot at the right on each tick and shifting the whole thing left.
@@ -148,53 +191,85 @@ struct WatchVoiceWave: View {
     var body: some View {
         Canvas { context, canvasSize in
             let lineWidth = Self.lineWidth(for: size)
-            let mid = canvasSize.height / 2
-            // Leave room for the line width, so a full-scale spike isn't clipped off by its own round cap.
-            let reach = mid - lineWidth
 
-            // A very faint centre line. It isn't decoration — with it, "there's no sound right now" and
-            // "this thing is broken and stuck" can be told apart (the former is a flat line hugging the centre, the latter is a blank).
+            // ★★ Revision 13: the baseline moves from the **centre line** to the **bottom of the canvas**.
+            //
+            // ⚠️ This is the only real change this round, and it's where "not enough rise and fall" came from:
+            //    a baseline on the centre line + values drawn upward only ⇒ the lower half of the canvas is always empty,
+            //    and the usable vertical travel is only half the canvas. Turning `beat` up just fills that half.
+            //
+            // 0.75 of a line width is left for the round pen cap: without it, the bottom-hugging line would be
+            // half-clipped by its own end cap (the round cap is a semicircle drawn with the line width as its diameter).
+            let baseline = canvasSize.height - lineWidth * 0.75
+            // Same deduction at both ends, so a full-scale spike isn't flattened by the round cap.
+            let reach = max(1, canvasSize.height - lineWidth * 1.5)
+
+            // A very faint baseline. It isn't decoration — with it, "there's no sound right now" and
+            // "this thing is broken and stuck" can be told apart (the former is a flat line hugging the baseline,
+            // the latter is a blank).
             var axis = Path()
-            axis.move(to: CGPoint(x: 0, y: mid))
-            axis.addLine(to: CGPoint(x: canvasSize.width, y: mid))
+            axis.move(to: CGPoint(x: 0, y: baseline))
+            axis.addLine(to: CGPoint(x: canvasSize.width, y: baseline))
             context.stroke(
                 axis,
-                with: .color(tint.opacity(0.18)),
+                with: .color(tint.opacity(0.16)),
                 style: StrokeStyle(lineWidth: max(1, lineWidth * 0.4), lineCap: .round)
             )
 
             guard samples.count > 1 else { return }
+
             var path = Path()
             for (index, value) in samples.enumerated() {
                 let x = canvasSize.width * CGFloat(index) / CGFloat(samples.count - 1)
                 // Clamp the value to 0...1 first: the level is theoretically in that range, but after taking
                 // `max` of `beat` and the level, clamp once more, so no single miscalculation turns into a line drawn outside the canvas.
                 let clamped = min(1, max(0, value))
-                let y = mid - clamped * reach
+                let y = baseline - clamped * reach
                 if index == 0 {
                     path.move(to: CGPoint(x: x, y: y))
                 } else {
                     path.addLine(to: CGPoint(x: x, y: y))
                 }
             }
+
+            // ★ Revision 13: add a very faint fill below the curve.
+            //
+            // ⚠️ Its height **equals the real level exactly** (the curve above), introducing no
+            //    fake data — the only difference is "it's a surface, not a line". With only a line in re-12,
+            //    the quiet-state wave on an 81pt-tall canvas was a thin line hugging the bottom, and its "share of the screen"
+            //    was still tiny; with this layer, loud makes the whole block open up and you can see at a glance that it's eating sound.
+            // ⚠️ Hand-write a closed path, rather than assembling one
+            //    `Path` from two `path.addLine(baseline)` calls — `Shape`/`Path`'s `fill` will automatically
+            //    connect an **unclosed** path back to its start, and that "closing edge" is easily drawn crooked on a multi-segment path.
+            var area = Path()
+            area.move(to: CGPoint(x: 0, y: baseline))
+            for (index, value) in samples.enumerated() {
+                let x = canvasSize.width * CGFloat(index) / CGFloat(samples.count - 1)
+                let clamped = min(1, max(0, value))
+                area.addLine(to: CGPoint(x: x, y: baseline - clamped * reach))
+            }
+            area.addLine(to: CGPoint(x: canvasSize.width, y: baseline))
+            area.closeSubpath()
+            context.fill(area, with: .color(tint.opacity(0.20)))
+
             context.stroke(
                 path,
                 with: .color(tint),
                 style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
             )
         }
-        // ★ Revision 12: 0.86 × 0.30 → **1.06 × 0.44** (user: "a bigger share of the screen").
+        // ★★ Revision 13: `1.06 × 0.44` → **`1.10 × 0.68`**.
         //
-        // ⚠️ The width cap is set hard by the `WatchBotFace` frame, not by the screen:
-        //    that face's frame is `size × 1.14` and the wave is drawn inside it. 1.06 leaves only about 4% of headroom
-        //    (about 5pt per side on 40mm); any wider and it pushes past the face frame — and then, even if the screen hasn't clipped it,
-        //    the wave no longer "belongs to this face".
-        //    If you want to go bigger, what should change is `WatchRecorderView.botFraction` (the whole face's
-        //    share), not this one number.
-        // ⚠️ Height 0.44: the face frame is also 1.14×size tall, and a line of elapsed time (about 16pt) goes below the wave.
-        //    0.44 + the elapsed-time allowance is just right; any taller and the face frame gets pushed out of shape (`ZStack` doesn't clip,
-        //    but the two rows start crowding each other).
-        .frame(width: size * 1.06, height: size * 0.44)
+        // ⚠️ The width cap is still set hard by the `WatchBotFace` frame, not by the screen:
+        //    that face's frame is `size × 1.14` and the wave is drawn inside it. 1.10 leaves only about 3.5% of
+        //    headroom (about 2pt per side on 40mm), **this one is maxed out** — any wider and it pushes past the face
+        //    frame, and then, even if the screen hasn't clipped it, the wave no longer "belongs to this face".
+        //    Want it wider still? What should change is `WatchRecorderView.botFraction` (the whole face's share),
+        //    not this one number.
+        //    Height has no such constraint (the face frame is also 1.14×size tall, and 0.68 + the elapsed-time allowance is just right),
+        //    so the "go bigger" step favours height — and once the baseline is at the bottom, height is **all**
+        //    the usable travel, with none of it wasted on an empty half-canvas.
+        .frame(width: size * 1.10, height: size * 0.68)
         // The glow for the recording state. It used to hang on the eyes and moved over once the eyes were replaced by this wave —
         // on the watch face there's nowhere else to say "it's working".
         .shadow(color: tint.opacity(0.55), radius: 7)
