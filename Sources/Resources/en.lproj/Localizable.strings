@@ -619,6 +619,7 @@
 "library.has_summary" = "Summary";
 "library.has_transcript" = "Transcript";
 "library.unread" = "Unread";
+"library.voice_memo_badge" = "Memo";
 "library.unread_count" = "%d unread";
 "library.filter_devices" = "Filter by device";
 "library.filter_all_devices" = "All devices";

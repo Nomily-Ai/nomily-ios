@@ -36,6 +36,12 @@ final class Library: ObservableObject {
         /// because at display time the SN is first looked up once in `RecorderAliasStore`.
         var deviceName: String?
 
+        /// ★ (2026-10-19) How this clip came into being: `"memo"` = the card's **voice key**
+        /// started the recording (an AI voice memo), `nil` = a regular recording. The library
+        /// uses it to badge and filter memos separately from recordings — the two gestures mean
+        /// different things to the user, so they must not land in one undifferentiated pile.
+        var source: String?
+
         enum CodingKeys: String, CodingKey {
             case size
             case downloadedAt = "downloaded_at"
@@ -43,6 +49,7 @@ final class Library: ObservableObject {
             case localName = "local_name"
             case deviceSerial = "device_serial"
             case deviceName = "device_name"
+            case source
         }
     }
 
@@ -97,7 +104,8 @@ final class Library: ObservableObject {
         transport: String = "ble",
         deviceSerial: String? = nil,
         deviceName: String? = nil,
-        localName: String? = nil
+        localName: String? = nil,
+        source: String? = nil
     ) {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -112,7 +120,8 @@ final class Library: ObservableObject {
             transport: transport,
             localName: localName ?? name,
             deviceSerial: deviceSerial ?? previous?.deviceSerial,
-            deviceName: deviceName ?? previous?.deviceName
+            deviceName: deviceName ?? previous?.deviceName,
+            source: source ?? previous?.source
         )
         rebuildSourceIndex()
         saveNow()
@@ -181,6 +190,12 @@ final class Library: ObservableObject {
     /// Why not just query `entry(for:)`: manifest keys have two shapes ——
     /// device downloads are `serial::name`, watch / live streams are bare `name`, while the list has only one
     /// on-disk name. The reverse index pulls the two shapes into the same coordinate system.
+    /// ★ (2026-10-19) `true` when this clip was recorded by the card's **voice key**
+    /// (an AI voice memo, `Entry.source == "memo"`) — the library row badges it.
+    func isVoiceMemo(forLocalName name: String) -> Bool {
+        rawEntry(forLocalName: name)?.entry.source == "memo"
+    }
+
     func source(forLocalName localName: String) -> ClipSource {
         sourcesByLocalName[localName]
             ?? ClipSource(kind: .imported, serial: nil, storedName: nil)

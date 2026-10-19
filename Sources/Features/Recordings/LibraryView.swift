@@ -501,7 +501,8 @@ struct LibraryView: View {
                 item: item,
                 source: library.source(forLocalName: item.name),
                 snippet: snippets[item.base],
-                isUnread: unread
+                isUnread: unread,
+                isVoiceMemo: library.isVoiceMemo(forLocalName: item.name)
             )
             if !isSelecting {
                 Image(systemName: "chevron.right")
@@ -1313,6 +1314,8 @@ private struct LibraryRow: View {
     var snippet: String? = nil
     /// not opened yet — a red dot hangs before the title.
     var isUnread: Bool = false
+    /// ★ (2026-10-19) Recorded with the card's voice key — an AI voice memo, badged "Memo".
+    var isVoiceMemo: Bool = false
 
     /// For the few with a customised title, the date is appended after the source badge.
     ///
@@ -1339,6 +1342,16 @@ private struct LibraryRow: View {
                 Text(item.displayTitle)
                     .font(.body)
                     .lineLimit(2)
+                if isVoiceMemo {
+                    // ★ (2026-10-19) AI voice memo (the card's voice key) — visually distinct
+                    // from regular recordings, per the user's "把录音功能跟语音备忘录功能区分开来".
+                    Text(L10n.Library.voiceMemoBadge)
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.appAccent.opacity(0.15)))
+                        .foregroundStyle(Color.appAccent)
+                }
                 Spacer()
                 if !item.hasAudio {
                     Image(systemName: "waveform.slash")

@@ -1002,6 +1002,11 @@ enum L10n {
             NSLocalizedString("library.unread", value: "Unread",
                               comment: "Accessibility label for the unread dot on a library row")
         }
+        /// ★ (2026-10-19) Badge for clips recorded with the card's voice key (AI voice memo).
+        static var voiceMemoBadge: String {
+            NSLocalizedString("library.voice_memo_badge", value: "Memo",
+                              comment: "Library row badge — AI voice memo from the card's voice key")
+        }
         /// The section header's "how many clips from this device are still unopened".
         static func unreadCount(_ count: Int) -> String {
             String(

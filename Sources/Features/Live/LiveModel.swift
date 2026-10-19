@@ -84,6 +84,11 @@ final class LiveModel: ObservableObject {
     /// the user's head, whereas recording continuing without text is a **degraded but working**
     /// state — the card is capturing audio and the clip will be transcribed from the saved file.
     @Published var serviceNotice: String?
+    /// ★ (2026-10-19) `true` while the current session was started by the card's **voice key**
+    /// — the view sets it after `start` returns, and `saveAndCleanup` reads it when recording
+    /// the clip into the library (`Library.Entry.source == "memo"`), so memos can be badged and
+    /// filtered separately from regular recordings.
+    @Published var voiceMemo = false
     /// True while the BLE link has dropped and we are waiting for the card to come back.
     ///
     /// ★ (2026-10-18) The session **survives** a link drop now. It used to be killed by it:
@@ -419,6 +424,10 @@ final class LiveModel: ObservableObject {
         }
         isStarting = true
         defer { isStarting = false }
+        // ★ (2026-10-19) Cleared here, set by the *view* only when the card's voice key (not
+        // the app's button) started the session — the saved clip is then recorded into the
+        // library as an AI voice memo (`Library.Entry.source == "memo"`).
+        voiceMemo = false
         frames = 0
         bytes = 0
         deviceElapsed = nil
@@ -1712,7 +1721,8 @@ final class LiveModel: ObservableObject {
 
         do {
             _ = try PostDownload.process(payload, name: name, chacha20Key: nil)
-            library?.recordDownload(name: name, size: payload.count, transport: "stream")
+            library?.recordDownload(name: name, size: payload.count, transport: "stream",
+                                    source: voiceMemo ? "memo" : nil)
             savedClipName = name
             // ★ Actually entered the database, now we can release the pending disk-write bytes.
             pendingSaveBuffer = Data()

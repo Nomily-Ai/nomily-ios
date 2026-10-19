@@ -619,6 +619,7 @@
 "library.has_summary" = "已生成摘要";
 "library.has_transcript" = "已转录";
 "library.unread" = "未读";
+"library.voice_memo_badge" = "备忘";
 "library.unread_count" = "%d 条未读";
 "library.filter_devices" = "筛选设备";
 "library.filter_all_devices" = "全部设备";

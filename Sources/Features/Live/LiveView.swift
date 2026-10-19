@@ -329,6 +329,8 @@ private struct LiveContent: View {
             voiceKeyNotice = true
             Task {
                 await model.start(source: source, config: config, library: library)
+                // ★ Tag the saved clip as an AI voice memo (voice key, not the record button).
+                model.voiceMemo = true
                 // Hold the banner long enough to be read, then fade it away.
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
                 voiceKeyNotice = false
