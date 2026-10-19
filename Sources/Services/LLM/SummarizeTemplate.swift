@@ -53,15 +53,25 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
         Self.localizedCategoryName(category)
     }
 
+    /// `NSLocalizedString` returns the **key itself** when a table lacks the
+    /// entry — on the languages that never got a translation that would render
+    /// a raw key like `template_prompt.case_record` into the UI. Every lookup
+    /// therefore falls back to the stored (English) text on a miss, which lets
+    /// a language ship partial prompt translations without leaking keys.
+    private static func localized(_ key: String, fallback: String) -> String {
+        let value = NSLocalizedString(key, comment: "")
+        return value == key ? fallback : value
+    }
+
     var localizedSummary: String? {
         guard let summary else { return nil }
         guard isBuiltIn, let key = Self.summaryKeys[name] else { return summary }
-        return NSLocalizedString(key, comment: "")
+        return Self.localized(key, fallback: summary)
     }
 
     var localizedPrompt: String {
         guard isBuiltIn, let key = Self.promptKeys[name] else { return prompt }
-        return NSLocalizedString(key, comment: "")
+        return Self.localized(key, fallback: prompt)
     }
 
     /// The second line of a picker row. The adopted library ships a one-line
@@ -140,6 +150,58 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
         "Research Discussion": "template_prompt.research_discussion",
         "Brainstorm Synthesis": "template_prompt.brainstorm_synthesis",
         "Interview Summary": "template_prompt.interview_summary",
+        // The library adopted from Vobot Recorder — prompts localized per
+        // language where the .lproj ships `template_prompt.<slug>`; other
+        // languages fall back to the stored English prompt (see `localized`).
+        "Detailed Summary": "template_prompt.detailed_summary",
+        "Meeting Report": "template_prompt.meeting_report",
+        "Key Points, Decisions, Tasks, Deadlines, and Actions": "template_prompt.key_points_decisions_tasks_deadlines_and_actions",
+        "Meeting Minutes+": "template_prompt.meeting_minutes",
+        "Lecture Summary": "template_prompt.lecture_summary",
+        "Keynote Speech Summary": "template_prompt.keynote_speech_summary",
+        "Training Overview": "template_prompt.training_overview",
+        "Phone Discussion Notes": "template_prompt.phone_discussion_notes",
+        "Manager/Employee 1:1 Meeting": "template_prompt.manager_employee_1_1_meeting",
+        "Customer Call Summary/Analysis": "template_prompt.customer_call_summary_analysis",
+        "Business Call": "template_prompt.business_call",
+        "Interview Notes": "template_prompt.interview_notes",
+        "Panel Discussion": "template_prompt.panel_discussion",
+        "Case Record": "template_prompt.case_record",
+        "Psychotherapy Session Record": "template_prompt.psychotherapy_session_record",
+        "Medical Consultation": "template_prompt.medical_consultation",
+        "BANT Customer Analysis": "template_prompt.bant_customer_analysis",
+        "Sales Call / Customer Outreach": "template_prompt.sales_call_customer_outreach",
+        "Sales Discovery Call": "template_prompt.sales_discovery_call",
+        "Client Needs": "template_prompt.client_needs",
+        "Discussion with Expert": "template_prompt.discussion_with_expert",
+        "Senior Management Consultant": "template_prompt.senior_management_consultant",
+        "University Lecture": "template_prompt.university_lecture",
+        "University Course Compilation": "template_prompt.university_course_compilation",
+        "Seminar / Lecture: Detailed Summary and Notes": "template_prompt.seminar_lecture_detailed_summary_and_notes",
+        "Acceptance Checklist": "template_prompt.acceptance_checklist",
+        "Engineering Project Meeting Minutes": "template_prompt.engineering_project_meeting_minutes",
+        "Site Inspection": "template_prompt.site_inspection",
+        "Multi-Participant Project Team Meeting": "template_prompt.multi_participant_project_team_meeting",
+        "IT Knowledge Transfer Meeting": "template_prompt.it_knowledge_transfer_meeting",
+        "Troubleshooting Summary": "template_prompt.troubleshooting_summary",
+        "Court Stenographer": "template_prompt.court_stenographer",
+        "Meeting Secretary (Legal)": "template_prompt.meeting_secretary_legal",
+        "Client Consultation": "template_prompt.client_consultation",
+        "Owners Committee General Meeting": "template_prompt.owners_committee_general_meeting",
+        "Business Meeting / Real Estate Project Template": "template_prompt.business_meeting_real_estate_project_template",
+        "Real Estate Property Acquisition": "template_prompt.real_estate_property_acquisition",
+        "Client Review Summary": "template_prompt.client_review_summary",
+        "Investment Consultation": "template_prompt.investment_consultation",
+        "Stock Market Discussion": "template_prompt.stock_market_discussion",
+        "Listed Company Research": "template_prompt.listed_company_research",
+        "From Chaos to Clarity: Tagged Daily Review": "template_prompt.from_chaos_to_clarity_tagged_daily_review",
+        "Daily Log": "template_prompt.daily_log",
+        "Key Data Points": "template_prompt.key_data_points",
+        "Meeting Highlights": "template_prompt.meeting_highlights",
+        "Work Report Summary": "template_prompt.work_report_summary",
+        "Email Thread Summary": "template_prompt.email_thread_summary",
+        "Long Article to Slide Deck Outline": "template_prompt.long_article_to_slide_deck_outline",
+        "Turning Scattered Notes into a To-Do List": "template_prompt.turning_scattered_notes_into_a_to_do_list",
     ]
 
     private static let nameKeys: [String: String] = [
@@ -264,12 +326,12 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
 
     static func localizedCategoryName(_ category: String) -> String {
         guard let key = categoryKeys[category] else { return category }
-        return NSLocalizedString(key, comment: "")
+        return Self.localized(key, fallback: category)
     }
 
     static func localizedTemplateName(_ name: String) -> String {
         guard let key = nameKeys[name] else { return name }
-        return NSLocalizedString(key, comment: "")
+        return Self.localized(key, fallback: name)
     }
 }
 
