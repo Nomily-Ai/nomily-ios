@@ -81,6 +81,9 @@ struct ClipDetailView: View {
     @State private var detailTab: DetailTab = .transcript
     @State private var transcriptQuery = ""
     @State private var speakerFilter: String?
+    /// Q&A state lives in the page, not in the section: the input bar is pinned to the bottom
+    /// while the answers stay in the scrolling list.
+    @StateObject private var aiChat = AIChatModel()
 
     var body: some View {
         Form {
@@ -110,8 +113,8 @@ struct ClipDetailView: View {
             // ★ (2026-10-19) AI Q&A closes the page, the way DingTalk's recording page does:
             // the questions a user has after reading are about *this* clip, and sending them to
             // a separate chat screen loses the context they were just looking at.
-            if let aiContext {
-                AIChatSection(context: aiContext)
+            if aiChat.isAvailable {
+                AIChatSection(model: aiChat)
             }
             // Export/delete moved into the top-right menu (Plaud / DingTalk detail-page shape).
             // Only a *running or failed* export still gets an inline row — progress needs to be
@@ -123,6 +126,16 @@ struct ClipDetailView: View {
         .padding(.top, -20)
         .navigationTitle(item.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
+        // ★ (2026-10-19) The three tabs belong to the app's home shell. Keeping them on a
+        // recording detail page wastes the bottom strip on navigation the user has already
+        // made a decision about — and the Q&A bar needs that strip.
+        .toolbar(.hidden, for: .tabBar)
+        // Answers scroll, the question box does not.
+        .safeAreaInset(edge: .bottom) {
+            if aiChat.isAvailable {
+                AIChatInputBar(model: aiChat)
+            }
+        }
         // ★ 2026-10-15: The detail page counts as "opened" the moment it appears, and the red dot on the list row goes away with it.
         //
         // Hooked here rather than in the list's tap callback: the detail page has several entry points (library,
@@ -208,6 +221,7 @@ struct ClipDetailView: View {
             loadTranslation()
             loadSummary()
             loadTranslatedSummary()
+            aiChat.context = aiContext ?? ""
         }
         .onDisappear { player.stop() }
         .onChange(of: transcription.inFlight.contains(item.name)) { isRunning in
