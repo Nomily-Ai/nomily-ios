@@ -131,6 +131,19 @@ final class DingTalkA1Link: NSObject, ObservableObject, RecorderLink {
     /// Counters for the throttled diagnostics.
     private var acksDeferred = 0
     private var acksDropped = 0
+    /// ★ (2026-10-19) ACK throttling — the fix for the ~30 s live-stream death spiral.
+    ///
+    /// Measured on device: 50 incoming frames/s each answered with its own ACK write saturated
+    /// the iOS outgoing queue (`canSendWriteWithoutResponse` false for hundreds of frames in a
+    /// row), the card's window filled, the stream went silent, the watchdog re-armed, and the
+    /// link died with `CBErrorDomain Code=6` — every 30–60 s, for the whole session.
+    ///
+    /// The ACK is positional flow control, not a reliable stream: the card cares that the link
+    /// keeps moving, not that every frame is individually answered. So we answer **one frame in
+    /// `ackEveryN`** — ~12 writes/s instead of ~50 — and the deferred path below still answers
+    /// the newest frame whenever the queue has spare room.
+    private static let ackEveryN = 4
+    private var acksSeen = 0
 
     /// Wall-clock of the last `0x0117` frame that parsed — the stall watchdog's clock.
     private var liveLastFrameAt = Date()
@@ -322,6 +335,10 @@ final class DingTalkA1Link: NSObject, ObservableObject, RecorderLink {
     /// positional, not a reliable stream, so replaying a stale window is worse than skipping it.
     private func acknowledgeStream(cmd: DingTalkA1Cmd, seq: UInt8) {
         guard isConnected, commandChar != nil else { return }
+        // ★ Throttle: answer every Nth frame. Cutting the write rate is what keeps the iOS
+        // outgoing queue below saturation; answering every frame is what killed the link.
+        acksSeen += 1
+        guard acksSeen % Self.ackEveryN == 0 else { return }
         guard peripheral.canSendWriteWithoutResponse else {
             ackBacklog.append((cmd, seq))
             if ackBacklog.count > Self.ackBacklogLimit {
