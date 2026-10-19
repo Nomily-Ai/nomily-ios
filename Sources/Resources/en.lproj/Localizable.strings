@@ -223,6 +223,14 @@
 "clip_detail.search_transcript" = "Search transcript";
 "clip_detail.speaker_all" = "All speakers";
 "clip_detail.more_actions" = "More";
+"clip_detail.ai_ask_title" = "AI Q&A";
+"clip_detail.ai_ask_you" = "You";
+"clip_detail.ai_ask_assistant" = "AI";
+"clip_detail.ai_ask_thinking" = "Thinking…";
+"clip_detail.ai_ask_clear" = "Clear";
+"clip_detail.ai_ask_placeholder" = "Ask about this recording";
+"clip_detail.ai_ask_footer" = "Answers use only this recording's transcript and summary.";
+"clip_detail.ai_ask_system" = "You are a meeting assistant. Answer strictly from the RECORDING MATERIAL provided. If it does not contain the answer, say so plainly instead of guessing, and suggest what the user could look for. Reply in the language of the question. Be concise and quote timestamps when useful.";
 "clip_detail.translation" = "Translation";
 "clip_detail.view_full_translation" = "View Full Translation";
 "clip_detail.translate" = "Translate";

@@ -107,6 +107,12 @@ struct ClipDetailView: View {
             case .todos:
                 todosSection
             }
+            // ★ (2026-10-19) AI Q&A closes the page, the way DingTalk's recording page does:
+            // the questions a user has after reading are about *this* clip, and sending them to
+            // a separate chat screen loses the context they were just looking at.
+            if let aiContext {
+                AIChatSection(context: aiContext)
+            }
             // Export/delete moved into the top-right menu (Plaud / DingTalk detail-page shape).
             // Only a *running or failed* export still gets an inline row — progress needs to be
             // visible without opening a menu.
@@ -644,6 +650,28 @@ struct ClipDetailView: View {
                 .foregroundStyle(selected ? Color.appAccent : Color.secondary)
         }
         .buttonStyle(.plain)
+    }
+
+    /// Everything the in-page AI Q&A may read: the summary plus the timestamped transcript.
+    /// Capped so a three-hour recording still fits one request — the tail of a long meeting is
+    /// the part a summary already covers best.
+    private var aiContext: String? {
+        var parts: [String] = []
+        if let summary, !summary.isEmpty {
+            parts.append("SUMMARY\n" + String(summary.prefix(6_000)))
+        }
+        if let transcript {
+            let body: String
+            if transcript.segments.isEmpty {
+                body = transcript.text
+            } else {
+                body = transcript.segments
+                    .map { "[\(ClockLabel.mmss($0.start))] " + ($0.speaker.map { "\($0): " } ?? "") + $0.text }
+                    .joined(separator: "\n")
+            }
+            parts.append("TRANSCRIPT\n" + String(body.prefix(12_000)))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
     }
 
     // MARK: To-dos tab

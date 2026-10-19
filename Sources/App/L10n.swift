@@ -2158,6 +2158,18 @@ enum L10n {
         static var tabSummary: String { NSLocalizedString("clip_detail.tab_summary", value: "AI Minutes", comment: "Detail page tab — AI summary") }
         static var tabTodos: String { NSLocalizedString("clip_detail.tab_todos", value: "To-dos", comment: "Detail page tab — action items") }
         static var moreActions: String { NSLocalizedString("clip_detail.more_actions", value: "More", comment: "Detail page top-right overflow menu") }
+        static var aiAskTitle: String { NSLocalizedString("clip_detail.ai_ask_title", value: "AI Q&A", comment: "Detail page — ask questions about this recording") }
+        static var aiAskYou: String { NSLocalizedString("clip_detail.ai_ask_you", value: "You", comment: "Chat speaker label — user") }
+        static var aiAskAssistant: String { NSLocalizedString("clip_detail.ai_ask_assistant", value: "AI", comment: "Chat speaker label — assistant") }
+        static var aiAskThinking: String { NSLocalizedString("clip_detail.ai_ask_thinking", value: "Thinking…", comment: "Chat pending state") }
+        static var aiAskClear: String { NSLocalizedString("clip_detail.ai_ask_clear", value: "Clear", comment: "Clear the Q&A history") }
+        static var aiAskPlaceholder: String { NSLocalizedString("clip_detail.ai_ask_placeholder", value: "Ask about this recording", comment: "Chat input placeholder") }
+        static var aiAskFooter: String { NSLocalizedString("clip_detail.ai_ask_footer", value: "Answers use only this recording's transcript and summary.", comment: "Chat footer — grounding") }
+        static var aiAskSystem: String {
+            NSLocalizedString("clip_detail.ai_ask_system",
+                              value: "You are a meeting assistant. Answer strictly from the RECORDING MATERIAL provided. If it does not contain the answer, say so plainly instead of guessing, and suggest what the user could look for. Reply in the language of the question. Be concise and quote timestamps when useful.",
+                              comment: "System prompt for the in-page recording Q&A")
+        }
         static var todosEmpty: String { NSLocalizedString("clip_detail.todos_empty", value: "No action items in the summary.", comment: "To-dos tab when the summary has no action-item section") }
         static var todosNeedSummary: String { NSLocalizedString("clip_detail.todos_need_summary", value: "Generate a summary to collect action items here.", comment: "To-dos tab when no summary exists yet") }
         static var searchTranscript: String { NSLocalizedString("clip_detail.search_transcript", value: "Search transcript", comment: "Transcript search field placeholder") }

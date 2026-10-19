@@ -224,6 +224,14 @@
 "clip_detail.search_transcript" = "搜索转录内容";
 "clip_detail.speaker_all" = "全部发言人";
 "clip_detail.more_actions" = "更多";
+"clip_detail.ai_ask_title" = "AI 问答";
+"clip_detail.ai_ask_you" = "你";
+"clip_detail.ai_ask_assistant" = "AI";
+"clip_detail.ai_ask_thinking" = "正在思考…";
+"clip_detail.ai_ask_clear" = "清空";
+"clip_detail.ai_ask_placeholder" = "就这段录音提问";
+"clip_detail.ai_ask_footer" = "回答只依据这段录音的转录与摘要。";
+"clip_detail.ai_ask_system" = "你是一名会议助理。只依据提供的《录音材料》回答。材料里没有的内容，直接说明没有，不要猜测，并提示用户可以去找什么。用提问的语言回答，简洁，必要时引用时间点。";
 "clip_detail.translation" = "翻译";
 "clip_detail.view_full_translation" = "查看完整翻译";
 "clip_detail.translate" = "翻译";
