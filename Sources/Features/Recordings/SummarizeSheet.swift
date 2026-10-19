@@ -286,7 +286,16 @@ struct SummarizeSheet: View {
                 }
             }
         }
-        .onAppear { refreshPreflight() }
+        .onAppear {
+            refreshPreflight()
+            // ★ 2026-10-19 "Set as default": opening the sheet pre-selects the user's default template
+            // instead of starting from scratch. If it is gone (deleted / language changed), stay silent on nil — no alert.
+            if selected == nil,
+               let key = env.config.config.summaryTemplateKey,
+               let stored = templateStore.templates.first(where: { $0.storeKey == key }) {
+                selected = stored
+            }
+        }
     }
 
     /// Kick off the run. **Called only from the overview page** — the tile itself only handles "open the overview".
@@ -431,7 +440,7 @@ struct SummarizeSheet: View {
                 HStack(spacing: 4) {
                     Text(currentLangName)
                         .font(.subheadline)
-                        .foregroundStyle(outputLangCode.isEmpty ? Color.secondary : Color.accentColor)
+                        .foregroundStyle(outputLangCode.isEmpty ? Color.secondary : Color.appAccent)
                     Image(systemName: "chevron.down")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -513,15 +522,15 @@ struct SummarizeSheet: View {
                 HStack(spacing: 6) {
                     Image(systemName: template.isBuiltIn ? "doc.text" : "pencil.and.outline")
                         .font(.caption)
-                        .foregroundStyle(template.isBuiltIn ? Color.secondary : Color.accentColor)
+                        .foregroundStyle(template.isBuiltIn ? Color.secondary : Color.appAccent)
                     Spacer(minLength: 0)
                     if !template.isBuiltIn {
                         Text(L10n.Summarize.customBadge)
                             .font(.system(size: 9, weight: .semibold))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.accentColor.opacity(0.16)))
-                            .foregroundStyle(Color.accentColor)
+                            .background(Capsule().fill(Color.appAccent.opacity(0.16)))
+                            .foregroundStyle(Color.appAccent)
                     }
                 }
                 Text(template.localizedName)
@@ -648,7 +657,7 @@ private struct TemplateOverviewView: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: template.isBuiltIn ? "doc.text" : "pencil.and.outline")
                 .font(.title3)
-                .foregroundStyle(template.isBuiltIn ? Color.secondary : Color.accentColor)
+                .foregroundStyle(template.isBuiltIn ? Color.secondary : Color.appAccent)
                 .frame(width: 38, height: 38)
                 .background(Circle().fill(Color(uiColor: .secondarySystemBackground)))
             VStack(alignment: .leading, spacing: 6) {

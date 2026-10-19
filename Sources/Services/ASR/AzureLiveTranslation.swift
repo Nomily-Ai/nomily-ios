@@ -48,6 +48,9 @@ final class AzureLiveTranslation {
     private var frameBuf: [Data] = []
     /// The tail that doesn't fill a complete packet is held over to be concatenated with the next batch (see `AzureLiveASR.pendingTail`).
     private var pendingTail = Data()
+    /// Counters for the on-device diagnostics only (never used for control flow).
+    private var pagesSent = 0
+    private var oddFrames = 0
     private static let framesPerPage = 10
 
     init(key: String, region: String, fromLang: String = "en-US", toLang: String = "en",
@@ -107,6 +110,10 @@ final class AzureLiveTranslation {
         }
         self.continuation = capturedContinuation
         startReceiveLoop()
+        // ★ Diagnostics that reach `Documents/ticnote-ble.log` (the file we can pull off the
+        //   phone). Everything above only goes to os_log, which is why "the card streams but no
+        //   text appears" left no trace at all in the on-device log.
+        TicNoteDiagLog.log("ASR", "azureTranslate ws opening region=\(region) \(fromLang)->\(toLang)")
         return stream
     }
 
@@ -172,6 +179,10 @@ final class AzureLiveTranslation {
             serial: serial, pageSeq: pageSeq, granule: granule, frames: frames)
         pageSeq &+= 1
         let msg = audioMessage(page)
+        pagesSent += 1
+        if pagesSent == 1 || pagesSent % 100 == 0 {
+            TicNoteDiagLog.log("ASR", "azureTranslate audio pages sent: \(pagesSent) (\(msg.count) B, \(frames.count) pkt)")
+        }
         task.send(.data(msg)) { error in
             if let error {
                 log.warning("audio page send failed: \(String(describing: error), privacy: .public)")
@@ -236,12 +247,27 @@ final class AzureLiveTranslation {
         switch message {
         case .string(let text):
             let parts = text.components(separatedBy: "\r\n\r\n")
-            guard parts.count >= 2 else { return }
+            guard parts.count >= 2 else {
+                // A service error (bad key, wrong region, quota) arrives as a plain text frame
+                // with no header separator. Dropping it silently is why a dead socket looked
+                // exactly like a working one that simply never produced words.
+                oddFrames += 1
+                if oddFrames <= 3 {
+                    TicNoteDiagLog.log("ASR", "azureTranslate unparsable text frame (\(text.count) B): \(text.prefix(120))")
+                }
+                return
+            }
             let headers = parts[0]
             let body = parts.dropFirst().joined(separator: "\r\n\r\n")
 
             guard let data = body.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                oddFrames += 1
+                if oddFrames <= 3 {
+                    TicNoteDiagLog.log("ASR", "azureTranslate bad JSON body (\(body.prefix(120)))")
+                }
+                return
+            }
 
             if headers.contains("translation.hypothesis") || headers.contains("speech.hypothesis") {
                 let bilingual = parseBilingual(json)
@@ -258,6 +284,9 @@ final class AzureLiveTranslation {
                 }
                 if status != "Success" {
                     log.info("phrase status: \(status, privacy: .public)")
+                    // `InitialSilenceTimeout` right after start = the service never heard usable
+                    // audio; `Error` = rejected the request outright.
+                    TicNoteDiagLog.log("ASR", "azureTranslate phrase status=\(status.isEmpty ? "-" : status)")
                 }
             } else if headers.contains("turn.end") {
                 log.debug("turn.end")
@@ -287,6 +316,7 @@ final class AzureLiveTranslation {
     private func reportClosed(_ error: Error?) {
         guard !closed else { return }
         closed = true
+        TicNoteDiagLog.log("ASR", "azureTranslate ws closed err=\(error.map { String(describing: $0) } ?? "nil") after \(pagesSent) page(s)")
         continuation?.yield(.closed(error))
         continuation?.finish()
         continuation = nil

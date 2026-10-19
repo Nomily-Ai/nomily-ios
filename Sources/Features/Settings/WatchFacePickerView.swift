@@ -61,7 +61,7 @@ struct WatchFacePickerView: View {
 
                 if style == chosen {
                     Image(systemName: "checkmark")
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.appAccent)
                         .font(.body.weight(.semibold))
                 }
             }

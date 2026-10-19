@@ -54,6 +54,13 @@ final class LiveModel: ObservableObject {
     @Published var isPaused = false
     @Published var bytes = 0
     @Published var frames = 0
+    /// The card's own recording clock, in seconds — refreshed every few seconds while running.
+    ///
+    /// ★ (2026-10-19) The screen used to trust `frames` alone. When the A1 stops pushing (it does,
+    ///   see `DingTalkA1Link.liveTask`) the frame count stops advancing and the timer freezes at
+    ///   whatever we last received — "the number is stuck / doesn't match DingTalk". The card
+    ///   keeps counting regardless and reports it in `0x0132`, so we adopt that number.
+    @Published var deviceElapsed: TimeInterval?
     @Published var error: String?
     /// True when the current `error` is "this device isn't paired with the
     /// app" — the view turns it into the same "Pair now" guidance the
@@ -71,6 +78,27 @@ final class LiveModel: ObservableObject {
     /// content with an error page**. And "translation missing" should not cause the user to lose the ongoing transcription —
     /// the transcription itself is fine, the user just misses half the content. Therefore this entry only provides a single-line hint.
     @Published var translationNotice: String?
+    /// Non-blocking "this session has no transcription" notice.
+    ///
+    /// Separate from `error` on purpose: `error` is shown as a failure and stops the session in
+    /// the user's head, whereas recording continuing without text is a **degraded but working**
+    /// state — the card is capturing audio and the clip will be transcribed from the saved file.
+    @Published var serviceNotice: String?
+    /// True while the BLE link has dropped and we are waiting for the card to come back.
+    ///
+    /// ★ (2026-10-18) The session **survives** a link drop now. It used to be killed by it:
+    ///   `spawnStreamTask` treated any stream end as "the device stopped recording", finalised the
+    ///   clip and cleared `isRunning` — which is exactly the reported "it pauses / ends the live
+    ///   transcription by itself". The card keeps recording independently, so the honest action
+    ///   is to hold the session, wait out the reconnect, and re-attach the stream.
+    @Published var linkRecovering = false
+    /// Recent loudness of the card's audio, normalised to 0...1, newest last.
+    ///
+    /// Drives the DingTalk-style level bars on the recording screen. Sampled from the **decoded
+    /// PCM** on the on-device path (several values per ~3 s batch), so it is real signal, not an
+    /// animation. Providers that stream opus straight to a socket (Azure / whisper server) never
+    /// decode locally, so the array simply stays empty and the bars hold still.
+    @Published var audioLevels: [Double] = []
     @Published var savedClipName: String?
     @Published var targetLangName: String = ""
     @Published var pendingRepair: PendingRepair?
@@ -155,12 +183,14 @@ final class LiveModel: ObservableObject {
     @MainActor
     private enum ActiveASR {
         case local(LiveStreamASR)
+        case onDevice(OnDeviceLiveASR)
         case azure(AzureLiveASR)
         case azureTranslate(AzureLiveTranslation)
 
         func send(_ data: Data) {
             switch self {
             case .local(let asr): asr.send(data)
+            case .onDevice(let asr): asr.send(data)
             case .azure(let asr): asr.send(data)
             case .azureTranslate(let asr): asr.send(data)
             }
@@ -169,6 +199,7 @@ final class LiveModel: ObservableObject {
         func close() {
             switch self {
             case .local(let asr): asr.close()
+            case .onDevice(let asr): asr.close()
             case .azure(let asr): asr.close()
             case .azureTranslate(let asr): asr.close()
             }
@@ -177,6 +208,12 @@ final class LiveModel: ObservableObject {
 
     private var startedAt: Date?
     private var streamTask: Task<Void, Never>?
+
+    /// Polls the card's own recording clock while a session runs (see `deviceElapsed`).
+    private var clockTask: Task<Void, Never>?
+    /// Slow enough to be invisible next to a 50 Hz stream, fast enough that a frozen frame count
+    /// never shows on screen for more than a few seconds.
+    private static let clockPollSeconds: TimeInterval = 3
     private var eventTask: Task<Void, Never>?
     private var currentASR: ActiveASR?
 
@@ -230,6 +267,15 @@ final class LiveModel: ObservableObject {
     /// `LiveModel` / `LiveView` together. See the documentation of `LiveAudioSource`.
     private var activeSource: (any LiveAudioSource)?
 
+    /// Asked again for "the source that can reach this device **now**".
+    ///
+    /// ★ A recorder link object does not survive a BLE drop: `BluetoothCoordinator` throws the
+    ///   old `DingTalkA1Link` away (`recorderLink = nil`) and builds a **new** one after it
+    ///   reconnects, so the instance captured at `start` is dead forever. Without this hook the
+    ///   only possible reaction to a hiccup was "end the session". `LiveView` hands in
+    ///   `{ liveSource }`, which always reads the current link.
+    var liveSourceResolver: (() -> (any LiveAudioSource)?)?
+
     /// Opus packet shape for this session. **Must match `activeSource.opusProfile`** —
     /// It determines the duration conversion "bytes per second" (used in `capturedDuration` /
     /// `durationLabel` / `saveAndCleanup`), and also dictates how many bytes per packet when saving.
@@ -280,11 +326,80 @@ final class LiveModel: ObservableObject {
         return isRunning ? L10n.Live.streaming : L10n.Live.ready
     }
 
+    /// Seconds of audio captured so far — **counted in packets, not bytes** (★ 2026-10-18).
+    ///
+    /// The old formula (`bytes / packetBytes * 0.02`) silently assumed every packet is exactly
+    /// `packetBytes` long. On the A1 that only holds for CBR frames: one VBR frame (or a short
+    /// last frame) shifts the divisor and the timer drifts away from the card's own counter —
+    /// which is exactly the "the timer doesn't match DingTalk's" complaint. A packet count has
+    /// no such assumption: one frame is one 20 ms block no matter how many bytes it took.
+    private var sessionSeconds: TimeInterval {
+        let perPacket = Double(opusProfile.samplesPerPacket) / Double(opusProfile.sampleRate)
+        let fromPackets = Double(frames) * (perPacket.isFinite && perPacket > 0 ? perPacket : 0.02)
+        // Take the larger of the two: the card is the authority on how long it has been
+        // recording, while the packet count advances smoothly between polls. `max` therefore
+        // gives a clock that moves every frame *and* jumps back to the truth when a stall
+        // froze the frames.
+        if let device = deviceElapsed, device > 0 {
+            return max(device, fromPackets)
+        }
+        return max(0, fromPackets)
+    }
+
     var durationLabel: String {
-        // ⚠️ `opusProfile.packetBytes` cannot be hard‑coded to 40 — TicNote packets are 160 B,
-        //    If hard‑coded, the same byte count would be displayed as **4×** the duration.
-        let secs = Int(Double(bytes / opusProfile.packetBytes) * 0.02)
+        let secs = Int(sessionSeconds)
         return String(format: "%d:%02d", secs / 60, secs % 60)
+    }
+
+    /// The big h:mm:ss counter on the recording screen (DingTalk puts the timer front and
+    /// centre; `durationLabel` stays m:ss for the compact bar).
+    var largeDurationLabel: String {
+        let secs = Int(sessionSeconds)
+        return String(format: "%d:%02d:%02d", secs / 3600, (secs % 3600) / 60, secs % 60)
+    }
+
+    /// Whether a recogniser is attached right now. `false` while running = the card is
+    /// recording (and the frames are being saved) but nothing is being transcribed — the UI
+    /// says so instead of showing an empty transcript that reads as "broken".
+    var asrIsOpen: Bool { currentASR != nil }
+
+    /// Lines the user can see: finished segments plus the one still being spoken.
+    var segmentCount: Int { finalSegments.count + (partialText.isEmpty ? 0 : 1) }
+
+    /// Keep the last few dozen loudness samples for the level bars.
+    ///
+    /// A 3 s ASR batch arrives as **one burst** (one value per ~60 ms). Appending all of them
+    /// would shift the strip by 48 bars at once and then leave it frozen until the next batch,
+    /// so the batch is squeezed into at most 14 slots (peak of each group) first — the strip then
+    /// advances by half its width per batch instead of teleporting.
+    private func pushAudioLevels(_ levels: [Double]) {
+        guard !isPaused, !levels.isEmpty else { return }
+        let target = 14
+        var squeezed = levels
+        if levels.count > target {
+            squeezed = []
+            let groupSize = Int((Double(levels.count) / Double(target)).rounded(.up))
+            var index = 0
+            while index < levels.count {
+                let slice = levels[index..<min(index + groupSize, levels.count)]
+                squeezed.append(slice.max() ?? 0)
+                index += groupSize
+            }
+        }
+        audioLevels.append(contentsOf: squeezed)
+        if audioLevels.count > 28 {
+            audioLevels.removeFirst(audioLevels.count - 28)
+        }
+    }
+
+    /// Drop a mark **from the app** (the card's own button is the other source).
+    ///
+    /// Only meaningful on the A1, where marks are a real concept with a sidecar and a
+    /// detail-page section; other devices return false and the button isn't shown at all.
+    @discardableResult
+    func addAppMark() -> Bool {
+        guard let a1 = activeSource as? DingTalkA1Link else { return false }
+        return a1.addMarkNow()
     }
 
     // MARK: - start
@@ -306,6 +421,7 @@ final class LiveModel: ObservableObject {
         defer { isStarting = false }
         frames = 0
         bytes = 0
+        deviceElapsed = nil
         error = nil
         errorNeedsPairing = false
         finalSegments = []
@@ -319,6 +435,8 @@ final class LiveModel: ObservableObject {
         pendingRepair = nil
         repairState = .idle
         pendingStartConfirm = false
+        serviceNotice = nil
+        audioLevels = []
         deadASRProviders = []
         currentASRProducedResult = false
         attachedToExistingRecording = false
@@ -336,8 +454,15 @@ final class LiveModel: ObservableObject {
         do {
             try openASR(config: config)
         } catch {
-            self.error = error.localizedDescription
-            return
+            // ★ 2026-10-18: a missing speech service must not stop the recording.
+            //
+            // This `return` used to run **before** the card was told to record, which is exactly
+            // why "the A1 cannot record" looked like a protocol failure: no key configured → no
+            // `0x0100 start` at all → nothing on the card and nothing on screen. Recording and
+            // transcription are independent concerns; without a service we still capture, and
+            // the saved clip gets transcribed afterwards (on-device, if enabled).
+            self.serviceNotice = L10n.ASR.liveRecordingWithoutASR
+            diagLive("openASR failed — continuing record-only: \(error.localizedDescription)")
         }
 
         do {
@@ -401,6 +526,7 @@ final class LiveModel: ObservableObject {
             startedAt = Date()
             isRunning = true
             spawnStreamTask(source: source)
+            startClock(source: source)
         } catch {
             self.error = error.localizedDescription
             if let dnoteError = error as? DnoteError, case .notBound = dnoteError {
@@ -409,6 +535,43 @@ final class LiveModel: ObservableObject {
             isRunning = false
             currentASR?.close()
             currentASR = nil
+        }
+    }
+
+    // MARK: - Bounded waits
+
+    /// Await `task`, but give up after `seconds` and cancel it.
+    ///
+    /// Every "close the session" path used to await an untrusted task with **no deadline**:
+    /// the ASR event loop and the card's `liveStop()`. One of them wedging was enough to freeze
+    /// pause and stop forever, with the card still recording on its own — the exact report that
+    /// started this round. A dead line is worth a cancelled task; it is never worth a hung UI.
+    private static func finish(_ task: Task<Void, Never>, within seconds: Double) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await task.value }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                task.cancel()
+            }
+            await group.next()
+            group.cancelAll()
+        }
+    }
+
+    /// Run `operation`, returning `nil` if it takes longer than `seconds`.
+    private static func firstResult<T: Sendable>(
+        seconds: Double,
+        _ operation: @escaping @Sendable () async -> T
+    ) async -> T? {
+        await withTaskGroup(of: T?.self) { group in
+            group.addTask { await operation() }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
         }
     }
 
@@ -424,8 +587,13 @@ final class LiveModel: ObservableObject {
         guard isRunning, !isPaused else { return }
         didPauseDuringSession = true
         commitPartial()
-        await closeASR()
+        // ★ Flip the flag **before** tearing the ASR down (2026-10-18). Closing the recogniser
+        //   is not instantaneous (it finishes a request, waits for the last callback); doing it
+        //   first made the button look dead for as long as that took, which the user reported
+        //   as "pause doesn't work". The stream task already drops frames on this flag, so
+        //   nothing leaks into the buffer during the teardown.
         isPaused = true
+        await closeASR()
     }
 
     func resume(config: ConfigService) async {
@@ -442,6 +610,7 @@ final class LiveModel: ObservableObject {
         streamTask = Task { [weak self] in
             guard let self else { return }
             var cancelled = false
+            var failure: Error?
             do {
                 // 10 s is generous for a device that is pushing at all
                 // (frames come every 20 ms); the default 30 s is for gaps
@@ -467,12 +636,95 @@ final class LiveModel: ObservableObject {
             } catch is CancellationError {
                 cancelled = true
             } catch {
-                self.error = error.localizedDescription
+                failure = error
+                // A dropped link is recovered below; flashing "the connection dropped" for the
+                // two seconds it takes to reconnect reads as a failure the user must act on.
+                var isLinkLoss = false
+                if let recorderError = error as? RecorderLinkError, case .linkLost = recorderError {
+                    isLinkLoss = true
+                }
+                if !isLinkLoss { self.error = error.localizedDescription }
             }
-            if !cancelled {
-                await self.handleDeviceStopped(source: source)
+            if cancelled { return }
+            // ★ (2026-10-18) "The stream ended" is **two** situations, not one.
+            //
+            // `handleDeviceStopped` finalises the clip, clears `isRunning` and saves — correct for
+            // "the card's own button was pressed" (clean `finish()`, so `failure == nil`). For a
+            // BLE drop it saved a half session the user never ended: exactly the reported
+            // "it paused/ended live transcription by itself". `.linkLost` is recoverable — the card is still recording on
+            // its own and the coordinator is already reconnecting — so we hold the session and
+            // re-attach. A `.timeout` (the card genuinely stopped pushing) and a clean end still
+            // finalise.
+            if await self.recoverStream(after: failure) { return }
+            guard !Task.isCancelled else { return }
+            await self.handleDeviceStopped(source: source)
+        }
+    }
+
+    // MARK: - device clock
+
+    /// Keep `deviceElapsed` in sync with the card while the session runs.
+    ///
+    /// Stops on its own when the session ends (`isRunning == false`), and is restarted by
+    /// `recoverStream` when a re-attach gives us a different link object.
+    private func startClock(source: any LiveAudioSource) {
+        clockTask?.cancel()
+        clockTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(Self.clockPollSeconds * 1_000_000_000))
+                guard !Task.isCancelled, let self else { return }
+                guard self.isRunning else { return }
+                if let elapsed = await source.liveDeviceElapsed(), elapsed > 0 {
+                    self.deviceElapsed = elapsed
+                }
             }
         }
+    }
+
+    // MARK: - recovery after a dropped link
+
+    /// How long the session stays open waiting for the card to come back.
+    ///
+    /// A reconnection normally takes 2–5 s (`BluetoothCoordinator.scheduleRecorderReconnect`);
+    /// 20 s covers one failed attempt plus its retry without looking like the app hung.
+    private static let streamRecoveryWindow: TimeInterval = 20
+
+    /// Re-attach the live stream after the link dropped, keeping the session alive.
+    ///
+    /// - Returns: `true` when a fresh stream is running again — the caller must **not** finalise.
+    ///   `false` when there is nothing to recover from, or the card never came back.
+    private func recoverStream(after failure: Error?) async -> Bool {
+        guard isRunning, !isPaused, let resolver = liveSourceResolver else { return false }
+        // Only a dropped link is ours to undo.
+        guard let recorderError = failure as? RecorderLinkError, case .linkLost = recorderError else {
+            return false
+        }
+
+        linkRecovering = true
+        diagLive("stream lost (link dropped) — holding the session open, waiting for the card")
+        defer { linkRecovering = false }
+
+        let deadline = Date().addingTimeInterval(Self.streamRecoveryWindow)
+        while Date() < deadline, !Task.isCancelled {
+            if let fresh = resolver(), fresh.isAvailable {
+                do {
+                    try await fresh.liveAttach()
+                    activeSource = fresh
+                    error = nil
+                    spawnStreamTask(source: fresh)
+                    startClock(source: fresh)
+                    diagLive("stream re-attached after the link came back")
+                    return true
+                } catch {
+                    diagLive("re-attach failed (\(error.localizedDescription)) — retrying")
+                }
+            }
+            // 500 ms: fine-grained enough to pounce on the reconnect, coarse enough not to spin
+            // the main actor while the phone is rescanning.
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        diagLive("stream not recovered within \(Int(Self.streamRecoveryWindow)) s — ending the session")
+        return false
     }
 
     // MARK: - stop
@@ -481,6 +733,8 @@ final class LiveModel: ObservableObject {
         guard isRunning || streamTask != nil || currentASR != nil else { return }
         streamTask?.cancel()
         streamTask = nil
+        clockTask?.cancel()
+        clockTask = nil
 
         // ★ TicNote's "stop" does two extra things compared to D·NOTE, both in `liveStop()`:
         //   ① First stop the pull‑stream loop, then send the stop‑recording frame — otherwise the card's segment hasn't finished writing,
@@ -488,7 +742,16 @@ final class LiveModel: ObservableObject {
         //   ② After stopping, verify the **actual** size of the card's segment (`0x17` fileSize / `0x1A` list),
         //      because "how much we pulled" and "how much is stored on the card" are **two distinct numbers** in real‑time pulling,
         //      (we might have pressed stop immediately after starting, pulling only 0 bytes).
-        let outcome = await source.liveStop()
+        // ★ Bounded (2026-10-18). `liveStop` issues two authenticated BLE commands; if the card
+        //   stopped answering (the link died mid-stream) each one waits out its 15 s timeout and
+        //   the "finish" button looked broken for half a minute. Ten seconds is enough for a
+        //   healthy card; past that we end the session anyway and keep what we already have —
+        //   the recording is still on the card's own storage either way.
+        let outcome = await Self.firstResult(seconds: 10) { await source.liveStop() }
+            ?? LiveStopOutcome(file: nil, deviceInitiated: false)
+        if outcome.file == nil {
+            TicNoteDiagLog.log("LIVE", "stop: liveStop timed out — ending session with what we have")
+        }
 
         commitPartial()
         await closeASR()
@@ -659,7 +922,28 @@ final class LiveModel: ObservableObject {
         for fb in defaults.fallbacks where fb != defaults.primary {
             chain.append(fb)
         }
+        // ★ On-device is appended as the **last resort**, not the first (2026-10-18).
+        //
+        // Reasoning about order: a configured Azure/whisper service produces better text than
+        // Apple's offline model, so an explicit choice must win. What on-device guarantees is
+        // that the chain is **never empty** — before this, a user with no key and no server got
+        // `openASR` throwing, and with it the card was never told to record at all.
+        if config.config.onDeviceASREnabled, !chain.contains("ondevice") {
+            chain.append("ondevice")
+        }
         for name in chain where !deadASRProviders.contains(name.lowercased()) {
+            // ★ (2026-10-19) Per-provider isolation — this is the difference between "no text at
+            // all" and "degraded but working".
+            //
+            // Until now a `connect()` throw escaped the whole loop. Real-world config that hits
+            // it: primary is Azure with an **empty key** (skipped by `azureUsable`), the local
+            // server is a LAN address the phone isn't on any more — `LiveStreamASR.connect()`
+            // throws, `openASR` fails, and the on-device fallback at the end of the chain is
+            // never even considered. The live page then records audio but transcribes nothing,
+            // which reads exactly like "live audio is broken".
+            //
+            // Each provider now owns its failure: mark it dead and move to the next link.
+            do {
             switch name.lowercased() {
             case "azure":
                 if azureUsable, let azure {
@@ -689,8 +973,33 @@ final class LiveModel: ObservableObject {
                     runEventLoop(local: events)
                     return
                 }
+            case "ondevice" where config.config.onDeviceASREnabled:
+                // Needs the phone's offline model for *this* language; if it isn't installed the
+                // only honest move is to skip it rather than start a recogniser that will fail
+                // on the first result (`supportsOnDeviceRecognition` is that check).
+                //
+                // ★ The `where` clause matters: an old config can still name "ondevice" as
+                //   primary/fallback, and honouring it after the user switched the feature off
+                //   would re-enter the exact path that crashed the app on launch.
+                if OnDeviceASR.isAvailable(localeID: sourceLang) {
+                    let asr = OnDeviceLiveASR(profile: opusProfile, localeID: sourceLang)
+                    asr.onLevels = { [weak self] levels in
+                        self?.pushAudioLevels(levels)
+                    }
+                    let events = try asr.connect()
+                    currentASR = .onDevice(asr)
+                    activeProvider = "ondevice"
+                    currentASRProducedResult = false
+                    diagLive("provider=ondevice locale=\(sourceLang) profile=\(opusProfile.packetBytes)B")
+                    runEventLoop(onDevice: events)
+                    return
+                }
             default:
                 break
+            }
+            } catch {
+                deadASRProviders.insert(name.lowercased())
+                diagLive("provider=\(name) unavailable: \(error.localizedDescription)")
             }
         }
         if deadASRProviders.isEmpty {
@@ -703,8 +1012,13 @@ final class LiveModel: ObservableObject {
         intentionalASRClose = true
         currentASR?.close()
         currentASR = nil
-        await eventTask?.value
-        eventTask = nil
+        // ★ Never wait unboundedly for the event loop (2026-10-18). `close()` finishes the
+        //   stream, so the loop normally ends within a frame or two; if it does not, the only
+        //   thing a longer wait buys is a frozen pause/stop button. 2 s, then cancel.
+        if let task = eventTask {
+            eventTask = nil
+            await Self.finish(task, within: 2)
+        }
         wsConnected = false
         partialText = ""
         partialTranslation = ""
@@ -732,10 +1046,9 @@ final class LiveModel: ObservableObject {
     /// Seconds of audio actually captured into `streamBuffer`. Used as the
     /// transcript timestamp instead of wall-clock so paused gaps don't
     /// desync the transcript from the saved clip.
-    private var capturedDuration: TimeInterval {
-        // // Same as above: convert based on `opusProfile`, do not hardcode 40.
-        Double(bytes / opusProfile.packetBytes) * 0.02
-    }
+    ///
+    /// `internal` on purpose: `LiveView` stamps the in-flight partial line with it.
+    var capturedDuration: TimeInterval { sessionSeconds }
 
     // MARK: - event loops
 
@@ -767,7 +1080,10 @@ final class LiveModel: ObservableObject {
                 do {
                     try self.openASR(config: config)
                 } catch {
-                    self.error = error.localizedDescription
+                    // Same rule as `start`: losing the speech service mid-session degrades the
+                    // session, it does not end it. The card is still recording; the clip will be
+                    // transcribed from the saved file.
+                    self.serviceNotice = L10n.ASR.liveRecordingWithoutASR
                 }
             }
             return
@@ -787,7 +1103,7 @@ final class LiveModel: ObservableObject {
             do {
                 try self.openASR(config: config)
             } catch {
-                self.error = error.localizedDescription
+                self.serviceNotice = L10n.ASR.liveRecordingWithoutASR
             }
         }
     }
@@ -810,6 +1126,27 @@ final class LiveModel: ObservableObject {
     }
 
     private func runEventLoop(azure events: AsyncStream<AzureLiveASR.Event>) {
+        eventTask = Task { [weak self] in
+            for await event in events {
+                guard let self else { break }
+                switch event {
+                case .partial(let t):
+                    self.noteASRResult()
+                    self.partialText = t
+                case .final(let t):
+                    if !t.isEmpty {
+                        let ts = self.capturedDuration
+                        self.finalSegments.append(LiveSegment(text: t, translation: nil, timestamp: ts))
+                    }
+                    self.partialText = ""
+                case .closed(let e):
+                    self.handleASRClosed(e)
+                }
+            }
+        }
+    }
+
+    private func runEventLoop(onDevice events: AsyncStream<OnDeviceLiveASR.Event>) {
         eventTask = Task { [weak self] in
             for await event in events {
                 guard let self else { break }

@@ -55,6 +55,15 @@
 "asr.no_provider_message" = "Set up a transcription provider (Azure or Local Server) in Settings.";
 "asr.azure" = "Azure";
 "asr.local_server_label" = "Local server";
+"asr.on_device" = "On-device (iPhone)";
+"asr.on_device_footer" = "Transcribes with the phone's own offline model: no key, no server, no audio leaving the device. Live transcription on the card uses it too, in short batches.";
+"asr.on_device_unauthorized" = "Speech recognition permission was declined. Allow it in iOS Settings › Nomily AI › Speech Recognition.";
+"asr.on_device_not_declared" = "This build is missing the speech-recognition declaration that iOS requires, so on-device recognition is blocked. It has to be added to project.yml (info.properties › NSSpeechRecognitionUsageDescription) and the app rebuilt — until then, pick another service.";
+"asr.on_device_unavailable" = "The phone has no offline speech model for %@. Add the keyboard/dictation language in iOS Settings, or pick another service.";
+"asr.on_device_decode_failed" = "Could not decode this recording for on-device recognition: %@";
+"asr.auto_summarize" = "Summarise right after transcribing";
+"asr.auto_summarize_footer" = "As soon as a transcript is ready, the configured AI service turns it into a summary, so the clip is already readable when you open it. Needs an AI service configured; skipped when there is none.";
+"asr.live_recording_without_asr" = "Recording and streaming, but no speech service is available — the clip will be transcribed once it is saved.";
 "asr.transcribe_auto" = "Auto-detect language";
 "asr.specify_languages" = "Specify languages…";
 "asr.languages_footer" = "Azure detects the language of each phrase independently, not the clip as a whole — useful for meetings that mix several languages.";
@@ -206,6 +215,14 @@
 "clip_detail.view_full_summary" = "View Full Summary";
 "clip_detail.summarize" = "Summarize";
 "clip_detail.transcribe_first" = "Transcribe first to enable summarization.";
+"clip_detail.tab_transcript" = "Transcript";
+"clip_detail.tab_summary" = "AI Minutes";
+"clip_detail.tab_todos" = "To-dos";
+"clip_detail.todos_empty" = "No action items in the summary.";
+"clip_detail.todos_need_summary" = "Generate a summary to collect action items here.";
+"clip_detail.search_transcript" = "Search transcript";
+"clip_detail.speaker_all" = "All speakers";
+"clip_detail.more_actions" = "More";
 "clip_detail.translation" = "Translation";
 "clip_detail.view_full_translation" = "View Full Translation";
 "clip_detail.translate" = "Translate";
@@ -375,6 +392,21 @@
 "live.streaming" = "Streaming";
 "live.ready" = "Ready";
 "live.paused" = "Paused";
+"live.reconnecting" = "Reconnecting…";
+"live.reconnecting_hint" = "Lost the card's Bluetooth link — reconnecting. The card keeps recording on its own, so nothing is lost.";
+"live.mark" = "Mark";
+"live.mark_added" = "Marked";
+"asr.custom_server" = "Custom Server (OpenAI-compatible)";
+"asr.custom_endpoint" = "Server address";
+"asr.custom_api_key" = "API key (optional)";
+"asr.custom_model" = "Model (default whisper-1)";
+"asr.custom_language" = "Language hint (optional, e.g. zh)";
+"asr.custom_probe" = "Test connection";
+"asr.custom_probe_footer" = "Speak the OpenAI /v1/audio/transcriptions API — works with faster-whisper-server, whisper.cpp, Groq and similar. File transcription only; live transcription falls back to on-device recognition.";
+"asr.custom_probe_auth" = "Server reachable, but the API key was rejected (401) — check the key";
+"asr.custom_probe_http" = "Server answered HTTP %d — is this really an OpenAI-compatible ASR endpoint?";
+"live.asr_offline" = "Recording only — transcription is off";
+"live.waiting_for_text" = "Audio is coming in, waiting for the first words…";
 "live.repair_title" = "Complete recording available";
 "live.repair_message" = "This recording had pauses, so some audio wasn't captured. Replace it with the complete version from your recorder?";
 "live.repair_message_attached" = "This session joined a recording that was already in progress, so the start is missing. Replace it with the complete version from your recorder?";
@@ -388,6 +420,8 @@
 "live.start_unknown_title" = "Can't tell whether the recorder is recording";
 "live.start_unknown_message" = "The recorder didn't answer the status check. Starting a live session now could cut off a recording you began with the button on the device. Try again, or start anyway if you're sure it isn't recording.";
 "live.start_anyway" = "Start Anyway";
+"live.voice_key_auto_started" = "Recording started with the card's key — live transcription attached automatically";
+"live.voice_key_memo_saved" = "Recording saved — transcribing, the AI memo will follow";
 "live.attach_no_upload" = "The recorder is recording, but this recording was started with the device button before the app connected, so it isn't sending audio. Stop the recording on the device, then start live from the app.";
 
 /* Scanner */
@@ -1051,3 +1085,83 @@
 "trash.delete_selected_title" = "Delete for Good?";
 "trash.delete_selected_message" = "%d item(s) will be removed for good. This can't be undone.";
 "watch.not_worn" = "Not worn";
+
+// MARK: - App theme (2026-10-18)
+"settings.theme" = "Theme";
+"theme.footer" = "The theme controls the app's main colour — buttons, links, selection and the active state of the connection pill. The launch screen keeps Nomily's brand red, so red stays the default.";
+"theme.crimson" = "Crimson";
+"theme.crimson.subtitle" = "Nomily's brand red";
+"theme.graphite" = "Graphite";
+"theme.graphite.subtitle" = "Neutral, no colour cast";
+"theme.ocean" = "Ocean";
+"theme.ocean.subtitle" = "Cool and quiet";
+"theme.forest" = "Forest";
+"theme.forest.subtitle" = "Grounded green";
+"theme.violet" = "Violet";
+"theme.violet.subtitle" = "Soft but distinctive";
+"theme.amber" = "Amber";
+"theme.amber.subtitle" = "Warm, low glare";
+
+// MARK: - DingTalk A1 credential import (2026-10-18)
+"a1.title" = "DingTalk A1";
+"a1.intro" = "Every DingTalk A1 has its own device secret. DingTalk issues it when the card is bound to an account; it can't be derived from the serial number and it is never sent over Bluetooth. So the first time, it has to be taken out of one signed-in DingTalk session — after that, listing, downloading and transcribing all happen offline, with no DingTalk involved.";
+"a1.step1.title" = "Bind the card to your DingTalk account";
+"a1.step1.body" = "Bought it second-hand? Ask the seller to unbind it first, then scan the code in DingTalk to bind it yourself. Only you can do this step — it decides which account the card hands its secret to.";
+"a1.step2.title" = "Open “AI Notes” once on the desktop app";
+"a1.step2.body" = "Any template will do. DingTalk writes the device list — secret included — into its own log on that computer.";
+"a1.step3.title" = "Run one command on that Mac";
+"a1.step3.body" = "It turns the secret into one line of text, copies it to the clipboard and shows a QR code — scan it or paste it. If your copy of the script lives somewhere else, edit the command below.";
+"a1.copy_command" = "Copy the command";
+"a1.command_footer" = "The extractor only reads DingTalk's log on this Mac. It doesn't touch the card, the firmware or your DingTalk account.";
+"a1.command.editor_title" = "Extractor command";
+"a1.command.editor_footer" = "The script ships with the Nomily tool package; point this at wherever it lives on your Mac. Add --qr to also draw a QR code the phone can scan — no clipboard involved. Example: cd <script dir> && python3 extract_secret_from_dingtalk_mac.py --copy --qr";
+"a1.open_import" = "Import this card's key";
+"a1.error.no_credential" = "This card has no key on this phone yet. Open this card's info page → “Card key” to scan or paste it — a one-time step, after which everything runs offline.";
+"a1.error.rejected" = "The card rejected the stored credential (501). Each card's secret works only on that card — import this card's own credential in Settings → DingTalk A1.";
+"a1.error.not_authenticated" = "The card says this session isn't authenticated (405). Disconnect and reconnect the card, then try again.";
+"a1.error.bad_secret" = "The stored credential's secret is too short to produce a token. Re-import it in Settings → DingTalk A1.";
+"a1.paste.section" = "Paste the credential";
+"a1.paste.placeholder" = "Paste what the command copied…";
+"a1.paste.from_clipboard" = "Paste";
+"a1.import" = "Import";
+"a1.paste.footer" = "Accepts a scanned QR code, the one-line link, the JSON the extractor writes, or key=value lines.";
+"a1.imported.header" = "Imported";
+"a1.imported.ok" = "Ready — reconnect the card to use it";
+"a1.card.name" = "Card";
+"a1.card.sn" = "Serial";
+"a1.card.secret" = "Secret";
+"a1.cards.header" = "Cards on this phone";
+"a1.cards.footer" = "The secret is kept in the iOS keychain only — never in the settings file, never uploaded anywhere. Swipe a card to remove it; the card itself is untouched.";
+"a1.delete.title" = "Remove this card's credential?";
+"a1.delete.message" = "Nomily will no longer be able to read this card. Recordings on the card are not affected.";
+"a1.import_failed" = "Couldn't import that";
+
+/* ---- DingTalk A1: QR / deep-link import ---- */
+"a1.scan.action" = "Scan QR code";
+"a1.scan.hint" = "Point the camera at the QR code the command printed on your Mac.";
+"a1.scan.denied" = "Camera access is off for Nomily. Turn it on in Settings → Nomily AI → Camera, or paste the line instead.";
+"a1.scan.no_camera" = "No camera available here.";
+"a1.scan.failed" = "That QR code isn't a DingTalk A1 credential. Use the one printed by the extractor on your Mac.";
+"a1.link.imported" = "Credential imported";
+"a1.link.imported_body" = "%@ is ready. Go back and tap “Try again”.";
+
+/* ---- Remark marks dropped on the card while recording ---- */
+"clip_detail.remarks" = "Remarks";
+"clip_detail.remarks_count" = "%d marks";
+"clip_detail.remarks_footer" = "Pressed the record key while the card was recording — each press drops a marker there. Tap one to jump to it.";
+
+/* ---- A1: each card's own key (device info page) ---- */
+"a1.section.title" = "Card key";
+"a1.section.footer" = "This key belongs to this card alone — it is not an app-wide setting. Another A1 needs its own. It is stored in the iOS keychain and never leaves the phone.";
+"a1.missing.title" = "No key on this phone yet — the card can't be read until one is imported.";
+"a1.replace" = "Replace key";
+"a1.remove" = "Delete key";
+"a1.paste.manually" = "Paste it instead";
+"a1.how_to" = "How do I get this key?";
+"a1.scoped_to" = "For %@ only";
+"a1.mismatch" = "Saved, but its serial ends in %@ — this card's ends in %@. If you meant this card, import that card's own key.";
+
+"summarize.chip_recommended" = "Recommended";
+"summarize.chip_custom" = "Custom";
+"summarize.default_badge" = "Default";
+"summarize.set_default" = "Set as default";

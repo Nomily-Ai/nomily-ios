@@ -91,6 +91,18 @@ struct RootView: View {
                 .tabItem { Label(L10n.Tab.settings, systemImage: "gearshape") }
                 .tag(Tab.settings)
         }
+        // ★ Theme: one place, whole app.
+        //
+        // `.tint()` writes `EnvironmentValues.tint`, and since iOS 16 that is the
+        // **same key** `Color.appAccent` resolves through (`accentColor(_:)` is
+        // only its deprecated spelling). So the ~20 call sites that already say
+        // `Color.appAccent` follow along without being touched — including the
+        // ones in sheets, because a presented sheet inherits the environment of
+        // the view that presented it.
+        //
+        // ⚠️ Do not turn this into a hard-coded `Color` anywhere else "just this
+        // once": the next palette then leaves a patch of the old red behind.
+        .tint(AppTheme.resolve(configService.config.appTheme).accent)
         .sheet(isPresented: $showScanner) {
             ScannerSheet(onConnected: { showScanner = false })
         }

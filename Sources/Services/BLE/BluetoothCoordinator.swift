@@ -516,7 +516,14 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
             throw RecorderLinkError.unsupported("cached peripheral id is not a UUID")
         }
         // First ask "is it already connected" (common when the app is suspended and comes back), then ask "can the handle be retrieved".
-        let candidates = central.retrieveConnectedPeripherals(withServices: TicNoteRecorderSpec.serviceUUIDs)
+        //
+        // ⚠️ The service list must come from **this card's own spec**, not hard-coded to
+        // TicNote's: `retrieveConnectedPeripherals(withServices:)` only returns peripherals
+        // that expose one of the given services, so asking about the wrong card's service makes
+        // the fast path silently miss (and fall back to a 90-second scan) for every other protocol.
+        let services = RecorderProtocolRegistry.spec(for: identity.protocolID)?.serviceUUIDs
+            ?? TicNoteRecorderSpec.serviceUUIDs
+        let candidates = central.retrieveConnectedPeripherals(withServices: services)
             + central.retrievePeripherals(withIdentifiers: [uuid])
         guard let peripheral = candidates.first(where: { $0.identifier == uuid }) else {
             // Failing to retrieve it usually means "switched phones / reinstalled / the system cleared peripheral records" —— honestly fall back to scanning.
@@ -629,6 +636,30 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
                 peripheral: recorder.peripheral,
                 central: central,
                 serialNumber: recorder.identityText
+            )
+        case DingTalkA1Spec.identifier:
+            // The A1 authenticates with a **per-card credential** that has to be imported once
+            // (see `DingTalkA1Credential`). Resolution order matters:
+            //
+            //   1. match the advertisement's SN tail (`"0655"`) against the stored cards — the
+            //      common case, and the only one that stays correct when the user owns two A1s;
+            //   2. fall back to the single stored card, for the case where the advertisement
+            //      carried no manufacturer data (the fast-reconnect path rebuilds the
+            //      advertisement from cache, so `raw` is empty there).
+            //
+            // Deliberately **not** an error when nothing matches: we still want the card to
+            // appear and connect, so the UI can say "this card needs its credential imported"
+            // instead of the user staring at a scan list that never lists their device.
+            let credential = DingTalkA1CredentialStore.credential(matchingTail: recorder.identityText)
+                ?? DingTalkA1CredentialStore.single
+            link = DingTalkA1Link(
+                peripheral: recorder.peripheral,
+                central: central,
+                credential: credential,
+                // Kept for the mid-connection re-resolve: after the user imports the
+                // credential on the (still connected) link, `ensureAuthenticated` matches
+                // again by this tail instead of failing until a full reconnect.
+                identityHint: recorder.identityText
             )
         default:
             // A protocol was added to the registry but not wired up here —— the symptom would be "can scan, can't connect", the hardest to track down.

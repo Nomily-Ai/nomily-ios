@@ -42,6 +42,12 @@ final class TranscriptionService: ObservableObject {
     /// The queue's serial pump, preventing two `resumePending()` calls running at once from running the same job twice.
     private var drainTask: Task<Void, Never>?
 
+    /// Fired on the main actor after a transcript has been **written**, with the audio's file name
+    /// (`clip.m4a`), which is the same key the summary job uses for `clipName`. Wired up in
+    /// `AppEnvironment`; `TranscriptionService` deliberately doesn't know about `JobQueue` (this
+    /// file is about speech, not about scheduling work).
+    var onTranscribed: ((String) -> Void)?
+
     init(config: ConfigService) {
         self.config = config
         self.pending = Self.loadQueue()
@@ -478,6 +484,11 @@ final class TranscriptionService: ObservableObject {
                     result = Self.remapTimestamps(result, ranges: vadRanges)
                 }
                 try writeArtefacts(result, audioName: key)
+                // ★ "Summarize right after transcribing" (2026-10-18). The hook lives here rather than in every
+                //   caller: manual, auto-after-download and the resumed queue all funnel through
+                //   this line, so one call covers all three — and a summary can only be generated
+                //   once the `.asr.json` is actually on disk, which is exactly this moment.
+                onTranscribed?(key)
                 return result
             } catch {
                 // Any flavour of cancellation (CancellationError or
@@ -541,6 +552,12 @@ final class TranscriptionService: ObservableObject {
         for fallback in defaults.fallbacks where fallback != defaults.primary {
             chain.append(fallback)
         }
+        // On-device goes last, for the same reason as in `LiveModel.openASR`: a configured
+        // service wins on quality, but the chain must never come back empty when the phone can
+        // do the job itself. Without this line "On-device recognition" would be a switch that never runs.
+        if config.config.onDeviceASREnabled, !chain.contains("ondevice") {
+            chain.append("ondevice")
+        }
         return chain.filter { !$0.isEmpty && hasCredentials($0) }
     }
 
@@ -554,6 +571,13 @@ final class TranscriptionService: ObservableObject {
         case "local":
             guard let l = config.config.asrProviders.local else { return false }
             return !l.host.isEmpty && l.port > 0
+        case "ondevice":
+            // No credentials to check — only the switch, plus the honest question of whether
+            // this phone actually has an offline model for the language we'd ask it for.
+            return config.config.onDeviceASREnabled
+        case "custom":
+            guard let c = config.config.asrProviders.custom else { return false }
+            return !c.endpoint.isEmpty
         default:
             return false
         }
@@ -577,6 +601,32 @@ final class TranscriptionService: ObservableObject {
             }
             let client = LocalASR(host: local.host, port: local.port)
             return try await client.transcribe(fileURL: fileURL)
+        case "ondevice":
+            // ★ Belt and braces: `hasCredentials` already filters this out when the switch is
+            //   off, but a queued job can name a provider from an older config — reaching
+            //   `Speech` after the user disabled it is exactly what used to crash on launch.
+            guard config.config.onDeviceASREnabled else {
+                throw AsrError.missingCredentials("On-device speech")
+            }
+            // ★ Offline, on the phone, no key. The locale has to be *named* — Apple has no
+            // auto-detect — so an explicitly chosen source language wins, otherwise the UI
+            // language is the best guess (a zh-Hans user recording Chinese needs no setup).
+            let locale = locales?.first
+                ?? config.config.lastSourceLang
+                ?? (config.config.appLanguage ?? Locale.current.identifier)
+            return try await OnDeviceASR.transcribeFile(url: fileURL, localeID: locale)
+        case "custom":
+            guard let custom = config.config.asrProviders.custom,
+                  !custom.endpoint.isEmpty else {
+                throw AsrError.missingCredentials("Custom server")
+            }
+            let client = CustomASR(
+                endpoint: custom.endpoint,
+                apiKey: custom.apiKey ?? "",
+                model: custom.model ?? "",
+                language: custom.language ?? ""
+            )
+            return try await client.transcribe(fileURL: fileURL, locales: locales)
         default:
             throw AsrError.missingCredentials(name)
         }

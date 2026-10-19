@@ -55,6 +55,15 @@
 "asr.no_provider_message" = "请在设置中配置语音识别服务（Azure 或本地服务器）。";
 "asr.azure" = "Azure";
 "asr.local_server_label" = "本地服务器";
+"asr.on_device" = "本地识别（iPhone 自带）";
+"asr.on_device_footer" = "用手机自己的离线模型转写：不用密钥、不用服务器、音频不出本机。录音卡的实时转写也会用它，按小段汇总识别。";
+"asr.on_device_unauthorized" = "语音识别权限被拒绝了。请到 iOS 设置 › Nomily AI › 语音识别 里打开。";
+"asr.on_device_not_declared" = "这个安装包没有声明语音识别用途，iOS 因此禁用本地识别。需要在 project.yml（info.properties › NSSpeechRecognitionUsageDescription）里补上再重新打包；这之前请先改用其他服务。";
+"asr.on_device_unavailable" = "手机里没有 %@ 的离线语音模型。可在 iOS 设置的键盘/听写里添加该语言，或改用其他服务。";
+"asr.on_device_decode_failed" = "这段音频无法解码给本地识别：%@";
+"asr.auto_summarize" = "转写完成后自动生成摘要";
+"asr.auto_summarize_footer" = "转写一完成就交给已配置的 AI 服务生成摘要，打开这条录音时摘要已经在了。需要先配置 AI 服务；没配置就跳过。";
+"asr.live_recording_without_asr" = "正在录音并取流，但没有可用的语音服务——这段录音保存后会自动转写。";
 "asr.transcribe_auto" = "自动检测语言";
 "asr.specify_languages" = "指定语言…";
 "asr.languages_footer" = "Azure 会对每一句单独识别语言，而非整段音频——特别适合多语种混合的会议。";
@@ -207,6 +216,14 @@
 "clip_detail.view_full_summary" = "查看完整摘要";
 "clip_detail.summarize" = "生成摘要";
 "clip_detail.transcribe_first" = "请先完成转录以启用摘要功能。";
+"clip_detail.tab_transcript" = "转写";
+"clip_detail.tab_summary" = "AI纪要";
+"clip_detail.tab_todos" = "待办";
+"clip_detail.todos_empty" = "摘要里没有待办事项。";
+"clip_detail.todos_need_summary" = "先生成摘要，待办事项会汇集在这里。";
+"clip_detail.search_transcript" = "搜索转录内容";
+"clip_detail.speaker_all" = "全部发言人";
+"clip_detail.more_actions" = "更多";
 "clip_detail.translation" = "翻译";
 "clip_detail.view_full_translation" = "查看完整翻译";
 "clip_detail.translate" = "翻译";
@@ -303,6 +320,21 @@
 "live.streaming" = "传输中";
 "live.ready" = "就绪";
 "live.paused" = "已暂停";
+"live.reconnecting" = "重连中…";
+"live.reconnecting_hint" = "与录音卡的蓝牙连接断了，正在重连。录音卡自己还在录，内容不会丢。";
+"live.mark" = "打点";
+"live.mark_added" = "已打点";
+"asr.custom_server" = "自定义服务（OpenAI 兼容）";
+"asr.custom_endpoint" = "服务器地址";
+"asr.custom_api_key" = "API 密钥（可选）";
+"asr.custom_model" = "模型（默认 whisper-1）";
+"asr.custom_language" = "语言提示（可选，如 zh）";
+"asr.custom_probe" = "测试连接";
+"asr.custom_probe_footer" = "对接 OpenAI /v1/audio/transcriptions 接口——faster-whisper-server、whisper.cpp、Groq 等均可。仅用于文件转写；实时转写会自动回退到本地识别。";
+"asr.custom_probe_auth" = "服务器可达，但密钥被拒绝（401）——请检查 API 密钥";
+"asr.custom_probe_http" = "服务器返回 HTTP %d——请确认这是 OpenAI 兼容的转写接口";
+"live.asr_offline" = "仅在录音 · 转写未开启";
+"live.waiting_for_text" = "已在接收音频，等待第一句文字…";
 "live.repair_title" = "设备上有完整录音";
 "live.repair_message" = "本次录音中途有暂停，部分音频未被捕获。是否从录音设备下载完整录音进行替换？";
 "live.repair_message_attached" = "本次会话接入了录音设备上已开始的录音，开头部分没有捕获到。是否下载完整录音进行替换？";
@@ -316,6 +348,8 @@
 "live.start_unknown_title" = "无法确认录音设备是否正在录音";
 "live.start_unknown_message" = "设备没有回应状态查询。此时开始实时会话，可能会切断你用设备按键开始的那段录音。可以重试；确定设备没在录音再选择「仍然开始」。";
 "live.start_anyway" = "仍然开始";
+"live.voice_key_auto_started" = "已通过卡片按键开始录音，实时转写已自动接入";
+"live.voice_key_memo_saved" = "录音已保存，正在转写并生成 AI 语音备忘录";
 "live.attach_no_upload" = "录音设备正在录音，但这段录音是在 App 连接之前用设备按键开始的，设备不会推送音频。请先在设备上结束录音，再从 App 开始实时会话。";
 
 /* 扫描 */
@@ -1053,3 +1087,105 @@
 "trash.delete_selected_title" = "彻底删除？";
 "trash.delete_selected_message" = "%d 条将被永久删除，无法撤销。";
 "watch.not_worn" = "未佩戴手表";
+
+// MARK: - 主题配色（2026-10-18）
+"settings.theme" = "主题配色";
+"theme.footer" = "主题决定 App 的主色：按钮、链接、选中态，以及顶部连接胶囊的激活色。启动屏固定使用 Nomily 品牌红，所以默认仍是红色。";
+"theme.crimson" = "绯红";
+"theme.crimson.subtitle" = "Nomily 品牌红";
+"theme.graphite" = "石墨黑";
+"theme.graphite.subtitle" = "中性无彩，最克制";
+"theme.ocean" = "远洋蓝";
+"theme.ocean.subtitle" = "冷静、不抢眼";
+"theme.forest" = "深林绿";
+"theme.forest.subtitle" = "沉稳的绿";
+"theme.violet" = "紫罗兰";
+"theme.violet.subtitle" = "柔和但有个性";
+"theme.amber" = "琥珀橙";
+"theme.amber.subtitle" = "暖色、低刺眼";
+
+// MARK: - 钉钉 A1 凭据导入（2026-10-18）
+"a1.title" = "钉钉 A1";
+"a1.intro" = "每台钉钉 A1 都有一把独立的设备密钥（deviceSecret）。它是钉钉在你绑定设备时下发的，不能从序列号推导，也从来不走蓝牙链路。所以「第一次」必须从一次已登录的钉钉会话里把它取出来——之后列文件、下载、转录全部离线完成，不再需要钉钉。";
+"a1.step1.title" = "把卡绑到你的钉钉账号";
+"a1.step1.body" = "二手买来的话，先让卖家解绑，然后你在钉钉里扫码绑定。这一步只能你自己做——它决定了这张卡把密钥交给哪个账号。";
+"a1.step2.title" = "在电脑版钉钉打开一次「AI 听记」";
+"a1.step2.body" = "随便点一个模板就行。钉钉会把设备列表（含密钥）写进那台电脑上的日志。";
+"a1.step3.title" = "在那台 Mac 上跑一条命令";
+"a1.step3.body" = "它会把密钥变成一行文字复制到剪贴板，同时打出一个二维码——手机扫码或粘贴都行。脚本放的位置不同就改下面那条命令。";
+"a1.copy_command" = "复制这条命令";
+"a1.command_footer" = "提取器只读这台 Mac 上钉钉自己的日志，不碰卡片、不改固件、不动你的钉钉账号。";
+"a1.command.editor_title" = "提取命令";
+"a1.command.editor_footer" = "脚本随 Nomily 工具包附带，把它改成你 Mac 上的实际位置即可。加上 --qr 会同时打出一个二维码，手机直接扫，不用粘贴。示例：cd <脚本目录> && python3 extract_secret_from_dingtalk_mac.py --copy --qr";
+"a1.open_import" = "导入这张卡的密钥…";
+"a1.error.no_credential" = "这台手机上还没有这张卡的密钥。打开这张卡的设备信息页 →「卡片密钥」扫码或粘贴导入——只需一次，之后全部离线使用。";
+"a1.error.rejected" = "卡拒绝了已存的凭据（501）。每张卡的 secret 只对它自己有效——请到「设置 → 钉钉 A1」导入这张卡自己的凭据。";
+"a1.error.not_authenticated" = "卡说本次会话未鉴权（405）。请断开重连一次卡片再试。";
+"a1.error.bad_secret" = "已存凭据的 secret 太短，算不出 token。请到「设置 → 钉钉 A1」重新导入。";
+"a1.paste.section" = "粘贴凭据";
+"a1.paste.placeholder" = "把命令复制到的内容粘贴到这里…";
+"a1.paste.from_clipboard" = "粘贴";
+"a1.import" = "导入";
+"a1.paste.footer" = "支持二维码扫描、一行式链接、提取器写出的 JSON，或 key=value 逐行格式。";
+"a1.imported.header" = "已导入";
+"a1.imported.ok" = "就绪——重新连一次卡片即可使用";
+"a1.card.name" = "卡片";
+"a1.card.sn" = "序列号";
+"a1.recordmode.title" = "录音模式";
+"a1.recordmode.picker_title" = "录音模式";
+"a1.recordmode.footer" = "卡片已连接时，选完会立即写入卡片；离线时只保存在 App 内。";
+"a1.recordmode.saved_offline" = "已保存在 App 内——连接卡片后再写入。";
+"a1.recordmode.applying" = "正在写入卡片…";
+"a1.recordmode.applied" = "已生效：卡片确认了新值。";
+"a1.recordmode.apply_failed" = "卡片没有确认修改，仅保存在 App 内。";
+"a1.recordmode.general.name" = "通用模式";
+"a1.recordmode.general.badge" = "通话录音 / 人声增强";
+"a1.recordmode.general.subtitle" = "标准高清拾音，AI智能降噪";
+"a1.recordmode.meeting.name" = "会议模式";
+"a1.recordmode.meeting.badge" = "8米拾音";
+"a1.recordmode.meeting.subtitle" = "会议室专用，中远距离拾音";
+"a1.recordmode.facetoface.name" = "面对面沟通";
+"a1.recordmode.facetoface.badge" = "侧面消音";
+"a1.recordmode.facetoface.subtitle" = "设备正对用户放置拾音，屏蔽其他方位声音";
+"a1.recordmode.visual.name" = "AI可视听记";
+"a1.recordmode.visual.badge" = "beta · 显示方位";
+"a1.recordmode.visual.subtitle" = "让声音能够被看见，识别方位";
+"a1.recordmode.lossless.name" = "无损原声";
+"a1.recordmode.lossless.badge" = "不降噪 · 48K保真";
+"a1.recordmode.lossless.subtitle" = "高保真，48kHz录制所有声音";
+"a1.card.secret" = "密钥";
+"a1.cards.header" = "这台手机上已有";
+"a1.cards.footer" = "密钥只存在 iOS 钥匙串里：不写进设置文件，也不上传到任何地方。左滑可移除，卡片本身不受影响。";
+"a1.delete.title" = "移除这张卡的凭据？";
+"a1.delete.message" = "移除后 Nomily 就读不了这张卡了。卡里的录音不受影响。";
+"a1.import_failed" = "导入失败";
+
+/* ---- 钉钉 A1：二维码 / 深链导入 ---- */
+"a1.scan.action" = "扫描二维码";
+"a1.scan.hint" = "把镜头对准电脑上那条命令打出的二维码。";
+"a1.scan.denied" = "Nomily 没有相机权限。到「设置 → Nomily AI → 相机」打开，或者改用粘贴。";
+"a1.scan.no_camera" = "这里没有可用的相机。";
+"a1.scan.failed" = "这个二维码不是钉钉 A1 的凭据。请扫电脑上提取脚本打出的那一个。";
+"a1.link.imported" = "凭据已导入";
+"a1.link.imported_body" = "%@ 已就绪。回到设备页点「再试一次」即可。";
+
+/* ---- 要点（录音时在卡上打点） ---- */
+"clip_detail.remarks" = "要点";
+"clip_detail.remarks_count" = "%d 个要点";
+"clip_detail.remarks_footer" = "录音过程中在卡上按一下录音键，会在那一刻打一个点。点一下就能跳到那个位置。";
+
+/* ---- A1：每张卡自己的密钥（设备信息页） ---- */
+"a1.section.title" = "卡片密钥";
+"a1.section.footer" = "这把密钥只属于这张卡，不是 App 级设置；换一张 A1 要各自导入。它存在 iOS 钥匙串里，不会离开这台手机。";
+"a1.missing.title" = "这台手机上还没有这张卡的密钥——导入之前读不了它。";
+"a1.replace" = "更换密钥";
+"a1.remove" = "删除密钥";
+"a1.paste.manually" = "改为粘贴";
+"a1.how_to" = "怎么拿到密钥？";
+"a1.scoped_to" = "只针对 %@";
+"a1.mismatch" = "已保存，但它的序列号结尾是 %@，而这张卡是 %@。如果你要的是这张卡，请导入它自己的那一个。";
+
+"summarize.chip_recommended" = "推荐";
+"summarize.chip_custom" = "自定义";
+"summarize.default_badge" = "默认";
+"summarize.set_default" = "设为默认模板";

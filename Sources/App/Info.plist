@@ -18,8 +18,19 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.nomily.app.ios.a1</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>nomily-a1</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
-	<string>27</string>
+	<string>52</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>
@@ -29,10 +40,14 @@
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Nomily AI connects to your D·NOTE recorder over Bluetooth to list, transfer and transcribe recordings.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Nomily AI scans the QR code that carries a DingTalk A1 credential, so it never has to go through the clipboard.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Nomily AI opens a direct TCP connection to your D·NOTE over its Wi-Fi access point during Fast Transfer.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Live transcription monitors microphone state to coordinate with the device's stream.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Nomily AI turns your recordings into text on this iPhone, using Apple's on-device speech recogniser. On that path the audio never leaves the device.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

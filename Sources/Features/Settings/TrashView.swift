@@ -376,7 +376,7 @@ struct TrashView: View {
                 Image(systemName: selected.contains(item.id)
                         ? "checkmark.circle.fill" : "circle")
                     .font(.body)
-                    .foregroundStyle(selected.contains(item.id) ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(selected.contains(item.id) ? Color.appAccent : Color.secondary)
                     // The check circle hugs the first line rather than the whole row — the row has four layers of content and centring would drift.
                     .padding(.top, 2)
 

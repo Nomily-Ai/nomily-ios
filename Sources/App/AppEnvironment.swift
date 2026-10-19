@@ -85,6 +85,38 @@ final class AppEnvironment: ObservableObject {
         jobs.register(.export) { job, _ in
             try await JobRunners.export(job, config: config.config)
         }
+        // ★ "Summarize right after transcribing" (2026-10-18): the transcript→summary hand-off.
+        //
+        // Two guards, both deliberate:
+        //   · the switch, so the user can turn it off; and
+        //   · **at least one configured LLM** — otherwise the job would be enqueued and fail
+        //     with "no provider", which the queue then shows as a stuck job. "On" means "do it
+        //     when there is an AI service", not "try anyway".
+        //
+        // The template is the first built-in one on purpose: with no user in the loop there is
+        // nobody to pick one, and auto-summary's job is "make the clip readable when I open it",
+        // not "guess which of 90 templates I wanted".
+        // The template is resolved **now**, not inside the closure: the store is
+        // main-actor-bound and this initialiser already runs there, whereas the hook may fire
+        // from a background resume path.
+        let autoSummaryTemplate = SummarizeTemplateStore.defaults.first
+        transcription.onTranscribed = { clip in
+            let cfg = config.config
+            guard cfg.autoSummarizeAfterTranscription,
+                  !cfg.llmProviders.configuredProviders.isEmpty,
+                  let template = autoSummaryTemplate
+            else { return }
+            // Never overwrite a summary the user already has. Transcribing the same clip twice
+            // (manual retry, resumed queue, a provider switch) would otherwise silently replace
+            // a hand-edited result with a fresh machine one.
+            guard !FileManager.default.fileExists(atPath: StorageLocations.summaryURL(for: clip).path)
+            else { return }
+            jobs.enqueue(.summarize(
+                clip: clip,
+                prompt: template.localizedPrompt,
+                templateName: template.name
+            ))
+        }
         self.localization = LocalizationService(selected: config.config.appLanguage)
         self.watch = WatchSyncService(
             config: config,

@@ -1036,12 +1036,12 @@ private struct PassphraseOnboardingBanner: View {
                 Button(action: onOpenSettings) {
                     Text(L10n.EncryptionOnboarding.bannerCTA)
                         .font(.caption.bold())
-                        .foregroundStyle(isWarning ? Color.white : Color.accentColor)
+                        .foregroundStyle(isWarning ? Color.white : Color.appAccent)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .background(
                             isWarning ? AnyShapeStyle(.white.opacity(0.2))
-                                      : AnyShapeStyle(Color.accentColor.opacity(0.12)),
+                                      : AnyShapeStyle(Color.appAccent.opacity(0.12)),
                             in: Capsule()
                         )
                 }

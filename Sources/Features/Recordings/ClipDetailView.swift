@@ -25,7 +25,6 @@ struct ClipDetailView: View {
     @State private var showSummarize = false
     @State private var showNoProvider = false
     @State private var showNoASR = false
-    @State private var showPlayer = false
     @State private var retranscribeAlert = false
     @State private var translation: String?
     @State private var translatedSummary: String?
@@ -54,18 +53,66 @@ struct ClipDetailView: View {
     @State private var showVADPreview = false
     @State private var showMindMap = false
     @State private var showExportChoice = false
+    /// "Marks" pushed by a recorder card while it was recording.
+    ///
+    /// ★ Read once on appear from `<base>.marks.json` and never re-read: a sidecar only ever appears
+    /// **together with** the download that produced this clip, so it cannot change while the page is
+    /// open. Keeping it in `@State` (rather than computing it inside `body`) also avoids decoding the
+    /// JSON on every redraw — `body` re-evaluates once a second while audio plays.
+    @State private var marks: [A1Mark] = []
 
     private enum TranslateTarget { case transcript, summary }
+
+    /// ★ (2026-10-19) DingTalk-style tabs: Transcript / AI Minutes / To-dos. The summary is the
+    /// "minutes" document, the transcript is the listening surface, and the to-dos are
+    /// lifted out of the summary's markdown — three very different reading modes, which
+    /// one endless Form made worse the longer the recording.
+    private enum DetailTab: CaseIterable, Identifiable {
+        case transcript, summary, todos
+        var id: Int { Self.allCases.firstIndex(of: self) ?? 0 }
+        var title: String {
+            switch self {
+            case .transcript: L10n.ClipDetail.tabTranscript
+            case .summary: L10n.ClipDetail.tabSummary
+            case .todos: L10n.ClipDetail.tabTodos
+            }
+        }
+    }
+    @State private var detailTab: DetailTab = .transcript
+    @State private var transcriptQuery = ""
+    @State private var speakerFilter: String?
 
     var body: some View {
         Form {
             if item.hasAudio { heroCard }
-            transcriptSection
-            if translation != nil { translationSection }
-            summarySection
-            if translatedSummary != nil { translatedSummarySection }
-            if item.hasAudio { exportSection }
-            destructiveSection
+            if !marks.isEmpty { marksSection }
+            Section {
+                Picker("", selection: $detailTab) {
+                    ForEach(DetailTab.allCases) { tab in
+                        Text(tab.title).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+            }
+            switch detailTab {
+            case .transcript:
+                transcriptSection
+                if translation != nil { translationSection }
+            case .summary:
+                summarySection
+                if translatedSummary != nil { translatedSummarySection }
+            case .todos:
+                todosSection
+            }
+            // Export/delete moved into the top-right menu (Plaud / DingTalk detail-page shape).
+            // Only a *running or failed* export still gets an inline row — progress needs to be
+            // visible without opening a menu.
+            if activeJob(.export) != nil || failedJob(.export) != nil {
+                exportStatusSection
+            }
         }
         .padding(.top, -20)
         .navigationTitle(item.displayTitle)
@@ -78,6 +125,56 @@ struct ClipDetailView: View {
         // miss a new entry point.
         .onAppear { ClipReadStore.shared.markSeen(name: item.name) }
         .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                // ★ (2026-10-19) Export + delete live here, not as two sections at the bottom of
+                // the page. Plaud / DingTalk both keep per-recording actions in a single overflow
+                // menu — the old layout pushed them below an arbitrarily long summary, so users
+                // scrolled past every section looking for "delete".
+                Menu {
+                    if item.hasAudio {
+                        Button {
+                            showExportChoice = true
+                        } label: {
+                            Label(L10n.ClipDetail.exportAudio, systemImage: "square.and.arrow.up.on.square")
+                        }
+                        .disabled(activeJob(.export) != nil)
+                    }
+                    if activeJob(.export) == nil, let staged = ExportCenter.shared.ready(forOrigin: item.name) {
+                        Button {
+                            exportShareURL = ExportCenter.shared.url(for: staged)
+                        } label: {
+                            Label(L10n.ClipDetail.exportReady, systemImage: "checkmark.circle")
+                        }
+                    }
+                    if item.hasAudio || transcript != nil || summary != nil {
+                        Divider()
+                    }
+                    if item.hasAudio {
+                        Button(role: .destructive) {
+                            deleteAudioAlert = true
+                        } label: {
+                            Label(L10n.ClipDetail.deleteAudio, systemImage: "trash")
+                        }
+                    }
+                    if transcript != nil {
+                        Button(role: .destructive) {
+                            deleteTranscriptAlert = true
+                        } label: {
+                            Label(L10n.ClipDetail.deleteTranscript, systemImage: "text.badge.xmark")
+                        }
+                    }
+                    if summary != nil {
+                        Button(role: .destructive) {
+                            deleteSummaryAlert = true
+                        } label: {
+                            Label(L10n.ClipDetail.deleteSummary, systemImage: "doc.badge.ellipsis")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel(L10n.ClipDetail.moreActions)
+            }
             if configService.config.isDeveloperMode {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -101,6 +198,7 @@ struct ClipDetailView: View {
             if let url = item.url { player.load(url) }
             languages.fetchTargetLanguagesIfNeeded()
             transcript = TranscriptDocument.load(for: item.name)
+            marks = A1MarkStore.sidecar(forClipBase: item.base)
             loadTranslation()
             loadSummary()
             loadTranslatedSummary()
@@ -113,9 +211,6 @@ struct ClipDetailView: View {
             // runTranscribe also benefits — it no longer has to reload
             // the doc itself.
             if !isRunning { transcript = TranscriptDocument.load(for: item.name) }
-        }
-        .sheet(isPresented: $showPlayer) {
-            PlayerSheet(player: player, title: item.displayTitle, totalDuration: item.duration)
         }
         .sheet(isPresented: $showSummarize) {
             if let doc = transcript {
@@ -233,61 +328,80 @@ struct ClipDetailView: View {
 
     private var heroCard: some View {
         Section {
-            Button { showPlayer = true } label: {
-                HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color.accentColor.opacity(0.12))
-                            .frame(width: 48, height: 48)
-                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title3)
-                            .foregroundColor(.accentColor)
-                    }
+            // ★ (2026-10-19) Inline player instead of "tap → sheet".
+            //   The sheet was the only way to control playback, so reading a transcript meant
+            //   opening and closing a modal for every re-listen; the detail page now owns the
+            //   transport and the transcript below reacts to it.
+            InlineAudioPlayer(player: player, totalDuration: item.duration)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            if let dur = item.durationLabel {
-                                Text(dur)
-                                    .font(.callout.weight(.medium).monospacedDigit())
-                                    .fixedSize()
-                            }
-                            Spacer()
-                            Text(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize()
-                        }
-                        // ★ Thirteenth revision, 2026-10-16: `.formatted(date:time:)` **doesn't read**
-                        //   the locale from the SwiftUI environment — it takes `Locale.current`,
-                        //   and this string is computed before `Text` ever sees it
-                        //   (only `Text(date, format:)` reads the environment).
-                        //   So this goes through `AppLocale` explicitly, following the app's language.
-                        //
-                        // ⚠️ The old `.abbreviated` / `.shortened` were
-                        //   `Date.FormatStyle` symbols, not `DateFormatter.Style`
-                        //   ones — the latter only takes none/short/medium/long/full.
-                        //   Equivalent mapping: `.abbreviated → .medium`, `.shortened → .short`.
-                        Text(AppLocale.string(from: item.recordedAt,
-                                              dateStyle: .medium,
-                                              timeStyle: .short))
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .fixedSize()
-                        Text(item.name)
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-                .padding(.vertical, 4)
-                // `.buttonStyle(.plain)` only takes hits on drawn pixels, so
-                // the gaps between the icon and the labels were dead — the
-                // card looked tappable everywhere but only responded on the
-                // artwork and text.
-                .contentShape(Rectangle())
+            HStack(spacing: 6) {
+                Text(item.name)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Text(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize()
+                Text("·").font(.caption2).foregroundStyle(.tertiary)
+                // Locale comes from `AppLocale` — `.formatted(date:time:)` reads
+                // `Locale.current`, not the SwiftUI environment (thirteenth revision note).
+                Text(AppLocale.string(from: item.recordedAt, dateStyle: .medium, timeStyle: .short))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize()
             }
-            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - remarks (marks)
+
+    /// The marks the card registered with **its own button** while it was recording.
+    ///
+    /// ★ These are not transcription output and not an invention on our side: mid-recording the A1
+    /// emits `AUDIO_CONTROL_REMARK_BUTTON_CLICK` (`0x0B000001`) stamped with the **card's own clock**,
+    /// so the offset from `AUDIO_RECORD_START` survives even when the report is delivered in a batch
+    /// seconds later. It is downloaded as `<base>.marks.json` next to the clip, which is what this reads.
+    ///
+    /// Hidden entirely when there are no marks — an empty "Remarks" header would advertise a feature the
+    /// recording never used, and the user would wonder what they were supposed to have pressed.
+    @ViewBuilder
+    private var marksSection: some View {
+        Section {
+            ForEach(Array(marks.enumerated()), id: \.offset) { _, mark in
+                Button {
+                    guard let url = item.url else { return }
+                    // `load` is a no-op on the same URL, so this is safe even mid-playback.
+                    player.load(url)
+                    player.seek(to: mark.offset)
+                    player.play()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "bookmark.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Text(ClockLabel.mmss(mark.offset))
+                            .font(.callout.monospacedDigit())
+                        Spacer()
+                        Image(systemName: "play.circle")
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        } header: {
+            HStack {
+                Text(L10n.ClipDetail.remarks)
+                Spacer()
+                Text(L10n.ClipDetail.remarksCount(marks.count))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        } footer: {
+            Text(L10n.ClipDetail.remarksFooter)
         }
     }
 
@@ -355,13 +469,18 @@ struct ClipDetailView: View {
             if let job = lastFinishedJob(.translate, target: "transcript") { notesRow(job) }
 
             if let doc = transcript {
-                Text(transcriptPreview(doc))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
+                if doc.segments.isEmpty {
+                    Text(transcriptPreview(doc))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                } else {
+                    transcriptSearchBar(doc)
+                    transcriptRows(doc)
+                }
 
                 NavigationLink(L10n.ClipDetail.viewFullTranscript) {
-                    TranscriptFullView(document: doc)
+                    TranscriptFullView(document: doc, player: player)
                 }
             } else if item.hasAudio, !isTranscribing {
                 Button {
@@ -400,8 +519,160 @@ struct ClipDetailView: View {
         }
     }
 
-    private func triggerTranscribe(locales: [String]?) {
-        if env.config.config.asrProviders.hasConfiguredProvider {
+    /// Index of the segment playing right now (`nil` before playback starts).
+    private func activeSegmentIndex(_ segments: [AsrSegment]) -> Int? {
+        guard !segments.isEmpty, player.currentTime > 0 else { return nil }
+        return segments.lastIndex { $0.start <= player.currentTime }
+    }
+
+    /// Four rows of context that slide with the audio — enough to read along without turning
+    /// the detail page into an endless list.
+    private func inlineSegmentWindow(_ segments: [AsrSegment]) -> [AsrSegment] {
+        let windowSize = 4
+        guard segments.count > windowSize else { return segments }
+        let active = activeSegmentIndex(segments) ?? 0
+        let start = max(0, min(active - 1, segments.count - windowSize))
+        return Array(segments[start..<(start + windowSize)])
+    }
+
+    // MARK: transcript search & speaker filter (★ 2026-10-19, DingTalk parity)
+
+    /// Search field + speaker chips. Hidden for single-speaker short transcripts where
+    /// there is nothing to find faster than reading.
+    @ViewBuilder
+    private func transcriptSearchBar(_ doc: TranscriptDocument) -> some View {
+        if doc.segments.count > 1 {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField(L10n.ClipDetail.searchTranscript, text: $transcriptQuery)
+                    .textFieldStyle(.plain)
+                    .font(.callout)
+                    .autocorrectionDisabled()
+                if !transcriptQuery.isEmpty {
+                    Button {
+                        transcriptQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            if distinctSpeakers(doc.segments).count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        speakerChip(nil, L10n.ClipDetail.speakerAll)
+                        ForEach(distinctSpeakers(doc.segments), id: \.self) { speaker in
+                            speakerChip(speaker, nil)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// While searching or filtering: all matching lines (highlighted, capped) with tap-to-seek;
+    /// otherwise the playback-following window.
+    @ViewBuilder
+    private func transcriptRows(_ doc: TranscriptDocument) -> some View {
+        let isSearching = !transcriptQuery.isEmpty || speakerFilter != nil
+        if isSearching {
+            let matches = doc.segments.filter { segment in
+                (speakerFilter == nil || segment.speaker == speakerFilter)
+                    && (transcriptQuery.isEmpty || segment.text.localizedCaseInsensitiveContains(transcriptQuery))
+            }
+            if matches.isEmpty {
+                Text(L10n.ClipDetail.noTranscriptMatch)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(matches.prefix(40), id: \.start) { seg in
+                    TranscriptSegmentRow(
+                        segment: seg,
+                        isActive: activeSegmentIndex(doc.segments).map { doc.segments[$0].start == seg.start } ?? false,
+                        highlight: transcriptQuery.isEmpty ? nil : transcriptQuery
+                    ) {
+                        player.seek(to: max(0, seg.start - 0.3))
+                        if !player.isPlaying { player.play() }
+                    }
+                }
+                if matches.count > 40 {
+                    Text("+\(matches.count - 40)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            // A short window that **follows playback**: the current sentence stays on screen
+            // and tapping any line jumps the audio there.
+            ForEach(inlineSegmentWindow(doc.segments), id: \.start) { seg in
+                TranscriptSegmentRow(
+                    segment: seg,
+                    isActive: activeSegmentIndex(doc.segments).map { doc.segments[$0].start == seg.start } ?? false
+                ) {
+                    player.seek(to: max(0, seg.start - 0.3))
+                    if !player.isPlaying { player.play() }
+                }
+            }
+        }
+    }
+
+    private func distinctSpeakers(_ segments: [AsrSegment]) -> [String] {
+        var seen: [String] = []
+        for segment in segments {
+            guard let speaker = segment.speaker, !speaker.isEmpty else { continue }
+            if !seen.contains(speaker) { seen.append(speaker) }
+        }
+        return seen
+    }
+
+    private func speakerChip(_ value: String?, _ label: String?) -> some View {
+        let selected = speakerFilter == value
+        return Button {
+            speakerFilter = value
+        } label: {
+            Text(label ?? L10n.ClipDetail.speaker(value ?? ""))
+                .font(.caption)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule().fill(selected ? Color.appAccent.opacity(0.18) : Color(uiColor: .secondarySystemBackground))
+                )
+                .foregroundStyle(selected ? Color.appAccent : Color.secondary)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: To-dos tab
+
+    /// The to-do tab: action items lifted from the summary's markdown. An honest empty
+    /// state when the summary has no such section — never invented content.
+    @ViewBuilder
+    private var todosSection: some View {
+        Section {
+            let todos = summary.map { TodoExtract.fromSummary($0) } ?? []
+            if !todos.isEmpty {
+                MarkdownBlocksView(blocks: todos)
+            } else if summary != nil {
+                Text(L10n.ClipDetail.todosEmpty)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else if transcript != nil {
+                Text(L10n.ClipDetail.todosNeedSummary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(L10n.ClipDetail.transcribeFirst)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func triggerTranscribe(locales: [String]?) {        if env.config.config.asrProviders.hasConfiguredProvider {
             runTranscribe(locales: locales)
         } else {
             showNoASR = true
@@ -674,10 +945,10 @@ struct ClipDetailView: View {
                 failedRow(job)
             }
             if let summary {
-                Text(String(summary.prefix(200)))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
+                // ★ (2026-10-19) The summary tab is the "AI minutes" reading surface, so the
+                //   whole document renders inline (headings / bullets, no truncation) instead of
+                //   a 14-block teaser behind a link.
+                MarkdownBlocksView(blocks: MarkdownBlocks.parse(summary))
 
                 NavigationLink(L10n.ClipDetail.viewFullSummary) {
                     SummaryFullView(text: summary)
@@ -747,6 +1018,21 @@ struct ClipDetailView: View {
     }
 
     // MARK: - export
+
+    /// Inline progress for a running / failed export. Every other export action now lives in
+    /// the top-right menu; this row stays so progress is visible without opening it.
+    @ViewBuilder
+    private var exportStatusSection: some View {
+        Section {
+            if let job = activeJob(.export) {
+                runningRow(job, L10n.ClipDetail.exporting)
+            } else if let job = failedJob(.export) {
+                failedRow(job)
+            }
+        } header: {
+            Text(L10n.ClipDetail.export)
+        }
+    }
 
     @ViewBuilder
     private var exportSection: some View {
@@ -872,6 +1158,10 @@ struct ClipDetailView: View {
         player.stop()
         var urls: [URL] = []
         if let url = item.url { urls.append(url) }
+        // The "mark" dots belong to the audio timeline — a marker pointing at a deleted recording is
+        // noise. `move` skips non-existent paths, so this needs no existence check, and putting it in
+        // the same group is what makes restore bring the marks back with the clip.
+        urls.append(A1MarkStore.sidecarURLForTrash(clipBase: item.base))
         // When the audio is this item's last remaining piece, `.title` instantly becomes an "orphaned title" — the scanner
         // would use it to rebuild a ghost entry with neither audio nor body text. So it moves together with the audio.
         if let title = ClipTrash.titleSidecar(
@@ -986,7 +1276,7 @@ struct PlayerSheet: View {
                 } else {
                     ZStack {
                         Circle()
-                            .fill(Color.accentColor.opacity(0.1))
+                            .fill(Color.appAccent.opacity(0.1))
                             .frame(width: 120, height: 120)
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 44))
@@ -1062,6 +1352,9 @@ struct PlayerSheet: View {
 
 struct TranscriptFullView: View {
     let document: TranscriptDocument
+    /// The detail page's controller — shared so a tap here keeps one playback session
+    /// (★ 2026-10-19: this page used to be a dead wall of text).
+    @ObservedObject var player: AudioPlaybackController
     @State private var showShareSheet = false
 
     private var plainText: String {
@@ -1087,29 +1380,28 @@ struct TranscriptFullView: View {
                 // Lazy: a multi-hour clip is thousands of segments, and an
                 // eager VStack lays every one of them out before the push
                 // animation can start.
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(Array(document.segments.enumerated()), id: \.offset) { _, seg in
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    if let speaker = seg.speaker, !speaker.isEmpty {
-                                        Text(L10n.ClipDetail.speaker(speaker))
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(stampLabel(seg))
-                                        .font(.caption2.monospacedDigit())
-                                        .foregroundStyle(.secondary)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(document.segments.enumerated()), id: \.offset) { index, seg in
+                                TranscriptSegmentRow(segment: seg, isActive: activeIndex == index) {
+                                    player.seek(to: max(0, seg.start - 0.3))
+                                    if !player.isPlaying { player.play() }
                                 }
-                                Text(seg.text)
-                                    .font(.body)
-                                    .lineSpacing(6)
-                                    .textSelection(.enabled)
+                                .id(index)
                             }
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
                     }
-                    .padding()
+                    // Follow the audio while it plays, so the page never drifts away from what
+                    // the user is hearing.
+                    .onChange(of: activeIndex) { newValue in
+                        guard let newValue, player.isPlaying else { return }
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            proxy.scrollTo(newValue, anchor: .center)
+                        }
+                    }
                 }
             }
         }
@@ -1133,6 +1425,12 @@ struct TranscriptFullView: View {
         let s = Int(seg.start)
         let e = Int(seg.end)
         return String(format: "%d:%02d\u{2013}%d:%02d", s / 60, s % 60, e / 60, e % 60)
+    }
+
+    /// The segment under the playhead, driving both the highlight and the auto-scroll.
+    private var activeIndex: Int? {
+        guard player.currentTime > 0, !document.segments.isEmpty else { return nil }
+        return document.segments.lastIndex { $0.start <= player.currentTime }
     }
 }
 

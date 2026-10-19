@@ -362,7 +362,7 @@ final class TicNoteLink: NSObject, ObservableObject, RecorderLink {
     //
     // This group is **only used by the `LiveAudioSource` section**, but must be declared in the class body ——
     // Swift extensions cannot add stored properties. See the end of the file
-    // `// MARK: - LiveAudioSource`。
+    // `// MARK: - LiveAudioSource`.
 
     /// The **full 32-bit** sid when the card pushes `0x14`/`0x17`.
     ///
@@ -2514,6 +2514,10 @@ extension TicNoteLink: LiveAudioSource {
     }
 
     // MARK: Audio pipeline
+
+    /// TicNote reports a written byte count, not a duration, and its stream does not stall the
+    /// way the A1's does — the packet-derived clock is already right for it.
+    func liveDeviceElapsed() async -> TimeInterval? { nil }
 
     func liveAudio(firstFrameTimeout: TimeInterval) -> AsyncThrowingStream<Data, Error> {
         // ★★ Two cleanup steps for "starting a new session" are both required (2026-10-12):

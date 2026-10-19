@@ -494,7 +494,7 @@ struct LibraryView: View {
             if isSelecting {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(isSelected ? Color.appAccent : Color.secondary)
                     .transition(.scale.combined(with: .opacity))
             }
             LibraryRow(
@@ -708,7 +708,7 @@ struct LibraryView: View {
         return out
     }
 
-    /// "2026年8月" / "August 2026". Assemble it per locale from the system's template format;
+    /// "August 2026" / "2026-08". Assemble it per locale from the system's template format;
     /// gluing on the words "year" and "month" yourself is wrong in all 10 other languages.
     ///
     /// ★ 2026-10-16 revision 13: the locale comes from `AppLocale` (**set the locale first, then call the template**).
@@ -853,7 +853,7 @@ struct LibraryView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(
-                Capsule().fill(selected ? Color.accentColor : Color(uiColor: .secondarySystemBackground))
+                Capsule().fill(selected ? Color.appAccent : Color(uiColor: .secondarySystemBackground))
             )
             .overlay(
                 Capsule().stroke(selected ? Color.clear : Color.primary.opacity(0.08), lineWidth: 1)
@@ -1317,7 +1317,7 @@ private struct LibraryRow: View {
     /// For the few with a customised title, the date is appended after the source badge.
     ///
     /// ★ 2026-10-16 revision 13: this used to be a **hard-coded** `"MM-dd HH:mm"`.
-    /// A hard-coded template is simply wrong in other languages (German wants "17.04.", Japanese "4月17日"),
+    /// A hard-coded template is simply wrong in other languages (German wants "17.04.", Japanese its own kanji order),
     /// and it's the last place in the whole App where "the date doesn't follow the App language".
     /// Switch to the system template `yMMMd jm` — `j` is "the locale's preferred hour cycle",
     /// so English/Arabic use 12-hour and Chinese/Japanese/German use 24-hour, with no need to decide yourself.

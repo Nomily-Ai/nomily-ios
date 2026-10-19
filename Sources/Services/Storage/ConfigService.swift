@@ -34,8 +34,27 @@ final class ConfigService: ObservableObject {
         // Keychain, then rewrite the file without them.
         let hadPlaintext = Self.migratePlaintextSecrets(from: loaded)
         Self.injectSecrets(into: &loaded)
+        // ★ (2026-10-19) The on-device switch is now opt-in; if the saved primary still names it,
+        //   point the picker at something that can actually run. This has to happen **after**
+        //   `injectSecrets`, otherwise Azure looks unconfigured (its key lives in the Keychain)
+        //   and the choice collapses to whatever else was lying around.
+        let repointedPrimary = Self.repointPrimaryOffOnDevice(&loaded)
         self.config = loaded
-        if hadPlaintext { saveNow() }
+        if hadPlaintext || repointedPrimary { saveNow() }
+        // Mirror the persisted palette so `Color.appAccent` is correct from the first frame,
+        // not from the first time someone opens the theme picker.
+        AppThemeRuntime.tag = loaded.appTheme
+    }
+
+    /// The one way to change the palette.
+    ///
+    /// Bundling "write config → mirror into `AppThemeRuntime` → save immediately" prevents the
+    /// bug this split would otherwise produce: a UI that shows the new colour while
+    /// `config.json` still holds the old one, so the theme reverts on the next launch.
+    func applyTheme(_ tag: String?) {
+        config.appTheme = tag
+        AppThemeRuntime.tag = tag
+        saveNow()
     }
 
     // MARK: persistence
@@ -58,12 +77,39 @@ final class ConfigService: ObservableObject {
         }
     }
 
+    /// Point `defaults.asr.primary` away from `ondevice` while the feature is switched off.
+    ///
+    /// - Returns: `true` when it actually changed something (the caller then persists).
+    ///
+    /// Called only after the Keychain secrets are back, so "is Azure configured?" is a real
+    /// question here — the same order the settings page uses.
+    private static func repointPrimaryOffOnDevice(_ config: inout AppConfig) -> Bool {
+        guard !config.onDeviceASREnabled,
+              config.defaults.asr.primary.lowercased() == "ondevice"
+        else { return false }
+        let azureUsable = config.asrProviders.azure.map { !$0.key.isEmpty && !$0.region.isEmpty } ?? false
+        let localUsable = config.asrProviders.local.map { !$0.host.isEmpty && $0.port > 0 } ?? false
+        config.defaults.asr.primary = azureUsable ? "azure" : (localUsable ? "local" : "")
+        // `Logger` interpolation is an escaping autoclosure — it cannot capture the `inout`.
+        let chosen = config.defaults.asr.primary
+        log.info("on-device ASR is off — primary moved off it to \(chosen, privacy: .public)")
+        return true
+    }
+
     private static func loadFromDisk() -> AppConfig? {
         let url = StorageLocations.configURL
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         do {
             let data = try Data(contentsOf: url)
             let decoder = JSONDecoder()
+            // ★ (2026-10-19) The "on-device speech off" migration runs inside
+            //   `AppConfig.init(from:)`, which only changes the **in-memory** value. Without this
+            //   check the file keeps saying `true` and the migration re-runs on every launch —
+            //   harmless but invisible, and it would silently undo a deliberate re-enable if the
+            //   flag ever came back missing. Detect "the file does not have the marker yet" and
+            //   write the migrated config back once.
+            let raw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let hadMigrationMarker = (raw?["on_device_asr_off_migrated"] as? Bool) ?? false
             // Secrets are re-attached by the caller from the Keychain.
             var config = try decoder.decode(AppConfig.self, from: data)
             // A local record without a host is junk: it cannot connect to any service, yet it causes the port field to show a number no one entered.
@@ -71,10 +117,41 @@ final class ConfigService: ObservableObject {
             if let local = config.asrProviders.local, local.host.isEmpty {
                 config.asrProviders.local = nil
             }
+            if !hadMigrationMarker {
+                // ⛔ Never `writeToDisk(config)` here: at load time secrets have **not** been
+                //   re-attached yet, and `extractSecrets` would happily save `nil` over every
+                //   Keychain item — one launch and the Azure key is gone. Rewriting the raw
+                //   dictionary is the safe form: the file never held secrets in the first place.
+                persistMigration(raw: raw, migrated: config, url: url)
+            }
             return config
         } catch {
             log.error("Config load failed: \(String(describing: error), privacy: .public) — falling back to defaults")
             return nil
+        }
+    }
+
+    /// Write the one-time "on-device speech off" migration back to disk, touching only the keys
+    /// it owns. Everything else in the file (devices, endpoints, model choices) is preserved
+    /// byte-for-byte, and no secret is read or written.
+    private static func persistMigration(raw: [String: Any]?, migrated: AppConfig, url: URL) {
+        guard var dict = raw else { return }
+        dict["on_device_asr_off_migrated"] = true
+        dict["on_device_asr_enabled"] = migrated.onDeviceASREnabled
+        if var defaults = dict["defaults"] as? [String: Any],
+           var asr = defaults["asr"] as? [String: Any] {
+            asr["primary"] = migrated.defaults.asr.primary
+            defaults["asr"] = asr
+            dict["defaults"] = defaults
+        }
+        guard let out = try? JSONSerialization.data(
+            withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]
+        ) else { return }
+        do {
+            try out.write(to: url, options: .atomic)
+            log.info("persisted the one-time on-device ASR migration")
+        } catch {
+            log.error("persisting the on-device ASR migration failed: \(String(describing: error), privacy: .public)")
         }
     }
 

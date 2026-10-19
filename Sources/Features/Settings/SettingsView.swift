@@ -35,6 +35,18 @@ struct SettingsView: View {
                 NavigationLink(L10n.Settings.recordings) { RecordingsSettingsView() }
                 NavigationLink(L10n.Settings.summarizeTemplates) { SummarizeTemplatesView() }
                 NavigationLink(L10n.Settings.devicesAndLibrary) { DevicesLibraryView() }
+                // ⛔ **DingTalk A1 is deliberately NOT here** (removed 2026-10-18).
+                //
+                // User's words: "The A1 recorder card's key should not appear in the app's general settings —
+                // it is not a general setting, it belongs to one specific recording product."
+                //
+                // They are right, and the earlier placement had a real cost: a card-shaped secret
+                // sitting under "Settings" reads as an account-level / app-wide thing, so people
+                // either paste the wrong card's secret or assume one import covers every A1 they
+                // own. The credential now lives **only** on that card's own device-info page
+                // (`RecorderSheet.cardInfoContent` → `a1CredentialSection`), where "which card"
+                // is unambiguous because the card is the thing on screen.
+                //
                 // Trash sits right next to "Devices & Library": what it manages is exactly those library entries,
                 // so it lives in this section, before Language. It only shows a count when there's really something in it —
                 // a permanent "0" reads as "0 things are broken here".
@@ -82,6 +94,23 @@ struct SettingsView: View {
                         Text(L10n.Settings.language)
                         Spacer()
                         Text(currentLanguageLabel)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                // Theme sits next to Language: both are "how the app looks and
+                // speaks", and neither belongs to a feature area. The leading dot
+                // is the theme's own accent, so the row answers "which one am I on"
+                // without being opened.
+                NavigationLink {
+                    ThemePickerView()
+                } label: {
+                    HStack {
+                        Circle()
+                            .fill(currentTheme.accent)
+                            .frame(width: 12, height: 12)
+                        Text(L10n.Settings.theme)
+                        Spacer()
+                        Text(currentTheme.title)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -289,6 +318,13 @@ struct SettingsView: View {
         return AppLanguage.autonym(of: AppLanguage.resolve(tag))
     }
 
+    /// Which palette the app is actually rendering with. Same "resolve, don't
+    /// trust the tag" rule as the language row: an unknown tag from a newer
+    /// build resolves to the default, and the row must show what's on screen.
+    private var currentTheme: AppTheme {
+        AppTheme.resolve(configService.config.appTheme)
+    }
+
     private var appVersion: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
@@ -361,6 +397,9 @@ struct ASRProvidersView: View {
     @State private var localProbeWarning: String?
     @State private var showAzureHelp = false
     @State private var showLeaveWarning = false
+    /// Connectivity/auth test for the custom (OpenAI-compatible) server.
+    @State private var customProbe: VerifyState = .idle
+    @State private var customProbeDetail: String?
 
     /// When the user provides a host but omits the port, a default port is supplied. **Only written when creating the record**,
     // and not used as the displayed value for an empty field.
@@ -371,6 +410,7 @@ struct ASRProvidersView: View {
             transcriptionSection
             azureSection
             localSection
+            customSection
         }
         .navigationTitle(L10n.Settings.asrProviders)
         .navigationBarTitleDisplayMode(.inline)
@@ -420,6 +460,11 @@ struct ASRProvidersView: View {
 
     private var configuredASR: [(key: String, label: String)] {
         var result: [(String, String)] = []
+        // On-device first: it needs no credentials, so it is the only entry that is always
+        // available and the one most users will want as the active service.
+        if configService.config.onDeviceASREnabled {
+            result.append(("ondevice", L10n.ASR.onDevice))
+        }
         // Only list services that are fully filled **and** whose credentials have not been rejected by verification: partially filled configs and those that failed verification would produce no transcription, and showing them as candidates would mislead users into thinking they are set up.
         if let a = configService.config.asrProviders.azure,
            !a.key.isEmpty, !a.region.isEmpty, a.verification != false {
@@ -427,6 +472,9 @@ struct ASRProvidersView: View {
         }
         if let l = configService.config.asrProviders.local, !l.host.isEmpty {
             result.append(("local", L10n.ASR.localServer))
+        }
+        if let c = configService.config.asrProviders.custom, !c.endpoint.isEmpty {
+            result.append(("custom", L10n.ASR.customServer))
         }
         return result
     }
@@ -459,6 +507,41 @@ struct ASRProvidersView: View {
                     in: 0...600,
                     step: 5
                 )
+            }
+
+            // ★ 2026-10-18: the phone's own offline model. Kept next to "Auto-transcribe" because both
+            // answer the same question — "can I get text without setting up a cloud account".
+            Toggle(isOn: Binding(
+                get: { configService.config.onDeviceASREnabled },
+                set: {
+                    configService.config.onDeviceASREnabled = $0
+                    configService.scheduleSave()
+                    // Turning it off while it is the active service would leave the picker
+                    // pointing at something that no longer exists; fall back to whatever is
+                    // configured, or to nothing (the picker then hides itself).
+                    if !$0, configService.config.defaults.asr.primary.lowercased() == "ondevice" {
+                        let fallback = configuredASR.first?.key ?? ""
+                        configService.config.defaults.asr.primary = fallback
+                        configService.scheduleSave()
+                    }
+                }
+            )) {
+                HStack(spacing: 4) {
+                    Text(L10n.ASR.onDevice)
+                    InfoTip(text: L10n.ASR.onDeviceFooter)
+                }
+            }
+
+            // "Summarize right after transcribing" — the LLM half of the pipeline the user asked for:
+            // speech → text → summary, with no tap in between.
+            Toggle(isOn: Binding(
+                get: { configService.config.autoSummarizeAfterTranscription },
+                set: { configService.config.autoSummarizeAfterTranscription = $0; configService.scheduleSave() }
+            )) {
+                HStack(spacing: 4) {
+                    Text(L10n.ASR.autoSummarize)
+                    InfoTip(text: L10n.ASR.autoSummarizeFooter)
+                }
             }
 
             Toggle(isOn: Binding(
@@ -736,8 +819,10 @@ struct ASRProvidersView: View {
             },
             set: { new in
                 configService.config.defaults.asr.primary = new
-                let other = (new == "azure") ? "local" : "azure"
-                configService.config.defaults.asr.fallbacks = [other]
+                // Fallbacks = every other configured provider, in a sensible order
+                // (server first, offline model last — it is already appended by the chain).
+                let others = configuredASR.map(\.key).filter { $0 != new }
+                configService.config.defaults.asr.fallbacks = others
                 configService.scheduleSave()
             }
         )
@@ -793,6 +878,118 @@ struct ASRProvidersView: View {
                 configService.scheduleSave()
             }
         )
+    }
+
+    // MARK: - Custom (OpenAI-compatible) server
+
+    private func writeCustom(_ custom: AppConfig.AsrProviders.Custom) {
+        // Same hygiene as `writeLocal`: a half-typed endpoint must not linger as a
+        // configured provider (it would appear in the picker and fail every transcription).
+        let hasEndpoint = !custom.endpoint
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        configService.config.asrProviders.custom = hasEndpoint ? custom : nil
+        configService.scheduleSave()
+    }
+
+    private var customSection: some View {
+        Section {
+            TextField(L10n.ASR.customEndpoint, text: Binding(
+                get: { configService.config.asrProviders.custom?.endpoint ?? "" },
+                set: {
+                    writeCustom(AppConfig.AsrProviders.Custom(
+                        endpoint: $0,
+                        apiKey: configService.config.asrProviders.custom?.apiKey,
+                        model: configService.config.asrProviders.custom?.model,
+                        language: configService.config.asrProviders.custom?.language))
+                    customProbe = .idle
+                }))
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            SecureField(L10n.ASR.customApiKey, text: Binding(
+                get: { configService.config.asrProviders.custom?.apiKey ?? "" },
+                set: {
+                    writeCustom(AppConfig.AsrProviders.Custom(
+                        endpoint: configService.config.asrProviders.custom?.endpoint ?? "",
+                        apiKey: $0.isEmpty ? nil : $0,
+                        model: configService.config.asrProviders.custom?.model,
+                        language: configService.config.asrProviders.custom?.language))
+                }))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            TextField(L10n.ASR.customModel, text: Binding(
+                get: { configService.config.asrProviders.custom?.model ?? "" },
+                set: {
+                    writeCustom(AppConfig.AsrProviders.Custom(
+                        endpoint: configService.config.asrProviders.custom?.endpoint ?? "",
+                        apiKey: configService.config.asrProviders.custom?.apiKey,
+                        model: $0.isEmpty ? nil : $0,
+                        language: configService.config.asrProviders.custom?.language))
+                }))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            TextField(L10n.ASR.customLanguage, text: Binding(
+                get: { configService.config.asrProviders.custom?.language ?? "" },
+                set: {
+                    writeCustom(AppConfig.AsrProviders.Custom(
+                        endpoint: configService.config.asrProviders.custom?.endpoint ?? "",
+                        apiKey: configService.config.asrProviders.custom?.apiKey,
+                        model: configService.config.asrProviders.custom?.model,
+                        language: $0.isEmpty ? nil : $0))
+                }))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            customProbeRow
+        } header: {
+            Text(L10n.ASR.customServer)
+        } footer: {
+            Text(L10n.ASR.customProbeFooter)
+        }
+    }
+
+    @ViewBuilder
+    private var customProbeRow: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L10n.ASR.customProbe)
+                switch customProbe {
+                case .success:
+                    if let detail = customProbeDetail {
+                        Text(L10n.ASR.localProbeReachable(detail))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                case .failed(let reason):
+                    fieldError(reason)
+                case .verifying:
+                    Text(L10n.ASR.statusVerifying)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                case .idle:
+                    EmptyView()
+                }
+            }
+            Spacer()
+            verifyButton(customProbe) { await runCustomProbe() }
+        }
+    }
+
+    private func runCustomProbe() async {
+        guard let custom = configService.config.asrProviders.custom,
+              !custom.endpoint.isEmpty else {
+            customProbe = .failed(L10n.ASR.localProbeNoHost)
+            return
+        }
+        customProbe = .verifying
+        customProbeDetail = nil
+        let result = await CustomASR.probe(endpoint: custom.endpoint,
+                                           apiKey: custom.apiKey ?? "")
+        if result.ok {
+            customProbeDetail = result.detail
+            customProbe = .success
+        } else {
+            customProbe = .failed(result.error ?? L10n.ASR.verifyFailed)
+        }
     }
 
     /// When no local server is configured, the config should not contain a `local` entry — e.g., `{host: "", port: 1}`
@@ -2020,7 +2217,13 @@ struct DevicesLibraryView: View {
         ) {
             for url in items {
                 let name = url.lastPathComponent
-                let shouldDelete = target.map { ClipArtefact.of(fileNamed: name) == $0 } ?? true
+                // `.marks.json` rides with the audio: it is a set of timestamps into that recording, so
+                // "clear audio" must take it too — otherwise the next scan finds markers for a clip that
+                // no longer exists. (`ClipArtefact` keeps it unclassified on purpose; see `marksSuffix`.)
+                let marksRidesWithAudio = name.hasSuffix(ClipArtefact.marksSuffix)
+                let shouldDelete = target.map {
+                    ClipArtefact.of(fileNamed: name) == $0 || (marksRidesWithAudio && $0 == .audio)
+                } ?? true
                 if shouldDelete {
                     do { try fm.removeItem(at: url) } catch { failures += 1 }
                 }

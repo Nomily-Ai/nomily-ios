@@ -46,7 +46,7 @@ struct LanguagePickerView: View {
                 Spacer()
                 if selected {
                     Image(systemName: "checkmark")
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.appAccent)
                         .font(.body.weight(.semibold))
                 }
             }

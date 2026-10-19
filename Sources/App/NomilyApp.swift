@@ -74,6 +74,13 @@ struct NomilyApp: App {
 private struct LocalizedRoot: View {
     @EnvironmentObject private var localization: LocalizationService
 
+    @State private var linkNotice: String?
+    @State private var linkNoticeTitle: String?
+    /// ★ (2026-10-19) Branded splash: the system launch screen is a bare red page; the logo
+    /// now stays on it for a beat before the app is revealed. Purely presentational — the
+    /// root is laid out underneath from the first frame, so nothing is blocked.
+    @State private var splashVisible = true
+
     var body: some View {
         RootView()
             // Dates, numbers and RTL follow the chosen language too — otherwise
@@ -81,5 +88,65 @@ private struct LocalizedRoot: View {
             .environment(\.locale, Locale(identifier: localization.effective))
             .environment(\.layoutDirection, localization.layoutDirection)
             .id(localization.selected ?? "system")
+            .overlay {
+                if splashVisible {
+                    SplashView()
+                        .transition(.opacity)
+                        .zIndex(10)
+                }
+            }
+            .task {
+                // Hold the logo for a second, then fade. `task` starts with the first frame,
+                // so the beat is measured from what the user actually sees.
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                withAnimation(.easeOut(duration: 0.3)) {
+                    splashVisible = false
+                }
+            }
+            // ★ `nomily-a1://import/…` — how a QR code scanned with the system Camera app (or
+            // a tapped link in a chat) becomes a stored credential. The in-app scanner calls
+            // the same parser; this is only the "already outside the app" entry point.
+            //
+            // Registering the scheme is worth it even with the scanner available: a code read
+            // by the Camera app needs *some* handler, and without one iOS shows a dead URL.
+            .onOpenURL { url in handleIncoming(url) }
+            .alert(linkNoticeTitle ?? "", isPresented: Binding(
+                get: { linkNotice != nil },
+                set: { if !$0 { linkNotice = nil; linkNoticeTitle = nil } }
+            )) {
+                Button(L10n.Common.ok, role: .cancel) { linkNotice = nil; linkNoticeTitle = nil }
+            } message: {
+                Text(linkNotice ?? "")
+            }
+    }
+
+    private func handleIncoming(_ url: URL) {
+        linkNoticeTitle = L10n.A1.importedFromLink
+        do {
+            let credential = try DingTalkA1Credential.parse(link: url)
+            DingTalkA1CredentialStore.save(credential)
+            linkNotice = L10n.A1.importedFromLinkBody(credential.displayName)
+        } catch {
+            linkNoticeTitle = L10n.A1.importFailed
+            linkNotice = L10n.A1.scanFailed
+        }
+    }
+}
+
+/// The one-second branded splash: same red as the launch screen, the app mark floating
+/// in the middle. No interaction, no progress — a beat of brand before the app appears.
+private struct SplashView: View {
+    var body: some View {
+        Color.accentColor
+            .ignoresSafeArea()
+            .overlay {
+                Image("NomiLogo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 116, height: 116)
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+            }
+            .ignoresSafeArea()
     }
 }

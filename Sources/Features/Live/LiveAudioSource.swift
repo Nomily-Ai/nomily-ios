@@ -109,6 +109,21 @@ protocol LiveAudioSource: AnyObject {
     /// instead of treating the whole silence as a "link failure".
     func liveAudio(firstFrameTimeout: TimeInterval) -> AsyncThrowingStream<Data, Error>
 
+    /// The **device's own** elapsed recording time for this session, in seconds.
+    ///
+    /// ★ Declared as a requirement, not an extension default. `LiveModel` talks to
+    ///   `any LiveAudioSource`, and a default implementation in an extension is dispatched
+    ///   statically — every device would silently get the `nil` behaviour forever.
+    ///
+    /// Why it exists: the screen used to derive the timer from the packets *we* received, so the
+    /// moment the card stopped pushing (a known A1 behaviour, see `DingTalkA1Link.liveTask`) the
+    /// clock froze while the card kept counting on its own — "the number is stuck / doesn't match
+    /// DingTalk". The card reports its own duration in `0x0132`; that is the number to show.
+    ///
+    /// - Returns: `nil` when the device cannot answer (unsupported, or the command failed) —
+    ///   never `0`, which would reset a running clock.
+    func liveDeviceElapsed() async -> TimeInterval?
+
     // MARK: Stop
 
     /// Stop: close the audio stream + make the device stop recording. **Idempotent**, can be invoked regardless of success or failure.
@@ -197,6 +212,9 @@ final class DnoteLiveSource: LiveAudioSource {
     func liveAudio(firstFrameTimeout: TimeInterval) -> AsyncThrowingStream<Data, Error> {
         client.streamAudio(firstFrameTimeout: firstFrameTimeout)
     }
+
+    /// D·NOTE's status has no recording clock — `nil` means "keep using the packet count".
+    func liveDeviceElapsed() async -> TimeInterval? { nil }
 
     func liveStop() async -> LiveStopOutcome {
         try? await client.stopStream()

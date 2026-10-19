@@ -14,6 +14,31 @@ struct AppConfig: Codable, Equatable {
     var devices: [String: DeviceRecord]
     var autoDeleteAfterTransfer: Bool
     var autoTranscribeAfterDownload: Bool
+    /// Whether the phone's own offline model (Apple `Speech`) may be used at all.
+    ///
+    /// ★ (2026-10-19) Default **off**, reversed from the original reasoning below.
+    ///
+    /// The original reason to default to on still holds technically — it is the only provider
+    /// that needs no key, no server and no network. But it also made every fresh install call
+    /// into `Speech` the moment something wanted a transcript, and a build whose `Info.plist`
+    /// had lost `NSSpeechRecognitionUsageDescription` (xcodegen regenerates that plist from
+    /// `project.yml`) did not fail gracefully: iOS killed the process on launch, repeatedly.
+    /// The owner does not use it, so it is opt-in now — explicit is better than convenient here.
+    var onDeviceASREnabled: Bool
+    /// Set once after the "on → off" migration above has run, so a user who turns it back on
+    /// keeps that choice across launches.
+    var onDeviceASROffMigrated: Bool
+    /// The user's **default summary template**, keyed by `"\(category)\u{1F}\(name)"`.
+    ///
+    /// ★ (2026-10-19) Mirrors DingTalk's "Set as default": the summary picker pre-selects this
+    /// template instead of leaving `nil` (which used to mean "scroll and pick again, every time").
+    /// Not a UUID on purpose — built-in templates get fresh UUIDs every launch.
+    var summaryTemplateKey: String?
+    /// Run the summary job automatically as soon as a transcript lands.
+    ///
+    /// Default on, but the caller checks `llmProviders.configuredProviders` first: "on" means
+    /// "do it when there is an AI service", never "call a service that isn't configured".
+    var autoSummarizeAfterTranscription: Bool
     var localVADEnabled: Bool
     /// Background keep-alive. When on, long jobs like transcription/summary keep a loop of
     /// silent audio going after the app moves to the background to hold the process up and stop iOS suspending it (hung off `BackgroundKeeper`).
@@ -40,13 +65,34 @@ struct AppConfig: Codable, Equatable {
     /// an English UI on first launch. Tags outside `AppLanguage.supported`
     /// resolve to English (`AppLanguage.resolve`).
     var appLanguage: String?
+    /// App colour theme — `AppTheme.rawValue` (`crimson` / `graphite` / `ocean` / …).
+    ///
+    /// **`nil` = the default (`crimson`, the brand red)**. Stored as a bare tag for the same reason as
+    /// `appLanguage` / `watchFaceStyle`: `AppConfig` is a pure disk schema living in `Sources/Services/`,
+    /// and importing the UI layer's `AppTheme` (which needs SwiftUI's `Color`) here would drag SwiftUI
+    /// into every target that only wants to read settings.
+    var appTheme: String?
+    /// The command the DingTalk A1 setup page shows for "run this on your Mac".
+    ///
+    /// **Machine-specific by nature** (the extractor script lives wherever the user put it), so
+    /// it is user-editable and persisted; `nil` = the generic default the setup page renders.
+    /// Never assume *our* path here — a build handed to someone else must not carry it.
+    var a1ExtractCommand: String?
+    /// The DingTalk A1 **recording mode** the user picked (`A1RecordMode.rawValue`).
+    ///
+    /// ★ (2026-10-19) Mirrors the card's five modes shown in DingTalk's device settings
+    /// (General / Meeting / Face-to-face / AI Visual Notes / Lossless). Persisted per app because `0x0100`
+    /// currently exposes **no** record-mode param — until the real key is confirmed from a
+    /// live `dumpAllParams()` log, the choice is a named preset the app documents (and later
+    /// applies once the key is known). `nil` = `.general` (the card's default).
+    var a1RecordMode: String?
     /// Which expression the watch home-screen face shows — `BotFaceStyle.rawValue`.
     ///
     /// **`nil` = never chosen**, equivalent to `calm` (what the face looked like before the thirteenth revision).
     /// Like `appLanguage`, this stores a **bare tag**, not an enum:
     /// `AppConfig` is a pure disk schema; dragging the UI layer's enum type in would get it compiled
     /// into places that don't need it (this file is in `Sources/`, while the expression library is in
-    /// `Sources/Services/Watch/`）。
+    /// `Sources/Services/Watch/`).
     ///
     /// ⚠️ This copy **exists only on the phone side**; the watch's copy is the one it stores itself after the push
     /// (see `WatchFaceStore`). Both sides are "newest version wins", so there's no sync conflict to speak of.
@@ -65,6 +111,9 @@ struct AppConfig: Codable, Equatable {
         devices: [:],
         autoDeleteAfterTransfer: true,
         autoTranscribeAfterDownload: false,
+        onDeviceASREnabled: false,
+        onDeviceASROffMigrated: true,
+        autoSummarizeAfterTranscription: true,
         localVADEnabled: true,
         backgroundKeepAliveEnabled: true,
         autoReconnectEnabled: true,
@@ -81,6 +130,10 @@ struct AppConfig: Codable, Equatable {
         case devices
         case autoDeleteAfterTransfer = "auto_delete_after_transfer"
         case autoTranscribeAfterDownload = "auto_transcribe_after_download"
+        case onDeviceASREnabled = "on_device_asr_enabled"
+        case onDeviceASROffMigrated = "on_device_asr_off_migrated"
+        case summaryTemplateKey = "summary_template_key"
+        case autoSummarizeAfterTranscription = "auto_summarize_after_transcription"
         case localVADEnabled = "local_vad_enabled"
         case backgroundKeepAliveEnabled = "background_keep_alive_enabled"
         case autoReconnectEnabled = "auto_reconnect_enabled"
@@ -90,6 +143,9 @@ struct AppConfig: Codable, Equatable {
         case lastTargetLang = "last_target_lang"
         case lastSummaryLang = "last_summary_lang"
         case appLanguage = "app_language"
+        case appTheme = "app_theme"
+        case a1ExtractCommand = "a1_extract_command"
+        case a1RecordMode = "a1_record_mode"
         case watchFaceStyle = "watch_face_style"
         case fastTransferThresholdKB = "fast_transfer_threshold_kb"
     }
@@ -109,6 +165,23 @@ struct AppConfig: Codable, Equatable {
         self.devices = try c.decodeIfPresent([String: DeviceRecord].self, forKey: .devices) ?? [:]
         self.autoDeleteAfterTransfer = try c.decodeIfPresent(Bool.self, forKey: .autoDeleteAfterTransfer) ?? true
         self.autoTranscribeAfterDownload = try c.decodeIfPresent(Bool.self, forKey: .autoTranscribeAfterDownload) ?? false
+        // ★ (2026-10-19) One-time "on → off" migration.
+        //
+        // The default flipped to off, but `decodeIfPresent` only affects *new* configs — an
+        // existing `config.json` still says `true` and would keep reaching into `Speech` on
+        // launch. `on_device_asr_off_migrated` makes the override happen exactly once, so a
+        // user who switches it back on afterwards keeps their choice on the next launch.
+        let offMigrated = try c.decodeIfPresent(Bool.self, forKey: .onDeviceASROffMigrated) ?? false
+        self.onDeviceASREnabled = offMigrated
+            ? (try c.decodeIfPresent(Bool.self, forKey: .onDeviceASREnabled) ?? false)
+            : false
+        self.summaryTemplateKey = try c.decodeIfPresent(String.self, forKey: .summaryTemplateKey)
+        self.onDeviceASROffMigrated = true
+        // ⚠️ The "primary pointed at ondevice" fix-up deliberately does **not** live here.
+        //   At decode time the Keychain secrets have not been re-attached yet, so every cloud
+        //   provider looks unconfigured and the decision would collapse to the wrong pick
+        //   (measured: azure → local). `ConfigService.load` does it after the secrets are back.
+        self.autoSummarizeAfterTranscription = try c.decodeIfPresent(Bool.self, forKey: .autoSummarizeAfterTranscription) ?? true
         self.localVADEnabled = try c.decodeIfPresent(Bool.self, forKey: .localVADEnabled) ?? true
         self.backgroundKeepAliveEnabled = try c.decodeIfPresent(Bool.self, forKey: .backgroundKeepAliveEnabled) ?? true
         self.autoReconnectEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoReconnectEnabled) ?? true
@@ -118,6 +191,9 @@ struct AppConfig: Codable, Equatable {
         self.lastTargetLang = try c.decodeIfPresent(String.self, forKey: .lastTargetLang)
         self.lastSummaryLang = try c.decodeIfPresent(String.self, forKey: .lastSummaryLang)
         self.appLanguage = try c.decodeIfPresent(String.self, forKey: .appLanguage)
+        self.appTheme = try c.decodeIfPresent(String.self, forKey: .appTheme)
+        self.a1ExtractCommand = try c.decodeIfPresent(String.self, forKey: .a1ExtractCommand)
+        self.a1RecordMode = try c.decodeIfPresent(String.self, forKey: .a1RecordMode)
         self.watchFaceStyle = try c.decodeIfPresent(String.self, forKey: .watchFaceStyle)
         self.fastTransferThresholdKB = try c.decodeIfPresent(Int.self, forKey: .fastTransferThresholdKB) ?? 512
     }
@@ -131,6 +207,10 @@ struct AppConfig: Codable, Equatable {
         devices: [String: DeviceRecord],
         autoDeleteAfterTransfer: Bool,
         autoTranscribeAfterDownload: Bool = false,
+        onDeviceASREnabled: Bool = false,
+        onDeviceASROffMigrated: Bool = true,
+        summaryTemplateKey: String? = nil,
+        autoSummarizeAfterTranscription: Bool = true,
         localVADEnabled: Bool = true,
         backgroundKeepAliveEnabled: Bool = true,
         autoReconnectEnabled: Bool = true,
@@ -140,6 +220,9 @@ struct AppConfig: Codable, Equatable {
         lastTargetLang: String? = nil,
         lastSummaryLang: String? = nil,
         appLanguage: String? = nil,
+        appTheme: String? = nil,
+        a1ExtractCommand: String? = nil,
+        a1RecordMode: String? = nil,
         watchFaceStyle: String? = nil,
         fastTransferThresholdKB: Int = 512
     ) {
@@ -151,6 +234,10 @@ struct AppConfig: Codable, Equatable {
         self.devices = devices
         self.autoDeleteAfterTransfer = autoDeleteAfterTransfer
         self.autoTranscribeAfterDownload = autoTranscribeAfterDownload
+        self.onDeviceASREnabled = onDeviceASREnabled
+        self.onDeviceASROffMigrated = onDeviceASROffMigrated
+        self.summaryTemplateKey = summaryTemplateKey
+        self.autoSummarizeAfterTranscription = autoSummarizeAfterTranscription
         self.localVADEnabled = localVADEnabled
         self.backgroundKeepAliveEnabled = backgroundKeepAliveEnabled
         self.autoReconnectEnabled = autoReconnectEnabled
@@ -160,6 +247,9 @@ struct AppConfig: Codable, Equatable {
         self.lastTargetLang = lastTargetLang
         self.lastSummaryLang = lastSummaryLang
         self.appLanguage = appLanguage
+        self.appTheme = appTheme
+        self.a1ExtractCommand = a1ExtractCommand
+        self.a1RecordMode = a1RecordMode
         self.watchFaceStyle = watchFaceStyle
         self.fastTransferThresholdKB = fastTransferThresholdKB
     }
@@ -180,6 +270,9 @@ struct AppConfig: Codable, Equatable {
     struct AsrProviders: Codable, Equatable {
         var azure: Azure?
         var local: Local?
+        /// User-defined OpenAI-compatible transcription server (2026-10-19).
+        /// Feasibility was proven against a real client↔server round-trip before wiring the UI.
+        var custom: Custom?
 
         struct Azure: Codable, Equatable {
             var key: String
@@ -214,10 +307,26 @@ struct AppConfig: Codable, Equatable {
             var host: String
             var port: Int
         }
+        struct Custom: Codable, Equatable {
+            /// Base URL, e.g. `http://192.168.1.10:8000` or `https://api.groq.com/openai`.
+            var endpoint: String
+            var apiKey: String?
+            var model: String?
+            /// Optional ISO-639-1 hint; empty = server-side detection.
+            var language: String?
+
+            enum CodingKeys: String, CodingKey {
+                case endpoint
+                case apiKey = "api_key"
+                case model
+                case language
+            }
+        }
 
         var hasConfiguredProvider: Bool {
             if let a = azure, !a.key.isEmpty, !a.region.isEmpty { return true }
             if let l = local, !l.host.isEmpty, l.port > 0 { return true }
+            if let c = custom, !c.endpoint.isEmpty { return true }
             return false
         }
     }

@@ -10,6 +10,10 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
     var summary: String?
     var prompt: String
     var isBuiltIn: Bool
+    /// SF Symbol shown on the template card. `nil` = derive from the category
+    /// (see `effectiveIcon`); custom templates without an explicit choice get
+    /// the "custom" glyph.
+    var icon: String?
 
     init(
         id: UUID = UUID(),
@@ -17,7 +21,8 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
         name: String,
         summary: String? = nil,
         prompt: String,
-        isBuiltIn: Bool = true
+        isBuiltIn: Bool = true,
+        icon: String? = nil
     ) {
         self.id = id
         self.category = category
@@ -25,7 +30,20 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
         self.summary = summary
         self.prompt = prompt
         self.isBuiltIn = isBuiltIn
+        self.icon = icon
     }
+
+    /// The glyph the card shows. Per-category defaults so every built-in gets
+    /// a recognisable mark without touching 20 template definitions; the
+    /// mapping lives next to `categoryKeys` on purpose.
+    var effectiveIcon: String {
+        if let icon { return icon }
+        return Self.categoryIcons[category] ?? (isBuiltIn ? "doc.text" : "square.and.pencil")
+    }
+
+    /// Identity that survives relaunches (UUIDs on built-ins are regenerated
+    /// every launch, so the persisted "default template" is keyed by this).
+    var storeKey: String { "\(category)\u{1F}\(name)" }
 
     var localizedName: String {
         isBuiltIn ? Self.localizedTemplateName(name) : name
@@ -56,6 +74,31 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
     }
 
     static let promptMaxCharacters = 4_000
+
+    /// Card glyph per category — kept beside `categoryKeys` so a new category
+    /// gets both its label and its icon in one edit.
+    static let categoryIcons: [String: String] = [
+        "Meeting Notes": "calendar",
+        "Action Items": "checklist",
+        "General Summary": "doc.text",
+        "Professional": "briefcase",
+        "Academic": "graduationcap",
+        "Creative": "paintbrush",
+        "Speech": "waveform",
+        "Call": "phone",
+        "Interview": "person.text.rectangle",
+        "Medical": "cross.case",
+        "Sales": "chart.line.uptrend.xyaxis",
+        "Consulting": "lightbulb",
+        "Education": "books.vertical",
+        "Construction": "hammer",
+        "IT & Engineering": "cpu",
+        "Legal": "scale.3d",
+        "Real Estate": "building.2",
+        "Finance": "banknote",
+        "Utility": "wrench.and.screwdriver",
+        "Workplace": "person.2",
+    ]
 
     private static let categoryKeys: [String: String] = [
         "Meeting Notes": "template_cat.meeting_notes",

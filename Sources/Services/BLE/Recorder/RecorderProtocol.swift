@@ -31,7 +31,12 @@ struct RecorderAdvertisement: Equatable {
     /// Original protocol fields are retained as‑is (firmware may add fields, the model layer does not decide which are readable)
     let raw: [String: AnyHashable]
 
-    var displayName: String { "\(family) \(modelName)" }
+    var displayName: String {
+        // `modelName` may be empty (the DingTalk A1 has no model string — its "model" is the
+        // serial tail, which the subtitle lines already show). Guard the join so we never
+        // render a trailing space like "DingTalk A1 ".
+        modelName.isEmpty ? family : "\(family) \(modelName)"
+    }
 
     static func == (lhs: RecorderAdvertisement, rhs: RecorderAdvertisement) -> Bool {
         lhs.protocolID == rhs.protocolID && lhs.identity == rhs.identity
@@ -458,6 +463,7 @@ enum RecorderProtocolRegistry {
     static let all: [any RecorderProtocolSpec.Type] = [
         DnoteRecorderSpec.self,
         TicNoteRecorderSpec.self,
+        DingTalkA1Spec.self,
     ]
 
     /// Protocol visible to users: `exposure != .hidden`.

@@ -55,7 +55,7 @@ Sources/
 │   ├── Device/           # Modal sheet for device info + settings
 │   └── Scanner/          # BLE scan + connect sheet
 ├── Services/
-│   ├── ASR/              # AsrTypes, AzureASR, LocalASR, LiveStreamASR, TranscriptionService
+│   ├── ASR/              # AsrTypes, AzureASR, LocalASR, LiveStreamASR, OnDeviceASR, TranscriptionService
 │   ├── BLE/              # CoreBluetooth: protocol, codec, scanner, client
 │   ├── Crypto/           # ChaCha20 raw stream cipher (RFC 8439)
 │   ├── Audio/            # OpusOgg (raw frames → Ogg-Opus container)
@@ -84,6 +84,39 @@ log show ./.logs/dnote.logarchive \
 ```
 
   The run is then readable in `./.logs/dnote.log`.
+
+## Transcription
+
+Three providers, picked in Settings → Speech Recognition and tried in the order
+`primary → fallbacks → on-device`:
+
+| Provider | Needs | Live | Notes |
+|---|---|---|---|
+| Azure Speech | key + region | yes (and live translation) | best quality, costs money |
+| Local server | faster-whisper box on the LAN | yes | `ws://host:port/v1/listen` |
+| **On-device** | nothing | yes, in ~3 s batches | Apple Speech, `requiresOnDeviceRecognition` — audio never leaves the phone |
+
+The on-device path (`Sources/Services/ASR/OnDeviceASR.swift`) exists for two reasons:
+
+- **It closes the last gap that required an account.** With no key and no server, live
+  transcription used to fail inside `openASR` **before** the card was told to record — the
+  symptom was "the record button did nothing", not "no text". Recording and transcription are now independent:
+  if no service is available the session still records and streams, says so, and the saved clip
+  is transcribed afterwards.
+- **The decoder.** Everything our recorders produce is Opus in Ogg and `SFSpeechRecognizer`
+  wants LPCM. `OnDeviceASR` decodes with `AVAssetReader` (16 kHz mono Int16) — the same path
+  `AudioExporter.exportAsWAV` already uses. `AudioConverter` with `kAudioFormatOpus` was tried
+  and rejected: the platform decoder latches end-of-stream after the first fill that drains its
+  input, so it cannot be fed packet-by-packet.
+
+Live on-device recognition batches ~3 s of packets, wraps them into an Ogg container in a temp
+file, decodes, and appends the PCM to a running recognition request — so text arrives in phrase
+bursts rather than word by word. A configured Azure/whisper service, when present, wins on
+quality and is tried first.
+
+**Summarize right after transcribing** (Settings, on by default) hands each fresh transcript to the
+configured LLM as a summary job. It is skipped when no LLM is configured, and it never
+overwrites a summary that already exists on disk.
 
 ## Notes
 

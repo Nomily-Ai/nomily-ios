@@ -279,6 +279,12 @@ enum RecorderLinkError: LocalizedError {
     case notConnected
     case timeout
     case cancelled
+    /// The BLE link went away **mid-operation** — the peer did not finish, it disappeared.
+    ///
+    /// Kept distinct from `.notConnected` (which means "we were never connected") because the
+    /// two call for opposite reactions: a live session treats `.notConnected` as "the device
+    /// really stopped", while `.linkLost` means "wait for the automatic reconnect and re-attach".
+    case linkLost
 
     var errorDescription: String? {
         switch self {
@@ -288,6 +294,7 @@ enum RecorderLinkError: LocalizedError {
         case .notConnected:       return "Device is not connected."
         case .timeout:            return "Device did not answer in time."
         case .cancelled:          return "Transfer was cancelled."
+        case .linkLost:           return "The connection to the device dropped."
         }
     }
 
@@ -300,6 +307,7 @@ enum RecorderLinkError: LocalizedError {
         case .notConnected: return "notConnected"
         case .timeout:     return "timeout"
         case .cancelled:   return "cancelled"
+        case .linkLost:    return "linkLost"
         }
     }
 }
@@ -507,6 +515,33 @@ protocol RecorderLink: AnyObject {
     /// It must never be collapsed to "not charging" -- the user looks at this item precisely to decide whether to plug in power.
     var pushedChargingState: Bool? { get }
 
+    /// Recorded length measured **on the device's own clock**, in seconds; `nil` = not available.
+    ///
+    /// ## ★ Why the device clock beats both of the other two sources
+    /// The stopwatch can be derived from three things, and they disagree:
+    ///   · **our own `startedAt` anchor** — off by however long the command took to land, plus any
+    ///     `Task.sleep` between the tap and the write;
+    ///   · **the status reply's `duration`** — quantised to whole seconds by the firmware, so the
+    ///     second hand visibly stutters and can lag a full second behind reality;
+    ///   · **the device's own event log** (`0x000C` on the A1) — a Unix timestamp taken *on the
+    ///     card* at the instant it actually began recording.
+    ///
+    /// The user's complaint was literally "the timer on the phone and the card disagree"
+    /// (2026-10-18). Only the third source answers "when did the card start", so when a device
+    /// offers it, it must win. Callers still fall back to `readRecordingStatus()`'s value.
+    ///
+    /// ⚠️ Like the others it is a protocol **requirement**: extension-only means static dispatch.
+    var pushedElapsed: TimeInterval? { get }
+
+    /// How many remark ("marks") marks the device registered **during the current recording**;
+    /// `nil` = this device has no such button / no recording in progress.
+    ///
+    /// In DingTalk this is what a second press of the record key does mid-recording — it does not
+    /// stop anything, it drops a marker onto the timeline ("mark this moment of the audio"). There is no
+    /// command to *ask* how many marks exist; the count is whatever arrived on the event stream,
+    /// so it is "what we heard", not ground truth.
+    var pushedRemarkCount: Int? { get }
+
     // MARK: Keep-alive
 
     /// Keep the link **from going idle** -- send a read-only command at low frequency so the device's idle sleep doesn't cut the link.
@@ -609,6 +644,17 @@ extension RecorderLink {
     /// and the symptom is again "compiles, zero warnings, the UI always shows `—`",
     /// looking identical to "this card simply doesn't report charging state" (the shape of this pitfall is in the long comment above `fastTransfer`).
     var pushedChargingState: Bool? { nil }
+
+    /// No device-clock timing by default: D·NOTE reports `recd` through its own poll, which the
+    /// session already adopts via `readRecordingStatus()`, so there is nothing extra to offer.
+    ///
+    /// ⚠️ Same requirement rule as `pushedChargingState` -- extension-only would be statically
+    /// dispatched on `any RecorderLink` and the session would silently keep the coarse value.
+    var pushedElapsed: TimeInterval? { nil }
+
+    /// No remark button by default. `nil` = "this device has no such gesture", which is why the UI
+    /// must hide the counter rather than show `0`.
+    var pushedRemarkCount: Int? { nil }
 
     /// **No** session ID by default (if the device doesn't report one it really is nil, not 0).
     var lastSessionID: UInt32? { nil }

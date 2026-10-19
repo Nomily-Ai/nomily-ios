@@ -65,6 +65,16 @@ enum OpusOgg {
         static let ticNote = Profile(
             packetBytes: 160, channels: 2, sampleRate: 48000,
             samplesPerPacket: 960, preSkip: 312)
+
+        /// DingTalk A1: 84 B per packet, mono, 48 kHz, 20 ms.
+        ///
+        /// Both the live stream (`0x0117`, audio length field = 84) and the `.dtyj` v1.7/32 kbps
+        /// container carry the same 84‑byte packet, TOC `0x4B`/`0x48` (config 9, SILK WB, 20 ms —
+        /// see the A1 reverse-engineering notes §7.4). The 64 kbps *download* variant is 164 B, but that
+        /// path goes through `DingTalkA1Audio.convert` (whole‑file DTYJ→Ogg), never through here.
+        static let dingTalkA1 = Profile(
+            packetBytes: 84, channels: 1, sampleRate: 48000,
+            samplesPerPacket: 960, preSkip: 312)
     }
 
     /// Alias (for readability: `OpusOgg.dnoteProfile` reads more naturally than `OpusOgg.Profile.dnote`).

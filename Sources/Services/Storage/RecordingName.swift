@@ -44,6 +44,16 @@ enum RecordingName {
         return display.string(from: date)
     }
 
+    /// Same rendering, for callers that already hold a `Date` instead of a file name.
+    ///
+    /// Added for the DingTalk A1: its recordings have no file name at all — the id **is** the
+    /// start timestamp (`fid`), so the title has to be formatted from a date directly. Reusing
+    /// `display` keeps the A1's list looking exactly like every other card's, instead of
+    /// growing a second date format that would drift the moment anyone touches this file.
+    static func displayTitle(for date: Date) -> String {
+        display.string(from: date)
+    }
+
     static func date(from filename: String) -> Date? {
         let stem = (filename as NSString).deletingPathExtension
         if let exact = parser.date(from: stem) { return exact }

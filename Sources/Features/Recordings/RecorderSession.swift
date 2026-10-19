@@ -87,6 +87,13 @@ final class RecorderSessionModel: ObservableObject {
     /// Device‑reported recorded duration (seconds). `nil` = device did not report.
     @Published private(set) var deviceElapsed: TimeInterval?
 
+    /// ★ How many "remarks" the card recorded during **this** recording.
+    ///
+    /// The A1's button pushes `AUDIO_CONTROL_REMARK_BUTTON_CLICK` mid-recording — the gesture
+    /// that makes DingTalk put a marker into the audio. There is no API to ask "how many";
+    /// the count comes from the link's event stream, so this is only ever "what we heard".
+    @Published private(set) var markCount = 0
+
     /// Card‑side explanatory hint (e.g., "card did not confirm recording command"). **Not an error** ——
     /// The command was indeed sent, but it's unknown whether the card acknowledged it; users need to know this distinction.
     @Published private(set) var notice: String?
@@ -147,6 +154,7 @@ final class RecorderSessionModel: ObservableObject {
         deviceElapsed = nil
         notice = nil
         isRecording = false
+        markCount = 0
         cardBatteryPercent = nil
         cardCharging = nil
 
@@ -248,6 +256,22 @@ final class RecorderSessionModel: ObservableObject {
                 // first set an anchor, and subsequent `pollOnce` will correct it with the device value.
                 if self.isRecording, self.startedAt == nil {
                     self.startedAt = Date()
+                }
+                // ★ Remark ("marks") count — a pure cache read on the same tick. There is no command to
+                // ask "how many marks", so this is the only way the counter can move while recording:
+                // the user presses the key on the card, the card pushes the event, the link counts it.
+                if self.isRecording {
+                    if let marks = link.pushedRemarkCount, self.markCount != marks {
+                        self.markCount = marks
+                    }
+                } else if self.markCount != 0 {
+                    self.markCount = 0
+                }
+                // ★ Device-clock length, also a cache read. Correcting the anchor here rather than only
+                // in `pollOnce` means the stopwatch is re-anchored ~1×/s even when the BLE round-trip
+                // is slow or queued behind a download.
+                if self.isRecording, let clock = link.pushedElapsed {
+                    self.adoptDeviceClock(clock)
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
@@ -433,7 +457,12 @@ final class RecorderSessionModel: ObservableObject {
             noteDeviceRecordingState(link.pushedRecordingState)
 
             guard let status = try? await link.readRecordingStatus() else { return }
-            if let device = status.deviceElapsed {
+            // ★ The device's own clock wins over the status reply's `duration` (whole seconds only, so
+            // it stutters), which in turn wins over nothing. The A1 stamps `AUDIO_RECORD_START` with
+            // its **own** clock — this is what fixes "the phone's stopwatch and the card disagree".
+            if let clock = link.pushedElapsed {
+                adoptDeviceClock(clock)
+            } else if let device = status.deviceElapsed {
                 adoptDeviceElapsed(device)
             }
             // The status in the response is **after this query**, newer than the cache.
@@ -472,6 +501,42 @@ final class RecorderSessionModel: ObservableObject {
         } else {
             // No anchor yet (e.g., card recording before App connects) — use the device value as the anchor.
             startedAt = Date().addingTimeInterval(-seconds)
+        }
+    }
+
+    /// Adopt a length measured on the **device's own clock** (`RecorderLink.pushedElapsed`).
+    ///
+    /// ## Why this is a second method instead of reusing `adoptDeviceElapsed`
+    /// That one is **forward-only** on purpose, because the status reply can legitimately report `0`
+    /// at the very beginning of a recording (real device: `… 01 01 00 00 00 00`) — adopting that would
+    /// pin the second hand at 0:00. A device-clock value can't be that spurious zero (it stays `nil`
+    /// until the device has seen its own start event), so it may also correct **backwards**.
+    ///
+    /// That backward case is not hypothetical — it is the user's complaint. The sequence on a tap is:
+    /// we set the anchor, *then* the command travels to the card, *then* the card starts. Our anchor is
+    /// therefore early by roughly the write latency, and the stopwatch runs **fast** for the whole
+    /// recording. Only a backward correction can fix that.
+    ///
+    /// ## Why the backward path is bounded
+    /// `deviceClockOffset` is derived from "report arrival − its newest record's device time", so a
+    /// **late-delivered batch** makes it overstate the offset and the computed elapsed then *under*-reads.
+    /// Mid-recording, a negative delta is far more likely to be that than a real anchor error, and
+    /// following it would make the clock visibly walk backwards. So: backward corrections only in the
+    /// first 10 s (where the write latency lives), with a deadband so a jittering report can't wobble it.
+    private func adoptDeviceClock(_ seconds: TimeInterval) {
+        guard seconds >= 0 else { return }
+        deviceElapsed = seconds
+        guard let startedAt else {
+            // No anchor yet (card started recording before the App connected).
+            self.startedAt = Date().addingTimeInterval(-seconds)
+            return
+        }
+        let local = Date().timeIntervalSince(startedAt)
+        let delta = seconds - local
+        if delta > 1 {
+            self.startedAt = Date().addingTimeInterval(-seconds)
+        } else if delta < -0.75, local < 10 {
+            self.startedAt = Date().addingTimeInterval(-seconds)
         }
     }
 
@@ -630,6 +695,19 @@ struct RecorderControl: View {
                         .foregroundStyle(.red)
                         // Fixed width to prevent the button from jumping when the time changes from 9:59 to 10:00
                         .frame(minWidth: 44, alignment: .trailing)
+                }
+                // ★ "N marks so far" — the feedback the card itself cannot give.
+                //
+                // The card has no screen readout for this and no "how many marks" command, so without
+                // this badge a press on the card looks like it did nothing at all (the card gives no
+                // beep during recording either). Shown only while recording: a leftover count after
+                // stopping would read as "this recording already has marks".
+                if model.markCount > 0 {
+                    Label("\(model.markCount)", systemImage: "bookmark.fill")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption2.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.orange)
+                        .accessibilityLabel(L10n.ClipDetail.remarksCount(model.markCount))
                 }
             }
             Button {

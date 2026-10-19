@@ -198,7 +198,14 @@ struct MindMapLayout {
             columnWidth[entry.node.depth] = max(columnWidth[entry.node.depth], width)
         }
         var columnX = [CGFloat](repeating: margin, count: deepest + 1)
-        for depth in 1...max(0, deepest) {
+        // ★ (2026-10-18) `stride`, not `1...max(0, deepest)`.
+        //
+        // Collapsing every branch leaves only the root visible, so `deepest == 0` and
+        // `1...max(0, 0)` becomes `1...0` — an invalid range, which Swift traps on with
+        // `_assertionFailure` (crash report: `EXC_BREAKPOINT / SIGTRAP` inside
+        // `MindMapLayout.build(tree:collapsed:)`, triggered by `MindMapScreen.toggle`).
+        // `stride(from: 1, through: 0, by: 1)` is simply empty, which is the correct geometry.
+        for depth in stride(from: 1, through: deepest, by: 1) {
             columnX[depth] = columnX[depth - 1] + columnWidth[depth - 1] + horizontalGap
         }
 

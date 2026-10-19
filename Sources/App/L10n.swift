@@ -68,6 +68,284 @@ enum L10n {
         static var about: String { NSLocalizedString("settings.about", comment: "") }
         static var version: String { NSLocalizedString("settings.version", comment: "") }
         static var language: String { NSLocalizedString("settings.language", comment: "") }
+        static var theme: String {
+            NSLocalizedString("settings.theme", value: "Theme", comment: "Colour theme row")
+        }
+    }
+
+    // MARK: - Theme
+
+    enum Theme {
+        static var footer: String {
+            NSLocalizedString(
+                "theme.footer",
+                value: "The theme controls the app's main colour — buttons, links, selection and the active state of the connection pill. The launch screen keeps Nomily's brand red, so red stays the default.",
+                comment: "Colour theme picker footer"
+            )
+        }
+    }
+
+    // MARK: - DingTalk A1 credential import
+
+    /// Copy for `DingTalkA1SetupView`.
+    ///
+    /// Every string here explains a step that **cannot** be automated away, so the wording is
+    /// deliberately plain: "one secret per card, here is how you get it, here is what it does
+    /// not do". Vague copy at this point reads as a request to trust a black box.
+    enum A1 {
+        static var title: String {
+            NSLocalizedString("a1.title", value: "DingTalk A1", comment: "A1 credential page title")
+        }
+        static var intro: String {
+            NSLocalizedString(
+                "a1.intro",
+                value: "Every DingTalk A1 has its own device secret. DingTalk issues it when the card is bound to an account; it can't be derived from the serial number and it is never sent over Bluetooth. So the first time, it has to be taken out of one signed-in DingTalk session — after that, listing, downloading and transcribing all happen offline, with no DingTalk involved.",
+                comment: "A1 credential page intro"
+            )
+        }
+        static var step1Title: String {
+            NSLocalizedString("a1.step1.title", value: "Bind the card to your DingTalk account",
+                              comment: "A1 setup step 1 title")
+        }
+        static var step1Body: String {
+            NSLocalizedString(
+                "a1.step1.body",
+                value: "Bought it second-hand? Ask the seller to unbind it first, then scan the code in DingTalk to bind it yourself. Only you can do this step — it decides which account the card hands its secret to.",
+                comment: "A1 setup step 1 body"
+            )
+        }
+        static var step2Title: String {
+            NSLocalizedString("a1.step2.title", value: "Open “AI Notes” once on the desktop app",
+                              comment: "A1 setup step 2 title")
+        }
+        static var step2Body: String {
+            NSLocalizedString(
+                "a1.step2.body",
+                value: "Any template will do. DingTalk writes the device list — secret included — into its own log on that computer.",
+                comment: "A1 setup step 2 body"
+            )
+        }
+        static var step3Title: String {
+            NSLocalizedString("a1.step3.title", value: "Run one command on that Mac",
+                              comment: "A1 setup step 3 title")
+        }
+        static var step3Body: String {
+            NSLocalizedString(
+                "a1.step3.body",
+                value: "It turns the secret into one line of text and copies it to the clipboard.",
+                comment: "A1 setup step 3 body"
+            )
+        }
+        static var copyCommand: String {
+            NSLocalizedString("a1.copy_command", value: "Copy the command", comment: "")
+        }
+        static var commandFooter: String {
+            NSLocalizedString(
+                "a1.command_footer",
+                value: "The extractor only reads DingTalk's log on this Mac. It doesn't touch the card, the firmware or your DingTalk account.",
+                comment: ""
+            )
+        }
+        static var pasteSection: String {
+            NSLocalizedString("a1.paste.section", value: "Paste the credential", comment: "")
+        }
+        static var pastePlaceholder: String {
+            NSLocalizedString("a1.paste.placeholder",
+                              value: "Paste what the command copied…", comment: "")
+        }
+        static var pasteFromClipboard: String {
+            NSLocalizedString("a1.paste.from_clipboard", value: "Paste", comment: "")
+        }
+        static var importAction: String {
+            NSLocalizedString("a1.import", value: "Import", comment: "")
+        }
+        static var pasteFooter: String {
+            NSLocalizedString(
+                "a1.paste.footer",
+                value: "Accepts the one-line form, the JSON the extractor writes, or key=value lines.",
+                comment: ""
+            )
+        }
+        static var importedHeader: String {
+            NSLocalizedString("a1.imported.header", value: "Imported", comment: "")
+        }
+        static var importedOK: String {
+            NSLocalizedString("a1.imported.ok", value: "Ready — reconnect the card to use it", comment: "")
+        }
+        static var cardName: String { NSLocalizedString("a1.card.name", value: "Card", comment: "") }
+        static var cardSN: String { NSLocalizedString("a1.card.sn", value: "Serial", comment: "") }
+        static var cardSecret: String {
+            NSLocalizedString("a1.card.secret", value: "Secret", comment: "")
+        }
+        static var cardsHeader: String {
+            NSLocalizedString("a1.cards.header", value: "Cards on this phone", comment: "")
+        }
+        static var cardsFooter: String {
+            NSLocalizedString(
+                "a1.cards.footer",
+                value: "The secret is kept in the iOS keychain only — never in the settings file, never uploaded anywhere. Swipe a card to remove it; the card itself is untouched.",
+                comment: ""
+            )
+        }
+        static var deleteTitle: String {
+            NSLocalizedString("a1.delete.title", value: "Remove this card's credential?", comment: "")
+        }
+        static var deleteMessage: String {
+            NSLocalizedString(
+                "a1.delete.message",
+                value: "Nomily will no longer be able to read this card. Recordings on the card are not affected.",
+                comment: ""
+            )
+        }
+        static var importFailed: String {
+            NSLocalizedString("a1.import_failed", value: "Couldn't import that", comment: "")
+        }
+
+        // MARK: QR / deep link
+
+        /// Button on the import page. A QR code removes the clipboard from the loop entirely,
+        /// which is where "paste it from your Mac" used to fall down.
+        static var scanAction: String {
+            NSLocalizedString("a1.scan.action", value: "Scan QR code", comment: "")
+        }
+        static var scanHint: String {
+            NSLocalizedString(
+                "a1.scan.hint",
+                value: "Point the camera at the QR code the command printed on your Mac.",
+                comment: ""
+            )
+        }
+        static var scanDenied: String {
+            NSLocalizedString(
+                "a1.scan.denied",
+                value: "Camera access is off for Nomily. Turn it on in Settings → Nomily AI → Camera, or paste the line instead.",
+                comment: ""
+            )
+        }
+        static var scanNoCamera: String {
+            NSLocalizedString("a1.scan.no_camera", value: "No camera available here.",
+                              comment: "")
+        }
+        static var scanFailed: String {
+            NSLocalizedString(
+                "a1.scan.failed",
+                value: "That QR code isn't a DingTalk A1 credential. Use the one printed by the extractor on your Mac.",
+                comment: ""
+            )
+        }
+        /// Shown when the app is opened from a scanned code / tapped link.
+        static var importedFromLink: String {
+            NSLocalizedString("a1.link.imported", value: "Credential imported",
+                              comment: "")
+        }
+        static func importedFromLinkBody(_ name: String) -> String {
+            String(format: NSLocalizedString("a1.link.imported_body",
+                                             value: "%@ is ready. Go back and tap “Try again”.",
+                                             comment: ""), name)
+        }
+
+        /// Row shown next to a failed read on an A1 device page — the way into this sheet
+        /// without hunting through Settings.
+        static var openImport: String {
+            NSLocalizedString("a1.open_import", value: "Import this card's key", comment: "A1 device page error CTA")
+        }
+
+        // MARK: Per-card credential section (device info page)
+
+        /// Header of the section on **one card's** device-info page.
+        static var sectionTitle: String {
+            NSLocalizedString("a1.section.title", value: "Card key", comment: "Per-card credential section header")
+        }
+        static var sectionFooter: String {
+            NSLocalizedString(
+                "a1.section.footer",
+                value: "This key belongs to this card alone — it is not an app-wide setting. Another A1 needs its own. It is stored in the iOS keychain and never leaves the phone.",
+                comment: "Per-card credential section footer"
+            )
+        }
+        static var missingTitle: String {
+            NSLocalizedString("a1.missing.title",
+                              value: "No key on this phone yet — the card can't be read until one is imported.",
+                              comment: "Per-card credential section, empty state")
+        }
+        static var replace: String {
+            NSLocalizedString("a1.replace", value: "Replace key", comment: "Re-import a card's secret")
+        }
+        static var remove: String {
+            NSLocalizedString("a1.remove", value: "Delete key", comment: "Remove this card's secret")
+        }
+        static var pasteManually: String {
+            NSLocalizedString("a1.paste.manually", value: "Paste it instead", comment: "Expands an inline paste box")
+        }
+        static var howTo: String {
+            NSLocalizedString("a1.how_to", value: "How do I get this key?", comment: "Opens the explainer page")
+        }
+        static func scopedTo(_ card: String) -> String {
+            String(format: NSLocalizedString("a1.scoped_to", value: "For %@ only",
+                                             comment: "Header line on the explainer, naming the card"), card)
+        }
+        /// Shown when the imported secret belongs to a different card than the one on screen.
+        static func mismatch(_ importedSN: String, _ expectedTail: String) -> String {
+            String(
+                format: NSLocalizedString(
+                    "a1.mismatch",
+                    value: "Saved, but its serial ends in %@ — this card's ends in %@. If you meant this card, import that card's own key.",
+                    comment: "Warning when the imported secret is for another card"
+                ),
+                importedSN, expectedTail
+            )
+        }
+
+        /// The error `DingTalkA1Link` throws when the card connects but no credential is on
+        /// file. Must name the exact place to go, because this string is all the user sees.
+        static var errorNoCredential: String {
+            NSLocalizedString(
+                "a1.error.no_credential",
+                value: "This card has no key on this phone yet. Open this card's info page → “Card key” to scan or paste it — a one-time step, after which everything runs offline.",
+                comment: "A1 missing-credential error"
+            )
+        }
+
+        /// `0x0133` answered 501 — the stored secret belongs to a different card.
+        static var errorRejected: String {
+            NSLocalizedString(
+                "a1.error.rejected",
+                value: "The card rejected the stored credential (501). Each card's secret works only on that card — import this card's own credential in Settings → DingTalk A1.",
+                comment: "A1 credential rejected error"
+            )
+        }
+
+        /// `0x0133` answered 405 — the card considers this session unauthenticated (usually a
+        /// stale link after the card rebooted or connected to something else).
+        static var errorNotAuthenticated: String {
+            NSLocalizedString(
+                "a1.error.not_authenticated",
+                value: "The card says this session isn't authenticated (405). Disconnect and reconnect the card, then try again.",
+                comment: "A1 session not authenticated error"
+            )
+        }
+
+        /// The stored secret can't mathematically produce a token (too short).
+        static var errorBadSecret: String {
+            NSLocalizedString(
+                "a1.error.bad_secret",
+                value: "The stored credential's secret is too short to produce a token. Re-import it in Settings → DingTalk A1.",
+                comment: "A1 malformed secret error"
+            )
+        }
+
+        // MARK: Extractor command (editable, machine-specific by nature)
+
+        static var commandEditorTitle: String {
+            NSLocalizedString("a1.command.editor_title", value: "Extractor command", comment: "")
+        }
+        static var commandEditorFooter: String {
+            NSLocalizedString(
+                "a1.command.editor_footer",
+                value: "The script ships with the Nomily tool package; point this at wherever it lives on your Mac. Example: cd <the tools folder> && python3 extract_secret_from_dingtalk_mac.py --copy",
+                comment: ""
+            )
+        }
     }
 
     // MARK: - Language
@@ -96,6 +374,27 @@ enum L10n {
         static var autoTranscribeFooter: String { NSLocalizedString("asr.auto_transcribe_footer", comment: "") }
         static var localVAD: String { NSLocalizedString("asr.local_vad", comment: "") }
         static var localVADFooter: String { NSLocalizedString("asr.local_vad_footer", comment: "") }
+        // ★ 2026-10-18: on-device recognition + LLM summary after transcription.
+        //
+        // "On-device" here means **the phone's own model** (Apple Speech, offline), a third
+        // thing next to "Azure" and "local server" — the latter is a whisper box on the LAN, and
+        // calling both "local" made the settings page unreadable. The label says the device, the
+        // footer says what it costs (nothing) and what it can't do (no translation stream).
+        static var onDevice: String { NSLocalizedString("asr.on_device", comment: "") }
+        static var onDeviceFooter: String { NSLocalizedString("asr.on_device_footer", comment: "") }
+        static var onDeviceUnauthorized: String { NSLocalizedString("asr.on_device_unauthorized", comment: "") }
+        /// Build-time misconfiguration, not a user-facing preference — see
+        /// `OnDeviceASR.hasUsageDescription`. Shown instead of a SIGABRT.
+        static var onDeviceNotDeclared: String { NSLocalizedString("asr.on_device_not_declared", comment: "") }
+        static func onDeviceUnavailable(_ locale: String) -> String {
+            String(format: NSLocalizedString("asr.on_device_unavailable", comment: ""), locale)
+        }
+        static func onDeviceDecodeFailed(_ detail: String) -> String {
+            String(format: NSLocalizedString("asr.on_device_decode_failed", comment: ""), detail)
+        }
+        static var autoSummarize: String { NSLocalizedString("asr.auto_summarize", comment: "") }
+        static var autoSummarizeFooter: String { NSLocalizedString("asr.auto_summarize_footer", comment: "") }
+        static var liveRecordingWithoutASR: String { NSLocalizedString("asr.live_recording_without_asr", comment: "") }
         // ★ 2026-10-15: Background keep-alive toggle + transcription queue status.
         //
         // Wording rule: **never say "silent audio"**. Users don't need to know how we keep the process alive;
@@ -182,6 +481,54 @@ enum L10n {
             value: "The app uses two ports on your server: this one for live streaming, and the one right after it for file transcription. Tap the check button to confirm both are answering.",
             comment: "Footer under the local ASR server section explaining the two-port probe"
         ) }
+        // ---- Custom (OpenAI-compatible) ASR server ----
+        static var customServer: String { NSLocalizedString(
+            "asr.custom_server",
+            value: "Custom Server (OpenAI-compatible)",
+            comment: "Section header for the user-defined ASR provider"
+        ) }
+        static var customEndpoint: String { NSLocalizedString(
+            "asr.custom_endpoint",
+            value: "Server address",
+            comment: "Placeholder for the custom ASR base URL"
+        ) }
+        static var customApiKey: String { NSLocalizedString(
+            "asr.custom_api_key",
+            value: "API key (optional)",
+            comment: "Placeholder for the custom ASR bearer token"
+        ) }
+        static var customModel: String { NSLocalizedString(
+            "asr.custom_model",
+            value: "Model (default whisper-1)",
+            comment: "Placeholder for the custom ASR model name"
+        ) }
+        static var customLanguage: String { NSLocalizedString(
+            "asr.custom_language",
+            value: "Language hint (optional, e.g. zh)",
+            comment: "Placeholder for the custom ASR language hint"
+        ) }
+        static var customProbe: String { NSLocalizedString(
+            "asr.custom_probe",
+            value: "Test connection",
+            comment: "Row label: probes the custom ASR server"
+        ) }
+        static var customProbeFooter: String { NSLocalizedString(
+            "asr.custom_probe_footer",
+            value: "Speak the OpenAI /v1/audio/transcriptions API — works with faster-whisper-server, whisper.cpp, Groq and similar. File transcription only; live transcription falls back to on-device recognition.",
+            comment: "Footer under the custom ASR section"
+        ) }
+        static var customProbeAuth: String { NSLocalizedString(
+            "asr.custom_probe_auth",
+            value: "Server reachable, but the API key was rejected (401) — check the key",
+            comment: "Probe result: server answered 401/403"
+        ) }
+        static func customProbeHTTP(_ code: Int) -> String {
+            String(format: NSLocalizedString(
+                "asr.custom_probe_http",
+                value: "Server answered HTTP %d — is this really an OpenAI-compatible ASR endpoint?",
+                comment: "Probe reached the server but it answered with an unexpected status"
+            ), code)
+        }
         static var localProbeNoHost: String { NSLocalizedString(
             "asr.local_probe_no_host",
             value: "Enter the host and port first",
@@ -1806,6 +2153,16 @@ enum L10n {
         static var viewFullSummary: String { NSLocalizedString("clip_detail.view_full_summary", comment: "") }
         static var summarize: String { NSLocalizedString("clip_detail.summarize", comment: "") }
         static var transcribeFirst: String { NSLocalizedString("clip_detail.transcribe_first", comment: "") }
+        /// ★ (2026-10-19) DingTalk-style detail tabs: Transcript / AI Minutes / To-dos.
+        static var tabTranscript: String { NSLocalizedString("clip_detail.tab_transcript", value: "Transcript", comment: "Detail page tab — transcript") }
+        static var tabSummary: String { NSLocalizedString("clip_detail.tab_summary", value: "AI Minutes", comment: "Detail page tab — AI summary") }
+        static var tabTodos: String { NSLocalizedString("clip_detail.tab_todos", value: "To-dos", comment: "Detail page tab — action items") }
+        static var moreActions: String { NSLocalizedString("clip_detail.more_actions", value: "More", comment: "Detail page top-right overflow menu") }
+        static var todosEmpty: String { NSLocalizedString("clip_detail.todos_empty", value: "No action items in the summary.", comment: "To-dos tab when the summary has no action-item section") }
+        static var todosNeedSummary: String { NSLocalizedString("clip_detail.todos_need_summary", value: "Generate a summary to collect action items here.", comment: "To-dos tab when no summary exists yet") }
+        static var searchTranscript: String { NSLocalizedString("clip_detail.search_transcript", value: "Search transcript", comment: "Transcript search field placeholder") }
+        static var speakerAll: String { NSLocalizedString("clip_detail.speaker_all", value: "All speakers", comment: "Speaker filter chip — clear the filter") }
+        static var noTranscriptMatch: String { NSLocalizedString("clip_detail.no_transcript_match", value: "No lines match.", comment: "Transcript search/filter found nothing") }
         static var translation: String { NSLocalizedString("clip_detail.translation", comment: "") }
         static var viewFullTranslation: String { NSLocalizedString("clip_detail.view_full_translation", comment: "") }
         static var translate: String { NSLocalizedString("clip_detail.translate", comment: "") }
@@ -1852,6 +2209,25 @@ enum L10n {
         static var deleteIndependentFooter: String { NSLocalizedString("clip_detail.delete_independent_footer", value: "Audio, transcript and summary are deleted independently — removing one leaves the others untouched.", comment: "") }
         static func speaker(_ id: String) -> String {
             String(format: NSLocalizedString("clip_detail.speaker", comment: ""), id)
+        }
+        // ---- "Marks" pressed on the recorder card while recording ----
+        static var remarks: String {
+            NSLocalizedString("clip_detail.remarks", value: "Remarks",
+                              comment: "Section listing the markers the recorder card dropped while recording")
+        }
+        static func remarksCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString("clip_detail.remarks_count", value: "%d marks",
+                                          comment: "How many marks this recording has"),
+                count
+            )
+        }
+        static var remarksFooter: String {
+            NSLocalizedString(
+                "clip_detail.remarks_footer",
+                value: "Pressed the record key on the card while it was recording — each press drops a marker at that moment. Tap one to jump there.",
+                comment: "Footer under the remarks section"
+            )
         }
     }
 
@@ -2167,6 +2543,29 @@ enum L10n {
         static var streaming: String { NSLocalizedString("live.streaming", comment: "") }
         static var ready: String { NSLocalizedString("live.ready", comment: "") }
         static var paused: String { NSLocalizedString("live.paused", comment: "") }
+        /// The link dropped; the session is being held open while the card reconnects.
+        static var reconnecting: String { NSLocalizedString("live.reconnecting", comment: "") }
+        /// The longer explanation shown on the standalone "reconnecting" screen.
+        static var reconnectingHint: String { NSLocalizedString("live.reconnecting_hint", comment: "") }
+        /// Left-hand button of the running control bar — drops a mark on the A1 card.
+        static var mark: String {
+            NSLocalizedString("live.mark", value: "Mark", comment: "Button that drops a marker at the current moment")
+        }
+        static var markAdded: String {
+            NSLocalizedString("live.mark_added", value: "Marked", comment: "Shown for a second after a mark was dropped")
+        }
+        /// Recording, but no recogniser attached — audio is being saved, text is not coming.
+        static var asrOffline: String {
+            NSLocalizedString("live.asr_offline",
+                              value: "Recording only — transcription is off",
+                              comment: "Hint on the running header when no ASR channel is attached")
+        }
+        /// Audio is flowing but no text has appeared yet (~8 s in) — usually the model loading.
+        static var waitingForText: String {
+            NSLocalizedString("live.waiting_for_text",
+                              value: "Audio is coming in, waiting for the first words…",
+                              comment: "Hint on the running header when frames arrive but no transcript yet")
+        }
         static var repairTitle: String { NSLocalizedString("live.repair_title", comment: "") }
         static var repairMessage: String { NSLocalizedString("live.repair_message", comment: "") }
         static var repairMessageAttached: String { NSLocalizedString("live.repair_message_attached", comment: "") }
@@ -2182,6 +2581,19 @@ enum L10n {
         static var startUnknownTitle: String { NSLocalizedString("live.start_unknown_title", comment: "") }
         static var startUnknownMessage: String { NSLocalizedString("live.start_unknown_message", comment: "") }
         static var startAnyway: String { NSLocalizedString("live.start_anyway", comment: "") }
+        /// Toast shown when the card's voice key started a recording and the live page auto-attached (★ 2026-10-19).
+        static var voiceKeyAutoStarted: String {
+            NSLocalizedString("live.voice_key_auto_started",
+                              value: "Recording started with the card's key — live transcription attached automatically",
+                              comment: "Voice-key linkage toast")
+        }
+        /// Toast shown when the voice-key recording ended (★ 2026-10-19): the clip is saved and
+        /// auto-transcribe → auto-summarize turns it into an AI voice memo.
+        static var voiceKeyMemoSaved: String {
+            NSLocalizedString("live.voice_key_memo_saved",
+                              value: "Recording saved — transcribing, the AI memo will follow",
+                              comment: "Voice-key release toast (AI voice memo)")
+        }
         static var attachNoUpload: String { NSLocalizedString("live.attach_no_upload", comment: "") }
         /// Want to take over the "recording" line on the device, but the device is not recording at all (TicNote).
         static var attachNotRecording: String { NSLocalizedString(
@@ -2294,6 +2706,23 @@ enum L10n {
         static var customBadge: String {
             NSLocalizedString("summarize.custom_badge", value: "Mine",
                               comment: "Template card/overview: created by the user")
+        }
+        // ★ 2026-10-19 DingTalk-style picker: chips + default template.
+        static var chipRecommended: String {
+            NSLocalizedString("summarize.chip_recommended", value: "Recommended",
+                              comment: "Template page: top filter chip with the curated built-ins")
+        }
+        static var chipCustom: String {
+            NSLocalizedString("summarize.chip_custom", value: "Custom",
+                              comment: "Template page: top filter chip with the user's own templates")
+        }
+        static var defaultBadge: String {
+            NSLocalizedString("summarize.default_badge", value: "Default",
+                              comment: "Template card: marks the template that is set as default")
+        }
+        static var setDefault: String {
+            NSLocalizedString("summarize.set_default", value: "Set as default",
+                              comment: "Template page: bottom button that marks the selected template as default")
         }
         /// Title of the "what this template does" section on the overview page.
         static var templateAbout: String {
