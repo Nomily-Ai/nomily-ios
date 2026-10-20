@@ -495,7 +495,7 @@ enum L10n {
         ) }
         static var localProbeFooter: String { NSLocalizedString(
             "asr.local_probe_footer",
-            value: "The app uses two ports on your server: this one for live streaming, and the one right after it for file transcription. Tap the check button to confirm both are answering.",
+            value: "The app uses two ports on your server: this one for live streaming, and the one right after it for file transcription. Tap the check button to confirm both are answering. ⚠️ Plaintext LAN only (http/ws) — trusted networks or Tailscale; never a public address. For a public server use the Remote Live Server below.",
             comment: "Footer under the local ASR server section explaining the two-port probe"
         ) }
         // ---- Custom (OpenAI-compatible) ASR server ----
@@ -531,9 +531,69 @@ enum L10n {
         ) }
         static var customProbeFooter: String { NSLocalizedString(
             "asr.custom_probe_footer",
-            value: "Speak the OpenAI /v1/audio/transcriptions API — works with faster-whisper-server, whisper.cpp, Groq and similar. File transcription only; live transcription falls back to on-device recognition.",
+            value: "Speak the OpenAI /v1/audio/transcriptions API — works with faster-whisper-server, whisper.cpp, Groq and similar. Accepts LAN http and secure remote https (a configured API key is sent with every request). File transcription only; leave the language empty for auto-detection (do not force zh on mixed speech).",
             comment: "Footer under the custom ASR section"
         ) }
+
+        // ---- Remote live (WSS) ASR server — ★ 2026-10-20 ----
+        static var remoteLive: String { NSLocalizedString(
+            "asr.remote_live",
+            value: "Remote Live Server (secure)",
+            comment: "Section header for the remote WSS live-transcription provider"
+        ) }
+        static var remoteEndpoint: String { NSLocalizedString(
+            "asr.remote_endpoint",
+            value: "Server address (wss://…)",
+            comment: "Placeholder for the remote live WSS endpoint; wss required"
+        ) }
+        static var remoteApiKey: String { NSLocalizedString(
+            "asr.remote_api_key",
+            value: "API Key (required)",
+            comment: "Placeholder for the remote live bearer token; stored in the Keychain"
+        ) }
+        static var remoteProbe: String { NSLocalizedString(
+            "asr.remote_probe",
+            value: "Test connection",
+            comment: "Row label: probes the remote live server via HTTPS /health"
+        ) }
+        static var remoteFooter: String { NSLocalizedString(
+            "asr.remote_footer",
+            value: "Encrypted WSS with API-key auth — for servers on the public internet. Live transcription only (file transcription uses the Custom Server above); set it as primary and keep the LAN server as fallback to fail over automatically. The key is stored in the Keychain and never logged.",
+            comment: "Footer under the remote live server section"
+        ) }
+        static var remoteErrInvalidScheme: String { NSLocalizedString(
+            "asr.remote_err_invalid_scheme",
+            value: "This field needs a wss:// address — plaintext ws:// is only for the trusted-LAN server above",
+            comment: "Remote live error: endpoint is not (and cannot be normalized to) wss"
+        ) }
+        static var remoteErrMissingKey: String { NSLocalizedString(
+            "asr.remote_err_missing_key",
+            value: "The remote service requires an API Key",
+            comment: "Remote live error: no key configured"
+        ) }
+        static var remoteErrAuth: String { NSLocalizedString(
+            "asr.remote_err_auth",
+            value: "Authentication failed — the API Key was rejected (401/403)",
+            comment: "Remote live error: server reachable but key invalid"
+        ) }
+        static func remoteErrHandshake(_ detail: String?) -> String {
+            let base = NSLocalizedString(
+                "asr.remote_err_handshake",
+                value: "Server reachable, but the secure WebSocket upgrade failed — check the address and that the server speaks WSS",
+                comment: "Remote live error: HTTPS reachable, WS handshake failed")
+            return detail.map { "\(base) (\($0))" } ?? base
+        }
+        static var remoteErrTimeout: String { NSLocalizedString(
+            "asr.remote_err_timeout",
+            value: "Connection timed out — the server did not answer",
+            comment: "Remote live error: no response within the timeout"
+        ) }
+        static var remoteErrServer: String { NSLocalizedString(
+            "asr.remote_err_server",
+            value: "The server closed the connection",
+            comment: "Remote live error: stream dropped after it was up"
+        ) }
+
         static var customProbeAuth: String { NSLocalizedString(
             "asr.custom_probe_auth",
             value: "Server reachable, but the API key was rejected (401) — check the key",

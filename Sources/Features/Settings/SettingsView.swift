@@ -400,6 +400,9 @@ struct ASRProvidersView: View {
     /// Connectivity/auth test for the custom (OpenAI-compatible) server.
     @State private var customProbe: VerifyState = .idle
     @State private var customProbeDetail: String?
+    /// ★ 2026-10-20: connectivity/auth test for the remote live (WSS) server.
+    @State private var remoteProbe: VerifyState = .idle
+    @State private var remoteProbeDetail: String?
 
     /// When the user provides a host but omits the port, a default port is supplied. **Only written when creating the record**,
     // and not used as the displayed value for an empty field.
@@ -411,6 +414,7 @@ struct ASRProvidersView: View {
             azureSection
             localSection
             customSection
+            remoteLiveSection
         }
         .navigationTitle(L10n.Settings.asrProviders)
         .navigationBarTitleDisplayMode(.inline)
@@ -475,6 +479,13 @@ struct ASRProvidersView: View {
         }
         if let c = configService.config.asrProviders.custom, !c.endpoint.isEmpty {
             result.append(("custom", L10n.ASR.customServer))
+        }
+        // ★ 2026-10-20: the remote live server serves **live** transcription; it is
+        // offered here so the live chain can pick it as primary/fallback. The file
+        // chain ignores the key "remote" (`TranscriptionService.hasCredentials`
+        // returns false for it), so choosing it never breaks file transcription.
+        if let r = configService.config.asrProviders.remoteLive, !r.endpoint.isEmpty {
+            result.append(("remote", L10n.ASR.remoteLive))
         }
         return result
     }
@@ -994,6 +1005,108 @@ struct ASRProvidersView: View {
             customProbe = .success
         } else {
             customProbe = .failed(result.error ?? L10n.ASR.verifyFailed)
+        }
+    }
+
+    // MARK: - Remote live (WSS) server ★ 2026-10-20
+
+    /// Endpoint + API key for the **remote secure** live service. Key never touches
+    /// disk: `ConfigService.extractSecrets` pulls it into the Keychain at the save
+    /// boundary, so these bindings can treat `config` as the source of truth exactly
+    /// like every other provider.
+    private func writeRemoteLive(_ remote: AppConfig.AsrProviders.RemoteLive) {
+        // Same hygiene as `writeCustom`: a half-typed endpoint must not linger as a
+        // configured provider.
+        let hasEndpoint = !remote.endpoint
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        configService.config.asrProviders.remoteLive = hasEndpoint ? remote : nil
+        configService.scheduleSave()
+    }
+
+    /// True when the user typed an endpoint that can never work: an explicit
+    /// plaintext `ws://` (LAN-only shape) or something the normalizer can't parse.
+    private var remoteEndpointInvalid: Bool {
+        let raw = configService.config.asrProviders.remoteLive?.endpoint ?? ""
+        guard !raw.isEmpty else { return false }
+        return RemoteLiveASR.listenURL(raw) == nil
+    }
+
+    private var remoteLiveSection: some View {
+        Section {
+            TextField(L10n.ASR.remoteEndpoint, text: Binding(
+                get: { configService.config.asrProviders.remoteLive?.endpoint ?? "" },
+                set: {
+                    writeRemoteLive(AppConfig.AsrProviders.RemoteLive(
+                        endpoint: $0,
+                        apiKey: configService.config.asrProviders.remoteLive?.apiKey))
+                    remoteProbe = .idle
+                }))
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.body.monospaced())
+            if remoteEndpointInvalid {
+                fieldError(L10n.ASR.remoteErrInvalidScheme)
+            }
+            SecureField(L10n.ASR.remoteApiKey, text: Binding(
+                get: { configService.config.asrProviders.remoteLive?.apiKey ?? "" },
+                set: {
+                    writeRemoteLive(AppConfig.AsrProviders.RemoteLive(
+                        endpoint: configService.config.asrProviders.remoteLive?.endpoint ?? "",
+                        apiKey: $0.isEmpty ? nil : $0))
+                }))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            remoteProbeRow
+        } header: {
+            Text(L10n.ASR.remoteLive)
+        } footer: {
+            Text(L10n.ASR.remoteFooter)
+        }
+    }
+
+    @ViewBuilder
+    private var remoteProbeRow: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L10n.ASR.remoteProbe)
+                switch remoteProbe {
+                case .success:
+                    if let detail = remoteProbeDetail {
+                        Text(L10n.ASR.localProbeReachable(detail))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                case .failed(let reason):
+                    fieldError(reason)
+                case .verifying:
+                    Text(L10n.ASR.statusVerifying)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                case .idle:
+                    EmptyView()
+                }
+            }
+            Spacer()
+            verifyButton(remoteProbe) { await runRemoteProbe() }
+        }
+    }
+
+    private func runRemoteProbe() async {
+        guard let remote = configService.config.asrProviders.remoteLive,
+              !remote.endpoint.isEmpty else {
+            remoteProbe = .failed(L10n.ASR.localProbeNoHost)
+            return
+        }
+        remoteProbe = .verifying
+        remoteProbeDetail = nil
+        let result = await RemoteLiveASR.probe(endpoint: remote.endpoint,
+                                               apiKey: remote.apiKey ?? "")
+        if result.ok {
+            remoteProbeDetail = result.detail
+            remoteProbe = .success
+        } else {
+            remoteProbe = .failed(result.error ?? L10n.ASR.verifyFailed)
         }
     }
 

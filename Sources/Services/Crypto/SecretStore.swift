@@ -25,6 +25,13 @@ enum SecretStore {
     /// id here and a line in `ConfigService`'s split/merge tables.
     enum Slot: String {
         case azureASRKey     = "asr.azure.key"
+        /// ★ 2026-10-20: the OpenAI-compatible file-transcription server key. It used to
+        /// sit as plaintext `api_key` inside `config.json` — same hole the LLM keys were
+        /// plugged with `llm.custom`.
+        case asrCustomKey    = "asr.custom.api_key"
+        /// ★ 2026-10-20: the remote live (WSS) transcription service key. Required for
+        /// that provider — the handshake carries it as `Authorization: Bearer`.
+        case asrRemoteLiveKey = "asr.remote_live.api_key"
         case llmOpenAI       = "llm.openai.api_key"
         case llmClaude       = "llm.claude.api_key"
         case llmGemini       = "llm.gemini.api_key"

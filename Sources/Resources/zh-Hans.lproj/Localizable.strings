@@ -40,6 +40,19 @@
 "setup.assistant_title" = "复制 AI 配置助手提示词";
 "setup.assistant_copied" = "已复制，粘贴给 ChatGPT 或 Claude Code";
 "setup.assistant_hint" = "在电脑上运行它，AI 会自动装好本地转录和 Ollama，并把要填进这里的地址打印给你。";
+
+// MARK: - 远程实时服务（2026-10-20）
+"asr.remote_live" = "远程实时服务（安全）";
+"asr.remote_endpoint" = "服务地址（wss://…）";
+"asr.remote_api_key" = "API Key（必填）";
+"asr.remote_probe" = "测试连接";
+"asr.remote_footer" = "加密 WSS + API Key 鉴权，用于公网服务器。仅用于实时转写（文件转写请用上面的「自定义服务」）；把它设为首选、局域网服务留作备用，即可自动故障切换。API Key 保存在系统钥匙串，不会写入日志或导出。";
+"asr.remote_err_invalid_scheme" = "这里需要 wss:// 地址——明文 ws:// 仅限上方可信局域网服务使用";
+"asr.remote_err_missing_key" = "远程服务必须填写 API Key";
+"asr.remote_err_auth" = "鉴权失败——API Key 被拒绝（401/403）";
+"asr.remote_err_handshake" = "服务器可达，但安全 WebSocket 升级失败——请检查地址以及服务端是否支持 WSS";
+"asr.remote_err_timeout" = "连接超时——服务器无响应";
+"asr.remote_err_server" = "服务端断开了连接";
 "asr.local_vad" = "上传前去除静音";
 "asr.local_vad_footer" = "在本机上检测人声活动，将静音段去掉后再发送到转录服务，可降低上传量和转录费用。";
 "asr.background_keep_alive" = "切到后台也继续转录";
@@ -343,7 +356,7 @@
 "asr.custom_model" = "模型（默认 whisper-1）";
 "asr.custom_language" = "语言提示（可选，如 zh）";
 "asr.custom_probe" = "测试连接";
-"asr.custom_probe_footer" = "对接 OpenAI /v1/audio/transcriptions 接口——faster-whisper-server、whisper.cpp、Groq 等均可。仅用于文件转写；实时转写会自动回退到本地识别。";
+"asr.custom_probe_footer" = "对接 OpenAI /v1/audio/transcriptions 接口——faster-whisper-server、whisper.cpp、Groq 等均可。支持局域网 http 和公网 https 远程安全服务（带 API Key 时自动随请求发送）。仅用于文件转写；语言留空即自动识别（中英混说不要强制指定 zh）。";
 "asr.custom_probe_auth" = "服务器可达，但密钥被拒绝（401）——请检查 API 密钥";
 "asr.custom_probe_http" = "服务器返回 HTTP %d——请确认这是 OpenAI 兼容的转写接口";
 "live.asr_offline" = "仅在录音 · 转写未开启";
@@ -768,7 +781,7 @@
 "asr.host_required" = "请输入服务器地址";
 "asr.port_invalid" = "端口需在 1–65535 之间";
 "asr.local_probe" = "测试连通性";
-"asr.local_probe_footer" = "App 会用到服务器上的两个端口：这里填的跑实时流式，紧挨着它的下一个跑文件转写。点右侧的对勾，两个都会探一次。";
+"asr.local_probe_footer" = "App 会用到服务器上的两个端口：这里填的跑实时流式，紧挨着它的下一个跑文件转写。点右侧的对勾，两个都会探一次。⚠️ 此区域仅支持局域网明文连接（http/ws），只适合可信内网或 Tailscale，请勿填入公网地址；公网服务器请用「远程实时服务」。";
 "asr.local_probe_no_host" = "请先填写服务器地址和端口";
 "asr.local_probe_reachable" = "已连通 · %@";
 "asr.local_probe_timeout" = "连接超时 —— 确认手机和服务器在同一网络";

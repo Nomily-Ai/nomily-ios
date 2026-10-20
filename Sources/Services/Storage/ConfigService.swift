@@ -164,6 +164,8 @@ final class ConfigService: ObservableObject {
     private static func extractSecrets(_ config: AppConfig) -> AppConfig {
         var stripped = config
         SecretStore.save(config.asrProviders.azure?.key, to: .azureASRKey)
+        SecretStore.save(config.asrProviders.custom?.apiKey, to: .asrCustomKey)
+        SecretStore.save(config.asrProviders.remoteLive?.apiKey, to: .asrRemoteLiveKey)
         SecretStore.save(config.llmProviders.openai?.apiKey, to: .llmOpenAI)
         SecretStore.save(config.llmProviders.claude?.apiKey, to: .llmClaude)
         SecretStore.save(config.llmProviders.gemini?.apiKey, to: .llmGemini)
@@ -173,6 +175,8 @@ final class ConfigService: ObservableObject {
         SecretStore.save(config.wifiAP?.psk, to: .wifiAPPassword)
 
         stripped.asrProviders.azure?.key = ""
+        stripped.asrProviders.custom?.apiKey = nil
+        stripped.asrProviders.remoteLive?.apiKey = nil
         stripped.llmProviders.openai?.apiKey = ""
         stripped.llmProviders.claude?.apiKey = ""
         stripped.llmProviders.gemini?.apiKey = ""
@@ -186,6 +190,12 @@ final class ConfigService: ObservableObject {
     private static func injectSecrets(into config: inout AppConfig) {
         if config.asrProviders.azure != nil {
             config.asrProviders.azure?.key = SecretStore.load(.azureASRKey) ?? ""
+        }
+        if config.asrProviders.custom != nil {
+            config.asrProviders.custom?.apiKey = SecretStore.load(.asrCustomKey)
+        }
+        if config.asrProviders.remoteLive != nil {
+            config.asrProviders.remoteLive?.apiKey = SecretStore.load(.asrRemoteLiveKey)
         }
         if config.llmProviders.openai != nil {
             config.llmProviders.openai?.apiKey = SecretStore.load(.llmOpenAI) ?? ""
@@ -215,6 +225,8 @@ final class ConfigService: ObservableObject {
     private static func migratePlaintextSecrets(from config: AppConfig) -> Bool {
         let plaintext = [
             config.asrProviders.azure?.key,
+            config.asrProviders.custom?.apiKey,
+            config.asrProviders.remoteLive?.apiKey,
             config.llmProviders.openai?.apiKey,
             config.llmProviders.claude?.apiKey,
             config.llmProviders.gemini?.apiKey,

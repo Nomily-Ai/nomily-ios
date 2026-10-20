@@ -305,6 +305,21 @@ struct AppConfig: Codable, Equatable {
         /// User-defined OpenAI-compatible transcription server (2026-10-19).
         /// Feasibility was proven against a real client↔server round-trip before wiring the UI.
         var custom: Custom?
+        /// ★ 2026-10-20: **remote live** service — a WSS endpoint speaking the same
+        /// `/v1/listen` + raw-Opus protocol as the LAN server, but over TLS with an API
+        /// key. Deliberately separate from `local` (that one is plaintext LAN-only and
+        /// must never receive a public hostname) and from `custom` (file transcription
+        /// only). The API key never touches disk — see `SecretStore.Slot.asrRemoteLiveKey`.
+        var remoteLive: RemoteLive?
+
+        struct RemoteLive: Codable, Equatable {
+            /// `wss://host[:port][/v1/listen]`. `wss` (or `https`, auto-upgraded) only —
+            /// an explicit `ws://` is rejected. `RemoteLiveASR.listenURL` normalizes.
+            var endpoint: String
+            /// In-memory only; extracted to the Keychain at the persistence boundary
+            /// (same split/merge as the LLM keys). Required for the remote service.
+            var apiKey: String?
+        }
 
         struct Azure: Codable, Equatable {
             var key: String
@@ -359,7 +374,17 @@ struct AppConfig: Codable, Equatable {
             if let a = azure, !a.key.isEmpty, !a.region.isEmpty { return true }
             if let l = local, !l.host.isEmpty, l.port > 0 { return true }
             if let c = custom, !c.endpoint.isEmpty { return true }
+            // ⚠️ `remoteLive` deliberately NOT counted: it serves **live** transcription
+            // only, while every caller of this flag gates **file** transcription buttons.
+            // Counting it would make "transcribe" tappable with no file provider behind it.
             return false
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case azure
+            case local
+            case custom
+            case remoteLive = "remote_live"
         }
     }
 

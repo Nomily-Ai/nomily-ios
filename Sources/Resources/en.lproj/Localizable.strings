@@ -40,6 +40,19 @@
 "setup.assistant_title" = "Copy AI Setup Prompt";
 "setup.assistant_copied" = "Copied — paste into ChatGPT or Claude Code";
 "setup.assistant_hint" = "Run it on your computer; it installs local transcription + Ollama and prints the values to fill in here.";
+
+// MARK: - Remote live server (2026-10-20)
+"asr.remote_live" = "Remote Live Server (secure)";
+"asr.remote_endpoint" = "Server address (wss://…)";
+"asr.remote_api_key" = "API Key (required)";
+"asr.remote_probe" = "Test connection";
+"asr.remote_footer" = "Encrypted WSS with API-key auth — for servers on the public internet. Live transcription only (file transcription uses the Custom Server above); set it as primary and keep the LAN server as fallback to fail over automatically. The key is stored in the Keychain and never logged.";
+"asr.remote_err_invalid_scheme" = "This field needs a wss:// address — plaintext ws:// is only for the trusted-LAN server above";
+"asr.remote_err_missing_key" = "The remote service requires an API Key";
+"asr.remote_err_auth" = "Authentication failed — the API Key was rejected (401/403)";
+"asr.remote_err_handshake" = "Server reachable, but the secure WebSocket upgrade failed — check the address and that the server speaks WSS";
+"asr.remote_err_timeout" = "Connection timed out — the server did not answer";
+"asr.remote_err_server" = "The server closed the connection";
 "asr.local_vad" = "Strip silence before upload";
 "asr.local_vad_footer" = "Voice activity detection runs on-device and removes silent stretches before sending audio to the transcription provider. Cuts upload size and ASR cost.";
 "asr.background_keep_alive" = "Keep transcribing in the background";
@@ -415,7 +428,7 @@
 "asr.custom_model" = "Model (default whisper-1)";
 "asr.custom_language" = "Language hint (optional, e.g. zh)";
 "asr.custom_probe" = "Test connection";
-"asr.custom_probe_footer" = "Speak the OpenAI /v1/audio/transcriptions API — works with faster-whisper-server, whisper.cpp, Groq and similar. File transcription only; live transcription falls back to on-device recognition.";
+"asr.custom_probe_footer" = "Speak the OpenAI /v1/audio/transcriptions API — works with faster-whisper-server, whisper.cpp, Groq and similar. Accepts LAN http and secure remote https (a configured API key is sent with every request). File transcription only; leave the language empty for auto-detection (do not force zh on mixed speech).";
 "asr.custom_probe_auth" = "Server reachable, but the API key was rejected (401) — check the key";
 "asr.custom_probe_http" = "Server answered HTTP %d — is this really an OpenAI-compatible ASR endpoint?";
 "live.asr_offline" = "Recording only — transcription is off";
@@ -767,7 +780,7 @@
 "asr.host_required" = "Enter the server host";
 "asr.port_invalid" = "Port must be between 1 and 65535";
 "asr.local_probe" = "Test connection";
-"asr.local_probe_footer" = "The app uses two ports on your server: this one for live streaming, and the one right after it for file transcription. Tap the check button to confirm both are answering.";
+"asr.local_probe_footer" = "The app uses two ports on your server: this one for live streaming, and the one right after it for file transcription. Tap the check button to confirm both are answering. ⚠️ Plaintext LAN only (http/ws) — trusted networks or Tailscale; never a public address. For a public server use the Remote Live Server below.";
 "asr.local_probe_no_host" = "Enter the host and port first";
 "asr.local_probe_reachable" = "Reachable · %@";
 "asr.local_probe_timeout" = "Timed out — make sure the phone and the server are on the same network";

@@ -188,6 +188,10 @@ final class LiveModel: ObservableObject {
     @MainActor
     private enum ActiveASR {
         case local(LiveStreamASR)
+        /// ★ 2026-10-20: remote secure service (WSS + API key) — same wire protocol
+        /// as `local`, different posture (TLS, auth, public internet). Fallback to
+        /// `local` is expressed by the user's chain order, not hard-coded here.
+        case remote(RemoteLiveASR)
         case onDevice(OnDeviceLiveASR)
         case azure(AzureLiveASR)
         case azureTranslate(AzureLiveTranslation)
@@ -195,6 +199,7 @@ final class LiveModel: ObservableObject {
         func send(_ data: Data) {
             switch self {
             case .local(let asr): asr.send(data)
+            case .remote(let asr): asr.send(data)
             case .onDevice(let asr): asr.send(data)
             case .azure(let asr): asr.send(data)
             case .azureTranslate(let asr): asr.send(data)
@@ -204,6 +209,7 @@ final class LiveModel: ObservableObject {
         func close() {
             switch self {
             case .local(let asr): asr.close()
+            case .remote(let asr): asr.close()
             case .onDevice(let asr): asr.close()
             case .azure(let asr): asr.close()
             case .azureTranslate(let asr): asr.close()
@@ -964,6 +970,27 @@ final class LiveModel: ObservableObject {
                     currentASRProducedResult = false
                     diagLive("provider=azure(transcription only)")
                     runEventLoop(azure: events)
+                    return
+                }
+            case "remote":
+                // ★ 2026-10-20: the remote secure live service (WSS + Bearer key).
+                // Same /v1/listen + raw-Opus protocol as `local`, but the endpoint is
+                // public internet, so: wss:// enforced by the adapter, the key rides
+                // handshake headers only, TLS validation stays URLSession-default.
+                // If the handshake fails the classified error (auth / timeout /
+                // unreachable) surfaces here, the provider is marked dead, and the
+                // chain falls through to `local` per the user's fallback order.
+                if let remote = config.config.asrProviders.remoteLive,
+                   !remote.endpoint.isEmpty {
+                    let asr = RemoteLiveASR(endpoint: remote.endpoint,
+                                            apiKey: remote.apiKey ?? "",
+                                            profile: opusProfile)
+                    let events = try asr.connect()
+                    currentASR = .remote(asr)
+                    activeProvider = "remote"
+                    currentASRProducedResult = false
+                    diagLive("provider=remote wss=\(URL(string: remote.endpoint)?.host ?? "-")")
+                    runEventLoop(local: events)
                     return
                 }
             case "local":
