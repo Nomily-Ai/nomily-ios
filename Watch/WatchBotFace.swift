@@ -315,29 +315,15 @@ struct WatchBotFace: View {
     @State private var dizzyTask: Task<Void, Never>?
     /// Hold progress 0...1.
     ///
-    /// ★ Revision fourteen: what it drives is no longer that ring of "2-second progress arc," but a patch of color that fills the screen.
-    /// ★ Revision fifteen: the **opacity** of that color patch is it.
-    /// ★★ Revision sixteen: what it drives now is **two pieces of geometry** (see `holdLayer`) --
-    ///   the first 32% kneads the two eyes into one blob, the last 68% spreads that blob until it fills the whole screen.
+    /// ★ 2026-10-20 (third pass): it drives the **progress ring around the face** again
+    /// (see `holdLayer`) -- revision fourteen had repurposed it into a full-screen colour
+    /// patch, which the user asked to retire ("背面是红色占满全屏还是需要优化").
     @State private var holdProgress: CGFloat = 0
-    /// The position where the finger pressed (**this face's local coordinates**). `nil` = not pressed yet.
+    /// The switch for the hold ring to **fade out** after the hold has run its course and recording has started.
     ///
-    /// ★★ Added in revision sixteen (user: "the two eyes automatically merge together at the place I press").
-    /// It only answers "where to merge toward" and takes part in no decision -- the hold timing is still entirely
-    /// `LongPressGesture`'s business.
-    ///
-    /// ⚠️ Lifting the finger does **not** clear it: during the 0.16 seconds that `holdProgress` rolls back, the two eyes still travel back
-    ///    along this point. Clearing it would make them divert to the face center mid-return. The next press overwrites it.
-    @State private var pressPoint: CGPoint?
-    /// The switch for the color patch to **fade out** after the hold has run its course and recording has started.
-    ///
-    /// ⚠️ `holdProgress` cannot simply be zeroed: at that moment the user has just let go and the screen is about to switch to the
-    ///    recording state, and a patch of color already covering the screen vanishing with a "snap" would flash. Let it **fill first,
-    ///    then fade out** (0.5 seconds), and the wave picks up at the same time it fades -- this is exactly what the user wants,
-    ///    "fill the entire screen **then** show the heart-rate time ripple."
-    ///    ⚠️ Revision fifteen turned `holdProgress` into the color patch's **opacity**; revision sixteen turned it
-    ///    into **the progress of the two pieces of geometry**, so "filled" and "faded out" are now handled separately by
-    ///    what `holdLayer` draws and this layer's `sweepFading`, each minding its own business.
+    /// ⚠️ `holdProgress` cannot simply be zeroed: at that moment the user has just released and the screen is about to switch to the
+    ///    recording state, and a completed ring vanishing with a "snap" would flash. Let it **complete first, then fade out**
+    ///    (0.4 seconds), and the wave picks up as it recedes.
     @State private var sweepFading = false
     /// Whether a finger is currently pressed on the eyes. Driven by `LongPressGesture.updating`.
     @GestureState private var holding = false
@@ -449,31 +435,25 @@ struct WatchBotFace: View {
             ZStack {
                 // ★ 2026-10-20: the square frame is back (user: "按照方框动态显示变动") --
                 // but as a **stroke in the eye colour**, not the filled plate revision eight
-                // removed ("no green"). The expression cycles *inside* it; the frame itself
-                // scales with the same breathing product as the eyes, so the whole figure
-                // breathes as one.
-                if frameVisible {
-                    // ★ 2026-10-20 (second pass): moved into the shared `BotFaceFrame` so the
-                    // phone preview draws the very same shape — and the recording figure is
-                    // sized to live *inside* it (see `figure`), fixing the "frame's bottom /
-                    // edges get covered" report on the real watch.
+                // removed ("no green"). The expression cycles *inside* it.
+                // ★★ 2026-10-20 (third pass, user: "录音页面则不要展示方框了"): the frame is
+                // an **idle-state** element only. While recording the waveform owns the
+                // whole face at full size -- the frame around a wave read as clutter, and
+                // it was the reason the wave had to shrink and the timer lift at all.
+                if frameVisible, !isRecording {
                     BotFaceFrame(size: size, tint: tint)
                         .scaleEffect(figureScale)
-                        .opacity(figureOpacity)
                 }
                 figure
                     .scaleEffect(figureScale)
-                    // During a hold, yield the position to the two inside `holdLayer` (see `figureOpacity`).
-                    .opacity(figureOpacity)
                     .animation(.spring(response: 0.34, dampingFraction: 0.62), value: isRecording)
-                // ★ Revision fifteen: the color patch is drawn in the **top layer** (in revision fourteen it was in the bottom layer).
-                // ★★ Revision sixteen: it handles both "kneading the two eyes into one blob" and "spreading across the screen,"
-                //    so from the very first frame of the press it has to take over the eyes -- which is why `figure`'s two
-                //    have to yield (`figureOpacity`).
+                // ★ 2026-10-20 (third pass): the hold indicator is a **progress ring around
+                // the face** again (the pre-revision-fourteen look). The eyes stay visible
+                // under it -- the ring no longer replaces them, so there is no hand-off.
                 holdLayer
             }
             // This outer frame is the face's **nominal** boundary (all of `BotFaceMetrics` derives its proportions from it).
-            // ⚠️ It **does not clip** its content -- the color patch during a hold has to spill all the way to the screen edge, and this is exactly what makes that possible.
+            // ⚠️ It **does not clip** its content -- the hold ring rides exactly on this boundary and must not be cut.
             .frame(width: size * 1.14, height: size * 1.14)
             // ★ Added in revision eight, **not optional**: with the plate gone, `Button` by default treats only the drawn
             //   shape as the hit area, i.e. those two capsules (or that wave while recording).
@@ -488,12 +468,6 @@ struct WatchBotFace: View {
         // `.gesture`, so the hold does not displace the `Button`'s own tap (which would make "tap to stop"
         // fail during hold recognition -- exactly when the user needs it most).
         .simultaneousGesture(holdGesture)
-        // ★★ Revision sixteen: used only to answer "where the finger pressed."
-        // ⚠️ It must **sit alongside** the hold (`simultaneousGesture`), not be chained into `holdGesture`
-        //    : `LongPressGesture` gives no coordinates, and "where the finger was at the moment of pressing"
-        //    is known only to a drag gesture -- chained together, it would not arrive until the hold ended, by which time the eyes
-        //    would long since have finished merging.
-        .simultaneousGesture(pressLocation)
         // ★ Double Tap (pinching index finger and thumb) = start/stop recording.
         //
         // ⚠️ When the switch is off you must **explicitly** pass `isEnabled: false`, not "leave it alone" --
@@ -515,10 +489,10 @@ struct WatchBotFace: View {
             // A hold while recording does not light up the progress -- otherwise the user thinks "two more seconds and it starts again."
             guard !isRecording else { return }
             if pressing {
-                // ★ Revision fourteen: first clear away the residue from the previous round (**without animation**), then grow it back from scratch.
+                // First clear away the residue from the previous round (**without animation**), then grow it back from scratch.
                 //    The last time the hold ended, `holdProgress` was left at 1 and `sweepFading` was true
-                //    (the color patch had only faded out; its size was unchanged). Without clearing it, this press starts straight from
-                //    "a full-screen fill" -- what the user sees is not "the color growing," just a flash.
+                //    (the ring had only faded out; its arc extent was unchanged). Without clearing it, this press
+                //    starts straight from "a complete ring" -- what the user sees is not progress growing, just a flash.
                 var reset = Transaction()
                 reset.disablesAnimations = true
                 withTransaction(reset) {
@@ -526,14 +500,13 @@ struct WatchBotFace: View {
                     sweepFading = false
                 }
                 // The progress filling up is exactly 2 seconds, aligned with the gesture's minimumDuration.
-                // Once the two disagree, you get either "recording starts before the color has filled the screen" or
-                // "the screen is full but recording never starts" -- both make the user stop trusting this action.
+                // Once the two disagree, you get either "recording starts before the ring is complete" or
+                // "the ring is complete but recording never starts" -- both make the user stop trusting this action.
                 withAnimation(.linear(duration: Self.holdSeconds)) { holdProgress = 1 }
             } else {
                 // ⚠️ Do not collapse the **successful** hold path here: `onEnded` has already taken that over
-                //    with a 0.5-second fade-out. Collapsing it again here (0.16 seconds) would yank the color patch away
-                //    over 0.16 seconds -- the user's "fill the whole screen **then** see the wave" would become
-                //    "a flash of white."
+                //    with a 0.4-second fade-out. Collapsing it again here (0.16 seconds) would yank the completed
+                //    ring away over 0.16 seconds -- "ring completes → wave appears" would become "a flash of nothing."
                 //    The leftover `holdProgress` / `sweepFading` need no attention: on the next press
                 //    that `if pressing` branch zeroes them **without animation**.
                 guard !sweepFading else { return }
@@ -599,33 +572,12 @@ struct WatchBotFace: View {
         LongPressGesture(minimumDuration: Self.holdSeconds, maximumDistance: Self.holdSlop)
             .updating($holding) { current, state, _ in state = current }
             .onEnded { _ in
-                // ★ Revision fourteen: the color **fills first, then fades out**, rather than "the ring collapsing."
-                //    Before revision thirteen this collapsed the progress arc within 0.12 seconds, because an arc left
-                //    shown as "completed" would clash with the recording-state glow. Now it is a whole patch of color: its 0.5-second fade-out
-                //    exactly covers the "eyes → wave" switch, so it reads as
-                //    "the color washes across the screen → the wave lights up as the color recedes."
-                withAnimation(.easeOut(duration: 0.5)) { sweepFading = true }
+                // ★ 2026-10-20 (third pass): the ring **completes first, then fades out**,
+                //    rather than collapsing. Its 0.4-second fade-out exactly covers the
+                //    "eyes → wave" switch, so it reads as
+                //    "the ring closes at 12 o'clock → the wave lights up as the ring recedes."
+                withAnimation(.easeOut(duration: 0.4)) { sweepFading = true }
                 onHold()
-            }
-    }
-
-    /// Its only job is to answer "where the finger pressed." It makes no decisions and takes no part in timing.
-    ///
-    /// ★★ Added in revision sixteen (user: "the two eyes automatically merge together at the place I press").
-    ///
-    /// ## Why a drag with `minimumDistance: 0`
-    /// * A tap (`SpatialTapGesture`) only gives coordinates on **release**, whereas what we want is
-    ///   "where the finger was at the moment of pressing";
-    /// * `LongPressGesture` gives no coordinates at all.
-    ///
-    /// ## Why it is recorded only once, on the first frame
-    /// A finger held down for 2 seconds cannot stay perfectly still. Updating it every frame would make the two eyes
-    /// drift along a little with the finger -- looking like they are stuck to it, rather than "merging toward where it pressed."
-    private var pressLocation: some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                guard pressPoint == nil else { return }
-                pressPoint = value.startLocation
             }
     }
 
@@ -953,21 +905,12 @@ struct WatchBotFace: View {
     @ViewBuilder
     private var figure: some View {
         if isRecording {
-            // ★ 2026-10-20 (second pass): with the square frame on, the recording figure
-            // must stay **inside** it. Two collisions the real device showed:
-            //   ① the wave canvas is `1.10 × size` wide — wider than the frame's
-            //      `1.02 × size`, so it crossed the stroke on both sides. When the frame
-            //      is on, the wave is handed a smaller size (`0.85 × size` ⇒ its drawn
-            //      width 0.94 × size fits the frame's inner width with margin); with the
-            //      frame off the approved full-size look is untouched.
-            //   ② the timer line hung so low it visually touched the frame's bottom
-            //      border. The whole group is lifted by ~5% of the face size — the shift
-            //      coincides with the "eyes → wave" swap (already a full-picture change,
-            //      see the re-centering note above), so it reads as nothing.
+            // ★ 2026-10-20 (third pass): the frame is **idle-only** now, so the recording
+            // figure owns the whole face again — full-size wave, no lift. (The second-pass
+            // shrink/lift existed only to keep the wave and timer inside the frame; with
+            // the frame gone during recording, that constraint disappears with it.)
             VStack(spacing: 6) {
-                WatchVoiceWave(meter: meter,
-                               size: frameVisible ? size * 0.85 : size,
-                               tint: tint)
+                WatchVoiceWave(meter: meter, size: size, tint: tint)
 
                 if let elapsedText {
                     Text(elapsedText)
@@ -977,7 +920,6 @@ struct WatchBotFace: View {
                         .foregroundStyle(tint)
                 }
             }
-            .offset(y: elapsedText != nil ? -size * 0.05 : 0)
         } else {
             eyes
         }
@@ -1030,139 +972,51 @@ struct WatchBotFace: View {
     ///    along with the decision to "cross-fade via `opacity` rather than pick one with `if/else`."
     ///    For the reason for the move see the `eyes` paragraph -- the picker on the iPhone has to lay out the preview with the same code.
 
-    // MARK: - Hold: eyes merge → spread across the screen
+    // MARK: - Hold: a progress ring around the face
 
-    /// ★★ 2026-10-16 revision sixteen (user's words:
-    ///   "what I want is for the two eyes, based on where I press down, to automatically merge together at the place I press,
-    ///    and then slowly spread across the whole screen and jump over to the recording side").
+    /// ★★ 2026-10-20 (third pass, user's words:
+    ///   "长按手表的表情背面是红色占满全屏还是需要优化" and
+    ///   "长按后还是按照之前圆圈的动效做过渡动画到录音界面好点").
     ///
-    /// ## Both versions were rejected; what this one wants is "an origin"
-    /// * Revision fourteen: a solid circle growing out of the eyes' circumscribed circle → the user read it as "the two eyes spreading";
-    /// * Revision fifteen: a full-screen solid color faded in via opacity → clean, but with **no origin** --
-    ///   the color rose out of thin air across the whole screen, with nothing to do with those two eyes.
-    /// This time the user spelled out the order: **merge first, then spread**. So this version is two pieces of geometry,
-    /// the first piece starring the two eyes, and only the second the full screen.
+    /// ## What was wrong with the previous look
+    /// Revision sixteen's hold animation (eyes merge at the press point → the blob
+    /// spreads until the tint covers the whole screen) filled the watch with a solid
+    /// colour for two seconds on every recording start. The user asked to go back to
+    /// the **circular** transition revision thirteen and earlier had: a progress arc
+    /// that fills around the face while the hold lasts, then hands over to the wave.
     ///
-    /// ## Two segments (`holdProgress` 0 → 1)
-    /// | Segment | Share | What it is doing |
-    /// |---|---|---|
-    /// | Merge | first **32%** | Each eye slides toward **the point the finger pressed**, growing from a "vertical bar" into a "circle," and they finally overlap into one blob at the press point |
-    /// | Spread | last **68%** | That blob grows round from the press point until it covers the whole screen |
-    ///
-    /// * The merge segment's end size is a **circle of `0.47 × size`**: that number was not pulled out of a hat --
-    ///   the two eyes' area is `2 × 0.235 × 0.375 ≈ 0.176 size²`, and a circle of diameter `d`
-    ///   has area `0.785 d²`; setting the two equal gives `d ≈ 0.47`. That is, **after merging the blob
-    ///   is the same size as before merging**, which reads as "combining," not "shrinking" or "swelling."
-    /// * Both segments pass through `smoothstep` (`3x² − 2x³`): linear interpolation has a
-    ///   corner at both the start and the end, and the eyes feel like they are yanked. Smoothed, it is "light start, fast middle, light finish."
-    /// * The spread segment's end radius is **`2.0 × size`**: the press point can at most be at the corner of the face's square
-    ///   (`0.57√2 ≈ 0.81 size` from the face center), the farthest screen corner is about `1.06 size` from the face center,
-    ///   so from the press point to the farthest corner is at most `1.87 size`. 2.0 leaves a little margin.
-    ///
-    /// ## Why draw it by hand with `Canvas` rather than `Rectangle` + two `Capsule`s
-    /// The merge segment needs the eyes to **grow round while moving**, whereas `BotFaceEye` draws a capsule
-    ///   (fixed aspect ratio, and carrying `BotFaceStyle`'s `arc` branch). To deform that shape
-    ///   continuously into a circle in SwiftUI, the geometry in `BotFaceStyle` would have to be rewritten -- and
-    ///   that is exactly the piece shared by both sides that must never fork. Drawing a **rounded rectangle** in `Canvas`
-    ///   leaves it untouched: when width = height the rounded rectangle **is** a circle, and the deformation is two parameters of the same `Path`
-    ///   being interpolated, with no second set of geometry.
-    ///
-    /// ## Three things that are mandatory
-    /// * `allowsHitTesting(false)` -- it covers the whole screen, and if it were tappable this page would be unusable.
-    /// * Canvas `4.2 × size`: `Canvas` **draws only within its own bounds**, so it has to be much
-    ///   larger than the screen (a 500pt square on 40mm, where the screen is only 162×194).
-    ///   The ring of the circle that gets clipped falls outside the screen and is invisible.
-    /// * The fade-out is left to `sweepFading`, **leaving `holdProgress` alone** -- geometry and exit are two separate things,
-    ///   and mixed into one state, "fill first, then exit" cannot be written.
+    /// ## This version
+    /// * A `Circle().trim` arc on the face's **nominal boundary** (`1.14 × size` — the
+    ///   same ring the charge/hold indicator used to ride). `holdProgress` 0 → 1 over
+    ///   exactly the gesture's `minimumDuration`, so the arc completing and the hold
+    ///   firing are the same event.
+    /// * The eyes **stay visible** the whole time — the ring is an indicator, not a
+    ///   replacement. That removes the old duplicate-eye hand-off entirely.
+    /// * On success (`sweepFading`) the arc fades out in 0.4 s, exactly covering the
+    ///   "eyes → wave" switch: the ring completes → the wave lights up as the ring
+    ///   recedes. On an early release the arc simply recedes with `holdProgress`.
+    /// * `allowsHitTesting(false)` — it rides the whole face; tappable would break the page.
     @ViewBuilder
     private var holdLayer: some View {
         if holdProgress > 0.002 {
-            Canvas { context, canvasSize in
-                let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-
-                // The press point is converted from "the face's local coordinates" to "canvas coordinates": the two views are concentric
-                //   (both centered in the same ZStack), so they differ by a single translation.
-                let faceSide = size * 1.14
-                let press = pressPoint ?? CGPoint(x: faceSide / 2, y: faceSide / 2)
-                let target = CGPoint(
-                    x: center.x + (press.x - faceSide / 2),
-                    y: center.y + (press.y - faceSide / 2)
+            Circle()
+                .trim(from: 0, to: holdProgress)
+                .stroke(
+                    tint,
+                    style: StrokeStyle(lineWidth: max(4, size * 0.06), lineCap: .round)
                 )
-
-                let merge = Self.smoothstep(min(1, holdProgress / Self.mergeShare))
-                let spread = Self.smoothstep(
-                    max(0, (holdProgress - Self.mergeShare) / (1 - Self.mergeShare))
-                )
-
-                // Start: **matched item by item** with the two idle eyes (the same `BotFaceMetrics`,
-                //   the same `style` deformation). Off by even a little and the eyes visibly jump on the first frame of the press.
-                let geo = style.geometry
-                let restW = BotFaceMetrics.eyeWidth(size) * geo.scaleX
-                let restH = BotFaceMetrics.eyeHeight(size) * geo.scaleY
-                let restGap = (BotFaceMetrics.eyeWidth(size) + BotFaceMetrics.eyeGap(size)) / 2
-                let restY = BotFaceMetrics.eyeRise(size)
-                let blobD = size * 0.47
-
-                for side in [CGFloat(-1), 1] {
-                    let rest = CGPoint(x: center.x + side * restGap, y: center.y + restY)
-                    let eye = CGPoint(
-                        x: rest.x + (target.x - rest.x) * merge,
-                        y: rest.y + (target.y - rest.y) * merge
-                    )
-                    let w = restW + (blobD - restW) * merge
-                    let h = restH + (blobD - restH) * merge
-                    let rect = CGRect(x: eye.x - w / 2, y: eye.y - h / 2, width: w, height: h)
-                    context.fill(
-                        Path(roundedRect: rect, cornerRadius: min(w, h) / 2),
-                        with: .color(tint)
-                    )
-                }
-
-                if spread > 0 {
-                    let from = blobD / 2
-                    let r = from + (size * 2.0 - from) * spread
-                    context.fill(
-                        Path(ellipseIn: CGRect(
-                            x: target.x - r, y: target.y - r, width: r * 2, height: r * 2
-                        )),
-                        with: .color(tint)
-                    )
-                }
-            }
-            .frame(width: size * 4.2, height: size * 4.2)
-            // A little blur. Merging and spreading are both "liquid" affairs; hard edges read as "two geometric shapes
-            //   stacked on top of each other." The radius follows `size`, about 5pt on 40mm.
-            .blur(radius: size * 0.045)
-            .opacity(sweepFading ? 0 : 1)
-            .animation(.easeOut(duration: 0.5), value: sweepFading)
-            .allowsHitTesting(false)
+                .frame(width: size * 1.14, height: size * 1.14)
+                .rotationEffect(.degrees(-90)) // start at 12 o'clock, like the old ring
+                .opacity(sweepFading ? 0 : 1)
+                .animation(.easeOut(duration: 0.4), value: sweepFading)
+                .allowsHitTesting(false)
         }
     }
 
-    /// The share of `holdProgress` the merge segment takes. The rest all goes to the spread segment.
-    ///
-    /// ⚠️ 0.32 is a measured ratio: merging too fast (<0.2) looks like "the eyes flashed once and vanished,"
-    ///    and too slow (>0.45) leaves the spread only half the time, so it grows hurriedly -- what the user wants is
-    ///    "spreading **slowly** across the whole screen."
-    private static let mergeShare: CGFloat = 0.32
-
-    /// Smooth interpolation: `3x² − 2x³`. The derivative is 0 at both ends, so the eyes neither start nor finish by "being yanked."
-    private static func smoothstep(_ x: CGFloat) -> CGFloat {
-        let t = min(1, max(0, x))
-        return t * t * (3 - 2 * t)
-    }
-
-    /// How much `figure`'s two eyes yield while the finger is down.
-    ///
-    /// ⚠️ **This handoff is mandatory**: `holdLayer` is the upper layer in the ZStack, and from the first frame of the press
-    ///    it is already drawing two eyes (using the same geometry). If `figure` is not dismissed, you get two pairs of eyes
-    ///    overlapping -- invisible on the base tier (a plain capsule), but with the `arc` tiers in `BotFaceStyle`
-    ///    (`happy` / `sad`) it shows: an arc underneath and a straight bar on top.
-    ///    0.06 of progress ≈ 0.12 seconds, too fast to tell this is a "hand-off."
-    private var figureOpacity: Double {
-        guard holdProgress > 0.002 else { return 1 }
-        return Double(max(0, 1 - holdProgress / 0.06))
-    }
+    /// ★ 2026-10-20 (third pass): the old `figureOpacity` hand-off is **gone**. The hold
+    /// indicator is a ring around the face, not a patch that takes over from the eyes,
+    /// so the figure stays at full opacity for the entire hold — no yielding, no
+    /// duplicate-eye cross-fade. The merge-and-spread patch died with this change.
 }
 
 // MARK: - Expressions (★ 2026-10-16 added in revision twelve, moved away in revision thirteen)
