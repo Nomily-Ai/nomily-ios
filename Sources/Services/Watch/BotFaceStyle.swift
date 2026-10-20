@@ -316,8 +316,35 @@ struct BotFaceEyeCurve: Shape {
     }
 }
 
-// MARK: - Blink pace + auto-express (★ 2026-10-20, settable on the iPhone)
+// MARK: - The square frame (★ 2026-10-20, shared by watch face + phone preview)
 
+/// The rounded-square **stroke** around the face ("按照方框动态显示变动").
+///
+/// Lives in this shared file for the same reason as `BotFacePair`: the picker on the
+/// phone must show *exactly* what the watch draws — one private copy per side is how
+/// "looks right in the preview, wrong on the wrist" happens.
+///
+/// ## Geometry contract (both sides must keep these in sync)
+/// * Side = `1.02 × size`, centred inside the face's nominal `1.14 × size` box;
+/// * corner radius `0.30 × size`, stroke `max(3, 0.045 × size)`, `strokeBorder`
+///   (draws **inside** the bounds, so the shape never grows past its frame);
+/// * the recording waveform must fit **within** this frame when the frame is on —
+///   the wave canvas is `1.10 × waveSize` wide, so the wave's size has to be capped
+///   (`WatchBotFace` passes `size * 0.85` ⇒ 0.94 × size < the frame's inner width),
+///   otherwise the wave crosses the stroke and reads as "the frame is being covered".
+struct BotFaceFrame: View {
+    /// The face's nominal side length (same basis as `WatchBotFace.size`).
+    let size: CGFloat
+    let tint: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.30, style: .continuous)
+            .strokeBorder(tint.opacity(0.85), lineWidth: max(3, size * 0.045))
+            .frame(width: size * 1.02, height: size * 1.02)
+    }
+}
+
+// MARK: - Blink pace + auto-express (★ 2026-10-20, settable on the iPhone)
 /// How fast the face blinks — and how often the auto-express cycle swaps the expression.
 ///
 /// Lives in this shared file for the same reason as `BotFaceStyle`: the iPhone pushes the raw tag,

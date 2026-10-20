@@ -2797,6 +2797,15 @@ enum L10n {
         static var bluetoothUnavailable: String { NSLocalizedString("scanner.bluetooth_unavailable", comment: "") }
         static var lookingForDevices: String { NSLocalizedString("scanner.looking_for_devices", comment: "") }
         static var lookingMessage: String { NSLocalizedString("scanner.looking_message", comment: "") }
+        /// Shown when every nearby device has already been added (★ 2026-10-20: added
+        /// devices no longer appear in the scan list at all, per user request).
+        static var noNewDevices: String {
+            NSLocalizedString(
+                "scanner.no_new_devices",
+                value: "No new devices nearby. Devices you've added are managed in the device list.",
+                comment: "Empty state when the scanner only sees already-added devices"
+            )
+        }
         static var sectionAvailable: String { NSLocalizedString("scanner.section_available", comment: "") }
         static var sectionAdded: String { NSLocalizedString("scanner.section_added", comment: "") }
         static var addedBadge: String { NSLocalizedString("scanner.added_badge", comment: "") }

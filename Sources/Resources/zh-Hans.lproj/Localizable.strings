@@ -384,6 +384,7 @@
 "scanner.connection_failed" = "连接失败";
 "scanner.bluetooth_unavailable" = "Bluetooth 不可用";
 "scanner.looking_for_devices" = "正在搜索录音设备…";
+"scanner.no_new_devices" = "附近没有新设备。已添加的设备请在设备列表中管理。";
 "scanner.looking_message" = "请确保您的录音设备已开机且在数米范围内。";
 "scanner.wake_and_retry" = "未找到设备。请按一下设备按键唤醒后重试。";
 

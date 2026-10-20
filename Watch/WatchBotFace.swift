@@ -453,9 +453,11 @@ struct WatchBotFace: View {
                 // scales with the same breathing product as the eyes, so the whole figure
                 // breathes as one.
                 if frameVisible {
-                    RoundedRectangle(cornerRadius: size * 0.30, style: .continuous)
-                        .strokeBorder(tint.opacity(0.85), lineWidth: max(3, size * 0.045))
-                        .frame(width: size * 1.02, height: size * 1.02)
+                    // ★ 2026-10-20 (second pass): moved into the shared `BotFaceFrame` so the
+                    // phone preview draws the very same shape — and the recording figure is
+                    // sized to live *inside* it (see `figure`), fixing the "frame's bottom /
+                    // edges get covered" report on the real watch.
+                    BotFaceFrame(size: size, tint: tint)
                         .scaleEffect(figureScale)
                         .opacity(figureOpacity)
                 }
@@ -951,8 +953,21 @@ struct WatchBotFace: View {
     @ViewBuilder
     private var figure: some View {
         if isRecording {
+            // ★ 2026-10-20 (second pass): with the square frame on, the recording figure
+            // must stay **inside** it. Two collisions the real device showed:
+            //   ① the wave canvas is `1.10 × size` wide — wider than the frame's
+            //      `1.02 × size`, so it crossed the stroke on both sides. When the frame
+            //      is on, the wave is handed a smaller size (`0.85 × size` ⇒ its drawn
+            //      width 0.94 × size fits the frame's inner width with margin); with the
+            //      frame off the approved full-size look is untouched.
+            //   ② the timer line hung so low it visually touched the frame's bottom
+            //      border. The whole group is lifted by ~5% of the face size — the shift
+            //      coincides with the "eyes → wave" swap (already a full-picture change,
+            //      see the re-centering note above), so it reads as nothing.
             VStack(spacing: 6) {
-                WatchVoiceWave(meter: meter, size: size, tint: tint)
+                WatchVoiceWave(meter: meter,
+                               size: frameVisible ? size * 0.85 : size,
+                               tint: tint)
 
                 if let elapsedText {
                     Text(elapsedText)
@@ -962,6 +977,7 @@ struct WatchBotFace: View {
                         .foregroundStyle(tint)
                 }
             }
+            .offset(y: elapsedText != nil ? -size * 0.05 : 0)
         } else {
             eyes
         }

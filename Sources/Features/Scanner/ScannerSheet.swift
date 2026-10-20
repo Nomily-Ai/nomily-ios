@@ -72,34 +72,42 @@ struct ScannerSheet: View {
                 systemImage: "wifi.slash",
                 message: message
             )
-        } else if bluetooth.discovered.isEmpty && bluetooth.discoveredRecorders.isEmpty {
-            EmptyStateView(
-                L10n.Scanner.lookingForDevices,
-                systemImage: "antenna.radiowaves.left.and.right",
-                message: L10n.Scanner.lookingMessage
-            )
+        } else if newAvailable.isEmpty && newRecorders.isEmpty {
+            // ★ 2026-10-20: the emptiness is judged on the **filtered** lists — when only
+            // already-added devices are nearby the list would otherwise render as an empty
+            // shell. The two messages distinguish "radio quiet" from "everything seen is
+            // already added" so the screen never looks like a hung scan.
+            if sortedDiscovered.isEmpty && bluetooth.discoveredRecorders.isEmpty {
+                EmptyStateView(
+                    L10n.Scanner.lookingForDevices,
+                    systemImage: "antenna.radiowaves.left.and.right",
+                    message: L10n.Scanner.lookingMessage
+                )
+            } else {
+                EmptyStateView(
+                    L10n.Scanner.noNewDevices,
+                    systemImage: "checkmark.seal",
+                    message: L10n.Scanner.lookingMessage
+                )
+            }
         } else {
             List {
-                if !available.isEmpty {
+                if !newAvailable.isEmpty {
                     Section(L10n.Scanner.sectionAvailable) {
-                        ForEach(available) { row($0) }
+                        ForEach(newAvailable) { row($0) }
                     }
                 }
-                // Already‑added devices are listed as a separate section with a label, so users can distinguish new devices.
-                // Do not hide the whole section: when `connectKnown` fails, the scan list is the only reconnection entry point.
-                // Tapping it will not add duplicates — `rememberDevice` overwrites the same record based on peripheral ID.
-                if !alreadyAdded.isEmpty {
-                    Section(L10n.Scanner.sectionAdded) {
-                        ForEach(alreadyAdded) { row($0, isAdded: true) }
-                    }
-                }
-                // Recording cards (TicNote, etc., non D·NOTE devices identified by the registry).
-                // A separate section rather than merged with the above two: their connection flow and subsequent pages are completely different
-                // (do not go to the device page, go directly to `RecorderSheet`), mixing them would make people think
-                // "The content seen after tapping should be the same".
-                if !bluetooth.discoveredRecorders.isEmpty {
+                // ★ 2026-10-20 (user: "已经添加的设备不要出现在扫描列表里面防止多次添加"):
+                // added devices no longer render **anywhere** in the scan list — not as a
+                // labelled section, not in the recorder section. The old "Added" section
+                // existed as a reconnection fallback for D·NOTE, but tapping a known card
+                // is exactly the "adds a second time" path the user wants closed; the
+                // device list on the home page is the single management entry now.
+                // (`rememberDevice` still overwrites by peripheral ID, so a re-add can
+                // never actually duplicate a ledger entry.)
+                if !newRecorders.isEmpty {
                     Section("Recorders") {
-                        ForEach(sortedRecorders) { recorderRow($0) }
+                        ForEach(newRecorders) { recorderRow($0) }
                     }
                 }
             }
@@ -109,6 +117,18 @@ struct ScannerSheet: View {
 
     private var sortedRecorders: [DiscoveredRecorder] {
         bluetooth.discoveredRecorders.sorted(by: { $0.identityHex < $1.identityHex })
+    }
+
+    /// Recording cards that are **not** in the device ledger yet.
+    private var newRecorders: [DiscoveredRecorder] {
+        sortedRecorders.filter { !isRecorderAdded($0) }
+    }
+
+    /// A recorder counts as added when its peripheral UUID is in the ledger — the same
+    /// key `connectRecorder` writes via `rememberDevice` (comment there for why the
+    /// peripheral UUID, not the SN, is the ledger key).
+    private func isRecorderAdded(_ recorder: DiscoveredRecorder) -> Bool {
+        configService.config.devices[recorder.id.uuidString] != nil
     }
 
     @ViewBuilder
@@ -200,8 +220,11 @@ struct ScannerSheet: View {
         configService.config.devices[peripheral.id.uuidString] != nil
     }
 
-    private var available: [DiscoveredPeripheral] { sortedDiscovered.filter { !isAdded($0) } }
-    private var alreadyAdded: [DiscoveredPeripheral] { sortedDiscovered.filter { isAdded($0) } }
+    /// ★ 2026-10-20: only **new** D·NOTE units are listed; added ones are hidden from the
+    /// scan list entirely (see the section comment in `content`).
+    private var newAvailable: [DiscoveredPeripheral] {
+        sortedDiscovered.filter { !isAdded($0) }
+    }
 
     @ViewBuilder
     private func row(_ peripheral: DiscoveredPeripheral, isAdded: Bool = false) -> some View {

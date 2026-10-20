@@ -130,15 +130,27 @@ struct WatchFacePickerView: View {
     }
 
     /// The drawn eyes, on a dark chip when a custom colour makes that necessary (see the header comment).
+    ///
+    /// ★ 2026-10-20 (second pass): the square frame is drawn here too, through the same
+    /// shared `BotFaceFrame` the watch uses. Before this the preview showed bare eyes
+    /// while the watch wrapped them in a frame — the user tuned expressions against a
+    /// picture that didn't match the device, and the frame itself had no preview at all.
     @ViewBuilder
     private func preview(_ style: BotFaceStyle) -> some View {
         let tint = chosenColorHex.map { Color(botHex: $0) } ?? Color.primary
-        if chosenColorHex != nil {
+        let frameOn = configService.config.watchFaceFrame ?? true
+        let face = ZStack {
+            if frameOn {
+                BotFaceFrame(size: Self.previewSize, tint: tint)
+            }
             BotFacePair(style: style, size: Self.previewSize, tint: tint)
+        }
+        if chosenColorHex != nil {
+            face
                 .frame(width: Self.previewBoxWidth, height: Self.previewBoxWidth, alignment: .center)
                 .background(Color(white: 0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         } else {
-            BotFacePair(style: style, size: Self.previewSize, tint: tint)
+            face
                 .frame(width: Self.previewBoxWidth, alignment: .center)
         }
     }

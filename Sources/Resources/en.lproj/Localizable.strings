@@ -456,6 +456,7 @@
 "scanner.connection_failed" = "Connection failed";
 "scanner.bluetooth_unavailable" = "Bluetooth unavailable";
 "scanner.looking_for_devices" = "Looking for recorders…";
+"scanner.no_new_devices" = "No new devices nearby. Devices you've added are managed in the device list.";
 "scanner.looking_message" = "Make sure your recorder is powered on and within a few metres.";
 "scanner.wake_and_retry" = "Device not found. Press the device's button to wake it, then try again.";
 
