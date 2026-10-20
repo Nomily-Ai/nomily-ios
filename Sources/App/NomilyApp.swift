@@ -140,12 +140,21 @@ private struct SplashView: View {
         Color.accentColor
             .ignoresSafeArea()
             .overlay {
-                Image("NomiLogo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 116, height: 116)
-                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-                    .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+                VStack(spacing: 22) {
+                    Image("NomiLogo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 116, height: 116)
+                        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                        .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+
+                    // App name in SF Pro (the system font) — the closest thing
+                    // to an "Apple-style" wordmark without shipping a custom face.
+                    Text("Nomily AI")
+                        .font(.system(size: 30, weight: .semibold, design: .default))
+                        .tracking(0.6)
+                        .foregroundStyle(.white.opacity(0.96))
+                }
             }
             .ignoresSafeArea()
     }
