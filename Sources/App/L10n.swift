@@ -972,6 +972,17 @@ enum L10n {
             NSLocalizedString("library.export_preparing", value: "Preparing export…",
                               comment: "Shown while staging files for the share sheet")
         }
+        /// ★ 2026-10-20 speed revision: which clip the batch export is copying right now.
+        /// The copies run in the background; without this line the user just sees a frozen
+        /// spinner over a multi-GB batch and reads it as "stuck".
+        static func exportProgress(_ done: Int, _ total: Int, _ title: String) -> String {
+            String(
+                format: NSLocalizedString("library.export_progress",
+                                          value: "Exporting %d of %d: %@",
+                                          comment: "Batch export progress: current index, total count, clip title"),
+                done, total, title
+            )
+        }
         static var exportFailed: String {
             NSLocalizedString("library.export_failed", value: "Export Failed", comment: "")
         }
@@ -1344,6 +1355,53 @@ enum L10n {
         static var micDenied: String { NSLocalizedString("watch.mic_denied", comment: "") }
         static func recordFailed(_ reason: String) -> String {
             String(format: NSLocalizedString("watch.record_failed", comment: ""), reason)
+        }
+        /// ★ 2026-10-20: an audio interruption (call, Siri, alarm) grabbed the mic and
+        /// the take could not be resumed (watchOS refuses background resume) — the take
+        /// was saved with everything recorded up to the interruption.
+        static var recordingInterrupted: String {
+            NSLocalizedString(
+                "watch.recording_interrupted",
+                value: "Recording was interrupted and saved. Reopen the app to start a new take.",
+                comment: "Shown when a call/Siri/alarm ended a background recording"
+            )
+        }
+        // ★ 2026-10-20 anti-mistouch set: tap during recording is refused (hold to stop
+        // is the deliberate path), and double-tap / shake stop via a confirmation.
+        static var holdToStop: String {
+            NSLocalizedString(
+                "watch.hold_to_stop",
+                value: "Long-press to end the recording",
+                comment: "Hint shown when a tap lands while recording"
+            )
+        }
+        static var stopConfirmTitle: String {
+            NSLocalizedString(
+                "watch.stop_confirm_title",
+                value: "End this recording?",
+                comment: "Confirmation after double-tap/shake while recording"
+            )
+        }
+        static var stopConfirmMessage: String {
+            NSLocalizedString(
+                "watch.stop_confirm_message",
+                value: "The take will be saved and sent to your iPhone.",
+                comment: "Body of the stop confirmation"
+            )
+        }
+        static var stopConfirmAction: String {
+            NSLocalizedString(
+                "watch.stop_confirm_action",
+                value: "End",
+                comment: "Destructive button in the stop confirmation"
+            )
+        }
+        static var continueAction: String {
+            NSLocalizedString(
+                "watch.continue_action",
+                value: "Keep recording",
+                comment: "Cancel button in the stop confirmation"
+            )
         }
         static var pendingHeader: String { NSLocalizedString("watch.pending_header", comment: "") }
         static var sending: String { NSLocalizedString("watch.sending", comment: "") }

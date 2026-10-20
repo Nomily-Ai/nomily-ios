@@ -1044,7 +1044,7 @@ struct LibraryView: View {
     /// The export name is written as readable English (`Transcript.txt`) rather than the on-disk name
     /// (`20240101010101.txt`): the folder is already named by title, so another timestamp inside
     /// would be a waste. One folder holds one clip, so these names never collide.
-    private static func textArtefacts(for item: LibraryItem) -> [(source: URL, name: String)] {
+    private nonisolated static func textArtefacts(for item: LibraryItem) -> [(source: URL, name: String)] {
         let dir = StorageLocations.decryptedDir
         func url(_ suffix: String) -> URL {
             dir.appendingPathComponent(item.base + suffix)
@@ -1089,40 +1089,35 @@ struct LibraryView: View {
         var staged = 0
         var bytes: Int64 = 0
         var taken = Set<String>()
-        do {
-            for item in items {
-                let dir = root.appendingPathComponent(
-                    Self.exportFolderName(for: item, taken: &taken), isDirectory: true
-                )
-                try fm.createDirectory(at: dir, withIntermediateDirectories: true)
 
-                // The audio keeps its **original filename** (the .opus / .m4a / .mp3 extension is how a player
-                // recognises it, so it can't be changed).
-                if let url = item.url, fm.fileExists(atPath: url.path) {
-                    do {
-                        let dest = dir.appendingPathComponent(item.name)
-                        try fm.copyItem(at: url, to: dest)
-                        bytes += Self.fileSize(dest)
-                        staged += 1
-                    } catch {
-                        failures.append("\(item.displayTitle): \(error.localizedDescription)")
-                    }
-                }
-                for artefact in Self.textArtefacts(for: item)
-                where fm.fileExists(atPath: artefact.source.path) {
-                    do {
-                        let dest = dir.appendingPathComponent(artefact.name)
-                        try fm.copyItem(at: artefact.source, to: dest)
-                        bytes += Self.fileSize(dest)
-                        staged += 1
-                    } catch {
-                        failures.append("\(item.displayTitle): \(error.localizedDescription)")
-                    }
-                }
+        // ★ 2026-10-20 speed revision: the copy loop is **off the main actor** now.
+        //
+        // The whole View is MainActor-isolated (SwiftUI's View protocol is), so the previous
+        // in-place loop copied GBs of bytes **on the main thread** — the entire app stuttered
+        // for the whole batch, which is exactly the "导出太慢/卡" complaint. The structure now:
+        //   · per item: folder naming + directory creation stay on the main actor (cheap string work,
+        //     and `taken` is mutated here);
+        //   · the actual byte copies (audio + text sidecars) run in a detached task — one hop per
+        //     item, not per buffer, so the overhead is nil;
+        //   · between items the busy overlay reports "exporting k/n: title" so a long batch no
+        //     longer looks like a hang.
+        for (index, item) in items.enumerated() {
+            busyMessage = L10n.Library.exportProgress(index + 1, items.count, item.displayTitle)
+            let dir = root.appendingPathComponent(
+                Self.exportFolderName(for: item, taken: &taken), isDirectory: true
+            )
+            do {
+                try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            } catch {
+                exportError = error.localizedDescription
+                return
             }
-        } catch {
-            exportError = error.localizedDescription
-            return
+            let copied = await Task.detached(priority: .userInitiated) { () -> (staged: Int, bytes: Int64, failures: [String]) in
+                Self.copyArtefacts(of: item, into: dir)
+            }.value
+            staged += copied.staged
+            bytes += copied.bytes
+            failures += copied.failures
         }
 
         // If there's a real I/O error, say so honestly and don't show the share sheet: making the user "Save to Files"
@@ -1147,7 +1142,50 @@ struct LibraryView: View {
         showExportSheet = true
     }
 
-    private static func fileSize(_ url: URL) -> Int64 {
+    /// One item's copies (audio + text sidecars) into its staging folder.
+    ///
+    /// ★ 2026-10-20 speed revision: deliberately `static` and pure I/O so it can run inside a
+    /// detached task — nothing here touches view state. Per-item granularity (not per-buffer)
+    /// keeps the hop overhead at zero while the multi-GB `copyItem` calls no longer block the UI.
+    ///
+    /// ⚠️ Must be `nonisolated`: the View's isolation would otherwise bleed into this static
+    /// through protocol conformance, quietly putting the copies **back on the main actor** —
+    /// the exact freeze this revision removes (and a hard error in Swift 6 mode).
+    ///
+    /// The audio keeps its **original filename** (the .opus / .m4a / .mp3 extension is how a player
+    /// recognises it, so it can't be changed).
+    private nonisolated static func copyArtefacts(
+        of item: LibraryItem, into dir: URL
+    ) -> (staged: Int, bytes: Int64, failures: [String]) {
+        let fm = FileManager.default
+        var staged = 0
+        var bytes: Int64 = 0
+        var failures: [String] = []
+        if let url = item.url, fm.fileExists(atPath: url.path) {
+            do {
+                let dest = dir.appendingPathComponent(item.name)
+                try fm.copyItem(at: url, to: dest)
+                bytes += fileSize(dest)
+                staged += 1
+            } catch {
+                failures.append("\(item.displayTitle): \(error.localizedDescription)")
+            }
+        }
+        for artefact in textArtefacts(for: item)
+        where fm.fileExists(atPath: artefact.source.path) {
+            do {
+                let dest = dir.appendingPathComponent(artefact.name)
+                try fm.copyItem(at: artefact.source, to: dest)
+                bytes += fileSize(dest)
+                staged += 1
+            } catch {
+                failures.append("\(item.displayTitle): \(error.localizedDescription)")
+            }
+        }
+        return (staged, bytes, failures)
+    }
+
+    private nonisolated static func fileSize(_ url: URL) -> Int64 {
         Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
     }
 

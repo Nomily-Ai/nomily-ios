@@ -174,6 +174,15 @@ struct WatchRecorderView: View {
     /// swallows that lift.
     @State private var tapGateUntil = Date.distantPast
 
+    /// ★ 2026-10-20: the "end this take?" confirmation (double-tap / shake while
+    /// recording). Both gestures are misfire-prone, so neither stops outright any more;
+    /// the deliberate hold-to-stop needs no confirmation by construction.
+    @State private var showStopConfirm = false
+    /// The "tap refused" hint state: a stray tap during recording shows "long-press to
+    /// stop" for two seconds in place of the byte counter, then falls back.
+    @State private var hintTask: Task<Void, Never>?
+    @State private var showStopHint = false
+
     /// Usable length of one side of the watch face: the actual screen width minus a 6pt inset on each side.
     ///
     /// ⚠️ Use `WKInterfaceDevice`'s **actual** screen width, never hard-code it -- the 40mm/44mm/45mm/49mm
@@ -297,6 +306,18 @@ struct WatchRecorderView: View {
             Spacer(minLength: 0).frame(height: 22)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // ★ 2026-10-20: double-tap / shake while recording land here instead of
+        // stopping outright. "End" takes the destructive role; "Keep recording" is
+        // the default the user most often wants after a misfire.
+        .alert(L10n.Watch.stopConfirmTitle, isPresented: $showStopConfirm) {
+            Button(L10n.Watch.stopConfirmAction, role: .destructive) {
+                tapGateUntil = Date().addingTimeInterval(0.5)
+                model.stop()
+            }
+            Button(L10n.Watch.continueAction, role: .cancel) {}
+        } message: {
+            Text(L10n.Watch.stopConfirmMessage)
+        }
     }
 
     /// The small line below the face. While idle it's a usage hint; while recording it's the **byte count written so far**.
@@ -319,12 +340,24 @@ struct WatchRecorderView: View {
     @ViewBuilder
     private var caption: some View {
         if model.isRecording {
-            Text(WatchFormat.bytes(model.currentBytes))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(styleStore.style.tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .monospacedDigit()
+            // ★ 2026-10-20: a stray tap during recording flashes the stop hint here in
+            // place of the byte counter — the tap itself is refused, so the user needs
+            // to be told what *would* end the take.
+            if showStopHint {
+                Text(L10n.Watch.holdToStop)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .transition(.opacity)
+            } else {
+                Text(WatchFormat.bytes(model.currentBytes))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(styleStore.style.tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .monospacedDigit()
+            }
         } else {
             Text(L10n.Watch.holdToRecord)
                 .font(.system(size: 11, weight: .medium))
@@ -334,39 +367,65 @@ struct WatchRecorderView: View {
         }
     }
 
-    /// The hold reaches 2 seconds (the progress ring has already been taken care of by `WatchBotFace` itself).
+    /// ★ 2026-10-20: a hold while **recording** now ends the take (hold-to-stop).
+    /// The ring the user sees filling is the same transition as starting — symmetric,
+    /// and immune to misfires because a 2-second deliberate press is nothing like a
+    /// cuff brush. Starting a recording still goes through `toggleRecording()`.
     private func beginRecordingByHold() {
-        guard !model.isRecording else { return }
         // The lift is read by the `Button` as a tap (see the `tapGateUntil` passage).
         tapGateUntil = Date().addingTimeInterval(0.5)
-        model.toggleRecording()
+        if model.isRecording {
+            model.stop()
+        } else {
+            model.toggleRecording()
+        }
     }
 
-    /// Tap. While recording = stop; while idle = just a poke.
+    /// Tap. While idle = poke; **while recording = refused with a hint** (anti-mistouch).
     ///
-    /// ⚠️ Not starting a recording **while idle** is deliberate: "one tap records" is exactly the habit this revision set out to break
-    /// (raising the wrist to check the time, or a brush from a cuff, would start recording). To start, hold for 2 seconds, double tap, or shake.
-    ///
-    /// ★ After revision twelve, what a "poke" does has changed: `pokeTick` now makes that face **play a random
-    /// expression** (one drawn from five), no longer the single whole-face bounce and "one kind of eye wobble" of revision ten.
-    /// This layer doesn't need to know which expressions exist -- it just fires the pulse off (see the `pokeTick`
-    /// passage in `WatchBotFace`, which explains why it doesn't just call a method).
+    /// ★ 2026-10-20: a tap used to stop the take, which is exactly the misfire the user
+    /// reported ("录音结束…防止误触中断") — a cuff brush reads as a tap. Stopping is now
+    /// **hold** (deliberate) or **double-tap/shake with a confirmation**. A stray tap
+    /// gets a haptic plus a hint line instead of silently ending the recording.
     private func handleTap() {
         guard Date() >= tapGateUntil else { return }
         if model.isRecording {
-            model.toggleRecording()
+            WKInterfaceDevice.current().play(.click)
+            flashStopHint()
         } else {
             pokeTick += 1
         }
     }
 
-    /// Double tap. Start / stop.
+    /// Tap refused during recording — flash the "long-press to stop" hint for 2 s.
+    ///
+    /// Named `flashStopHint` (not `showStopHint`): the `@State` boolean it drives is
+    /// `showStopHint`, and the two can't share a name in the same type.
+    private func flashStopHint() {
+        hintTask?.cancel()
+        withAnimation(.easeIn(duration: 0.15)) { showStopHint = true }
+        hintTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) { showStopHint = false }
+        }
+    }
+
+    /// Double tap. Start / stop-with-confirmation.
     ///
     /// Shares the same `Button` as the tap, and `WatchBotFace.handlePrimaryAction()` tells them apart by
     /// "whether this one came with a touch" (a double tap is an in-air gesture with no touch).
+    ///
+    /// ★ 2026-10-20: while recording the pinch **asks** instead of stopping outright
+    /// (user: "双指捏合…需要弹出一个确定或者继续防止误触中断") — an in-air pinch is easy
+    /// to fire while reaching for something else, and it used to end the take instantly.
     private func handleToggle() {
         guard Date() >= tapGateUntil else { return }
-        model.toggleRecording()
+        if model.isRecording {
+            showStopConfirm = true
+        } else {
+            model.toggleRecording()
+        }
     }
 
     // MARK: - The two side swipe menus
@@ -594,6 +653,14 @@ struct WatchRecorderView: View {
             // so without feedback you can't tell whether it actually started recording. Two different feels, "start/stop",
             // let the haptic alone tell start from stop.
             WKInterfaceDevice.current().play(model.isRecording ? .stop : .start)
+            // ★ 2026-10-20: while **recording** the shake asks before acting (user:
+            // "摇一摇也是需要弹出是否确认取消") — a shake is the easiest gesture to
+            // produce by accident while moving, and it used to end the take outright.
+            // (The detector fires on the main queue, so the @State write is safe.)
+            guard !model.isRecording else {
+                showStopConfirm = true
+                return
+            }
             // ★ Revision fourteen: the eyes **spin in circles** (user: "shaking makes the eyes spin in circles with a dizzy feel
             //   to add more interaction"). A haptic for the wrist and the dizzy for the eyes; together the two channels say "received".
             dizzyTick += 1

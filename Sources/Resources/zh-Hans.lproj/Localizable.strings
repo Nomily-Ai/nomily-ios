@@ -619,6 +619,7 @@
 "library.selected_count" = "已选 %d 条";
 "library.export" = "导出";
 "library.export_preparing" = "正在准备导出…";
+"library.export_progress" = "正在导出第 %d/%d 条：%@";
 "library.export_failed" = "导出失败";
 "library.export_empty" = "没有可导出的内容。";
 "library.export_ready" = "上次导出已完成";
@@ -654,6 +655,12 @@
 "watch.stop" = "停止录音";
 "watch.mic_denied" = "请在设置中允许使用麦克风。";
 "watch.record_failed" = "无法开始录音：%@";
+"watch.recording_interrupted" = "录音被打断，已保存已录部分。重新打开 App 可开始新录音。";
+"watch.hold_to_stop" = "长按屏幕结束录音";
+"watch.stop_confirm_title" = "结束这段录音？";
+"watch.stop_confirm_message" = "录音会保存并发送到 iPhone。";
+"watch.stop_confirm_action" = "结束";
+"watch.continue_action" = "继续录音";
 "watch.pending_header" = "等待同步到 iPhone";
 "watch.pending_count" = "%d 项待传";
 "watch.shake_to_record" = "摇一摇开始录音";

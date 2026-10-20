@@ -111,6 +111,19 @@ struct SummarizeSheet: View {
                             .padding(.horizontal, 32)
                         Button(L10n.Common.close) { dismiss() }
                             .buttonStyle(.bordered)
+                        // ★ Thirteenth revision, 2026-10-20: a real cancel lives here again — the user's exact
+                        //   words: "生成摘要不能中途取消". Close (above) only leaves the page; this one stops the
+                        //   job via `JobQueue.cancel(id:)`, which interrupts the runner's Task (URLSession
+                        //   requests break with it) and marks the ledger "finished with no error" — the same
+                        //   entry point TaskCenterView has always had, one tap away instead of a detour.
+                        //   After cancelling, dismiss too: there's nothing left to wait on. If the summary file
+                        //   somehow exists, `observeJob → adoptResult` still reads it back; if it doesn't
+                        //   (the normal case), the detail page simply shows no summary and the user can rerun.
+                        Button(L10n.Common.cancel, role: .destructive) {
+                            if let jobID { jobs.cancel(id: jobID) }
+                            dismiss()
+                        }
+                            .buttonStyle(.bordered)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 case .done:
@@ -160,12 +173,13 @@ struct SummarizeSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    // ★ Twelfth revision: this button **no longer cancels the job**.
+                    // ★ Twelfth revision: this button **does not cancel the job**.
                     //
                     // The user's exact request was "exit to the background first and check when it's done" —
                     // so "leave this page" and "don't want this job" have to be two separate things.
-                    // The former is this button (and the swipe-down gesture); the latter moved to the background tasks page
-                    // (`TaskCenterView`) — that's where jobs are managed.
+                    // The former is this button (and the swipe-down gesture); the latter used to live only on the
+                    // background tasks page (`TaskCenterView`) — since the thirteenth revision the running page
+                    // also carries a destructive Cancel next to Close, but this button still only *leaves*.
                     //
                     // The cost of conflating them was concrete: the old button said "Cancel", so users wanting to leave feared
                     // tapping would stop everything and just sat there watching the spinner — and the whole reason this feature exists

@@ -619,6 +619,7 @@
 "library.selected_count" = "%d selected";
 "library.export" = "Export";
 "library.export_preparing" = "Preparing export…";
+"library.export_progress" = "Exporting %d of %d: %@";
 "library.export_failed" = "Export Failed";
 "library.export_empty" = "Nothing to export.";
 "library.export_ready" = "Your last export is ready";
@@ -654,6 +655,12 @@
 "watch.stop" = "Stop";
 "watch.mic_denied" = "Allow microphone access in Settings.";
 "watch.record_failed" = "Couldn't start recording: %@";
+"watch.recording_interrupted" = "Recording was interrupted and saved. Reopen the app to start a new take.";
+"watch.hold_to_stop" = "Long-press to end the recording";
+"watch.stop_confirm_title" = "End this recording?";
+"watch.stop_confirm_message" = "The take will be saved and sent to your iPhone.";
+"watch.stop_confirm_action" = "End";
+"watch.continue_action" = "Keep recording";
 "watch.pending_header" = "Waiting for iPhone";
 "watch.pending_count" = "%d to send";
 "watch.shake_to_record" = "Shake to Record";

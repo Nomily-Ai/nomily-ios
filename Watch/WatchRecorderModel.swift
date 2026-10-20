@@ -60,6 +60,15 @@ final class WatchRecorderModel: NSObject, ObservableObject {
     private var intentObserver: NSObjectProtocol?
     private var startedAt: Date?
     private var lastPush = Date.distantPast
+    /// `true` between "the system interrupted our audio" and "the interruption ended".
+    ///
+    /// ★ 2026-10-20: while this is set the recorder is **paused**, not stopped —
+    /// `AVAudioRecorder.pause()` keeps the file and the clock (`currentTime` freezes,
+    /// so elapsed time excludes the interruption automatically).
+    private var interrupted = false
+    /// Installed once per model lifetime. Re-registering per recording would stack
+    /// observers (each delivering the first interruption N times).
+    private var interruptionHandlersInstalled = false
 
     /// How often the phone is re-told a take is still running. Slow enough to
     /// be free, frequent enough that the phone can call the state stale after
@@ -162,12 +171,28 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         do {
             // `.spokenAudio` is a playback mode and returns paramErr (-50)
             // against the record-only category on watch hardware.
-            try session.setCategory(.record, mode: .default, options: [])
+            //
+            // ★ 2026-10-20: category upgraded from `.record` to **`.playAndRecord`
+            //   + `.mixWithOthers`** for two measured reasons:
+            //   ① Background survival — the user's recordings were being killed
+            //      shortly after the app went to the background. The audio background
+            //      entitlement was in place, but `.record`-only sessions are the
+            //      configuration field reports single out as unreliable for
+            //      background continuation on watchOS; `.playAndRecord` is the
+            //      category Apple's own background-recording guidance and every
+            //      production watch recorder settles on.
+            //   ② `.mixWithOthers` — without it, activating the session interrupts
+            //      any other audio (music, podcasts), and other audio activations
+            //      interrupt *us*. Mixing keeps both directions peaceful: a call or
+            //      an alarm still interrupts (that's a hard interruption), but a
+            //      music app no longer ends the take.
+            try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
         } catch {
             fail(error)
             return
         }
+        installInterruptionHandlers()
 
         do {
             let url = makeClipURL()
@@ -207,7 +232,10 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         }
     }
 
-    private func stop() {
+    /// ★ 2026-10-20: no longer `private` — the hold-to-stop path in `WatchRecorderView`
+    /// ends the take directly (a deliberate 2-second hold needs no extra confirmation,
+    /// unlike tap / double-tap / shake, which are all misfire-prone).
+    func stop() {
         guard let recorder else { return }
         let url = recorder.url
         recorder.stop()
@@ -215,6 +243,7 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         timer?.invalidate()
         timer = nil
         isRecording = false
+        interrupted = false
         // Zero it rather than leave the last slot: after stopping, the home screen must switch back to the eyes immediately,
         // and keeping a level value would make the waveform flash once before it disappears.
         meter = WatchAudioMeter()
@@ -228,6 +257,95 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         // After `reloadPending`, so the phone hears "not recording, one clip on
         // the way" in a single push rather than flickering through "idle".
         pushState()
+    }
+
+    // MARK: - audio interruptions (★ 2026-10-20)
+
+    /// Registers the two system notifications that can end a background take.
+    ///
+    /// ## Why this exists
+    /// The user's background recordings were dying silently. The audio background
+    /// entitlement keeps the **process** alive, but it does not shield the audio
+    /// session: an incoming call, Siri, a timer alarm (anything that grabs the mic)
+    /// delivers an **interruption**, and without a handler `AVAudioRecorder` simply
+    /// stops while the app sits suspended in the background — from the user's side,
+    /// "the recording got killed".
+    ///
+    /// ## What each notification does here
+    /// * `interruptionNotification` — `.began` **pauses** the recorder (file and
+    ///   clock preserved); `.ended` tries to resume. Resume inside a live session
+    ///   works; resume from a *suspended background* app is refused by watchOS
+    ///   (Apple engineer, forum 750432: background resume must be user-initiated).
+    ///   When the resume attempt fails we **stop gracefully** instead of pretending:
+    ///   the bytes recorded so far are transferred to the phone exactly like a
+    ///   manual stop, and the state push tells the phone what happened.
+    /// * `mediaServicesWereResetNotification` — the media server daemon crashed and
+    ///   every audio object was invalidated. Nothing can be salvaged in place; the
+    ///   take is stopped the same graceful way.
+    ///
+    /// Both handlers hop to the main actor because every state write here is
+    /// `@MainActor`-isolated and the notifications arrive on an arbitrary queue.
+    private func installInterruptionHandlers() {
+        guard !interruptionHandlersInstalled else { return }
+        interruptionHandlersInstalled = true
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil, queue: .main
+        ) { [weak self] note in
+            Task { @MainActor in self?.handleInterruption(note) }
+        }
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.mediaServicesWereResetNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleMediaServicesReset() }
+        }
+    }
+
+    private func handleInterruption(_ note: Notification) {
+        let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+        guard let type = AVAudioSession.InterruptionType(rawValue: raw ?? 0) else { return }
+        switch type {
+        case .began:
+            guard let recorder, isRecording, !interrupted else { return }
+            log.warning("audio interruption began — pausing the take")
+            recorder.pause()
+            interrupted = true
+            WKInterfaceDevice.current().play(Self.confirmation)
+
+        case .ended:
+            guard isRecording, interrupted else { return }
+            interrupted = false
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch {
+                log.error("session re-activate after interruption failed: \(error.localizedDescription, privacy: .public)")
+            }
+            // `.shouldResume` is the system's own opinion that the take may go on;
+            // `record()` on a paused recorder appends to the same file.
+            let rawOpts = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
+            let opts = AVAudioSession.InterruptionOptions(rawValue: rawOpts ?? 0)
+            if opts.contains(.shouldResume), let recorder, recorder.record() {
+                log.info("recording resumed after interruption")
+            } else {
+                // Background resume is an OS-level refusal, not a bug we can fix.
+                // Save what exists: the partial file rides the normal stop path.
+                log.warning("cannot resume after interruption — stopping gracefully")
+                errorMessage = L10n.Watch.recordingInterrupted
+                stop()
+            }
+
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleMediaServicesReset() {
+        guard isRecording else { return }
+        log.error("media services were reset — ending the take with what is on disk")
+        errorMessage = L10n.Watch.recordingInterrupted
+        interrupted = false
+        stop()
     }
 
     /// Re-states the whole recorder in one payload. Cheap enough to call from

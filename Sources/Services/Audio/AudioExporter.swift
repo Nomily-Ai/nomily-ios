@@ -71,6 +71,29 @@ enum AudioExporter {
         try? FileManager.default.removeItem(at: outputURL)
 
         let asset = AVURLAsset(url: source)
+
+        // ★ 2026-10-20 speed revision: a source that is *already* AAC-in-M4A needs no re-encode
+        // at all — `Passthrough` remuxes the existing compressed frames into the output container
+        // in seconds, where the `AppleM4A` preset ran the whole track through the AAC encoder
+        // again (that encode is where the "export takes forever" wait went, and it also cost a
+        // needless generation of quality). If the remux isn't accepted for a particular source,
+        // the partial output is wiped and the encode path below runs as before.
+        if source.pathExtension.lowercased() == "m4a",
+           let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) {
+            session.outputURL = outputURL
+            session.outputFileType = .m4a
+            session.shouldOptimizeForNetworkUse = true
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                session.exportAsynchronously { cont.resume() }
+            }
+            if session.status == .completed {
+                log.info("passthrough export \(source.lastPathComponent, privacy: .public) (no re-encode)")
+                return outputURL
+            }
+            log.info("passthrough export fell back to re-encode: \(session.status.rawValue, privacy: .public)")
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
             throw AudioExportError.noExportSession
         }
@@ -199,6 +222,15 @@ enum AudioExporter {
         try handle.write(contentsOf: riffHeader(dataBytes: 0, sampleRate: sampleRate, channels: channels))
         var dataBytes = 0
 
+        // ★ 2026-10-20 speed revision: samples are buffered and flushed in ~1 MB batches.
+        // `copyNextSampleBuffer` hands out small buffers (a few KB each); writing each one
+        // straight to the FileHandle meant one syscall per buffer for the whole clip —
+        // for a one-hour recording that's tens of thousands of writes. The accumulator
+        // turns that into a few hundred. Flush *before* the cancellation check so a
+        // cancelled run still throws with every written byte accounted for.
+        var pending = Data()
+        pending.reserveCapacity(1 << 20)
+
         while reader.status == .reading {
             if Task.isCancelled {
                 reader.cancelReading()
@@ -221,8 +253,18 @@ enum AudioExporter {
                 try? FileManager.default.removeItem(at: outputURL)
                 throw AudioExportError.exportFailed("Could not read audio samples (OSStatus \(copied)).")
             }
-            try handle.write(contentsOf: chunk)
-            dataBytes += length
+            pending.append(chunk)
+            if pending.count >= 1 << 20 {
+                try handle.write(contentsOf: pending)
+                dataBytes += pending.count
+                pending.removeAll(keepingCapacity: true)
+            }
+        }
+
+        if !pending.isEmpty {
+            try handle.write(contentsOf: pending)
+            dataBytes += pending.count
+            pending.removeAll(keepingCapacity: true)
         }
 
         if reader.status == .failed {

@@ -486,8 +486,11 @@ struct WatchBotFace: View {
             //   "start recording").
             lastTouchAt = Date()
 
-            // A hold while recording does not light up the progress -- otherwise the user thinks "two more seconds and it starts again."
-            guard !isRecording else { return }
+            // ★ 2026-10-20 (fourth pass): a hold while recording **does** light the ring
+            // now — stopping is hold-to-stop (anti-mistouch, user request), and the ring
+            // is its progress indicator, mirroring the start transition. The old rule
+            // ("a hold while recording does not light up the progress") died with it:
+            // back then a hold during recording had no meaning at all.
             if pressing {
                 // First clear away the residue from the previous round (**without animation**), then grow it back from scratch.
                 //    The last time the hold ended, `holdProgress` was left at 1 and `sweepFading` was true
