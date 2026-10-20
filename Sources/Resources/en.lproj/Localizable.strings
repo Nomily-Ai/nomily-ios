@@ -620,6 +620,7 @@
 "library.export" = "Export";
 "library.export_preparing" = "Preparing export…";
 "library.export_progress" = "Exporting %d of %d: %@";
+"banner.transcribe_done" = "Transcript ready";
 "library.export_failed" = "Export Failed";
 "library.export_empty" = "Nothing to export.";
 "library.export_ready" = "Your last export is ready";

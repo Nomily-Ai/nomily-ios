@@ -620,6 +620,7 @@
 "library.export" = "导出";
 "library.export_preparing" = "正在准备导出…";
 "library.export_progress" = "正在导出第 %d/%d 条：%@";
+"banner.transcribe_done" = "转录完成";
 "library.export_failed" = "导出失败";
 "library.export_empty" = "没有可导出的内容。";
 "library.export_ready" = "上次导出已完成";

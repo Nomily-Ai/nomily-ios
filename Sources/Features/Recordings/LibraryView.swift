@@ -10,6 +10,9 @@ import UniformTypeIdentifiers
 /// `TranscriptionService`.
 struct LibraryView: View {
     @EnvironmentObject private var library: Library
+    /// ★ 2026-10-20: only read for `pendingClipOpen` — the tail end of the "transcript
+    /// ready" banner's deep link. See `consumePendingClipOpen()`.
+    @EnvironmentObject private var env: AppEnvironment
     @StateObject private var model = LibraryListModel()
     /// Solely so that "after a card is renamed, the source badge in the list follows along."
     ///
@@ -98,6 +101,7 @@ struct LibraryView: View {
         .task {
             await model.refresh()
             dropStaleDeviceFilter()
+            consumePendingClipOpen()
         }
         // A watch recording can land while this list is on screen; the file
         // arrives outside any SwiftUI lifecycle, so it has to say so.
@@ -110,6 +114,10 @@ struct LibraryView: View {
         // Knowledge-base search. `.task(id:)` is the key: change the query or the scope and SwiftUI will
         // **cancel the previous run entirely**, so fast typing doesn't have several rounds of disk reading running at once.
         .task(id: searchKey) { await runSearch() }
+        // ★ 2026-10-20: if the deep-link intent arrives while this list is already on
+        // screen (user was browsing the library when the banner was tapped), consume it
+        // right here; the `.task` above covers the fresh-mount path.
+        .onChange(of: env.pendingClipOpen) { _ in consumePendingClipOpen() }
         .searchable(
             text: $query,
             placement: .navigationBarDrawer(displayMode: .always),
@@ -999,6 +1007,24 @@ struct LibraryView: View {
         guard !Task.isCancelled else { return }
         snippets = hits
         isSearching = false
+    }
+
+    // MARK: - Deep link from the transcript-ready banner
+
+    /// ★ 2026-10-20: consume `env.pendingClipOpen` — the last layer of the deep link
+    /// started by tapping the "transcript ready" toast (RootView switched tabs,
+    /// `RecordingsView` switched segments; this list actually opens the clip).
+    ///
+    /// The scanned item is preferred (it carries the list's freshly computed flags);
+    /// the single-entry disk read is the fallback for the common race where the banner
+    /// fired while `model.refresh()` was still running and the clip isn't in `items`
+    /// yet. Either way the intent is cleared first, so a failed open never loops back.
+    private func consumePendingClipOpen() {
+        guard let name = env.pendingClipOpen else { return }
+        env.pendingClipOpen = nil
+        guard let item = model.items.first(where: { $0.name == name })
+            ?? LibraryItem.readFromDisk(name: name, duration: nil) else { return }
+        detailItem = item
     }
 
     // MARK: - Batch export

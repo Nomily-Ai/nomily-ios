@@ -103,6 +103,17 @@ struct RootView: View {
         // ⚠️ Do not turn this into a hard-coded `Color` anywhere else "just this
         // once": the next palette then leaves a patch of the old red behind.
         .tint(AppTheme.resolve(configService.config.appTheme).accent)
+        // ★ 2026-10-20: the "transcript ready" toast, user's words: "有消息转录完成则弹出
+        //   顶部导航栏提示告知转录完成". Top-aligned overlay on the whole TabView (not per
+        //   tab) so it appears wherever the user happens to be, right under the status bar
+        //   — over the navigation bar, which is what "顶部导航栏" names. Tapping deep-opens
+        //   the clip through `openClipFromBanner`.
+        .overlay(alignment: .top) {
+            TranscriptionBannerView { clipName in
+                openClipFromBanner(clipName)
+            }
+            .padding(.horizontal, 16)
+        }
         .sheet(isPresented: $showScanner) {
             ScannerSheet(onConnected: { showScanner = false })
         }
@@ -279,8 +290,25 @@ struct RootView: View {
             if phase == .active {
                 env.transcription.resumePending()
                 env.jobs.resume()
+                // A toast that finished queuing in the background must not pop up
+                // minutes after unlock — drop anything past its shelf life.
+                TranscriptionBannerCenter.shared.dropStale()
             }
         }
+    }
+
+    /// Deep-open the clip the "transcript ready" banner was tapped for.
+    ///
+    /// The path is three layers (tab → library segment → `detailItem`), and each layer owns
+    /// its own lock: the tab switch is blocked by the transfer alert while a BLE transfer
+    /// runs, and `RecordingsView` guards the segment switch the same way. So this only
+    /// **sets the intent** (`env.pendingClipOpen`); the library consumes it whenever the
+    /// user actually reaches it. While transferring, the toast is informational — tapping
+    /// it lands on the recordings tab and nothing more, which beats fighting the locks.
+    private func openClipFromBanner(_ clipName: String) {
+        selectedTab = .recordings
+        guard !env.isBLETransferring else { return }
+        env.pendingClipOpen = clipName
     }
 
     private func pollDeviceInfo() async {

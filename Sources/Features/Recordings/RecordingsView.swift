@@ -143,6 +143,16 @@ struct RecordingsView: View {
             guard !env.isBLETransferring else { return }
             segment = .library
         }
+        // ★ 2026-10-20: second layer of the "transcript ready" banner's deep link.
+        // RootView set `env.pendingClipOpen` and switched to this tab; this view's only
+        // job is flipping to the library segment and letting `LibraryView` consume the
+        // rest. Same lock as the picker binding above: a BLE transfer keeps the user on
+        // the device segment, and the pending flag stays set — the library opens the
+        // clip whenever the user reaches it on their own.
+        .onChange(of: env.pendingClipOpen) { pending in
+            guard pending != nil, !env.isBLETransferring else { return }
+            segment = .library
+        }
         .navigationDestination(isPresented: $showClipDetail) {
             if let item = transferredClipItem {
                 ClipDetailView(item: item)

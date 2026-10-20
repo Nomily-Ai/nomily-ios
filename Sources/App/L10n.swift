@@ -4,6 +4,17 @@ import Foundation
 
 enum L10n {
 
+    // MARK: - Top banner
+
+    /// The "transcript ready" toast that slides down under the navigation bar
+    /// when a background transcription finishes.
+    enum Banner {
+        static var transcribeDone: String {
+            NSLocalizedString("banner.transcribe_done", value: "Transcript ready",
+                              comment: "Top banner shown when a recording finishes transcribing")
+        }
+    }
+
     // MARK: - Azure verify
 
     /// Reasons for Azure verification failure. Raw status codes are not user-friendly and do not indicate whether to change the key or region,

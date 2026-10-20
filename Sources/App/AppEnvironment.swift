@@ -40,6 +40,11 @@ final class AppEnvironment: ObservableObject {
     /// Set by recording UI when an unpaired-device error needs to open the
     /// current device sheet and expose its pairing banner.
     @Published var openDeviceSheetForPairing = false
+    /// ★ 2026-10-20: the clip the "transcript ready" banner wants to open. Set by
+    /// `RootView` when the toast is tapped, consumed by `LibraryView` (after
+    /// `RecordingsView` has switched to the library segment). Three layers deep, so a
+    /// hand-off flag is the only way through — same pattern as `openDeviceSheetForPairing`.
+    @Published var pendingClipOpen: String?
 
     /// The live composition root, for the one caller SwiftUI's environment
     /// can't reach: `ToggleRecordingIntent` runs in this process but outside
@@ -108,6 +113,10 @@ final class AppEnvironment: ObservableObject {
         transcription.onTranscribed = { clip in
             Task { @MainActor in
                 AppEnvironment.shared?.maybeAutoSummarize(clipName: clip)
+                // ★ 2026-10-20: the top banner telling the user the transcript has landed.
+                // Same hook as auto-summary — manual, auto-after-download and the resumed
+                // queue all funnel through this one callback, so one line covers all three.
+                TranscriptionBannerCenter.shared.enqueue(clipName: clip)
             }
         }
         self.localization = LocalizationService(selected: config.config.appLanguage)
