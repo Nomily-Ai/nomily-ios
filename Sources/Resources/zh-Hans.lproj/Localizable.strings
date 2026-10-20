@@ -32,9 +32,9 @@
 /* 语音识别 */
 "asr.transcription" = "语音转文字";
 "asr.active_provider" = "当前服务";
-"asr.auto_transcribe_after_download" = "下载后自动转录";
+"asr.auto_transcribe_after_download" = "导入的录音自动转录";
 "asr.auto_transcribe_min" = "最短时长：%d 秒";
-"asr.auto_transcribe_footer" = "下载完成后自动运行转录。短于最小时长的片段将被跳过。如已配置，另一个服务会作为备用方案自动启用。";
+"asr.auto_transcribe_footer" = "手表传输、Wi-Fi 快传、卡片下载和实况录音落地后自动转录；转录完成后按下方开关自动生成摘要。短于最小时长的片段将被跳过。";
 "asr.local_vad" = "上传前去除静音";
 "asr.local_vad_footer" = "在本机上检测人声活动，将静音段去掉后再发送到转录服务，可降低上传量和转录费用。";
 "asr.background_keep_alive" = "切到后台也继续转录";

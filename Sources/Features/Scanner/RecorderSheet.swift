@@ -34,6 +34,9 @@ struct RecorderDeviceView: View {
 
     @EnvironmentObject private var bluetooth: BluetoothCoordinator
     @EnvironmentObject private var library: Library
+    /// ★ 2026-10-20: auto-transcribe after the transfer lands (see the block after
+    /// `recordDownload` in the transfer function below).
+    @EnvironmentObject private var transcription: TranscriptionService
 
     /// Device ledger. **Only needed for unbinding**: after unbinding, remove this card from the user‑visible list
     /// (Same concluding step as D·NOTE's `DeviceSheet.unbindAndRemove()`).
@@ -2037,8 +2040,7 @@ struct RecorderDeviceView: View {
                 sessionID: recording.sessionID,
                 fileExtension: clip.fileExtension
             )
-            try RecorderClipStore.store(clip, name: name)
-            // `deviceSerial` uses SN instead of iOS's peripheral UUID ——
+            let storedClipURL = try RecorderClipStore.store(clip, name: name)            // `deviceSerial` uses SN instead of iOS's peripheral UUID ——
             // The latter changes when the phone is swapped or the app reinstalled, causing the "already downloaded" check to fail (as noted in `Library`'s comments
             // that records this pitfall). Identical filename conflicts are therefore scoped by **SN**.
             library.recordDownload(
@@ -2059,6 +2061,20 @@ struct RecorderDeviceView: View {
             }
             // ★ Once stored → the bottom "N items pending transfer" counter should decrement, and hide itself when all transfers are complete.
             refreshWifiFallback()
+
+            // ★ 2026-10-20: auto-transcribe right after the transfer lands — the same opt-in
+            // gate the watch / Wi-Fi fast-transfer / device-download paths already use, now
+            // extended to the card-transfer sheet (user: "card recordings should transcribe
+            // and summarize on their own too"). Through the **queue** so a kill mid-run is
+            // picked up on next launch; `tooShort` below the duration floor is swallowed by
+            // the auto path, the same as everywhere else.
+            if configService.config.autoTranscribeAfterDownload {
+                Task.detached { @MainActor in
+                    await transcription.enqueueAndWait(fileURL: storedClipURL, enforceMinDuration: true)
+                    NotificationCenter.default.post(name: .libraryDidChange, object: nil)
+                }
+            }
+
             var message = L10n.TicNoteCard.savedToLibrary(name)
             log.info("downloaded \(recording.id, privacy: .public) as \(name, privacy: .public) over \(self.activeTransport, privacy: .public)")
             TicNoteDiagLog.log("XFER",

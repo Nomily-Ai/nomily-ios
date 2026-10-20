@@ -1736,6 +1736,20 @@ final class LiveModel: ObservableObject {
         diagLive("Disk write: \(segments.count) segments, of which \(segments.filter { $0.translation != nil }.count) segments have translations")
         if !segments.isEmpty {
             saveTranscript(segments: segments, audioName: name, provider: provider)
+            // ★ 2026-10-20: the live path wrote its transcript **straight to disk** — it never
+            // passes through `TranscriptionService`, so `onTranscribed` never fires and without
+            // this line a live clip would never get its auto-summary. Jump straight to the
+            // summary half; re-transcribing here would just re-bill ASR for text we already have.
+            Task { @MainActor in
+                AppEnvironment.shared?.maybeAutoSummarize(clipName: name)
+            }
+        } else if config?.config.autoTranscribeAfterDownload == true, let env = AppEnvironment.shared {
+            // No live transcript (live ASR off / voice memo / transcription never ran) — treat
+            // the clip like any other import and hand it to the auto-transcribe path.
+            let url = StorageLocations.decryptedDir.appendingPathComponent(name)
+            Task.detached { @MainActor in
+                await env.autoTranscribeAfterImport(fileURL: url)
+            }
         }
 
         // If the user paused during the session, the iOS clip is missing

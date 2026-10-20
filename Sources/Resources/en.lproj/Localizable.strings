@@ -32,9 +32,9 @@
 /* ASR */
 "asr.transcription" = "Transcription";
 "asr.active_provider" = "Active Provider";
-"asr.auto_transcribe_after_download" = "Auto-transcribe after download";
+"asr.auto_transcribe_after_download" = "Auto-transcribe imported recordings";
 "asr.auto_transcribe_min" = "Min duration: %ds";
-"asr.auto_transcribe_footer" = "Transcription runs after each download. Clips shorter than the minimum duration are skipped. Another provider is used as fallback when configured.";
+"asr.auto_transcribe_footer" = "Watch transfers, Wi-Fi fast transfer, card downloads and live recordings are transcribed on their own once they land. Clips shorter than the minimum duration are skipped. Pairs with the auto-summary toggle below.";
 "asr.local_vad" = "Strip silence before upload";
 "asr.local_vad_footer" = "Voice activity detection runs on-device and removes silent stretches before sending audio to the transcription provider. Cuts upload size and ASR cost.";
 "asr.background_keep_alive" = "Keep transcribing in the background";

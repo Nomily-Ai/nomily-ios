@@ -13,6 +13,10 @@ struct AppConfig: Codable, Equatable {
     var wifiAP: WifiAP?
     var devices: [String: DeviceRecord]
     var autoDeleteAfterTransfer: Bool
+    /// ★ (2026-10-20) Default **on**, per the user: "watch / imported / card recordings should
+    /// transcribe and summarize on their own". Covers every import path — watch transfers,
+    /// Wi-Fi fast transfer, device-file downloads, the card transfer sheet and live-stream
+    /// saves. Clips shorter than `minTranscribeDuration` are skipped by the auto path.
     var autoTranscribeAfterDownload: Bool
     /// Whether the phone's own offline model (Apple `Speech`) may be used at all.
     ///
@@ -122,7 +126,7 @@ struct AppConfig: Codable, Equatable {
         wifiAP: nil,
         devices: [:],
         autoDeleteAfterTransfer: true,
-        autoTranscribeAfterDownload: false,
+        autoTranscribeAfterDownload: true,
         onDeviceASREnabled: false,
         onDeviceASROffMigrated: true,
         autoSummarizeAfterTranscription: true,
@@ -180,7 +184,7 @@ struct AppConfig: Codable, Equatable {
         self.wifiAP = try c.decodeIfPresent(WifiAP.self, forKey: .wifiAP)
         self.devices = try c.decodeIfPresent([String: DeviceRecord].self, forKey: .devices) ?? [:]
         self.autoDeleteAfterTransfer = try c.decodeIfPresent(Bool.self, forKey: .autoDeleteAfterTransfer) ?? true
-        self.autoTranscribeAfterDownload = try c.decodeIfPresent(Bool.self, forKey: .autoTranscribeAfterDownload) ?? false
+        self.autoTranscribeAfterDownload = try c.decodeIfPresent(Bool.self, forKey: .autoTranscribeAfterDownload) ?? true
         // ★ (2026-10-19) One-time "on → off" migration.
         //
         // The default flipped to off, but `decodeIfPresent` only affects *new* configs — an
@@ -226,7 +230,7 @@ struct AppConfig: Codable, Equatable {
         wifiAP: WifiAP?,
         devices: [String: DeviceRecord],
         autoDeleteAfterTransfer: Bool,
-        autoTranscribeAfterDownload: Bool = false,
+        autoTranscribeAfterDownload: Bool = true,
         onDeviceASREnabled: Bool = false,
         onDeviceASROffMigrated: Bool = true,
         summaryTemplateKey: String? = nil,

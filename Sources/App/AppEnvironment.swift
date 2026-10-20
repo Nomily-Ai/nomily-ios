@@ -22,6 +22,10 @@ final class AppEnvironment: ObservableObject {
     /// relaunches; `nil` inside means follow the system.
     let localization: LocalizationService
     let watch: WatchSyncService
+    /// The template the **auto** summary uses — the first built-in one. Resolved once at
+    /// init (see the comment at the assignment) rather than on every call, because the
+    /// template store is main-actor-bound while callers of `maybeAutoSummarize` may not be.
+    private let autoSummaryTemplate: SummarizeTemplate?
     @Published var isStreaming = false
     @Published var isBLETransferring = false
     /// Set by DeviceFilesView while the Device segment is on screen.
@@ -98,24 +102,13 @@ final class AppEnvironment: ObservableObject {
         // not "guess which of 90 templates I wanted".
         // The template is resolved **now**, not inside the closure: the store is
         // main-actor-bound and this initialiser already runs there, whereas the hook may fire
-        // from a background resume path.
-        let autoSummaryTemplate = SummarizeTemplateStore.defaults.first
+        // from a background resume path. (★ 2026-10-20 it moved onto `self` so
+        // `maybeAutoSummarize` can share it — resolved once, here, for the same reason.)
+        autoSummaryTemplate = SummarizeTemplateStore.defaults.first
         transcription.onTranscribed = { clip in
-            let cfg = config.config
-            guard cfg.autoSummarizeAfterTranscription,
-                  !cfg.llmProviders.configuredProviders.isEmpty,
-                  let template = autoSummaryTemplate
-            else { return }
-            // Never overwrite a summary the user already has. Transcribing the same clip twice
-            // (manual retry, resumed queue, a provider switch) would otherwise silently replace
-            // a hand-edited result with a fresh machine one.
-            guard !FileManager.default.fileExists(atPath: StorageLocations.summaryURL(for: clip).path)
-            else { return }
-            jobs.enqueue(.summarize(
-                clip: clip,
-                prompt: template.localizedPrompt,
-                templateName: template.name
-            ))
+            Task { @MainActor in
+                AppEnvironment.shared?.maybeAutoSummarize(clipName: clip)
+            }
         }
         self.localization = LocalizationService(selected: config.config.appLanguage)
         self.watch = WatchSyncService(
@@ -160,5 +153,53 @@ final class AppEnvironment: ObservableObject {
 
     private static func ms(_ from: Date, _ to: Date) -> Int {
         Int(to.timeIntervalSince(from) * 1000)
+    }
+
+    // MARK: - Auto pipeline (import → transcribe → summarize)
+
+    /// ★ 2026-10-20: the **transcription** half of auto-transcribe-on-import, shared by the
+    /// import paths that didn't have their own copy yet (card transfer sheet, live-stream
+    /// saves). Watch / Wi-Fi fast-transfer / device-files got theirs inline earlier and keep
+    /// them — same gate, same queue, one switch (`autoTranscribeAfterDownload`).
+    ///
+    /// Through the **queue** (`enqueueAndWait`) rather than a bare `transcribe`: the queue
+    /// persists to disk first, so if the app is killed mid-run the next launch picks the job
+    /// up from the pending list. Waiting for the dequeue also means the trailing
+    /// `libraryDidChange` fires only once the transcript has actually landed, so the Library
+    /// list can bring the text out in one pass.
+    @MainActor
+    func autoTranscribeAfterImport(fileURL: URL) async {
+        guard config.config.autoTranscribeAfterDownload else { return }
+        await transcription.enqueueAndWait(fileURL: fileURL, enforceMinDuration: true)
+        NotificationCenter.default.post(name: .libraryDidChange, object: nil)
+    }
+
+    /// ★ 2026-10-20: the **summary** half, callable from anywhere. Extracted from the
+    /// `onTranscribed` closure it used to live in: the live-stream path writes its
+    /// transcript straight to disk (`LiveModel.saveTranscript`) and never passes through
+    /// `TranscriptionService`, so its clips would never get a summary without this.
+    ///
+    /// Guards, all deliberate (carried over verbatim from the closure):
+    ///   · the switch, so the user can turn it off;
+    ///   · at least one configured LLM — otherwise the job would be enqueued and fail with
+    ///     "no provider", which the queue then shows as a stuck job; and
+    ///   · no existing summary — never overwrite a hand-edited result with a machine one.
+    @MainActor
+    func maybeAutoSummarize(clipName: String) {
+        let cfg = config.config
+        guard cfg.autoSummarizeAfterTranscription,
+              !cfg.llmProviders.configuredProviders.isEmpty,
+              let template = autoSummaryTemplate
+        else { return }
+        // Never overwrite a summary the user already has. Transcribing the same clip twice
+        // (manual retry, resumed queue, a provider switch) would otherwise silently replace
+        // a hand-edited result with a fresh machine one.
+        guard !FileManager.default.fileExists(atPath: StorageLocations.summaryURL(for: clipName).path)
+        else { return }
+        jobs.enqueue(.summarize(
+            clip: clipName,
+            prompt: template.localizedPrompt,
+            templateName: template.name
+        ))
     }
 }
