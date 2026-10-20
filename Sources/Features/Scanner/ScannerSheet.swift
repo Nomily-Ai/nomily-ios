@@ -46,8 +46,15 @@ struct ScannerSheet: View {
         //
         // ⚠️ Do not casually change this line to the default value: it would cause users to see a flood of recording times again.
         //    The home entry (`RecordingsView`) should keep `.recordings`.
+        // ★ 2026-10-20: `onFinish` — after adding a card, "Done" must land the user back
+        //   on the **home page**, not leave them on the scan list where tapping the same
+        //   device again looks like it would add it a second time. This mirrors the
+        //   D·NOTE path, where `onConnected` already closes this sheet.
         .sheet(item: $openedRecorder) { recorder in
-            RecorderSheet(recorder: recorder, mode: .deviceInfo)
+            RecorderSheet(recorder: recorder, mode: .deviceInfo, onFinish: {
+                openedRecorder = nil
+                dismiss()
+            })
         }
         .onAppear {
             bluetooth.startScan()

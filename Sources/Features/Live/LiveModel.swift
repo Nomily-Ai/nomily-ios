@@ -146,6 +146,23 @@ final class LiveModel: ObservableObject {
     /// next one in the chain is used instead of retrying the same dead end.
     private var deadASRProviders: Set<String> = []
 
+    /// ★ (2026-10-20) The **kind** of the active ASR link, for dead-marking.
+    ///
+    /// `activeProvider` feeds the UI badge, so the Azure live-translation branch
+    /// displays as plain "azure". But when that link dies, only the *translation*
+    /// path is proven unusable (e.g. an unsupported target language like `lzh`
+    /// — the server closes the stream instantly) while plain Azure transcription
+    /// may be perfectly healthy. Marking "azure" dead poisoned the whole
+    /// provider: `openASR` re-selected the translation branch (its guard never
+    /// consulted the dead set), the server closed again, and the session burned
+    /// its whole duration in a ~1 Hz reconnect loop with zero text — the
+    /// "live transcription doesn't work" report of 2026-10-20.
+    ///
+    /// Dead-marking uses this kind ("azuretranslate" vs "azure"), and the
+    /// translation branch is gated on its own kind, so a failed translation
+    /// degrades to plain live transcription instead of retrying forever.
+    private var activeASRKind = ""
+
     /// Whether the current ASR link has produced anything yet. Until it has,
     /// nothing proves the WebSocket handshake and auth actually succeeded.
     private var currentASRProducedResult = false
@@ -444,6 +461,7 @@ final class LiveModel: ObservableObject {
         partialTranslation = ""
         wsConnected = false
         activeProvider = ""
+        activeASRKind = ""
         savedClipName = nil
         streamBuffer = Data()
         didPauseDuringSession = false
@@ -898,7 +916,14 @@ final class LiveModel: ObservableObject {
         let azureUsable = !(azure?.key.isEmpty ?? true) && !(azure?.region.isEmpty ?? true)
         diagLive("openASR wantTranslate=\(wantTranslation) azureUsable=\(azureUsable) src=\(sourceLang) tgt=\(targetLang ?? "-") profile=\(opusProfile.packetBytes)B")
 
-        if wantTranslation, azureUsable, let azure {
+        // ★ (2026-10-20) This branch is gated on the "azuretranslate" kind, not just
+        //    azureUsable. Without that check a dead translation link (e.g. target
+        //    language `lzh`, which Azure Speech translation rejects by closing the
+        //    stream) re-entered this branch on every reconnect — an infinite ~1 Hz
+        //    loop that produced no text for the whole session. Once marked dead we
+        //    fall through to the plain-transcription chain below; `beginLiveTranslation`
+        //    keeps translating finals locally if an LLM is configured.
+        if wantTranslation, azureUsable, let azure, !deadASRProviders.contains("azuretranslate") {
             // ★★ The preferred option remains Azure real-time translation: the source and translated text **return together in the same stream**,
             //    with the lowest latency and no need for local compute power. This path is consistent with the previous word-by-word approach.
             endLiveTranslation()
@@ -914,6 +939,7 @@ final class LiveModel: ObservableObject {
             let events = try asr.connect()
             currentASR = .azureTranslate(asr)
             activeProvider = "azure"
+            activeASRKind = "azuretranslate"
             currentASRProducedResult = false
             diagLive("provider=azureTranslate (original and translation in the same stream)")
             runEventLoop(translation: events)
@@ -967,6 +993,7 @@ final class LiveModel: ObservableObject {
                     let events = try asr.connect()
                     currentASR = .azure(asr)
                     activeProvider = "azure"
+                    activeASRKind = "azure"
                     currentASRProducedResult = false
                     diagLive("provider=azure(transcription only)")
                     runEventLoop(azure: events)
@@ -988,6 +1015,7 @@ final class LiveModel: ObservableObject {
                     let events = try asr.connect()
                     currentASR = .remote(asr)
                     activeProvider = "remote"
+                    activeASRKind = "remote"
                     currentASRProducedResult = false
                     diagLive("provider=remote wss=\(URL(string: remote.endpoint)?.host ?? "-")")
                     runEventLoop(local: events)
@@ -1004,6 +1032,7 @@ final class LiveModel: ObservableObject {
                     let events = try asr.connect()
                     currentASR = .local(asr)
                     activeProvider = "local"
+                    activeASRKind = "local"
                     currentASRProducedResult = false
                     diagLive("provider=local ws://\(local.host):\(local.port)/v1/listen")
                     runEventLoop(local: events)
@@ -1025,6 +1054,7 @@ final class LiveModel: ObservableObject {
                     let events = try asr.connect()
                     currentASR = .onDevice(asr)
                     activeProvider = "ondevice"
+                    activeASRKind = "ondevice"
                     currentASRProducedResult = false
                     diagLive("provider=ondevice locale=\(sourceLang) profile=\(opusProfile.packetBytes)B")
                     runEventLoop(onDevice: events)
@@ -1107,7 +1137,9 @@ final class LiveModel: ObservableObject {
         // next configured service — file transcription has had this
         // primary→fallback chain all along; live never did.
         if !currentASRProducedResult, !activeProvider.isEmpty {
-            deadASRProviders.insert(activeProvider.lowercased())
+            // ★ (2026-10-20) Dead-mark the **kind**, not the display name: a failed
+            // Azure *translation* link must not poison plain Azure transcription.
+            deadASRProviders.insert(activeASRKind.isEmpty ? activeProvider.lowercased() : activeASRKind)
             log.warning("ASR provider \(self.activeProvider, privacy: .public) produced nothing before closing — trying the next one")
             asrReconnectAttempts = 0
             Task { @MainActor [weak self] in

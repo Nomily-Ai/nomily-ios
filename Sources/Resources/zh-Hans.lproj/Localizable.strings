@@ -901,6 +901,7 @@
 "ticnote.unbind" = "解绑设备";
 "ticnote.unbind_confirm_title" = "解绑这台设备？";
 "ticnote.unbind_confirm_message" = "卡片会被释放，可以重新配对；本 App 会忘掉它。卡上的录音不会被删除——想保留请先传回手机。";
+"ticnote.unbind_confirm_message_a1" = "这会把该卡片从 Nomily 中移除——包括它的密钥、名称与台账，并断开连接。卡上的录音会保留；钉钉账号内的云绑定需要在官方钉钉 App 里解除。";
 "ticnote.unbind_confirm_action" = "解绑";
 "ticnote.unbinding" = "解绑中…";
 "ticnote.unbind_success" = "已解绑，已从本 App 的列表中移除。";

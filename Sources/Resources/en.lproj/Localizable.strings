@@ -900,6 +900,7 @@
 "ticnote.unbind" = "Unbind this card";
 "ticnote.unbind_confirm_title" = "Unbind this card?";
 "ticnote.unbind_confirm_message" = "The card is released so it can be paired again, and this app forgets it. Recordings on the card are not deleted — transfer them first if you want to keep them.";
+"ticnote.unbind_confirm_message_a1" = "This removes the card from Nomily — its key, name and ledger entry — and disconnects it. The card keeps its recordings, and the binding inside your DingTalk account can only be removed in the official DingTalk app.";
 "ticnote.unbind_confirm_action" = "Unbind";
 "ticnote.unbinding" = "Unbinding…";
 "ticnote.unbind_success" = "Unbound. The card has been removed from this app.";

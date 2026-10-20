@@ -2230,6 +2230,18 @@ enum L10n {
                 comment: "Body of the unbind confirmation. Deliberately does not promise to erase recordings"
             )
         }
+        /// ★ (2026-10-20) A1-specific confirm body. The A1 protocol has no BLE unbind
+        /// command, so this action removes the card **from the app** (secret, alias,
+        /// ledger) and drops the link. The cloud binding inside the DingTalk account
+        /// can only be removed in the official DingTalk app — say so, or the user will
+        /// believe the card left their DingTalk account.
+        static var unbindConfirmMessageA1: String {
+            NSLocalizedString(
+                "ticnote.unbind_confirm_message_a1",
+                value: "This removes the card from Nomily — its key, name and ledger entry — and disconnects it. The card keeps its recordings, and the binding inside your DingTalk account can only be removed in the official DingTalk app.",
+                comment: "Body of the unbind confirmation for the DingTalk A1 card"
+            )
+        }
         static var unbindConfirmAction: String {
             NSLocalizedString("ticnote.unbind_confirm_action", value: "Unbind", comment: "Confirm button in the unbind alert")
         }

@@ -88,6 +88,24 @@ struct RecorderDeviceView: View {
     /// By default keep historical behavior (recording‑material‑first), only the two "tap device" entry points pass `.deviceInfo`.
     var mode: Mode = .recordings
 
+    /// ★ (2026-10-20) "Done" during the **add flow** must land the user back on the home
+    /// page. The old Done only closed the topmost layer, so after adding a card the user
+    /// was still sitting on the scan page and could tap the same device again (reported:
+    /// "点击完成后应该跳转到首页"). The caller closes its own presentation in the callback
+    /// (`ScannerSheet` dismisses itself, mirroring what `onConnected` does for D·NOTE).
+    /// `nil` (home/capsule/embedded entries) keeps the historical single-layer dismiss.
+    var onFinish: (() -> Void)? = nil
+
+    /// Close this layer, then let the presenter close its own layer one tick later —
+    /// dismissing two sheets in the same tick cancels the first animation.
+    private func finishToRoot() {
+        guard let onFinish else { return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            onFinish()
+        }
+    }
+
     /// Its own session model (used only when not injected).
     @StateObject private var ownSession = RecorderSessionModel()
 
@@ -939,7 +957,12 @@ struct RecorderDeviceView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { showCardInfo = false }
+                    // ★ (2026-10-20) In the add flow (`.deviceInfo`) Done goes **all the way
+                    //    home**; in `.recordings` mode it keeps closing just this popup.
+                    Button("Done") {
+                        showCardInfo = false
+                        if mode == .deviceInfo { finishToRoot() }
+                    }
                 }
             }
             .alert(L10n.TicNoteCard.unbindConfirmTitle, isPresented: $showUnbindConfirm) {
@@ -948,7 +971,12 @@ struct RecorderDeviceView: View {
                     Task { await unbindCard() }
                 }
             } message: {
-                Text(L10n.TicNoteCard.unbindConfirmMessage)
+                // ★ (2026-10-20) A1 wording differs: this is an app-side removal
+                //    (the protocol has no BLE unbind), and the DingTalk cloud binding
+                //    must be removed in the official DingTalk app.
+                Text(recorder.protocolID == DingTalkA1Spec.identifier
+                     ? L10n.TicNoteCard.unbindConfirmMessageA1
+                     : L10n.TicNoteCard.unbindConfirmMessage)
             }
         }
     }
@@ -1014,8 +1042,12 @@ struct RecorderDeviceView: View {
         //    e.g., the card is lost, returned, or this firmware version cannot connect) it **still must be visible** ——
         //    "Remove this card from the App" is exactly the only action desired in that scenario.
         //    When frames cannot actually be sent, the button disables itself and explains the reason below (see `CardUnbindSection`).
+        // ★ (2026-10-20) `isConnected` is a `RecorderLink` protocol requirement, so read it off the
+        //    existential directly. The old `(connectedLink as? TicNoteLink)` cast made the A1's
+        //    connected state invisible → the unbind button stayed disabled even while the card
+        //    was live-connected (user-reported).
         CardUnbindSection(
-            isConnected: (connectedLink as? TicNoteLink)?.isConnected ?? false,
+            isConnected: connectedLink?.isConnected ?? false,
             isWorking: isUnbinding,
             request: { showUnbindConfirm = true }
         )
@@ -2201,6 +2233,37 @@ struct RecorderDeviceView: View {
     /// **the card‑info layer** — controlled by `showCardInfo`. Therefore we simply set it back to false,
     /// independent of "where it was entered from".
     private func unbindCard() async {
+        // ★ (2026-10-20) DingTalk A1 branch — the A1 protocol has **no BLE unbind command**
+        //    (the card carries no account ownership; cloud binding lives in the DingTalk
+        //    account, see docs/A1-BLE-Protocol-Spec-v1.0.md). So "unbind" here means
+        //    **app-side removal**: forget the card secret (without it the card can't be
+        //    re-authenticated), the alias and the device-ledger entry, then drop the link
+        //    and stop auto-reconnect. This works identically whether or not the card is
+        //    currently connected — which is the whole point of this fix: the old code
+        //    strong-cast to `TicNoteLink`, so for an A1 the button either stayed disabled
+        //    or fell into the offline path.
+        if recorder.protocolID == DingTalkA1Spec.identifier {
+            guard !isUnbinding else { return }
+            isUnbinding = true
+            defer { isUnbinding = false }
+
+            if let credential = DingTalkA1CredentialStore.credential(matchingTail: recorder.identityText)
+                ?? DingTalkA1CredentialStore.single {
+                DingTalkA1CredentialStore.remove(credential)
+            }
+            aliasStore.forget(identityHex: recorder.identityHex,
+                              peripheralUUID: recorder.id.uuidString)
+            configService.config.devices.removeValue(forKey: recorder.id.uuidString)
+            configService.scheduleSave()
+            bluetooth.disconnect()
+            unbindNotice = L10n.TicNoteCard.unbindSuccess
+            TicNoteDiagLog.log("LINK", "Unbound \(recorder.displayName) (A1, tail \(recorder.identityText)) — credential + ledger removed app-side")
+
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            showCardInfo = false
+            return
+        }
+
         guard let ticNote = connectedLink as? TicNoteLink else {
             unbindNotice = L10n.TicNoteCard.unbindOffline
             return
@@ -2541,14 +2604,30 @@ struct RecorderSheet: View {
     /// "Both entry points that "tap device" (from the scan page connection and the top bar capsule) pass `.deviceInfo`.
     var mode: RecorderDeviceView.Mode = .recordings
 
+    /// ★ (2026-10-20) Forwarded to `RecorderDeviceView`; the scan page passes a closure
+    /// that dismisses the scanner itself, so "Done" after adding a card lands on home.
+    var onFinish: (() -> Void)? = nil
+
     var body: some View {
         NavigationStack {
-            RecorderDeviceView(recorder: recorder, mode: mode)
+            RecorderDeviceView(recorder: recorder, mode: mode, onFinish: onFinish)
                 .navigationTitle(recorder.displayName)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Done") { dismiss() }
+                        Button("Done") {
+                            dismiss()
+                            if mode == .deviceInfo {
+                                // Mirror of `RecorderDeviceView.finishToRoot`: close the
+                                // scanner one tick later so both sheet animations run.
+                                if let onFinish {
+                                    Task { @MainActor in
+                                        try? await Task.sleep(nanoseconds: 350_000_000)
+                                        onFinish()
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
         }
