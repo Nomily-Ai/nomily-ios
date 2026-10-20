@@ -926,7 +926,12 @@ struct ClipDetailView: View {
                 .lineLimit(3)
 
             NavigationLink(L10n.ClipDetail.viewFullTranslatedSummary) {
-                SummaryFullView(text: translatedSummary!)
+                SummaryFullView(
+                    text: translatedSummary!,
+                    posterTitle: item.customTitle ?? item.name,
+                    posterDate: item.modifiedAt,
+                    posterDuration: item.duration
+                )
             }
         } header: {
             Text(L10n.ClipDetail.translatedSummary)
@@ -993,7 +998,12 @@ struct ClipDetailView: View {
                 MarkdownBlocksView(blocks: MarkdownBlocks.parse(summary))
 
                 NavigationLink(L10n.ClipDetail.viewFullSummary) {
-                    SummaryFullView(text: summary)
+                    SummaryFullView(
+                        text: summary,
+                        posterTitle: item.customTitle ?? item.name,
+                        posterDate: item.modifiedAt,
+                        posterDuration: item.duration
+                    )
                 }
 
                 // Only offered when the summary actually has section
@@ -1480,9 +1490,15 @@ struct TranscriptFullView: View {
 
 struct SummaryFullView: View {
     let text: String
+    /// Poster header metadata (image-text share). Optional — the poster
+    /// collapses missing rows, so the translated-summary entry can skip them.
+    var posterTitle: String? = nil
+    var posterDate: Date? = nil
+    var posterDuration: Double? = nil
     @State private var showRaw = false
     @State private var showShareSheet = false
     @State private var showMindMap = false
+    @State private var showPoster = false
 
     var body: some View {
         Group {
@@ -1511,6 +1527,12 @@ struct SummaryFullView: View {
                         Image(systemName: showRaw ? "doc.richtext" : "doc.plaintext")
                     }
                     Button {
+                        showPoster = true
+                    } label: {
+                        Image(systemName: "photo.on.rectangle.angled")
+                    }
+                    .accessibilityLabel(L10n.ClipDetail.shareAsImage)
+                    Button {
                         showShareSheet = true
                     } label: {
                         Image(systemName: "square.and.arrow.up")
@@ -1523,6 +1545,14 @@ struct SummaryFullView: View {
         }
         .fullScreenCover(isPresented: $showMindMap) {
             MindMapScreen(markdown: text, fallbackTitle: L10n.ClipDetail.summary)
+        }
+        .sheet(isPresented: $showPoster) {
+            SummaryPosterView(
+                markdown: text,
+                title: posterTitle,
+                date: posterDate,
+                duration: posterDuration
+            )
         }
     }
 }

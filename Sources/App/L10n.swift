@@ -2217,6 +2217,24 @@ enum L10n {
         static var mindMapExportFailed: String { NSLocalizedString("clip_detail.mind_map_export_failed", value: "Couldn't export the mind map.", comment: "Alert title when mind-map PNG export fails") }
         static var mindMapExpandAll: String { NSLocalizedString("clip_detail.mind_map_expand_all", value: "Expand all", comment: "Toolbar button that opens every folded branch of the mind map") }
         static var mindMapCollapseAll: String { NSLocalizedString("clip_detail.mind_map_collapse_all", value: "Collapse all", comment: "Toolbar button that folds the mind map back to its top-level branches") }
+        // ---- "Image-text" poster share (DingTalk-style share card) ----
+        static var shareAsImage: String {
+            NSLocalizedString("clip_detail.share_as_image", value: "Share as Image",
+                              comment: "Opens the summary poster sheet (image-text share)")
+        }
+        static var share: String {
+            NSLocalizedString("poster.share", value: "Share", comment: "Poster sheet: share the rendered image")
+        }
+        static var posterCopy: String {
+            NSLocalizedString("poster.copy", value: "Copy", comment: "Poster sheet: copy the image to the pasteboard")
+        }
+        static var posterCopied: String {
+            NSLocalizedString("poster.copied", value: "Copied to clipboard", comment: "Toast after copying the poster image")
+        }
+        static var posterEmpty: String {
+            NSLocalizedString("poster.empty", value: "Nothing to render — the summary is empty.",
+                              comment: "Poster sheet shown when there is no summary content")
+        }
         static var deleteAudio: String { NSLocalizedString("clip_detail.delete_audio", value: "Delete Audio", comment: "Deletes only the audio file, keeping transcript and summary") }
         static var deleteAudioMessage: String { NSLocalizedString("clip_detail.delete_audio_message", value: "The audio file moves to Recently Deleted. The transcript and summary are kept. You can recover it for 30 days.", comment: "") }
         static var deleteTranscript: String { NSLocalizedString("clip_detail.delete_transcript", value: "Delete Transcript", comment: "Deletes only the transcript, keeping audio and summary") }
