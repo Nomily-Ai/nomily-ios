@@ -263,7 +263,10 @@ struct WatchRecorderView: View {
                 isRecording: model.isRecording,
                 // ★ Revision thirteen: which expression to wear while idle is decided by the iPhone's settings.
                 style: faceStore.style,
-                tint: styleStore.style.tint,
+                // ★ 2026-10-20: the eye colour now comes from the iPhone when the user picked
+                // one there (`faceStore.colorHex`); only when they haven't (`nil`) does the
+                // watch fall back to its own "Appearance" palette.
+                tint: faceStore.colorHex.map { Color(botHex: $0) } ?? styleStore.style.tint,
                 meter: model.meter,
                 // ★ Revision eleven: while recording the timer shows right by the wave (user: "with the recording time attached below").
                 // ★ Revision fifteen: the `bpm:` parameter is **deleted** -- the waveform is no longer driven by heart rate,
@@ -274,6 +277,10 @@ struct WatchRecorderView: View {
                 pokeTick: pokeTick,
                 dizzyTick: dizzyTick,
                 handGestureEnabled: prefs.pinchToRecord,
+                // ★ 2026-10-20: blink pace / auto-cycling expressions / square frame — all set on the iPhone.
+                blinkSpeed: faceStore.blinkSpeed,
+                autoCycle: faceStore.autoCycle,
+                frameVisible: faceStore.frameVisible,
                 onTap: handleTap,
                 onHold: beginRecordingByHold,
                 onToggle: handleToggle

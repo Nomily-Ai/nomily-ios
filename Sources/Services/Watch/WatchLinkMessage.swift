@@ -58,4 +58,23 @@ enum WatchLinkMessage {
     /// ℹ️ The two directions' application contexts are **separate** slots, so the watch's
     ///    "recording state" push (also `updateApplicationContext`) won't be crowded out by this one.
     static let faceStyleKey = "faceStyle"
+
+    // MARK: - Face settings (phone → watch, ★ 2026-10-20)
+    //
+    // The user asked to drive the face's colour, blink pace and the "square frame with
+    // auto-cycling expressions" from the phone. Same channel and same caveats as
+    // `faceStyleKey`: one `updateApplicationContext` per push, "newest value wins",
+    // watch-local defaults apply when a key is missing (old phone → new watch).
+
+    /// The eye colour as `RRGGBB` hex (no `#`). Absent = follow the watch's own
+    /// "Appearance" palette — the pre-existing watch-local preference stays authoritative
+    /// until the user actually picks a colour on the phone.
+    static let faceColorKey = "faceColor"
+    /// `BotBlinkSpeed.rawValue` — scales the blink-gap tiers. Absent = `normal`.
+    static let blinkSpeedKey = "blinkSpeed"
+    /// Whether the idle expression auto-cycles inside the square frame. Absent = `true`
+    /// (the dynamic behaviour the user asked for is the default).
+    static let faceAutoCycleKey = "faceAutoCycle"
+    /// Whether the rounded-square frame is drawn around the face. Absent = `true`.
+    static let faceFrameKey = "faceFrame"
 }

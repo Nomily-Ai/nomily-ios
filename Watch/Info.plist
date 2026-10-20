@@ -19,7 +19,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0.0</string>
 	<key>CFBundleVersion</key>
-	<string>56</string>
+	<string>61</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Nomily AI reads your current heart rate while recording, so the waveform on the watch face beats in time with your own pulse. It never reads any other health data and never leaves your devices.</string>
 	<key>NSMicrophoneUsageDescription</key>

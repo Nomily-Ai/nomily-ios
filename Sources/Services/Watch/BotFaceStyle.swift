@@ -73,6 +73,21 @@ enum BotFaceStyle: String, CaseIterable, Codable, Identifiable {
     case listen
     /// Scanning. A narrow tall slit, as if sweeping back and forth.
     case scan
+    // ★ 2026-10-20: six more tiers (user: "add more expressions, Grok-bot style"). All
+    // stay inside the four expressible dimensions — height / width / tilt / arc — and each
+    // must still read as a different expression from half a metre away (rule 1 above).
+    /// Grinning. The ∩ arc, wider — a bigger smile.
+    case grin
+    /// Blissful. Flat and very wide, height squashed — "relaxed, eyes closed happy".
+    case blissful
+    /// Surprised. Narrow and tall — the "O" mouth of the eye world.
+    case surprised
+    /// Focused. Small and tense — a pin-point stare.
+    case focus
+    /// Sly. A strong slant on a narrowed eye — a knowing squint.
+    case sly
+    /// Curious. A raised brow: tall, slightly narrower, tilted.
+    case curious
 
     var id: String { rawValue }
 
@@ -88,6 +103,12 @@ enum BotFaceStyle: String, CaseIterable, Codable, Identifiable {
         case .shy:    return L10n.Face.shy
         case .listen: return L10n.Face.listen
         case .scan:   return L10n.Face.scan
+        case .grin:     return L10n.Face.grin
+        case .blissful: return L10n.Face.blissful
+        case .surprised: return L10n.Face.surprised
+        case .focus:    return L10n.Face.focus
+        case .sly:      return L10n.Face.sly
+        case .curious:  return L10n.Face.curious
         }
     }
 
@@ -110,6 +131,12 @@ enum BotFaceStyle: String, CaseIterable, Codable, Identifiable {
         case .shy:    return BotFaceGeometry(scaleX: 1.08, scaleY: 0.58, tilt: 10)
         case .listen: return BotFaceGeometry(scaleX: 0.86, scaleY: 1.18)
         case .scan:   return BotFaceGeometry(scaleX: 0.72, scaleY: 1.15)
+        case .grin:      return BotFaceGeometry(scaleX: 1.22, arc: .up)
+        case .blissful:  return BotFaceGeometry(scaleX: 1.30, scaleY: 0.42)
+        case .surprised: return BotFaceGeometry(scaleX: 0.82, scaleY: 1.45)
+        case .focus:     return BotFaceGeometry(scaleX: 0.80, scaleY: 0.66)
+        case .sly:       return BotFaceGeometry(scaleY: 0.55, tilt: 17)
+        case .curious:   return BotFaceGeometry(scaleX: 0.90, scaleY: 1.28, tilt: 9)
         }
     }
 
@@ -288,3 +315,92 @@ struct BotFaceEyeCurve: Shape {
         return path
     }
 }
+
+// MARK: - Blink pace + auto-express (★ 2026-10-20, settable on the iPhone)
+
+/// How fast the face blinks — and how often the auto-express cycle swaps the expression.
+///
+/// Lives in this shared file for the same reason as `BotFaceStyle`: the iPhone pushes the raw tag,
+/// both sides must agree on what it means, and the *preview* of "what lively looks like" is a lie
+/// unless the watch multiplies the same numbers.
+///
+/// ## What the multiplier touches (and what it must not)
+/// Only the **wait between** blinks scales (`WatchBotFace.nextBlinkGap()`). The 300 ms blink
+/// keyframes do **not**: a human eyelid's closing speed doesn't change just because blinks come
+/// more often — stretch those and "lively" turns into "sleepy with extra steps".
+enum BotBlinkSpeed: String, CaseIterable, Codable, Identifiable {
+    /// Long gaps — quieter than the "normal person" default.
+    case slow
+    /// The resting-human distribution shipped in revision twelve (the default).
+    case normal
+    /// Short gaps — noticeably awake. The near tier bottoms out around 2 s (below that
+    /// reads as jitter, see `WatchBotFace.blinkGapNear`), so the multiplier stops there.
+    case lively
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .slow:   return L10n.Face.blinkSlow
+        case .normal: return L10n.Face.blinkNormal
+        case .lively: return L10n.Face.blinkLively
+        }
+    }
+
+    /// Multiplies both blink-gap tiers. Kept inside the bounds the comments there document:
+    /// slow 1.6× ⇒ far tier tops out at 28.8 s (a "dozing" look the user asked *for* when
+    /// picking slow), lively 0.55× ⇒ near tier bottoms out at 1.93 s, just above the 2 s jitter floor.
+    var gapMultiplier: Double {
+        switch self {
+        case .slow:   return 1.6
+        case .normal: return 1.0
+        case .lively: return 0.55
+        }
+    }
+
+    /// How often the **auto-express cycle** swaps the idle expression (the "square frame
+    /// dynamically cycling" behaviour). Drawn fresh from this range each swap — same
+    /// "no metronome" rule as the blink gaps.
+    var expressCycle: ClosedRange<Double> {
+        switch self {
+        case .slow:   return 7.0 ... 11.0
+        case .normal: return 4.5 ... 7.5
+        case .lively: return 2.8 ... 4.8
+        }
+    }
+}
+
+// MARK: - Hex validation (shared)
+
+/// True when `hex` is exactly 6 hex digits (`RRGGBB`). CharacterSet-based
+/// because `Character.isHexadecimal` doesn't exist on watchOS (the iOS build
+/// took it from a Foundation overlay the watch SDK doesn't ship — measured
+/// error in `WatchFaceStore.applySettings`).
+func isValidFaceHex(_ hex: String) -> Bool {
+    guard hex.count == 6 else { return false }
+    return CharacterSet(charactersIn: "0123456789abcdefABCDEF")
+        .isSuperset(of: CharacterSet(charactersIn: hex))
+}
+
+// MARK: - Hex → Color (shared)
+
+extension Color {
+    /// `RRGGBB` (no `#`) → `Color`. Invalid input yields **white** — callers
+    /// must gate on the hex being a valid shape (it is, by construction:
+    /// `WatchFaceStore.applySettings` and `WatchFacePickerView.validHex`
+    /// only accept 6 hex digits).
+    ///
+    /// Lives in the **shared** file so both targets compile exactly one copy:
+    /// the picker on the phone tints its previews with the chosen colour, and
+    /// the watch draws with it — two private copies would be two chances to drift.
+    init(botHex hex: String) {
+        var value: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&value)
+        self.init(
+            red: Double((value >> 16) & 0xFF) / 255.0,
+            green: Double((value >> 8) & 0xFF) / 255.0,
+            blue: Double(value & 0xFF) / 255.0
+        )
+    }
+}
+

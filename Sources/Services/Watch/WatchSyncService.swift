@@ -199,20 +199,62 @@ final class WatchSyncService: NSObject, ObservableObject {
     ///    and hands it over the next time the watch wakes. Checking reachability would instead treat "the watch is in the background right now" as a failure,
     ///    so the user changes the setting, raises their wrist, and finds nothing changed.
     func sendFaceStyle(_ tag: String) {
-        pushFaceStyle(tag)
+        pushFaceSettings(style: tag)
+    }
+
+    /// The user changed one of the other face settings (colour / blink pace /
+    /// auto-cycle / frame) — push the whole face-settings bundle at once.
+    ///
+    /// ⚠️ All five keys travel in **one** `updateApplicationContext`: that call
+    ///    *replaces* the previous context wholesale, so pushing only the changed
+    ///    key would wipe the other four off the watch.
+    func sendFaceSettings(
+        style: String,
+        colorHex: String?,
+        blinkSpeed: String?,
+        autoCycle: Bool,
+        frameVisible: Bool
+    ) {
+        pushFaceSettings(
+            style: style,
+            colorHex: colorHex,
+            blinkSpeed: blinkSpeed,
+            autoCycle: autoCycle,
+            frameVisible: frameVisible
+        )
     }
 
     /// The style in use on the watch — re-pushed once on activation, closing the window where
     /// "what's stored on the watch differs from the phone" (the user switched phones, reinstalled the watch app, or a previous push never arrived).
-    private func pushFaceStyle(_ tag: String) {
+    private func pushFaceSettings(
+        style: String,
+        colorHex: String? = nil,
+        blinkSpeed: String? = nil,
+        autoCycle: Bool? = nil,
+        frameVisible: Bool? = nil
+    ) {
         guard WCSession.isSupported() else { return }
+        // Missing settings fall back to their defaults here so the context is
+        // always complete — the watch then never has to distinguish "key
+        // absent" from "set to default".
+        var context: [String: Any] = [
+            WatchLinkMessage.faceStyleKey: style,
+            WatchLinkMessage.faceAutoCycleKey: autoCycle ?? true,
+            WatchLinkMessage.faceFrameKey: frameVisible ?? true,
+        ]
+        if let colorHex {
+            context[WatchLinkMessage.faceColorKey] = colorHex
+        }
+        if let blinkSpeed {
+            context[WatchLinkMessage.blinkSpeedKey] = blinkSpeed
+        }
         do {
-            try WCSession.default.updateApplicationContext([WatchLinkMessage.faceStyleKey: tag])
-            log.info("face style pushed: \(tag, privacy: .public)")
+            try WCSession.default.updateApplicationContext(context)
+            log.info("face settings pushed: style=\(style, privacy: .public) color=\(colorHex ?? "-", privacy: .public) speed=\(blinkSpeed ?? "-", privacy: .public) auto=\(autoCycle ?? true, privacy: .public) frame=\(frameVisible ?? true, privacy: .public)")
         } catch {
             // You reach here when the session hasn't activated yet. The activation callback pushes again, so this time
             // failing isn't fatal — a log line is enough; don't show the user anything.
-            log.error("face style push failed: \(String(describing: error), privacy: .public)")
+            log.error("face settings push failed: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -265,7 +307,14 @@ extension WatchSyncService: WCSessionDelegate {
             // ★ Thirteenth revision: re-push the "home-screen expression" while we're at it. This phone-side setting exists **only**
             //   on the phone side; the watch has no other way to get it, and the watch may have just been reinstalled, just switched phones,
             //   or been absent during the last push. Activation is the one moment when "the two sides are actually connected right now".
-            self.pushFaceStyle(self.config.config.watchFaceStyle ?? BotFaceStyle.calm.rawValue)
+            //   ★ 2026-10-20: the other face settings (colour / blink pace / auto-cycle / frame) ride along in the same context.
+            pushFaceSettings(
+                style: config.config.watchFaceStyle ?? BotFaceStyle.calm.rawValue,
+                colorHex: config.config.watchEyeColor,
+                blinkSpeed: config.config.watchBlinkSpeed,
+                autoCycle: config.config.watchFaceAutoCycle,
+                frameVisible: config.config.watchFaceFrame
+            )
             log.info("session activated: paired=\(paired) installed=\(installed) reachable=\(reachable)")
         }
     }

@@ -1087,6 +1087,24 @@
 "face.listen" = "聆听";
 "face.scan" = "扫视";
 
+// MARK: - 手表表情新批次 + 表情设置（2026-10-19）
+"face.grin" = "咧嘴笑";
+"face.blissful" = "惬意";
+"face.surprised" = "惊讶";
+"face.focus" = "专注";
+"face.sly" = "狡黠";
+"face.curious" = "好奇";
+"face.blink_slow" = "慢";
+"face.blink_normal" = "正常";
+"face.blink_lively" = "活泼";
+"face.auto_cycle" = "表情自动变动";
+"face.auto_cycle_footer" = "这张脸每隔几秒自己换一个表情。在手表上轻点它，仍然会立刻换。";
+"face.blink_speed" = "眨眼节奏";
+"face.eye_color" = "眼睛颜色";
+"face.follow_watch" = "跟随手表";
+"face.frame" = "方框";
+"face.frame_footer" = "在手表首页的眼睛外面画一圈圆角方框。";
+
 // MARK: - 回收站多选 + 手表未佩戴提示（2026-10-16 十四改）
 "trash.select" = "选择";
 "trash.select_all" = "全选";

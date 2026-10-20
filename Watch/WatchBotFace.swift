@@ -232,6 +232,19 @@ struct WatchBotFace: View {
     let dizzyTick: Int
     /// Whether Double Tap can start/stop recording. Toggled in by `WatchRecordingPrefs.pinchToRecord`.
     let handGestureEnabled: Bool
+    /// Blink pace — pushed from the iPhone (★ 2026-10-20). Scales only the gaps
+    /// **between** blinks, never the 300 ms blink keyframes (see `BotBlinkSpeed`).
+    let blinkSpeed: BotBlinkSpeed
+    /// Whether the idle expression **auto-cycles** inside the square frame
+    /// (★ 2026-10-20, user: "the expression should display and change dynamically in the
+    /// square frame"). When on, a background loop springs to a fresh tier from the
+    /// library every few seconds; the tap one-shot (`mood`) still wins while it plays.
+    let autoCycle: Bool
+    /// Whether the rounded-square frame is drawn around the face (★ 2026-10-20,
+    /// user: "according to the square frame"). Revision eight removed the *plate*
+    /// ("no green, just make the frame two eyes"); this is the frame coming back —
+    /// but as a **stroke in the eye colour**, not a filled plate.
+    let frameVisible: Bool
     /// Tap (a finger actually touched the face). Recording = stop; idle = the home screen decides whether to just poke it.
     let onTap: () -> Void
     /// The hold reached 2 seconds.
@@ -288,6 +301,12 @@ struct WatchBotFace: View {
     ///    unaware of each other, so the one that wakes first would erase **the new expression that has just come on** --
     ///    showing up as "tapping twice produced nothing at all."
     @State private var moodTask: Task<Void, Never>?
+    /// The tier the **auto-express cycle** currently has on (★ 2026-10-20).
+    /// `nil` = draw the user's persistent tier. Priority: `mood` (a tap's one-shot)
+    /// → `cycleStyle` (the auto cycle) → `style` (what the phone pinned).
+    @State private var cycleStyle: BotFaceStyle?
+    /// The handle for the auto-express loop.
+    @State private var cycleTask: Task<Void, Never>?
     /// How many degrees the eyes have **spun in circles** so far. 0 = not spinning.
     ///
     /// ★ Added in revision fourteen, see `playDizzy()`.
@@ -428,6 +447,18 @@ struct WatchBotFace: View {
         //    behavior directly here.
         Button(action: handlePrimaryAction) {
             ZStack {
+                // ★ 2026-10-20: the square frame is back (user: "按照方框动态显示变动") --
+                // but as a **stroke in the eye colour**, not the filled plate revision eight
+                // removed ("no green"). The expression cycles *inside* it; the frame itself
+                // scales with the same breathing product as the eyes, so the whole figure
+                // breathes as one.
+                if frameVisible {
+                    RoundedRectangle(cornerRadius: size * 0.30, style: .continuous)
+                        .strokeBorder(tint.opacity(0.85), lineWidth: max(3, size * 0.045))
+                        .frame(width: size * 1.02, height: size * 1.02)
+                        .scaleEffect(figureScale)
+                        .opacity(figureOpacity)
+                }
                 figure
                     .scaleEffect(figureScale)
                     // During a hold, yield the position to the two inside `holdLayer` (see `figureOpacity`).
@@ -623,6 +654,11 @@ struct WatchBotFace: View {
         //   so leaving it hanging would make an expression from two actions ago suddenly pop up after recording ends.
         moodTask?.cancel()
         moodTask = nil
+        // ★ 2026-10-20: the auto-express cycle is managed by the same single switch —
+        //   it changes the eye shape exactly like `mood` does, so it must vanish the
+        //   moment recording starts or the face dims.
+        cycleTask?.cancel()
+        cycleTask = nil
 
         guard !dimmed, !isRecording else {
             // Back to the rest position. Dimming wants a static open-eyed face, and in the recording state the eyes are simply absent --
@@ -632,6 +668,7 @@ struct WatchBotFace: View {
                 openness = 1
                 gaze = .zero
                 mood = nil
+                cycleStyle = nil
             }
             return
         }
@@ -645,6 +682,39 @@ struct WatchBotFace: View {
         gaze = CGSize(width: gazeAmpX, height: gazeAmpY)
         idleLoop = Task { await runBlinkLoop() }
         gazeLoop = Task { await runGazeLoop() }
+        if autoCycle {
+            cycleTask = Task { await runExpressCycle() }
+        }
+    }
+
+    /// The **auto-express cycle** (★ 2026-10-20, user: "the expression should display and
+    /// change dynamically in the square frame"). Every few seconds the face springs to a
+    /// fresh tier drawn from the library — the square frame stays put and the expression
+    /// inside it keeps changing.
+    ///
+    /// ## The rules
+    /// * The next tier is drawn from `tapPool(excluding:)` — never the same tier twice in
+    ///   a row (a "swap" to the same shape reads as the loop being broken), never `calm`
+    ///   (drawing the idle state = nothing happened).
+    /// * The wait is **drawn fresh** from `blinkSpeed.expressCycle` each time — the same
+    ///   "no metronome" rule the blink loop lives by.
+    /// * There is no "return to base": the cycle *is* the idle look while it's on. That's
+    ///   what "动态显示变动" asks for — the face keeps changing, rather than playing
+    ///   one shot and snapping back.
+    /// * A tap still wins: `mood` sits above `cycleStyle` in `shownStyle`, and the tap's
+    ///   one-shot expires back into whatever the cycle is currently wearing.
+    private func runExpressCycle() async {
+        while !Task.isCancelled {
+            let wait = Double.random(in: blinkSpeed.expressCycle)
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            let current = cycleStyle ?? style
+            let pool = BotFaceStyle.tapPool(excluding: current)
+            guard let next = pool.randomElement() else { return }
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.66)) {
+                cycleStyle = next
+            }
+        }
     }
 
     // MARK: - The idle loops
@@ -687,7 +757,7 @@ struct WatchBotFace: View {
     ///    The loop structure, the double-blink chance and `blinkOnce()`'s keyframes **did not move a single cell**.
     private func runBlinkLoop() async {
         while !Task.isCancelled {
-            let wait = Self.nextBlinkGap()
+            let wait = nextBlinkGap()
             try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             guard !Task.isCancelled else { return }
 
@@ -733,9 +803,22 @@ struct WatchBotFace: View {
     /// ⚠️ Why draw **twice** rather than use "a skewed distribution": `Double.random` only has a uniform distribution,
     ///    and building a skewed distribution on top of it would need an inverse transform, not worth it for two numbers. The two-tier approach
     ///    instead puts the intent out in the open -- whoever reads the code immediately sees "mostly a few seconds, occasionally a dozen-plus."
-    private static func nextBlinkGap() -> Double {
-        let far = Double.random(in: 0 ..< 1) < blinkGapFarChance
-        return Double.random(in: far ? blinkGapFar : blinkGapNear)
+    /// Draw the next "interval between two blinks."
+    ///
+    /// ★ Added in revision twelve. This is the whole implementation of "like a normal person" -- first decide by probability whether this round
+    /// is "dense" or "sparse," then randomize within that tier. The numbers for the two tiers are documented over at the constants.
+    ///
+    /// ⚠️ Why draw **twice** rather than use "a skewed distribution": `Double.random` only has a uniform distribution,
+    ///    and building a skewed distribution on top of it would need an inverse transform, not worth it for two numbers. The two-tier approach
+    ///    instead puts the intent out in the open -- whoever reads the code immediately sees "mostly a few seconds, occasionally a dozen-plus."
+    ///
+    /// ★ 2026-10-20: the tiers' *product* is scaled by `blinkSpeed` — the shape of the
+    /// distribution (two tiers, 22 % far, 14 % double) is untouched; only the clock runs
+    /// faster or slower. The blink keyframes stay 300 ms at every setting.
+    private func nextBlinkGap() -> Double {
+        let far = Double.random(in: 0 ..< 1) < Self.blinkGapFarChance
+        let base = Double.random(in: far ? Self.blinkGapFar : Self.blinkGapNear)
+        return base * blinkSpeed.gapMultiplier
     }
 
     /// The product of three scale layers: breathing × poke × recording.
@@ -903,10 +986,14 @@ struct WatchBotFace: View {
     ///    and translate it toward the gaze (`gaze`).
     ///    ⚠️ The drawing method had to move -- the picker on the iPhone has to lay out the preview with the same code.
     ///      Written separately, "the smiling eye chosen on the phone" and "the smiling eye drawn on the watch" would eventually differ.
+    /// Which tier the idle eyes are wearing right now: a tap's one-shot first, then the
+    /// auto-express cycle's current pick, then the tier the phone pinned (★ 2026-10-20).
+    private var shownStyle: BotFaceStyle { mood ?? cycleStyle ?? style }
+
     private var eyes: some View {
         BotFacePair(
             // The tier played by a tap takes priority; if there is none, fall back to the user's chosen persistent tier.
-            style: mood ?? style,
+            style: shownStyle,
             size: size,
             tint: tint,
             openness: openness

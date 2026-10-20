@@ -122,16 +122,19 @@ final class WatchLink: NSObject, ObservableObject {
         )
     }
 
-    /// Take in the "home-screen expression" pushed from the phone.
+    /// Take in the face settings pushed from the phone.
     ///
-    /// ★ Added in the thirteenth revision. This is the **only** appearance setting on the phone that actively pushes to the watch;
-    /// the reasoning and the choice (why it goes through `updateApplicationContext`) are written in
-    /// the block at `WatchLinkMessage.faceStyleKey`.
+    /// ★ Added in the thirteenth revision (expression), ★ extended 2026-10-20
+    ///   (colour / blink pace / auto-cycle / square frame). This is the **only** appearance
+    ///   setting on the phone that actively pushes to the watch; the reasoning and the choice
+    ///   (why it goes through `updateApplicationContext`) are written in
+    ///   the block at `WatchLinkMessage.faceStyleKey`.
     ///
-    /// ⚠️ Unrecognised values are silently dropped by `WatchFaceStore.apply` (the two ends' versions may differ),
+    /// ⚠️ Unrecognised values are silently dropped by `WatchFaceStore` (the two ends' versions may differ),
     ///    so this validates nothing and reports nothing — that's the store's business; here we just move it along.
     private func apply(remoteContext context: [String: Any]) {
         WatchFaceStore.shared.apply(context[WatchLinkMessage.faceStyleKey] as? String)
+        WatchFaceStore.shared.applySettings(context)
     }
 }
 

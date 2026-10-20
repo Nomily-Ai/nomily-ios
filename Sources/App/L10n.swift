@@ -1561,6 +1561,61 @@ enum L10n {
         static var scan: String {
             NSLocalizedString("face.scan", value: "Scanning", comment: "Watch face expression: very narrow tall slits")
         }
+        // The six expressions added in the 2026-10-19 batch (user: "more expressions, Grok-bot style").
+        static var grin: String {
+            NSLocalizedString("face.grin", value: "Grinning", comment: "Watch face expression: very wide smile-arc eyes")
+        }
+        static var blissful: String {
+            NSLocalizedString("face.blissful", value: "Blissful", comment: "Watch face expression: very wide, nearly flat eyes")
+        }
+        static var surprised: String {
+            NSLocalizedString("face.surprised", value: "Surprised", comment: "Watch face expression: tall, wide-open eyes")
+        }
+        static var focus: String {
+            NSLocalizedString("face.focus", value: "Focused", comment: "Watch face expression: narrow, slightly lowered eyes")
+        }
+        static var sly: String {
+            NSLocalizedString("face.sly", value: "Sly", comment: "Watch face expression: half-closed eyes tipped sharply inwards")
+        }
+        static var curious: String {
+            NSLocalizedString("face.curious", value: "Curious", comment: "Watch face expression: tall eyes tipped slightly inwards")
+        }
+
+        // Blink pace (a three-way setting, see `BotBlinkSpeed`).
+        static var blinkSlow: String {
+            NSLocalizedString("face.blink_slow", value: "Slow", comment: "Blink pace option: blinks and expression changes are slower than usual")
+        }
+        static var blinkNormal: String {
+            NSLocalizedString("face.blink_normal", value: "Normal", comment: "Blink pace option: the usual pace")
+        }
+        static var blinkLively: String {
+            NSLocalizedString("face.blink_lively", value: "Lively", comment: "Blink pace option: blinks and expression changes are quicker than usual")
+        }
+
+        // The other face settings (colour / blink pace / auto-cycle / frame).
+        static var autoCycle: String {
+            NSLocalizedString("face.auto_cycle", value: "Dynamic Expressions", comment: "Toggle: the watch face changes expression on its own every few seconds")
+        }
+        static var autoCycleFooter: String {
+            NSLocalizedString("face.auto_cycle_footer", value: "The face switches between expressions on its own. Tapping the face on the watch still changes it right away.",
+                              comment: "Footer for the auto-cycle toggle")
+        }
+        static var blinkSpeed: String {
+            NSLocalizedString("face.blink_speed", value: "Blink Pace", comment: "Section header: how quickly the eyes blink")
+        }
+        static var eyeColor: String {
+            NSLocalizedString("face.eye_color", value: "Eye Color", comment: "Section header: the colour of the watch face's eyes")
+        }
+        static var followWatch: String {
+            NSLocalizedString("face.follow_watch", value: "Follow Watch", comment: "Eye-color option: don't override the colour the watch itself picked")
+        }
+        static var frame: String {
+            NSLocalizedString("face.frame", value: "Square Frame", comment: "Toggle: show a rounded-square outline around the watch face")
+        }
+        static var frameFooter: String {
+            NSLocalizedString("face.frame_footer", value: "Draws a rounded-square border around the eyes on the watch face.",
+                              comment: "Footer for the square-frame toggle")
+        }
     }
 
     // MARK: - Device Files

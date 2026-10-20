@@ -97,6 +97,18 @@ struct AppConfig: Codable, Equatable {
     /// ⚠️ This copy **exists only on the phone side**; the watch's copy is the one it stores itself after the push
     /// (see `WatchFaceStore`). Both sides are "newest version wins", so there's no sync conflict to speak of.
     var watchFaceStyle: String?
+    /// The watch face's eye colour as `RRGGBB` hex (no `#`). **`nil` = follow the watch's own
+    /// "Appearance" palette** — that watch-local preference stays authoritative until the user
+    /// picks a colour here. ★ 2026-10-20.
+    var watchEyeColor: String?
+    /// Blink pace for the watch face — `BotBlinkSpeed.rawValue`. `nil` = `normal`.
+    /// A bare tag, same reason as `watchFaceStyle`. ★ 2026-10-20.
+    var watchBlinkSpeed: String?
+    /// Whether the watch face's idle expression auto-cycles inside its square frame.
+    /// `nil` = `true` (the dynamic behaviour is the default). ★ 2026-10-20.
+    var watchFaceAutoCycle: Bool?
+    /// Whether the rounded-square frame is drawn around the watch face. `nil` = `true`.
+    var watchFaceFrame: Bool?
     /// Backlog size (in KB) above which the Wi-Fi fast-transfer button
     /// is offered on the device-files screen. 0 disables the suggestion
     /// and the button never appears.
@@ -147,6 +159,10 @@ struct AppConfig: Codable, Equatable {
         case a1ExtractCommand = "a1_extract_command"
         case a1RecordMode = "a1_record_mode"
         case watchFaceStyle = "watch_face_style"
+        case watchEyeColor = "watch_eye_color"
+        case watchBlinkSpeed = "watch_blink_speed"
+        case watchFaceAutoCycle = "watch_face_auto_cycle"
+        case watchFaceFrame = "watch_face_frame"
         case fastTransferThresholdKB = "fast_transfer_threshold_kb"
     }
 
@@ -176,6 +192,10 @@ struct AppConfig: Codable, Equatable {
             ? (try c.decodeIfPresent(Bool.self, forKey: .onDeviceASREnabled) ?? false)
             : false
         self.summaryTemplateKey = try c.decodeIfPresent(String.self, forKey: .summaryTemplateKey)
+        self.watchEyeColor = try c.decodeIfPresent(String.self, forKey: .watchEyeColor)
+        self.watchBlinkSpeed = try c.decodeIfPresent(String.self, forKey: .watchBlinkSpeed)
+        self.watchFaceAutoCycle = try c.decodeIfPresent(Bool.self, forKey: .watchFaceAutoCycle)
+        self.watchFaceFrame = try c.decodeIfPresent(Bool.self, forKey: .watchFaceFrame)
         self.onDeviceASROffMigrated = true
         // ⚠️ The "primary pointed at ondevice" fix-up deliberately does **not** live here.
         //   At decode time the Keychain secrets have not been re-attached yet, so every cloud
@@ -224,6 +244,10 @@ struct AppConfig: Codable, Equatable {
         a1ExtractCommand: String? = nil,
         a1RecordMode: String? = nil,
         watchFaceStyle: String? = nil,
+        watchEyeColor: String? = nil,
+        watchBlinkSpeed: String? = nil,
+        watchFaceAutoCycle: Bool? = nil,
+        watchFaceFrame: Bool? = nil,
         fastTransferThresholdKB: Int = 512
     ) {
         self.asrProviders = asrProviders
@@ -251,6 +275,10 @@ struct AppConfig: Codable, Equatable {
         self.a1ExtractCommand = a1ExtractCommand
         self.a1RecordMode = a1RecordMode
         self.watchFaceStyle = watchFaceStyle
+        self.watchEyeColor = watchEyeColor
+        self.watchBlinkSpeed = watchBlinkSpeed
+        self.watchFaceAutoCycle = watchFaceAutoCycle
+        self.watchFaceFrame = watchFaceFrame
         self.fastTransferThresholdKB = fastTransferThresholdKB
     }
 
