@@ -35,6 +35,11 @@
 "asr.auto_transcribe_after_download" = "导入的录音自动转录";
 "asr.auto_transcribe_min" = "最短时长：%d 秒";
 "asr.auto_transcribe_footer" = "手表传输、Wi-Fi 快传、卡片下载和实况录音落地后自动转录；转录完成后按下方开关自动生成摘要。短于最小时长的片段将被跳过。";
+
+// MARK: - 本地部署配置助手（2026-10-20）
+"setup.assistant_title" = "复制 AI 配置助手提示词";
+"setup.assistant_copied" = "已复制，粘贴给 ChatGPT 或 Claude Code";
+"setup.assistant_hint" = "在电脑上运行它，AI 会自动装好本地转录和 Ollama，并把要填进这里的地址打印给你。";
 "asr.local_vad" = "上传前去除静音";
 "asr.local_vad_footer" = "在本机上检测人声活动，将静音段去掉后再发送到转录服务，可降低上传量和转录费用。";
 "asr.background_keep_alive" = "切到后台也继续转录";

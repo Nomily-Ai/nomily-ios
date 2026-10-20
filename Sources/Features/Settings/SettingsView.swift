@@ -732,6 +732,11 @@ struct ASRProvidersView: View {
                 }
             }
             localProbeRow
+            // ★ 2026-10-20: the "I don't know what a faster-whisper server is" escape hatch.
+            // Copies a one-shot prompt the user pastes into ChatGPT / Claude Code on the
+            // computer that will run the server; the AI does the install and prints the
+            // host/port to type above.
+            SetupAssistantRow()
         } header: {
             Text(L10n.ASR.localASRServer)
         } footer: {
@@ -1520,6 +1525,10 @@ private struct OllamaSection: View {
                            model: modelBinding,
                            placeholder: "qwen2.5:3b",
                            load: { await loadModels() })
+
+            // ★ 2026-10-20: same escape hatch as the local-ASR section — one prompt for
+            // ChatGPT / Claude Code installs Ollama (LAN-exposed) and picks a model.
+            SetupAssistantRow()
         } header: {
             Text("Ollama")
         } footer: {

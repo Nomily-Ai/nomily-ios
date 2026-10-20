@@ -355,6 +355,23 @@ enum L10n {
         static var footer: String { NSLocalizedString("language.footer", comment: "") }
     }
 
+    // MARK: - Setup assistant ("one-prompt deploy" for local ASR + Ollama, 2026-10-20)
+
+    enum Setup {
+        static var assistantTitle: String {
+            NSLocalizedString("setup.assistant_title", value: "Copy AI Setup Prompt",
+                              comment: "Row under the local-ASR / Ollama config: copies the one-shot prompt for ChatGPT / Claude Code")
+        }
+        static var assistantCopied: String {
+            NSLocalizedString("setup.assistant_copied", value: "Copied — paste into ChatGPT or Claude Code",
+                              comment: "Confirmation shown after the setup prompt lands on the pasteboard")
+        }
+        static var assistantHint: String {
+            NSLocalizedString("setup.assistant_hint", value: "Run it on your computer; it installs local transcription + Ollama and prints the values to fill in here.",
+                              comment: "What the setup prompt does, so tapping the row needs no explanation elsewhere")
+        }
+    }
+
     // MARK: - ASR
 
     enum ASR {

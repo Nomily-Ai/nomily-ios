@@ -35,6 +35,11 @@
 "asr.auto_transcribe_after_download" = "Auto-transcribe imported recordings";
 "asr.auto_transcribe_min" = "Min duration: %ds";
 "asr.auto_transcribe_footer" = "Watch transfers, Wi-Fi fast transfer, card downloads and live recordings are transcribed on their own once they land. Clips shorter than the minimum duration are skipped. Pairs with the auto-summary toggle below.";
+
+// MARK: - Setup assistant (2026-10-20)
+"setup.assistant_title" = "Copy AI Setup Prompt";
+"setup.assistant_copied" = "Copied — paste into ChatGPT or Claude Code";
+"setup.assistant_hint" = "Run it on your computer; it installs local transcription + Ollama and prints the values to fill in here.";
 "asr.local_vad" = "Strip silence before upload";
 "asr.local_vad_footer" = "Voice activity detection runs on-device and removes silent stretches before sending audio to the transcription provider. Cuts upload size and ASR cost.";
 "asr.background_keep_alive" = "Keep transcribing in the background";
