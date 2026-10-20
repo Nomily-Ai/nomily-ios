@@ -203,11 +203,15 @@ enum SummaryPosterExporter {
             if bodyHeight > 8200 { break }
         }
 
+        // Divider block: 14pt above, the fill itself, 14pt below — this must
+        // mirror the draw-time advance exactly, or the business header band
+        // (sized from `headerHeight`) drifts into the first body line.
+        let dividerFillHeight: CGFloat = template == .business ? 1.5 : 7
         let headerHeight: CGFloat = {
             var h: CGFloat = 0
             if titleLayout.height > 0 { h += titleLayout.height + 18 }
             if !meta.isEmpty { h += metaText(meta, palette: p).height + 10 }
-            if h > 0 { h += 30 } // divider breathing room
+            if h > 0 { h += 14 + dividerFillHeight + 14 }
             return h
         }()
         let footerHeight: CGFloat = 118
@@ -227,8 +231,9 @@ enum SummaryPosterExporter {
             context.fill(CGRect(origin: .zero, size: size))
 
             // Business style: solid header band behind the title block.
+            // Exactly `margin + headerHeight` tall — the body starts right there.
             if template == .business {
-                let band = CGRect(x: 0, y: 0, width: posterWidth, height: margin + headerHeight + 26)
+                let band = CGRect(x: 0, y: 0, width: posterWidth, height: margin + headerHeight)
                 p.header.setFill()
                 context.fill(band)
             }
@@ -255,13 +260,12 @@ enum SummaryPosterExporter {
                 if template != .business {
                     p.accent.setFill()
                     // Accent underline: short, thick, left-aligned.
-                    context.fill(CGRect(x: margin, y: y, width: 92, height: 7))
-                    y += 7 + 14
+                    context.fill(CGRect(x: margin, y: y, width: 92, height: dividerFillHeight))
                 } else {
                     p.headerInk.withAlphaComponent(0.25).setFill()
-                    context.fill(CGRect(x: margin, y: y, width: posterWidth - margin * 2, height: 1.5))
-                    y += 1.5 + 14
+                    context.fill(CGRect(x: margin, y: y, width: posterWidth - margin * 2, height: dividerFillHeight))
                 }
+                y += dividerFillHeight + 14
             }
 
             // --- Body --------------------------------------------------
