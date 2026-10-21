@@ -1406,6 +1406,8 @@
 "plaud.marks_title" = "打点";
 "plaud.marks_count" = "%d 处打点";
 "plaud.marks_live" = "本次打点";
+"plaud.marks_waiting" = "按卡片上的打点键添加";
+"plaud.marks_after_stop" = "此固件在录音结束后回传打点数";
 "plaud.recording_now_on_card" = "卡片正在录音——停止后列表会自动刷新。";
 "plaud.transfer_header" = "传输";
 "plaud.delete_after_sync_footer" = "录音拉取到资料库后会从卡片上删除。关闭则卡片保留原件。";

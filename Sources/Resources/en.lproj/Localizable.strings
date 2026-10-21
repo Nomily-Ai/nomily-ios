@@ -1304,6 +1304,8 @@
 "plaud.marks_title" = "Marks";
 "plaud.marks_count" = "%d mark(s)";
 "plaud.marks_live" = "Marks this recording";
+"plaud.marks_waiting" = "Press the card's key to add one";
+"plaud.marks_after_stop" = "The card reports marks when the take ends";
 "plaud.recording_now_on_card" = "Recording on the card — the list refreshes when it stops.";
 "plaud.transfer_header" = "Transfer";
 "plaud.delete_after_sync_footer" = "Once a recording has been pulled into the library it is erased from the card. Off = the card keeps its copy.";

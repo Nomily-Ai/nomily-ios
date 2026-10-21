@@ -183,6 +183,8 @@ enum L10n {
             String(format: NSLocalizedString("plaud.marks_count", value: "%d mark(s)", comment: "How many bookmarks a recording carries; %d = number"), count)
         }
         static var marksLive: String { NSLocalizedString("plaud.marks_live", value: "Marks this recording", comment: "Live count of marks pressed during the current recording") }
+        static var marksWaiting: String { NSLocalizedString("plaud.marks_waiting", value: "Press the card's key to add one", comment: "Shown while recording and no mark has been reported yet") }
+        static var marksAfterStop: String { NSLocalizedString("plaud.marks_after_stop", value: "The card reports marks when the take ends", comment: "This firmware ignores the live mark query, so the count appears after stopping") }
         static var recordingNowOnCard: String { NSLocalizedString("plaud.recording_now_on_card", value: "Recording on the card — the list refreshes when it stops.", comment: "") }
         // ★ 2026-10-21 (3rd round): device info behind the pill tap, transfer prefs, progress
         static var transferHeader: String { NSLocalizedString("plaud.transfer_header", value: "Transfer", comment: "Section title for transfer settings / progress") }

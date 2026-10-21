@@ -159,6 +159,14 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// pushes them via `bleMarking`; there is no "how many" query mid-recording,
     /// so this is "what we heard" — same contract as the A1's remark count.
     @Published private(set) var recordMarks: [UInt32] = []
+    /// Mark count as the UI shows it. `max` of everything the card has told us,
+    /// because two independent channels can report it (see the marks poll):
+    ///   · `bleMarking(markList:)` — the answer to `getMarking(sessionId:)`,
+    ///     carries the timestamps;
+    ///   · `bleFileList` for the live session — `BleFile.penCollect`, the file's
+    ///     own counter. On firmware where `getMarking` answers nothing, this one
+    ///     still moves, and a single press must not be counted twice.
+    @Published private(set) var recordMarkCount = 0
     /// Sessions already pulled into the library. Mirrors the private
     /// `syncedSessions` set — that one lives behind `UserDefaults` and would not
     /// republish, so the card list could not show "already saved" after a pull.
@@ -230,6 +238,21 @@ final class PlaudDirectService: NSObject, ObservableObject {
     private var stalledSessions: Set<Int> = []
     /// How many files this pass had to skip (surfaced in the finish message).
     @Published private(set) var downloadSkipped = 0
+    /// True while the next `bleFileList` answer is the single-entry marks probe
+    /// (`getFile(sessionId:)`), not a card listing. See `bleFileList`.
+    private var fileProbeForMarks = false
+    /// Session the current `recordMarks` belong to, so a new take starts at zero.
+    private var marksSessionID: Int?
+    /// ★ 2026-10-21 (7th round): how many `getMarking` requests went out without
+    /// a single `bleMarking` answer. Hardware evidence (2 MB of SDK command log
+    /// from a Note Pro on V1.7): 52 requests, **zero** `recv-cmd:cmd 35` replies
+    /// — this firmware ignores `getMarking` entirely, live. So the probe gives up
+    /// after two silent attempts instead of injecting a dead command every few
+    /// seconds into the same channel that carries the audio.
+    private var markingProbeStrikes = 0
+    /// Set once the card ever answers `getMarking`. When false the UI says the
+    /// count arrives after the recording instead of showing a permanent "—".
+    @Published private(set) var marksAvailableLive = true
     private var currentExportSession: Int?
     /// Session ids already pulled into the library (persisted) — the card
     /// keeps files until deleted, so dedup is what makes re-syncs cheap.
@@ -619,6 +642,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
         liveStreaming = false
         livePCMBytes = 0
         clearRecordClock()
+        recordMarks = []
+        recordMarkCount = 0
+        marksSessionID = nil
+        fileProbeForMarks = false
         isRecording = false
         isPaused = false
         battery = nil
@@ -990,10 +1017,32 @@ final class PlaudDirectService: NSObject, ObservableObject {
                 // high-level agent has no such call: it lives on the low-level
                 // `bleAgent`. Without this poll the mark count stayed at 0 until
                 // the recording had finished (user: "打点没有实时同步到手机").
-                if self.isRecording {
-                    let sid = self.recordSessionID ?? PlaudDeviceAgent.shared.getCurrentSessionID()
-                    if sid > 0 {
+                //
+                // ★ 2026-10-21 (7th round, "打点数值不增加"): two fixes here.
+                //   · The poll is no longer gated on `isRecording`. That flag comes
+                //     from `blePenState`, and if a card reports anything but 4099
+                //     while recording (firmware dependent) the marks were never
+                //     asked for at all. What matters is "there is a live session".
+                //   · Every other tick also asks for the single file entry
+                //     (`getFile(sessionId:)` → `bleFileList` with one item) and
+                //     reads `penCollect`. If `getMarking` is a no-op on this
+                //     firmware, the file's own mark counter still moves.
+                if let sid = self.activeRecordSessionID {
+                    if self.markingProbeStrikes < 2 {
+                        self.markingProbeStrikes += 1
+                        log.info("plaud marks probe #\(self.markingProbeStrikes): getMarking sid=\(sid) (bleAgent=\(PlaudDeviceAgent.shared.bleAgent != nil))")
                         PlaudDeviceAgent.shared.bleAgent?.getMarking(sid)
+                        if self.markingProbeStrikes == 2, self.recordMarkCount == 0 {
+                            // Two requests, no `bleMarking` answer: stop pretending
+                            // a live count is coming and tell the UI the truth.
+                            DispatchQueue.main.async { self.marksAvailableLive = false }
+                        }
+                    } else if tick % 2 == 1 {
+                        // getMarking is being ignored on this firmware — fall back
+                        // to the file entry's own counter (cheap, one command).
+                        log.info("plaud marks fallback: getFile sid=\(sid)")
+                        self.fileProbeForMarks = true
+                        PlaudDeviceAgent.shared.getFile(sessionId: sid)
                     }
                 }
             }
@@ -1133,6 +1182,17 @@ final class PlaudDirectService: NSObject, ObservableObject {
             self.cardFileCount = mapped.count
             self.cardFiles = mapped
             self.cardFilesLoaded = true
+            // ★ 2026-10-21 (7th round): the ONLY dependable mark source on this
+            // firmware. `getMarking` is ignored while recording (52 requests, 0
+            // replies in the SDK log), but the finished file carries
+            // `penCollect` — so once the list includes the take we just made,
+            // that number is the real mark count and must replace the dead "—".
+            if let sid = self.marksSessionID,
+               let entry = mapped.first(where: { $0.sessionID == sid }),
+               entry.marks > 0 {
+                self.recordMarkCount = max(self.recordMarkCount, entry.marks)
+                self.marksAvailableLive = false
+            }
         }
         let fresh = files.filter {
             !syncedSessions.contains($0.sessionId) && !stalledSessions.contains($0.sessionId)
@@ -1339,6 +1399,17 @@ final class PlaudDirectService: NSObject, ObservableObject {
         recordSessionID = nil
         recordBytes = 0
         liveLevel = 0
+    }
+
+    /// Session id of the recording that is running right now, from either source.
+    ///
+    /// Used by the marks poll: `recordSessionID` is only set when *we* started
+    /// the take, while `getCurrentSessionID()` also covers a take started on the
+    /// card's own key. Returns nil as soon as the card says it is idle.
+    private var activeRecordSessionID: Int? {
+        if let sid = recordSessionID, sid > 0 { return sid }
+        let current = PlaudDeviceAgent.shared.getCurrentSessionID()
+        return current > 0 ? current : nil
     }
 
     /// Peak level of a 16-bit LE PCM block, normalised to 0…1.
@@ -1573,7 +1644,16 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             // Last-resort anchor: the card's own stamp is unknown here, so the
             // clock starts now and gets corrected by `blePcmData.millsec`.
             if self.recordStartedAt == nil { self.recordStartedAt = Date() }
-            if sid > 0 { self.recordSessionID = sid }
+            if sid > 0 {
+                self.recordSessionID = sid
+                // A take started on the card's key: marks belong to it, so start
+                // from zero instead of carrying the previous take's number over.
+                if self.marksSessionID != sid {
+                    self.recordMarks = []
+                    self.recordMarkCount = 0
+                    self.marksSessionID = sid
+                }
+            }
             self.liveStreaming = true
         }
         guard sid > 0 else { return }
@@ -1601,6 +1681,10 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.recordBytes = start
             self.recordNotice = nil
             self.recordMarks = []
+            self.recordMarkCount = 0
+            self.marksSessionID = sessionId
+            self.markingProbeStrikes = 0
+            self.marksAvailableLive = true
             // `startTime` is the card's own start stamp (unix seconds). Using it
             // keeps the clock honest when we TAKE OVER a recording that was
             // started by the physical key before the app was listening.
@@ -1700,9 +1784,17 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
     /// Bookmark pressed on the card ("打点"). Pushed while recording, so the app
     /// can show the count live instead of only finding out after the transfer.
     func bleMarking(sessionId: Int, status: Int, markList: [UInt32]) {
-        log.info("plaud marking sid=\(sessionId) status=\(status) count=\(markList.count)")
+        // ★ Log the head of the list, not just its length: when the count "does
+        // not increase" the question is always *what* the card sent — an empty
+        // list, a stale one, or the same one repeated.
+        let head = markList.prefix(6).map(String.init).joined(separator: ",")
+        log.info("plaud marking sid=\(sessionId) status=\(status) count=\(markList.count) first=[\(head)]")
         DispatchQueue.main.async {
+            self.markingProbeStrikes = 0
+            self.marksAvailableLive = true
             self.recordMarks = markList
+            self.recordMarkCount = max(self.recordMarkCount, markList.count)
+            self.marksSessionID = sessionId
         }
     }
 
@@ -1760,6 +1852,24 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
     }
 
     func bleFileList(bleFiles: [BleFile]) {
+        // ★ Marks fallback (7th round): the poll asks for ONE file entry while
+        // recording (`getFile(sessionId:)`) so `penCollect` — the card's own mark
+        // counter — can be read even when `getMarking` answers nothing. That
+        // answer must not be mistaken for a full card listing (it would blank the
+        // list down to a single row).
+        if fileProbeForMarks {
+            fileProbeForMarks = false
+            if let sid = activeRecordSessionID,
+               let entry = bleFiles.first(where: { $0.sessionId == sid }) {
+                let collect = entry.penCollect
+                log.info("plaud marks fallback sid=\(sid) penCollect=\(collect)")
+                DispatchQueue.main.async {
+                    self.recordMarkCount = max(self.recordMarkCount, collect)
+                }
+                return
+            }
+            // Fall through to the normal handling if the entry was not there.
+        }
         handleFileList(bleFiles)
     }
 

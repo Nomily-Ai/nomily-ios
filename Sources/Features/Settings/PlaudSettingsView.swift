@@ -568,14 +568,29 @@ struct PlaudCardFilesView: View {
             // every 3 s via `bleAgent.getMarking(sessionId:)` — `bleMarking` is
             // an answer, not a push, so without the poll the count only appeared
             // after the recording ended.
-            if direct.isRecording || !direct.recordMarks.isEmpty {
+            if direct.isRecording || direct.recordMarkCount > 0 {
                 HStack {
                     Label(L10n.Plaud.marksLive, systemImage: "bookmark")
                     Spacer()
-                    Text(direct.recordMarks.isEmpty
-                         ? "—"
-                         : L10n.Plaud.marksCount(direct.recordMarks.count))
-                        .foregroundStyle(direct.recordMarks.isEmpty ? Color.secondary : Color.appAccent)
+                    // Two honest states (2026-10-21, 7th round):
+                    //  · the card answers `getMarking` → live count;
+                    //  · it does not (Note Pro V1.7 ignores cmd 0x23 — verified in
+                    //    the SDK's own command log) → say the number lands after
+                    //    the take, and fill it from the finished file's
+                    //    `penCollect` instead of leaving a dead "—".
+                    Group {
+                        if direct.recordMarkCount > 0 {
+                            Text(L10n.Plaud.marksCount(direct.recordMarkCount))
+                                .foregroundStyle(Color.appAccent)
+                        } else if direct.marksAvailableLive {
+                            Text(L10n.Plaud.marksWaiting)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(L10n.Plaud.marksAfterStop)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.body)
                 }
             }
             if let notice = direct.recordNotice {
@@ -923,12 +938,12 @@ struct PlaudRecordControl: View {
                 }
                 // "N marks so far" — the card itself gives no feedback for its
                 // bookmark key, so this badge is the only proof a press landed.
-                if !direct.recordMarks.isEmpty {
-                    Label("\(direct.recordMarks.count)", systemImage: "bookmark.fill")
+                if direct.recordMarkCount > 0 {
+                    Label("\(direct.recordMarkCount)", systemImage: "bookmark.fill")
                         .labelStyle(.titleAndIcon)
                         .font(.caption2.weight(.semibold).monospacedDigit())
                         .foregroundStyle(.orange)
-                        .accessibilityLabel(L10n.Plaud.marksCount(direct.recordMarks.count))
+                        .accessibilityLabel(L10n.Plaud.marksCount(direct.recordMarkCount))
                 }
             }
             Button {
