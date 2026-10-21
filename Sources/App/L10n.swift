@@ -93,6 +93,37 @@ enum L10n {
         static var guideAudio: String { NSLocalizedString("plaud.guide_audio", value: "Pulls the ORIGINAL audio from the PLAUD cloud — never the official transcript", comment: "") }
         static var guideKeys: String { NSLocalizedString("plaud.guide_keys", value: "Transcription and summaries always use your own ASR/LLM keys", comment: "") }
         static var guideOfficialApp: String { NSLocalizedString("plaud.guide_app", value: "The official PLAUD app keeps working untouched — nothing is unbound", comment: "") }
+
+        // Direct connect (SDK takeover) — the primary mode (2026-10-21)
+        static var directHeader: String { NSLocalizedString("plaud.direct_header", value: "Direct connect (recommended)", comment: "SDK direct-connect section header") }
+        static var directFooter: String { NSLocalizedString("plaud.direct_footer", value: "Scans the card over Bluetooth and pulls the ORIGINAL audio files directly — no PLAUD account involved. First takeover requires unbinding the card once in the official PLAUD app (recordings on the card are kept).", comment: "") }
+        static var clientId: String { NSLocalizedString("plaud.client_id", value: "Client ID", comment: "PLAUD developer Client ID field") }
+        static var clientSecret: String { NSLocalizedString("plaud.client_secret", value: "Client Secret", comment: "PLAUD developer Client Secret field") }
+        static var domain: String { NSLocalizedString("plaud.domain", value: "Platform domain", comment: "PLAUD developer platform host") }
+        static var devHint: String { NSLocalizedString("plaud.dev_hint", value: "One-time setup: get the Client ID and Client Secret at dev.plaud.ai. Your PLAUD app account (phone or email) is NOT involved.", comment: "") }
+        static var directActivate: String { NSLocalizedString("plaud.direct_activate", value: "Activate direct connect", comment: "") }
+        static var directActivated: String { NSLocalizedString("plaud.direct_activated", value: "Direct connect active", comment: "") }
+        static var scan: String { NSLocalizedString("plaud.scan", value: "Scan for device", comment: "") }
+        static var scanning: String { NSLocalizedString("plaud.scanning", value: "Scanning…", comment: "") }
+        static var connect: String { NSLocalizedString("plaud.connect", value: "Connect", comment: "") }
+        static func connectedTo(_ sn: String) -> String {
+            String(format: NSLocalizedString("plaud.connected_to", value: "Connected: %@", comment: ""), sn)
+        }
+        static var syncFromCard: String { NSLocalizedString("plaud.sync_from_card", value: "Pull recordings from card", comment: "") }
+        static var deleteAfterSync: String { NSLocalizedString("plaud.delete_after_sync", value: "Delete from card after pull", comment: "") }
+        static var deactivate: String { NSLocalizedString("plaud.deactivate", value: "Deactivate direct connect", comment: "") }
+        static var pairRejected: String { NSLocalizedString("plaud.pair_rejected", value: "The card refused the connection — unbind it once in the official PLAUD app (Settings → device → unbind), then retry.", comment: "") }
+        static var cloudNote: String { NSLocalizedString("plaud.cloud_note", value: "Optional compatibility path. Requires a PLAUD account registered with an EMAIL (phone-number accounts are rejected). The card stays bound to the official app.", comment: "") }
+        static func syncStarting(_ count: Int) -> String {
+            String(format: NSLocalizedString("plaud.sync_starting", value: "Pulling %d recording(s)…", comment: ""), count)
+        }
+        static func syncDownloading(_ index: Int) -> String {
+            String(format: NSLocalizedString("plaud.sync_downloading", value: "Transferring file %d…", comment: ""), index)
+        }
+        static var syncDone: String { NSLocalizedString("plaud.sync_done", value: "All recordings pulled.", comment: "") }
+        static func syncFailed(_ msg: String) -> String {
+            String(format: NSLocalizedString("plaud.sync_failed", value: "Pull failed: %@", comment: ""), msg)
+        }
     }
 
     enum Settings {
