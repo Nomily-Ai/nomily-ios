@@ -116,6 +116,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
     @Published private(set) var downloadSpeed: String = ""
     @Published private(set) var downloadDone: Int = 0
     @Published private(set) var downloadTotal: Int = 0
+    /// User-visible card name — the custom alias when one is set, otherwise the
+    /// model name. Written by `rename(to:)` and mirrored into the device ledger
+    /// so Settings, the pill and the home row all agree.
+    @Published private(set) var displayName: String = "PLAUD"
     /// Live device vitals for the device-page card (populated by the SDK
     /// power/storage callbacks; nil until the card reports them).
     @Published private(set) var battery: Int?
@@ -214,6 +218,8 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// (device pages), so the answer must NOT kick off a download queue — the
     /// user only asked to look.
     private var fileListProbeOnly = false
+    /// Rate limit for `handleExportProgress` — the SDK reports per packet.
+    private var lastProgressPublish = Date.distantPast
     /// SN we are trying to re-bind automatically (`reconnect()`). Cleared as
     /// soon as the card is seen or the attempt is abandoned.
     private var reconnectTarget: String?
@@ -290,11 +296,52 @@ final class PlaudDirectService: NSObject, ObservableObject {
         sn.hasPrefix("882") ? "PLAUD NotePin S" : "PLAUD Note Pro"
     }
 
+    /// The name to show for a card: the user's alias if they renamed it, the
+    /// product name otherwise. Keyed by SN so the alias survives reconnects and
+    /// a second card keeps its own name.
+    static func storedName(for sn: String) -> String {
+        let alias = UserDefaults.standard.string(forKey: "plaud.name.\(sn)") ?? ""
+        return alias.isEmpty ? modelName(for: sn) : alias
+    }
+
+    /// Rename the card. Empty input falls back to the product name.
+    ///
+    /// Why a rename lives on the phone and not on the card: the SDK's
+    /// `setDeviceName` writes the BLE advertising name, which is shared by every
+    /// phone that ever pairs with it — and a wrong name there would break
+    /// reconnection for the official app too. A local alias is the reversible
+    /// choice, and it is what the other cards do as well.
+    func rename(to newName: String) {
+        let sn: String
+        if let paired = pairedSN {
+            sn = paired
+        } else if case .connected(let connected) = phase {
+            sn = connected
+        } else {
+            return
+        }
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let final = trimmed.isEmpty ? Self.modelName(for: sn) : trimmed
+        if final == Self.modelName(for: sn) {
+            UserDefaults.standard.removeObject(forKey: "plaud.name.\(sn)")
+        } else {
+            UserDefaults.standard.set(final, forKey: "plaud.name.\(sn)")
+        }
+        displayName = final
+        // The ledger row (Settings → Devices) and the pill both read this name.
+        let ledger = Self.ledgerID(for: sn)
+        Task { @MainActor [weak self] in
+            self?.configService?.renameDevice(id: ledger, name: final)
+        }
+    }
+
     private override init() {
         let d = UserDefaults.standard
         isConfigured = !(d.string(forKey: "plaud.client_id") ?? "").isEmpty
             && !(d.string(forKey: "plaud.client_secret") ?? "").isEmpty
-        pairedSN = d.string(forKey: "plaud.paired_sn")
+        let storedSN = d.string(forKey: "plaud.paired_sn")
+        pairedSN = storedSN
+        if let sn = storedSN { displayName = Self.storedName(for: sn) }
         deleteAfterSync = d.bool(forKey: "plaud.delete_after_sync")
         syncedSessions = Set(d.array(forKey: "plaud.synced_sessions") as? [Int] ?? [])
         pulledSessions = syncedSessions
@@ -584,6 +631,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
 
     /// Pull battery/charging straight from the card.
     func refreshVitals() {
+        // Same rule as the state poll: no chatter on the link while a file is
+        // moving (this is called from `onAppear`/`onChange`, which fire exactly
+        // when the user opens a page mid-transfer).
+        guard !isSyncing else { return }
         PlaudDeviceAgent.shared.getChargingState()
         PlaudDeviceAgent.shared.getState()
         PlaudDeviceAgent.shared.getStorage()
@@ -616,9 +667,11 @@ final class PlaudDirectService: NSObject, ObservableObject {
             setRecordNotice(L10n.Plaud.recordingNow)
             return
         }
-        guard !isSyncing else {
-            // A batch owns the card's serial command queue; a delete squeezed
-            // into it would desync the bookkeeping on both ends.
+        // ★ 2026-10-21 (4th round): deleting used to be blocked whenever a
+        // transfer was running — and since the card auto-pulls, a transfer is
+        // running most of the time, so the swipe button looked dead ("点击删除
+        // 不了"). Only the file that is *currently* being exported has to wait.
+        guard currentExportSession != file.sessionID else {
             setSyncMessage(L10n.Plaud.recordBusy)
             return
         }
@@ -638,10 +691,11 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// recorder cards. `ConfigService` is main-actor bound and this is called
     /// from the SDK's callback queue, hence the hop.
     private func rememberInLedger(sn: String) {
+        let name = Self.storedName(for: sn)
         Task { @MainActor [weak self] in
             self?.configService?.rememberDevice(
                 id: Self.ledgerID(for: sn),
-                name: Self.modelName(for: sn),
+                name: name,
                 isRecorder: true
             )
         }
@@ -665,10 +719,28 @@ final class PlaudDirectService: NSObject, ObservableObject {
     private func startStatePolling() {
         statePollTask?.cancel()
         statePollTask = Task { [weak self] in
+            var tick = 0
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 guard let self, !Task.isCancelled else { return }
                 guard self.phase.isConnected else { continue }
+                // ★ Never talk to the card mid-transfer (2026-10-21: "the
+                // transfer stutters"). Every command we send is queued ahead of
+                // the file packets on the same serial BLE channel, so a 3 s
+                // heartbeat of getState/getChargingState (plus getMarking) is
+                // exactly what makes progress freeze and jump. The transfer
+                // owns the link while it runs; the UI already shows its bar.
+                if self.isSyncing { continue }
+                // ★ Safety net for "卡片上有录音则自动传输" (4th round): the
+                // event paths (bind / record-stop) cover the common cases, but a
+                // card-side recording that starts AND stops between two state
+                // polls would otherwise sit unpulled forever. Every ~30 s, while
+                // idle, ask for the list — it only queues files we don't have.
+                tick += 1
+                if tick % 10 == 0 {
+                    self.autoPullNewRecordings()
+                    continue
+                }
                 PlaudDeviceAgent.shared.getState()
                 PlaudDeviceAgent.shared.getChargingState()
                 // ★ Marks ("打点") do NOT arrive on their own while recording —
@@ -872,6 +944,14 @@ final class PlaudDirectService: NSObject, ObservableObject {
         // are no longer exporting (user deleted it / cancelled) must not move
         // the bar.
         guard currentExportSession == sessionId else { return }
+        // ★ Throttle (2026-10-21 "the transfer stutters"): the callback fires for
+        // every packet — dozens of times a second. Publishing each one rebuilds
+        // the whole file list on the main thread, which competes with the SDK's
+        // own decoding and *looks* like a stutter. 5 updates/s is all a progress
+        // bar can show anyway.
+        let now = Date()
+        guard progress >= 100 || now.timeIntervalSince(lastProgressPublish) > 0.2 else { return }
+        lastProgressPublish = now
         let speed = PlaudDeviceAgent.shared.getFormattedDownloadSpeed()
         DispatchQueue.main.async {
             self.downloadProgress = min(1, max(0, Double(progress) / 100))
@@ -1109,6 +1189,9 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         log.info("plaud bound: \(sn, privacy: .public)")
         pairedSN = sn
         UserDefaults.standard.set(sn, forKey: "plaud.paired_sn")
+        // Keep the user's alias across reconnects (and across cards, since it is
+        // keyed by SN) instead of snapping back to the product name.
+        DispatchQueue.main.async { self.displayName = Self.storedName(for: sn) }
         // A bound card is one of "my devices" now — same ledger the other
         // recorder cards live in, so it appears in Settings → Devices.
         rememberInLedger(sn: sn)

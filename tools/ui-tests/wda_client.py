@@ -187,6 +187,37 @@ class WDA:
         path.write_bytes(base64.b64decode(blob))
         return path
 
+    def send_keys(self, text: str) -> None:
+        """Type into the focused element (alert TextField, search box, ...)."""
+        assert self.session_id, "no session"
+        self._request("POST", f"/session/{self.session_id}/wda/keys", {"value": [text]})
+
+    # -- element-handle helpers (for clear-then-type) ----------------------
+    @staticmethod
+    def _element_id(value: dict) -> str:
+        for key in ("element-6066-11e4-a52e-4f735466cecf", "ELEMENT"):
+            if key in value:
+                return value[key]
+        raise KeyError(f"no element id in {value}")
+
+    def element(self, strategy: str, selector: str) -> str:
+        assert self.session_id, "no session"
+        res = self._request("POST", f"/session/{self.session_id}/element",
+                            {"using": strategy, "value": selector})
+        return self._element_id(res["value"])
+
+    def element_clear(self, eid: str) -> None:
+        self._request("POST", f"/session/{self.session_id}/element/{eid}/clear")
+
+    def element_set(self, eid: str, text: str) -> None:
+        self._request("POST", f"/session/{self.session_id}/element/{eid}/value",
+                      {"value": [text]})
+
+    def replace_text(self, strategy: str, selector: str, text: str) -> None:
+        eid = self.element(strategy, selector)
+        self.element_clear(eid)
+        self.element_set(eid, text)
+
     # -- OCR-backed helpers ------------------------------------------------
     def texts(self, shot: Path | None = None) -> list[TextBox]:
         image = shot or self.screenshot(ARTIFACTS / "_ocr.png")

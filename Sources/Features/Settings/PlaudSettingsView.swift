@@ -67,8 +67,18 @@ struct DirectConnectSection: View {
     @State private var message: String?
     @State private var showFactoryConfirm = false
     @State private var releasedNote = false
+    @State private var showRename = false
+    @State private var nameDraft = ""
 
     var body: some View {
+        nameSection
+            .alert(L10n.Plaud.rename, isPresented: $showRename) {
+                TextField(L10n.Plaud.deviceName, text: $nameDraft)
+                Button(L10n.Common.save) { direct.rename(to: nameDraft) }
+                Button(L10n.Common.cancel, role: .cancel) {}
+            } message: {
+                Text(L10n.Plaud.renameMessage)
+            }
         mainSection
         if direct.isConfigured {
             transferPrefsSection
@@ -210,35 +220,11 @@ struct DirectConnectSection: View {
                 .foregroundStyle(.secondary)
             }
         }
-        if direct.isRecording {
-            HStack {
-                Label(L10n.Plaud.recordingElapsed(PlaudCardFilesView.elapsedText(direct)),
-                      systemImage: "record.circle")
-                    .foregroundStyle(.red)
-                Spacer()
-                Button(L10n.Plaud.stopRecord, role: .destructive) {
-                    direct.stopRecording()
-                }
-            }
-        } else if direct.isPaused {
-            HStack {
-                Label(L10n.Plaud.recordingPaused, systemImage: "pause.circle")
-                    .foregroundStyle(.orange)
-                Spacer()
-                Button(L10n.Plaud.resumeRecord) { direct.resumeRecording() }
-            }
-        } else {
-            Button {
-                direct.startRecording()
-            } label: {
-                Label(L10n.Plaud.startRecord, systemImage: "record.circle")
-            }
-        }
-        if let notice = direct.recordNotice {
-            Text(notice).font(.footnote).foregroundStyle(.orange)
-        }
-        // ★ History count (2026-10-21 user request "录音跟历史条数"): how many
-        // recordings the card is holding right now, re-readable on demand.
+        // ★ The record button does NOT live here (2026-10-21: "录音按键不是在
+        // 设备信息里面"). Recording is a daily action and belongs on the home
+        // device page, right above the card's file list — device info is for
+        // identity, capacity and connection housekeeping.
+        // ★ History count: how many recordings the card is holding right now.
         // "Not read yet" instead of 0 — an unread count is not a zero.
         HStack {
             Text(L10n.Plaud.cardRecordings)
@@ -253,17 +239,57 @@ struct DirectConnectSection: View {
             .buttonStyle(.borderless)
             .accessibilityLabel(L10n.Plaud.refresh)
         }
+        // ★ Storage as a bar (2026-10-21: "设备内存展示是进度条，用了多少剩下多少").
+        // A bare "62.5 GB / 62.5 GB" line made the user do the arithmetic; the
+        // bar answers "how full is it" at a glance, and the two labels split
+        // used from free.
         if let total = direct.storageTotal, let free = direct.storageFree, total > 0 {
-            HStack {
-                Text(L10n.TicNoteCard.storageFree)
-                Spacer()
-                Text(PlaudCardFilesView.storageLine(total: total, free: free)).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 6) {
+                ProgressView(value: Double(max(0, total - free)), total: Double(total))
+                    .progressViewStyle(.linear)
+                HStack(spacing: 8) {
+                    Text(L10n.Plaud.storageUsed(PlaudCardFilesView.sizeText(total - free)))
+                    Spacer()
+                    Text(L10n.Plaud.storageLeft(PlaudCardFilesView.sizeText(free)))
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
             }
+            .padding(.vertical, 2)
         }
         Button(L10n.Plaud.syncFromCard) { direct.syncFromCard() }
             .disabled(direct.isSyncing)
 
         Button(L10n.Plaud.disconnect) { direct.disconnect() }
+    }
+
+    /// Name + rename (2026-10-21: "需要支持修改设备名称").
+    ///
+    /// Shown whenever we know which card this is (`pairedSN` or a live link), so
+    /// the name can be fixed from Settings even while the card is asleep.
+    @ViewBuilder
+    private var nameSection: some View {
+        if direct.pairedSN != nil || direct.phase.isConnected {
+            Section {
+                HStack {
+                    Text(L10n.Plaud.deviceName)
+                    Spacer()
+                    Text(direct.displayName)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        nameDraft = direct.displayName
+                        showRename = true
+                    } label: {
+                        Image(systemName: "pencil")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(L10n.Plaud.rename)
+                }
+            } header: {
+                Text(L10n.Plaud.deviceInfoHeader)
+            }
+        }
     }
 
     /// Transfer preferences (2026-10-21 request: "add an auto-delete-after-
@@ -368,7 +394,7 @@ struct PlaudCardFilesView: View {
     private var cardSN: String? { connectedSN ?? direct.pairedSN }
 
     private var cardName: String {
-        if let sn = cardSN { return PlaudDirectService.modelName(for: sn) }
+        if cardSN != nil { return direct.displayName }
         return "PLAUD"
     }
 
@@ -605,7 +631,11 @@ struct PlaudCardFilesView: View {
             } label: {
                 Label(L10n.Plaud.deleteFromCard, systemImage: "trash")
             }
-            .disabled(direct.isSyncing || direct.isRecording)
+            // Only a live recording blocks it: a running transfer must NOT
+            // (that is what made the swipe button look dead, since the card
+            // auto-pulls almost continuously). The service refuses only for the
+            // single file currently being exported.
+            .disabled(direct.isRecording)
         }
     }
 
@@ -618,7 +648,7 @@ struct PlaudCardFilesView: View {
         return fmt.string(from: date)
     }
 
-    private static func sizeText(_ bytes: Int) -> String {
+    static func sizeText(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 

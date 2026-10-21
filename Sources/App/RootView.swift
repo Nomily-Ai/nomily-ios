@@ -103,7 +103,7 @@ struct RootView: View {
             if let newest = knownDevices.first, newest.id != ledgerID { return nil }
         }
         return PlaudPillState(
-            name: PlaudDirectService.modelName(for: sn),
+            name: plaudDirect.displayName,
             sn: sn,
             isConnected: plaudDirect.phase.isConnected,
             isRecording: plaudDirect.isRecording,

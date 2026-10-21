@@ -1299,6 +1299,12 @@
 "plaud.delete_after_sync_footer" = "Once a recording has been pulled into the library it is erased from the card. Off = the card keeps its copy.";
 "plaud.device_info_hint" = "Shows the card's serial number, firmware, battery, storage and connection actions.";
 "plaud.downloading_single" = "Transferring…";
+"plaud.device_info_header" = "Device";
+"plaud.device_name" = "Name";
+"plaud.rename" = "Rename";
+"plaud.rename_message" = "Only changes the name in this app — the card itself is untouched. Leave it empty to go back to the model name.";
+"plaud.storage_used" = "Used %@";
+"plaud.storage_left" = "Free %@";
 "plaud.not_connected" = "Connect the card first.";
 "plaud.card_files" = "Recordings on the card";
 "plaud.card_files_empty" = "No recordings on the card.";

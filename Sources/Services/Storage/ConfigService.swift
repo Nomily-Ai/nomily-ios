@@ -283,6 +283,19 @@ final class ConfigService: ObservableObject {
         config.devices[id]?.isRecorderDevice ?? false
     }
 
+    /// Rename a known device **without** touching `lastConnected`.
+    ///
+    /// `rememberDevice` also stamps "just seen", which would silently reorder the
+    /// device list (and the top-left pill picks the newest row) — a rename must
+    /// not pretend the device was just used.
+    func renameDevice(id: String, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, var record = config.devices[id], record.name != trimmed else { return }
+        record.name = trimmed
+        config.devices[id] = record
+        scheduleSave()
+    }
+
     /// Drop a ledger entry. Used when a card is **released/unbound** (PLAUD
     /// hand-back, recorder unbind): the device no longer belongs to this
     /// install, so keeping a row for it would be a lie in the device list.
