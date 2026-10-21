@@ -732,6 +732,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
                 && !pendingDownloads.contains { $0.sessionId == file.sessionID }
         }
         guard !unique.isEmpty else { return }
+        // A manual pull clears the "gave up" mark: otherwise the 30 s fallback
+        // would keep excluding that session forever and the user's retry would
+        // never become part of normal auto-pull again.
+        unique.forEach { stalledSessions.remove($0.sessionID) }
         let bles = unique.map { BleFile("", $0.sessionID, $0.size) }
         pendingDownloads.append(contentsOf: bles)
         if isSyncing {
@@ -832,6 +836,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
         DispatchQueue.main.async {
             self.downloadProgress = 0
             self.downloadSpeed = ""
+            self.downloadSkipped = 0
         }
         _ = keepCardFiles
     }
