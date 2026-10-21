@@ -2967,6 +2967,32 @@ enum L10n {
             value: "Device not found. Press and hold the device button for 1 second to wake it, then try again.",
             comment: "Manual reconnect timed out because a sleeping known device was not advertising"
         ) }
+        // ★ 2026-10-21: category-first add flow
+        static var addTitle: String { NSLocalizedString("scanner.add_title", value: "Add device", comment: "Title of the device-type pick page") }
+        static var pickHint: String { NSLocalizedString("scanner.pick_hint", value: "Pick a device type, then scan for it", comment: "Hint on the device-type pick page") }
+        static var categoryVobot: String { NSLocalizedString("scanner.category_vobot", value: "Vobot (D·NOTE)", comment: "Device family card") }
+        static var categoryTicnote: String { NSLocalizedString("scanner.category_ticnote", value: "TicNote", comment: "Device family card") }
+        static var categoryA1: String { NSLocalizedString("scanner.category_a1", value: "DingTalk A1", comment: "Device family card") }
+        static var categoryPlaud: String { NSLocalizedString("scanner.category_plaud", value: "PLAUD", comment: "Device family card") }
+        static var categoryWatch: String { NSLocalizedString("scanner.category_watch", value: "Apple Watch", comment: "Device family card") }
+        static var actionScan: String { NSLocalizedString("scanner.action_scan", value: "Scan to connect", comment: "Card subtitle: BLE scan flow") }
+        static var actionSDK: String { NSLocalizedString("scanner.action_sdk", value: "Official SDK direct connect", comment: "Card subtitle: PLAUD SDK flow") }
+        static var actionWatch: String { NSLocalizedString("scanner.action_watch", value: "Install the Watch app", comment: "Card subtitle: Apple Watch flow") }
+        static func noNewInCategory(_ name: String) -> String {
+            String(format: NSLocalizedString(
+                "scanner.no_new_in_category",
+                value: "No new %@ nearby. Make sure the device is on and in pairing mode.",
+                comment: "Empty scan list for one specific device family"), name)
+        }
+    }
+
+    /// Apple Watch install guide (its "add" action is installing the app).
+    enum WatchAdd {
+        static var title: String { NSLocalizedString("watchadd.title", value: "Install on Apple Watch", comment: "") }
+        static var step1: String { NSLocalizedString("watchadd.step1", value: "Open the “Watch” app on this iPhone", comment: "") }
+        static var step2: String { NSLocalizedString("watchadd.step2", value: "Go to “My Watch” → scroll to “AVAILABLE APPS”", comment: "") }
+        static var step3: String { NSLocalizedString("watchadd.step3", value: "Find Nomily and tap “Install”, then open it on the watch", comment: "") }
+        static var note: String { NSLocalizedString("watchadd.note", value: "Recordings made on the watch sync into the library automatically — no extra pairing needed here.", comment: "") }
     }
 
     // MARK: - Connection Pill

@@ -1,33 +1,84 @@
 import SwiftUI
 
+/// Add-device sheet. ★ 2026-10-21 redesign (user request): pick a **device
+/// type first**, then scan — instead of one mixed BLE list. The PLAUD card
+/// opens its own SDK flow and Apple Watch opens an install guide; the other
+/// three start a scan filtered to that family only.
 struct ScannerSheet: View {
     @EnvironmentObject private var bluetooth: BluetoothCoordinator
     @EnvironmentObject private var configService: ConfigService
     @Environment(\.dismiss) private var dismiss
     let onConnected: () -> Void
 
+    /// Device families offered on the pick page. PLAUD is handled as its own
+    /// sheet action (official SDK, separate radio session) and Apple Watch is
+    /// an install guide, so neither is a scan target here.
+    enum AddCategory: String, CaseIterable, Identifiable {
+        case vobot
+        case ticnote
+        case dingtalkA1
+        case appleWatch
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .vobot: return L10n.Scanner.categoryVobot
+            case .ticnote: return L10n.Scanner.categoryTicnote
+            case .dingtalkA1: return L10n.Scanner.categoryA1
+            case .appleWatch: return L10n.Scanner.categoryWatch
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .vobot, .ticnote, .dingtalkA1: return L10n.Scanner.actionScan
+            case .appleWatch: return L10n.Scanner.actionWatch
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .vobot: return "hifispeaker.2"
+            case .ticnote: return "waveform.circle"
+            case .dingtalkA1: return "key.horizontal"
+            case .appleWatch: return "applewatch"
+            }
+        }
+    }
+
+    @State private var category: AddCategory?
     @State private var connecting: DiscoveredPeripheral?
     @State private var connectError: String?
     /// Recording cards that are currently connecting (non D·NOTE). Separate from `connecting` because after connecting it goes into
     /// another flow (`RecorderSheet`), not the D·NOTE device page.
     @State private var connectingRecorder: DiscoveredRecorder?
     @State private var openedRecorder: DiscoveredRecorder?
-    /// ★ 2026-10-21: PLAUD (Note Pro / Note Pin S) uses the official SDK and
-    /// its own direct-connect flow — it does NOT ride the generic scan list
-    /// (that list only shows D·NOTE + our own recorder cards). The entry row
-    /// below opens `PlaudAddSheet`.
     @State private var showPlaudAdd = false
+    @State private var showWatchGuide = false
 
     var body: some View {
         NavigationStack {
-            content
-                .navigationTitle(L10n.Scanner.scan)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button(L10n.Common.done) { dismiss() }
-                    }
+            Group {
+                if category == nil {
+                    categoryGrid
+                } else {
+                    scanContent
+                }
+            }
+            .navigationTitle(category == nil ? L10n.Scanner.addTitle : L10n.Scanner.scan)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if category != nil {
                     ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            category = nil
+                            bluetooth.stopScan()
+                        } label: {
+                            Image(systemName: "chevron.backward")
+                        }
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
                         if bluetooth.isScanning {
                             ProgressView()
                         } else {
@@ -36,13 +87,19 @@ struct ScannerSheet: View {
                         }
                     }
                 }
-                .alert(L10n.Scanner.connectionFailed, isPresented: errorBinding, actions: {
-                    Button(L10n.Common.ok, role: .cancel) { connectError = nil }
-                }, message: { Text(connectError ?? "") })
-                .safeAreaInset(edge: .bottom) { plaudAddRow }
-                .sheet(isPresented: $showPlaudAdd) {
-                    PlaudAddSheet()
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(L10n.Common.done) { dismiss() }
                 }
+            }
+            .alert(L10n.Scanner.connectionFailed, isPresented: errorBinding, actions: {
+                Button(L10n.Common.ok, role: .cancel) { connectError = nil }
+            }, message: { Text(connectError ?? "") })
+            .sheet(isPresented: $showPlaudAdd) {
+                PlaudAddSheet()
+            }
+            .sheet(isPresented: $showWatchGuide) {
+                WatchAddGuideSheet()
+            }
         }
         // ★ 2026-10-14: Pass `.deviceInfo` — user quote
         //   > "When adding a device, do not show recording time; directly display device information,
@@ -66,53 +123,86 @@ struct ScannerSheet: View {
             })
         }
         .onAppear {
-            bluetooth.startScan()
+            // Scanning starts only once a family is picked — the pick page
+            // itself must not burn radio time for a type the user doesn't want.
+            if category != nil { bluetooth.startScan() }
         }
         .onDisappear {
             bluetooth.stopScan()
         }
     }
 
-    /// Fixed "add a PLAUD card" row — visible in every scanner state
-    /// (empty / no-new-devices / list) so the entry point never disappears.
-    private var plaudAddRow: some View {
-        Button {
-            showPlaudAdd = true
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "waveform")
-                    .font(.title3)
-                    .foregroundStyle(Color.appAccent)
-                    .frame(width: 28)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.Plaud.navTitle).font(.body.bold())
-                    Text(L10n.Plaud.addRowCaption)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+    // MARK: - Category pick page
+
+    private var categoryGrid: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(L10n.Scanner.pickHint)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    ForEach(AddCategory.allCases) { cat in
+                        Button {
+                            pick(cat)
+                        } label: {
+                            CategoryCard(icon: cat.icon, title: cat.title, subtitle: cat.subtitle)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Button {
+                        showPlaudAdd = true
+                    } label: {
+                        CategoryCard(
+                            icon: "waveform",
+                            title: L10n.Scanner.categoryPlaud,
+                            subtitle: L10n.Scanner.actionSDK
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.bold())
-                    .foregroundStyle(.tertiary)
+                .padding(.horizontal)
             }
-            .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal)
-        .padding(.bottom, 8)
+    }
+
+    private func pick(_ cat: AddCategory) {
+        switch cat {
+        case .appleWatch:
+            showWatchGuide = true
+        default:
+            category = cat
+            connectError = nil
+            bluetooth.startScan()
+        }
+    }
+
+    // MARK: - Scan (filtered by the picked category)
+
+    /// D·NOTE units matching the picked family (only the `.vobot` family scans them).
+    private var filteredAvailable: [DiscoveredPeripheral] {
+        category == .vobot ? newAvailable : []
+    }
+
+    /// Recorder cards matching the picked family.
+    private var filteredRecorders: [DiscoveredRecorder] {
+        switch category {
+        case .ticnote: return newRecorders.filter { $0.protocolID == "ticnote" }
+        case .dingtalkA1: return newRecorders.filter { $0.protocolID == "dingtalk-a1" }
+        default: return []
+        }
     }
 
     @ViewBuilder
-    private var content: some View {
+    private var scanContent: some View {
         if let message = bluetooth.adapter.userMessage {
             EmptyStateView(
                 L10n.Scanner.bluetoothUnavailable,
                 systemImage: "wifi.slash",
                 message: message
             )
-        } else if newAvailable.isEmpty && newRecorders.isEmpty {
+        } else if filteredAvailable.isEmpty && filteredRecorders.isEmpty {
             // ★ 2026-10-20: the emptiness is judged on the **filtered** lists — when only
             // already-added devices are nearby the list would otherwise render as an empty
             // shell. The two messages distinguish "radio quiet" from "everything seen is
@@ -125,29 +215,21 @@ struct ScannerSheet: View {
                 )
             } else {
                 EmptyStateView(
-                    L10n.Scanner.noNewDevices,
+                    L10n.Scanner.noNewInCategory(category?.title ?? ""),
                     systemImage: "checkmark.seal",
                     message: L10n.Scanner.lookingMessage
                 )
             }
         } else {
             List {
-                if !newAvailable.isEmpty {
+                if !filteredAvailable.isEmpty {
                     Section(L10n.Scanner.sectionAvailable) {
-                        ForEach(newAvailable) { row($0) }
+                        ForEach(filteredAvailable) { row($0) }
                     }
                 }
-                // ★ 2026-10-20 (user: "已经添加的设备不要出现在扫描列表里面防止多次添加"):
-                // added devices no longer render **anywhere** in the scan list — not as a
-                // labelled section, not in the recorder section. The old "Added" section
-                // existed as a reconnection fallback for D·NOTE, but tapping a known card
-                // is exactly the "adds a second time" path the user wants closed; the
-                // device list on the home page is the single management entry now.
-                // (`rememberDevice` still overwrites by peripheral ID, so a re-add can
-                // never actually duplicate a ledger entry.)
-                if !newRecorders.isEmpty {
+                if !filteredRecorders.isEmpty {
                     Section("Recorders") {
-                        ForEach(newRecorders) { recorderRow($0) }
+                        ForEach(filteredRecorders) { recorderRow($0) }
                     }
                 }
             }
@@ -312,6 +394,64 @@ struct ScannerSheet: View {
             } catch {
                 connecting = nil
                 connectError = error.localizedDescription
+            }
+        }
+    }
+}
+
+/// One pickable family card on the category grid.
+private struct CategoryCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 30))
+                .foregroundStyle(Color.appAccent)
+                .frame(height: 36)
+            VStack(spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
+        .padding(.horizontal, 8)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+/// Apple Watch "add" = installing the watch app from iOS. Recordings made on
+/// the wrist sync into the library automatically (watch transport).
+struct WatchAddGuideSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Label(L10n.WatchAdd.step1, systemImage: "1.circle")
+                    Label(L10n.WatchAdd.step2, systemImage: "2.circle")
+                    Label(L10n.WatchAdd.step3, systemImage: "3.circle")
+                } header: {
+                    Text(L10n.WatchAdd.title)
+                } footer: {
+                    Text(L10n.WatchAdd.note)
+                }
+            }
+            .navigationTitle(L10n.Scanner.categoryWatch)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(L10n.Common.done) { dismiss() }
+                }
             }
         }
     }

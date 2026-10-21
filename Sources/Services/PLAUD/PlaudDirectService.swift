@@ -131,6 +131,12 @@ final class PlaudDirectService: NSObject, ObservableObject {
     private let session: URLSession
     private let exportQueue = DispatchQueue(label: "com.nomily.app.plaud-export")
 
+    /// Injected by `AppEnvironment` at launch. Needed to register every
+    /// pulled clip in the library manifest — that registration is what makes
+    /// the library's device filter show a **PLAUD** group (and row badges).
+    /// Without it the clips would read as "imported files".
+    var library: Library?
+
     private override init() {
         let d = UserDefaults.standard
         isConfigured = !(d.string(forKey: "plaud.client_id") ?? "").isEmpty
@@ -402,6 +408,20 @@ final class PlaudDirectService: NSObject, ObservableObject {
         do {
             try FileManager.default.moveItem(at: src, to: dest)
             log.info("plaud export landed: \(name, privacy: .public)")
+            // Register in the library manifest so the clip groups under a
+            // **PLAUD** device (filter chip + row badge), like every card.
+            let size = (try? FileManager.default.attributesOfItem(atPath: dest.path)[.size] as? Int) ?? 0
+            let sn = pairedSN ?? ""
+            DispatchQueue.main.async {
+                self.library?.recordDownload(
+                    name: name,
+                    size: size,
+                    transport: "ble",
+                    deviceSerial: "plaud-\(sn)",
+                    deviceName: "PLAUD",
+                    localName: name
+                )
+            }
             NotificationCenter.default.post(name: .libraryDidChange, object: nil)
         } catch {
             log.error("plaud export move failed: \(error.localizedDescription, privacy: .public)")

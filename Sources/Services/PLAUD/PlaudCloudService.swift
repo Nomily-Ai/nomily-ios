@@ -57,6 +57,10 @@ final class PlaudCloudService: ObservableObject {
     @Published private(set) var accessToken: String?
     private(set) var apiBase: String
 
+    /// Injected by `AppEnvironment`. Registers cloud-pulled clips in the
+    /// library manifest so they group under a **PLAUD** device filter chip.
+    var library: Library?
+
     private let session: URLSession
 
     init() {
@@ -220,6 +224,18 @@ final class PlaudCloudService: ObservableObject {
         let dest = dir.appendingPathComponent(candidate)
         try audio.write(to: dest, options: .atomic)
         log.info("plaud cloud audio downloaded: \(candidate, privacy: .public) (\(audio.count) B)")
+        // Manifest registration → the library's device filter gets a PLAUD
+        // group (serial carries the account, so one account = one group).
+        DispatchQueue.main.async {
+            self.library?.recordDownload(
+                name: candidate,
+                size: audio.count,
+                transport: "ble",
+                deviceSerial: "plaud-cloud-\(self.email ?? "")",
+                deviceName: "PLAUD",
+                localName: candidate
+            )
+        }
         NotificationCenter.default.post(name: .libraryDidChange, object: nil)
         return dest
     }
