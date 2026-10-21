@@ -73,17 +73,24 @@ final class PlaudCloudService: ObservableObject {
 
     // MARK: - Auth (OTP)
 
-    /// Step 1: email → verification code sent by PLAUD. Persists the OTP token
-    /// (held only in memory by the caller) and follows region redirects.
+    /// Step 1: email → verification code sent by PLAUD. **One request total**:
+    /// the same call follows region redirects and returns the OTP token. The
+    /// previous version probed the region with a separate request first, so
+    /// every tap sent TWO codes — the second tripped PLAUD's send rate limit,
+    /// `otpToken` stayed nil, and login later failed with the confusing
+    /// "Request a code first."
     func sendCode(to emailAddress: String) async throws {
-        let base = try await resolveRegion(email: emailAddress)
-        apiBase = base
-        UserDefaults.standard.set(base, forKey: "plaud.api_base")
-        otpToken = try await postOTP(
+        let result = try await postOTP(
             path: "/auth/otp-send-code",
             body: ["username": emailAddress],
-            base: base
-        ).token
+            base: apiBase
+        )
+        apiBase = result.base
+        UserDefaults.standard.set(result.base, forKey: "plaud.api_base")
+        guard let token = result.token, !token.isEmpty else {
+            throw PlaudError.badResponse("PLAUD did not return a login token.")
+        }
+        otpToken = token
     }
 
     private var otpToken: String?
@@ -116,15 +123,6 @@ final class PlaudCloudService: ObservableObject {
         let d = UserDefaults.standard
         d.removeObject(forKey: "plaud.token")
         d.removeObject(forKey: "plaud.email")
-    }
-
-    /// Region probe + code request in one: a CN account gets `status:-302`
-    /// with the regional API host, which every later call must reuse.
-    private func resolveRegion(email: String) async throws -> String {
-        let result = try await postOTP(
-            path: "/auth/otp-send-code", body: ["username": email], base: apiBase
-        )
-        return result.base
     }
 
     private struct OTPResult { let token: String?; let base: String }
