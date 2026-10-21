@@ -86,6 +86,14 @@ final class PlaudDirectService: NSObject, ObservableObject {
     @Published private(set) var battery: Int?
     @Published private(set) var storageFree: Int?
     @Published private(set) var storageTotal: Int?
+    /// ★ Official-app parity (2026-10-21): recording state + stop/start from
+    /// the app. `blePenState` reports 4099 (or 1) while the card is recording.
+    @Published private(set) var isRecording = false
+    @Published private(set) var isCharging = false
+    @Published private(set) var firmware: String?
+    /// The card the user tapped in the scan list (before credentials exist —
+    /// the official app shows cards + SN first, key comes after).
+    @Published private(set) var selectedCard: ScannedCard?
     @Published var deleteAfterSync: Bool {
         didSet { UserDefaults.standard.set(deleteAfterSync, forKey: "plaud.delete_after_sync") }
     }
@@ -257,16 +265,19 @@ final class PlaudDirectService: NSObject, ObservableObject {
 
     // MARK: - Scan / connect / sync (public, UI-facing)
 
+    /// ★ Scan does NOT require credentials (official-app parity: the user
+    /// sees cards + SN first, the key comes after). If credentials exist and
+    /// the token is fresh we still bring the SDK up so `connect` right after
+    /// a tap needs no extra round trip; failure is non-fatal — scanning is a
+    /// pure BLE operation under the hood.
     func startScan() {
         Task {
-            do {
-                try await ensureInitialized()
-                setPhase(.scanning)
-                clearScanned()
-                PlaudDeviceAgent.shared.startScan()
-            } catch {
-                setPhase(.failed(error.localizedDescription))
+            if isConfigured {
+                try? await ensureInitialized()
             }
+            setPhase(.scanning)
+            clearScanned()
+            PlaudDeviceAgent.shared.startScan()
         }
     }
 
@@ -275,8 +286,24 @@ final class PlaudDirectService: NSObject, ObservableObject {
         if phase == .scanning { setPhase(pairedSN.map { Phase.connected(sn: $0) } ?? .idle) }
     }
 
-    func connect(_ card: ScannedCard) {
-        guard let ble = cachedBleDevices[card.sn] else { return }
+    /// User tapped a card in the scan list. Connecting needs credentials; the
+    /// UI keeps the selection visible and asks for the key when missing.
+    func select(_ card: ScannedCard) {
+        selectedCard = card
+        guard isConfigured else {
+            setPhase(.idle)
+            return
+        }
+        connectSelected()
+    }
+
+    /// Connect the previously selected card (called right after activation).
+    func connectSelected() {
+        guard let card = selectedCard, let ble = cachedBleDevices[card.sn] else {
+            setPhase(.failed(L10n.Plaud.cardGone))
+            return
+        }
+        firmware = nil
         setPhase(.connecting(name: card.name))
         PlaudDeviceAgent.shared.stopScan()
         PlaudDeviceAgent.shared.connectBleDevice(bleDevice: ble, deviceToken: userId)
@@ -287,6 +314,28 @@ final class PlaudDirectService: NSObject, ObservableObject {
         pairedSN = nil
         UserDefaults.standard.removeObject(forKey: "plaud.paired_sn")
         setPhase(.idle)
+    }
+
+    // MARK: - Card controls (official-app parity)
+
+    /// Stop the card's ongoing recording from the app.
+    func stopRecording() {
+        PlaudDeviceAgent.shared.stopRecord()
+        // The card answers via blePenState; optimistically flip so the button
+        // doesn't look stuck if the state push is slow.
+        DispatchQueue.main.async { self.isRecording = false }
+    }
+
+    /// Start a recording from the app (remote record).
+    func startRecording() {
+        PlaudDeviceAgent.shared.startRecord()
+        DispatchQueue.main.async { self.isRecording = true }
+    }
+
+    /// Pull battery/charging straight from the card.
+    func refreshVitals() {
+        PlaudDeviceAgent.shared.getChargingState()
+        PlaudDeviceAgent.shared.getState()
     }
 
     // MARK: Release (unbind) — return-to-seller / hand-back support
@@ -546,16 +595,22 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         log.info("plaud bound: \(sn, privacy: .public)")
         pairedSN = sn
         UserDefaults.standard.set(sn, forKey: "plaud.paired_sn")
+        // Firmware is read off the advertisement at scan time.
+        if let card = selectedCard, card.sn == sn {
+            firmware = cachedBleDevices[sn].map { $0.wholeVersion() }
+        }
+        DispatchQueue.main.async { self.selectedCard = nil }
         setPhase(.connected(sn: sn))
-        // Auto-pull right after binding, like the official template.
+        // Pull vitals right away, then auto-pull the file list like the
+        // official template does.
+        refreshVitals()
         PlaudDeviceAgent.shared.getFileList(startSessionId: 0)
     }
 
-    /// @required — recorder state push. Populates battery/storage on the
-    /// connected card; recording state (4099) is deliberately ignored: the
-    /// card records stand-alone and files are pulled afterwards.
+    /// @required — recorder state push. `state == 4099` (or 1) = recording.
     func blePenState(state: Int, privacy: Int, keyState: Int, uDisk: Int, findMyToken: Int, hasSndpKey: Int, deviceAccessToken: Int) {
         log.info("plaud pen state \(state) privacy \(privacy) key \(keyState)")
+        DispatchQueue.main.async { self.isRecording = (state == 4099 || state == 1) }
     }
 
     func bleDeviceDisconnectErr() {
@@ -575,9 +630,10 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         DispatchQueue.main.async { self.battery = power }
     }
 
-    func bleChargingState(isCharging: Bool, level: Int) {
-        if level > 0 {
-            DispatchQueue.main.async { self.battery = level }
+    func bleChargingState(isCharging charging: Bool, level: Int) {
+        DispatchQueue.main.async {
+            self.isCharging = charging
+            if level > 0 { self.battery = level }
         }
     }
 

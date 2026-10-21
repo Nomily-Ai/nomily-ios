@@ -1359,7 +1359,7 @@
 "plaud.released" = "已解绑——官方 PLAUD App 可重新配对该卡。";
 "scanner.add_title" = "添加设备";
 "scanner.pick_hint" = "选择设备类型，再进行扫描";
-"scanner.category_vobot" = "Vobot（D·NOTE）";
+"scanner.category_vobot" = "V05E";
 "scanner.category_ticnote" = "TicNote";
 "scanner.category_a1" = "钉钉 A1";
 "scanner.category_plaud" = "PLAUD";
@@ -1373,3 +1373,11 @@
 "watchadd.step2" = "进入「我的手表」→ 下滑到「可用的 App」";
 "watchadd.step3" = "找到 Nomily 点「安装」，然后在手表上打开即可";
 "watchadd.note" = "手表上的录音会自动同步进资料库，无需在此额外配对。";
+"plaud.scan_nearby" = "扫描附近卡片";
+"plaud.card_selected" = "已选择：%@——在下方激活后连接";
+"plaud.card_gone" = "所选卡片不在附近——请重新扫描。";
+"plaud.recording_now" = "卡片正在录音";
+"plaud.stop_record" = "停止录音";
+"plaud.start_record" = "开始录音";
+"plaud.disconnect" = "断开连接";
+"plaud.charging" = "充电中";

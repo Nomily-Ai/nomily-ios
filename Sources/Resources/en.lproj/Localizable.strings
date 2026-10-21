@@ -1257,7 +1257,7 @@
 "plaud.released" = "Card released — the official PLAUD app can pair it again.";
 "scanner.add_title" = "Add device";
 "scanner.pick_hint" = "Pick a device type, then scan for it";
-"scanner.category_vobot" = "Vobot (D·NOTE)";
+"scanner.category_vobot" = "V05E";
 "scanner.category_ticnote" = "TicNote";
 "scanner.category_a1" = "DingTalk A1";
 "scanner.category_plaud" = "PLAUD";
@@ -1271,3 +1271,11 @@
 "watchadd.step2" = "Go to “My Watch” → scroll to “AVAILABLE APPS”";
 "watchadd.step3" = "Find Nomily and tap “Install”, then open it on the watch";
 "watchadd.note" = "Recordings made on the watch sync into the library automatically — no extra pairing needed here.";
+"plaud.scan_nearby" = "Scan for nearby cards";
+"plaud.card_selected" = "Selected: %@ — activate below to connect";
+"plaud.card_gone" = "The selected card is out of range — scan again.";
+"plaud.recording_now" = "Card is recording";
+"plaud.stop_record" = "Stop recording";
+"plaud.start_record" = "Start recording";
+"plaud.disconnect" = "Disconnect";
+"plaud.charging" = "Charging";

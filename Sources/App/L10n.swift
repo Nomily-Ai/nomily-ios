@@ -119,6 +119,17 @@ enum L10n {
         static var factoryResetMsg: String { NSLocalizedString("plaud.factory_reset_msg", value: "All recordings on the card will be erased and the binding released — the card becomes like new. This cannot be undone.", comment: "") }
         static var erase: String { NSLocalizedString("plaud.erase", value: "Erase", comment: "") }
         static var released: String { NSLocalizedString("plaud.released", value: "Card released — the official PLAUD app can pair it again.", comment: "") }
+        // ★ Official-app parity (2026-10-21): scan-first flow + card controls
+        static var scanNearby: String { NSLocalizedString("plaud.scan_nearby", value: "Scan for nearby cards", comment: "Scan action for PLAUD cards (no key needed)") }
+        static func cardSelected(_ name: String) -> String {
+            String(format: NSLocalizedString("plaud.card_selected", value: "Selected: %@ — activate below to connect", comment: ""), name)
+        }
+        static var cardGone: String { NSLocalizedString("plaud.card_gone", value: "The selected card is out of range — scan again.", comment: "") }
+        static var recordingNow: String { NSLocalizedString("plaud.recording_now", value: "Card is recording", comment: "") }
+        static var stopRecord: String { NSLocalizedString("plaud.stop_record", value: "Stop recording", comment: "") }
+        static var startRecord: String { NSLocalizedString("plaud.start_record", value: "Start recording", comment: "") }
+        static var disconnect: String { NSLocalizedString("plaud.disconnect", value: "Disconnect", comment: "") }
+        static var charging: String { NSLocalizedString("plaud.charging", value: "Charging", comment: "") }
         static var pairRejected: String { NSLocalizedString("plaud.pair_rejected", value: "The card refused the connection — unbind it once in the official PLAUD app (Settings → device → unbind), then retry.", comment: "") }
         static var cloudNote: String { NSLocalizedString("plaud.cloud_note", value: "Optional compatibility path. Requires a PLAUD account registered with an EMAIL (phone-number accounts are rejected). The card stays bound to the official app.", comment: "") }
         static func syncStarting(_ count: Int) -> String {
@@ -2970,7 +2981,7 @@ enum L10n {
         // ★ 2026-10-21: category-first add flow
         static var addTitle: String { NSLocalizedString("scanner.add_title", value: "Add device", comment: "Title of the device-type pick page") }
         static var pickHint: String { NSLocalizedString("scanner.pick_hint", value: "Pick a device type, then scan for it", comment: "Hint on the device-type pick page") }
-        static var categoryVobot: String { NSLocalizedString("scanner.category_vobot", value: "Vobot (D·NOTE)", comment: "Device family card") }
+        static var categoryVobot: String { NSLocalizedString("scanner.category_vobot", value: "V05E", comment: "Device family card") }
         static var categoryTicnote: String { NSLocalizedString("scanner.category_ticnote", value: "TicNote", comment: "Device family card") }
         static var categoryA1: String { NSLocalizedString("scanner.category_a1", value: "DingTalk A1", comment: "Device family card") }
         static var categoryPlaud: String { NSLocalizedString("scanner.category_plaud", value: "PLAUD", comment: "Device family card") }

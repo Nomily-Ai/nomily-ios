@@ -55,12 +55,31 @@ struct PlaudDeviceCard: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("PLAUD").font(.body.bold())
                         Text(sn).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                        if let fw = direct.firmware {
+                            Text(fw).font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
                     Spacer()
                     if let battery = direct.battery {
-                        Label("\(battery)%", systemImage: direct.battery == 100 ? "battery.100percent.bolt" : "battery.75percent")
+                        Label(
+                            "\(battery)%" + (direct.isCharging ? " \(L10n.Plaud.charging)" : ""),
+                            systemImage: direct.isCharging ? "battery.100percent.bolt" : "battery.75percent"
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                // ★ Official-app parity: recording state + stop from the app.
+                if direct.isRecording {
+                    HStack {
+                        Label(L10n.Plaud.recordingNow, systemImage: "record.circle")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.red)
+                        Spacer()
+                        Button(L10n.Plaud.stopRecord, role: .destructive) {
+                            direct.stopRecording()
+                        }
+                        .font(.footnote)
                     }
                 }
                 if let total = direct.storageTotal, let free = direct.storageFree, total > 0 {
@@ -110,10 +129,13 @@ struct DirectConnectSection: View {
 
     var body: some View {
         Section {
-            if direct.isConfigured {
-                activatedContent
-            } else {
-                setupContent
+            // ★ Scan-first (official-app parity): the scan/selection/status
+            // block works WITHOUT credentials; the credential form is only
+            // needed to actually connect, and sits right below the picked
+            // card when missing.
+            statusAndControls
+            if !direct.isConfigured {
+                setupFields
             }
         } header: {
             Text(L10n.Plaud.directHeader)
@@ -131,31 +153,36 @@ struct DirectConnectSection: View {
         }
     }
 
-    // MARK: already activated
-
+    /// Everything the section shows besides the credential form.
     @ViewBuilder
-    private var activatedContent: some View {
+    private var statusAndControls: some View {
         switch direct.phase {
         case .connected(let sn):
-            Label(L10n.Plaud.connectedTo(sn), systemImage: "antenna.radiowaves.left.and.right")
-                .foregroundStyle(.primary)
-            Button(L10n.Plaud.syncFromCard) { direct.syncFromCard() }
-                .disabled(direct.isSyncing)
+            connectedControls(sn: sn)
         case .scanning:
             HStack { ProgressView(); Text(L10n.Plaud.scanning) }
+            Button(L10n.Common.cancel) { direct.stopScan() }
             ForEach(direct.scanned) { card in
                 Button {
-                    direct.connect(card)
+                    direct.select(card)
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(card.name).foregroundStyle(.primary)
-                            Text(card.sn).font(.caption2).foregroundStyle(.secondary)
+                            Text(card.sn).font(.caption2.monospaced()).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(L10n.Plaud.connect).font(.footnote)
+                        Text(direct.selectedCard?.sn == card.sn
+                             ? L10n.Plaud.connect
+                             : L10n.Plaud.connect)
+                            .font(.footnote)
                     }
                 }
+            }
+            if let selected = direct.selectedCard {
+                Label(L10n.Plaud.cardSelected(selected.name), systemImage: "checkmark.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         case .connecting(let name):
             HStack { ProgressView(); Text(name) }
@@ -164,6 +191,13 @@ struct DirectConnectSection: View {
                 .foregroundStyle(.orange)
             scanButton
         case .idle:
+            if let selected = direct.selectedCard {
+                // Picked a card but credentials are missing: show the
+                // selection prominently; the setup fields are right below.
+                Label(L10n.Plaud.cardSelected(selected.name), systemImage: "checkmark.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             scanButton
         }
 
@@ -171,39 +205,93 @@ struct DirectConnectSection: View {
         if let msg = direct.syncMessage {
             Text(msg).font(.footnote).foregroundStyle(.secondary)
         }
-        Toggle(L10n.Plaud.deleteAfterSync, isOn: $direct.deleteAfterSync)
         if releasedNote {
             Label(L10n.Plaud.released, systemImage: "checkmark.circle")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
-        // ★ Return / hand-back guarantee (2026-10-21 user question "7 天无理由"):
-        // takeover must be reversible — these two release the card so the
-        // official app (or a buyer) can pair it again as if new.
-        Button(L10n.Plaud.unbindKeep, role: .destructive) {
-            direct.releaseDevice(factoryReset: false)
-            releasedNote = true
+        if direct.isConfigured {
+            // ★ Return / hand-back guarantee (2026-10-21 user question "7 天无理由"):
+            // takeover must be reversible — these two release the card so the
+            // official app (or a buyer) can pair it again as if new.
+            Button(L10n.Plaud.unbindKeep, role: .destructive) {
+                direct.releaseDevice(factoryReset: false)
+                releasedNote = true
+            }
+            .disabled(!direct.phase.isConnected)
+            Button(L10n.Plaud.factoryReset, role: .destructive) {
+                showFactoryConfirm = true
+            }
+            .disabled(!direct.phase.isConnected)
+            Button(L10n.Plaud.deactivate, role: .destructive) {
+                direct.deactivate()
+                message = nil
+            }
         }
-        Button(L10n.Plaud.factoryReset, role: .destructive) {
-            showFactoryConfirm = true
+    }
+
+    /// Battery / recording / firmware row set shown while connected —
+    /// parity with the official app's device panel.
+    @ViewBuilder
+    private func connectedControls(sn: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .foregroundStyle(Color.appAccent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.Plaud.connectedTo(sn)).font(.body.weight(.medium))
+                if let fw = direct.firmware {
+                    Text(fw).font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if let battery = direct.battery {
+                Label(
+                    "\(battery)%" + (direct.isCharging ? " \(L10n.Plaud.charging)" : ""),
+                    systemImage: direct.isCharging ? "battery.100percent.bolt" : "battery.75percent"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
         }
-        Button(L10n.Plaud.deactivate, role: .destructive) {
-            direct.deactivate()
-            message = nil
+        if direct.isRecording {
+            HStack {
+                Label(L10n.Plaud.recordingNow, systemImage: "record.circle")
+                    .foregroundStyle(.red)
+                Spacer()
+                Button(L10n.Plaud.stopRecord, role: .destructive) {
+                    direct.stopRecording()
+                }
+            }
+        } else {
+            Button {
+                direct.startRecording()
+            } label: {
+                Label(L10n.Plaud.startRecord, systemImage: "record.circle")
+            }
         }
+        Button(L10n.Plaud.syncFromCard) { direct.syncFromCard() }
+            .disabled(direct.isSyncing)
+        Toggle(L10n.Plaud.deleteAfterSync, isOn: $direct.deleteAfterSync)
+        Button(L10n.Plaud.disconnect) { direct.disconnect() }
     }
 
     private var scanButton: some View {
-        Button(L10n.Plaud.scan) {
+        Button {
             message = nil
             direct.startScan()
+        } label: {
+            if direct.phase == .scanning {
+                HStack { ProgressView(); Text(L10n.Plaud.scanning) }
+            } else {
+                Label(L10n.Plaud.scanNearby, systemImage: "antenna.radiowaves.left.and.right")
+            }
         }
     }
 
-    // MARK: first-time setup
+    // MARK: first-time setup (only the credential form; scan lives above)
 
     @ViewBuilder
-    private var setupContent: some View {
+    private var setupFields: some View {
         TextField(L10n.Plaud.clientId, text: $clientId)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
@@ -237,6 +325,9 @@ struct DirectConnectSection: View {
                 clientId: clientId, secret: clientSecret,
                 domain: domain.isEmpty ? PlaudDirectService.defaultDomain : domain
             )
+            // A card picked before activation now proceeds automatically —
+            // the official app behaves the same way (select → key → connect).
+            direct.connectSelected()
         } catch {
             message = error.localizedDescription
         }
