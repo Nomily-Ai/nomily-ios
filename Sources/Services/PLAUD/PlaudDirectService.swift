@@ -266,6 +266,48 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// SN we are trying to re-bind automatically (`reconnect()`). Cleared as
     /// soon as the card is seen or the attempt is abandoned.
     private var reconnectTarget: String?
+    // MARK: Device Recovery (docs.plaud.ai "Recovering a Plaud device")
+    /// ★ 2026-10-21 (9th round): a card whose cloud and local bind state went
+    /// out-of-sync locks EVERY app out — our normal handshake no longer matches
+    /// the on-device lock ("Nomily 无法匹配") and the official app has no key
+    /// at all ("官方 App 加不上"). The documented escape is a recovery connect:
+    /// re-handshake with each **previously bound client ID** using force-clear
+    /// until one matches the lock; the stale lock is wiped and the card can be
+    /// bound again — by us (then depair(clear:true) hands it to another app)
+    /// or directly by the official app.
+    private var recoveryMode = false
+    private var recoveryIndex = 0
+    private var recoveryDevice: BleDevice?
+    /// Identities the on-device lock could have been minted against. The
+    /// registry's `bind_history` is empty once unbound, so we reconstruct the
+    /// candidates locally: the partner client id, its bare-UUID form, and the
+    /// user-token subject (`client_user_…`) — the lock's key pair is generated
+    /// from the user token, so its subject is the most likely match.
+    private var recoveryClientIDs: [String] {
+        var ids: [String] = []
+        if let tok = userToken, let sub = Self.jwtSubject(tok), !sub.isEmpty {
+            ids.append(sub)
+        }
+        let cid = clientId
+        if !cid.isEmpty {
+            ids.append(cid)
+            if cid.hasPrefix("client_") { ids.append(String(cid.dropFirst("client_".count))) }
+        }
+        return ids
+    }
+
+    /// `sub` claim of a JWT payload (base64url, unpadded).
+    private static func jwtSubject(_ token: String) -> String? {
+        let parts = token.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var payload = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while payload.count % 4 != 0 { payload += "=" }
+        guard let data = Data(base64Encoded: payload),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return json["sub"] as? String
+    }
     /// Periodic `getState()` while connected (see `startStatePolling`).
     private var statePollTask: Task<Void, Never>?
 
@@ -557,6 +599,89 @@ final class PlaudDirectService: NSObject, ObservableObject {
         }
     }
 
+    /// ★ Device Recovery ("救砖"): the card refuses every app. Scan for it and
+    /// re-handshake with each historical client ID (force-clear) until the
+    /// on-device lock matches one; then wipe the card completely
+    /// (`depair(clear: true)` + cloud unbind) so ANY app — including the
+    /// official one — can bind it like new. Erases all recordings on the card.
+    func startRecovery() {
+        guard !phase.isBusy, !phase.isConnected else { return }
+        guard isConfigured else {
+            setPhase(.failed(PlaudCloudService.PlaudError
+                .badResponse("Direct connect is not activated yet.").localizedDescription))
+            return
+        }
+        Task {
+            do { try await ensureInitialized() } catch {
+                setPhase(.failed(error.localizedDescription))
+                return
+            }
+            guard !recoveryClientIDs.isEmpty else {
+                setPhase(.failed(L10n.Plaud.recoveryFailed))
+                return
+            }
+            recoveryMode = true
+            recoveryIndex = 0
+            recoveryDevice = nil
+            setRecordNotice(nil)
+            setSyncMessage(L10n.Plaud.recoveryRunning)
+            setPhase(.scanning)
+            clearScanned()
+            reconnectTarget = nil
+            PlaudDeviceAgent.shared.setDeviceActive(status: 1)
+            PlaudDeviceAgent.shared.startScan()
+        }
+    }
+
+    /// Try historical identity #`index` against the card found by the scan.
+    private func attemptRecovery(_ index: Int) {
+        let ids = recoveryClientIDs
+        guard recoveryMode, let ble = recoveryDevice else { return }
+        guard index < ids.count else {
+            log.warning("plaud recovery: all \(ids.count) historical ids rejected")
+            recoveryMode = false
+            setSyncMessage(nil)
+            setPhase(.failed(L10n.Plaud.recoveryFailed))
+            return
+        }
+        recoveryIndex = index
+        log.info("plaud recovery attempt #\(index + 1)/\(ids.count) id=\(ids[index], privacy: .public)")
+        setPhase(.connecting(name: L10n.Plaud.recoveryRunning))
+        PlaudDeviceAgent.shared.recoveryConnectBleDevice(
+            bleDevice: ble, historicalUserId: ids[index])
+    }
+
+    /// Recovery handshake succeeded: the stale lock is gone and the card is
+    /// bound to us — immediately wipe it (lock + recordings) and drop the link,
+    /// leaving factory state for the official app.
+    private func finishRecovery(sn: String) {
+        recoveryMode = false
+        log.info("plaud recovery succeeded for \(sn, privacy: .public) — wiping card")
+        setSyncMessage(L10n.Plaud.recoveryRunning)
+        PlaudDeviceAgent.shared.depair(clear: true)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.ensureInitialized()
+                try await self.cloudUnbind(sn: sn)
+            } catch {
+                log.warning("plaud recovery cloud unbind skipped: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        // Give the depair command a beat to reach the card before dropping
+        // the link (same pattern the unbind path uses implicitly).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self else { return }
+            PlaudDeviceAgent.shared.disconnect()
+            self.forgetLedger(sn: sn)
+            self.pairedSN = nil
+            UserDefaults.standard.removeObject(forKey: "plaud.paired_sn")
+            self.scanned = []
+            self.setSyncMessage(L10n.Plaud.recoveryDone)
+            self.setPhase(.idle)
+        }
+    }
+
     /// Connect a card we know by SN only (the pill / picker hands us the ledger
     /// id `plaud-<SN>`). ★ 2026-10-21: needed because the "remembered" marker can
     /// be empty (first launch after an unbind, or data restored from a backup)
@@ -618,6 +743,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
         // Close the live channel first: leaving it open makes the card keep
         // pushing PCM that nobody reads, which is exactly the "disconnect looks
         // like it did nothing, card still busy" symptom.
+        recoveryMode = false
         if liveStreaming { PlaudDeviceAgent.shared.stopSyncFile() }
         stopStatePolling()
         Task { @MainActor in self.stopLiveTranscription() }
@@ -1505,6 +1631,15 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             .map { ScannedCard(sn: $0.serialNumber, name: Self.displayName($0), rssi: Int($0.rssi)) }
             .sorted { $0.rssi > $1.rssi }
         setScanned(cards)
+        // ★ Recovery path: take the strongest card we find and start the
+        // force-clear handshake ladder — no pick list, the user asked for a
+        // rescue, not a browse.
+        if recoveryMode, let best = supported.sorted(by: { $0.rssi > $1.rssi }).first {
+            recoveryDevice = best
+            PlaudDeviceAgent.shared.stopScan()
+            attemptRecovery(0)
+            return
+        }
         // Auto-bind the card we were told to reconnect as soon as its
         // advertisement arrives (`reconnect()` path).
         if let target = reconnectTarget, let card = cards.first(where: { $0.sn == target }) {
@@ -1522,6 +1657,12 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
     func bleScanOverTime() {
         // Scan timed out. Still not connected — say so instead of re-asserting
         // the last known SN as a live link.
+        if recoveryMode {
+            recoveryMode = false
+            setSyncMessage(nil)
+            setPhase(.failed(L10n.Plaud.cardGone))
+            return
+        }
         if phase == .scanning || reconnectTarget != nil {
             reconnectTarget = nil
             if case .connecting = phase {
@@ -1535,6 +1676,12 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
     /// 0 = disconnected, 1 = GATT up (handshake still pending), 2/-1/-2 = failed.
     func bleConnectState(state: Int) {
         log.info("plaud connect state \(state)")
+        // Recovery ladder: a refused link means this historical id did not
+        // match the lock — try the next one.
+        if recoveryMode, state != 1 {
+            attemptRecovery(recoveryIndex + 1)
+            return
+        }
         switch state {
         case 1:
             break // wait for bleBind — GATT alone is not success
@@ -1551,6 +1698,18 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
 
     /// Handshake verdict — status 0 is the real "connected".
     func bleBind(sn: String?, status: Int, protVersion: Int, timezone: Int) {
+        // ★ Recovery verdict: force-clear handshake accepted → the stale lock
+        // is wiped; finish by erasing the card and dropping the link. Rejected
+        // → the next historical id gets its try.
+        if recoveryMode {
+            if status == 0, let sn {
+                finishRecovery(sn: sn)
+            } else {
+                log.warning("plaud recovery bind rejected: status \(status)")
+                attemptRecovery(recoveryIndex + 1)
+            }
+            return
+        }
         guard status == 0, let sn else {
             log.warning("plaud bind rejected: status \(status)")
             setPhase(.failed(L10n.Plaud.pairRejected))

@@ -144,6 +144,16 @@ enum L10n {
         static var handoverStep2: String { NSLocalizedString("plaud.handover_step2", value: "② Settings → Bluetooth: if a PLAUD entry is still listed, tap ⓘ and Forget This Device.", comment: "") }
         static var handoverStep3: String { NSLocalizedString("plaud.handover_step3", value: "③ Open the official PLAUD app → Add device → scan and pair. Wake the card with a short press first.", comment: "") }
         static var handoverFooter: String { NSLocalizedString("plaud.handover_footer", value: "A card can be bound to one app at a time — that is why the official app cannot see it while Nomily holds it. To come back later, just scan and pair again; your Client ID / Secret stay saved.", comment: "") }
+        // ★ Device recovery (9th round): the card refuses every app — ours
+        // ("无法匹配") and the official one. Documented escape: force-clear
+        // handshake with each historical client id, then wipe.
+        static var recoveryButton: String { NSLocalizedString("plaud.recovery_button", value: "Rescue card (locked out of every app)", comment: "Device recovery: force-clear the on-device lock and erase the card") }
+        static var recoveryConfirmTitle: String { NSLocalizedString("plaud.recovery_confirm_title", value: "Rescue the card?", comment: "") }
+        static var recoveryConfirmMsg: String { NSLocalizedString("plaud.recovery_confirm_msg", value: "Nomily will force-clear the ownership lock on the card and erase everything on it, leaving factory state that the official PLAUD app (China or global) can bind like a new card. Use this when no app can connect to the card any more. Erased recordings cannot be recovered.", comment: "") }
+        static var recoveryConfirmAction: String { NSLocalizedString("plaud.recovery_confirm_action", value: "Rescue and erase", comment: "") }
+        static var recoveryRunning: String { NSLocalizedString("plaud.recovery_running", value: "Rescuing… keep the card close to the phone.", comment: "") }
+        static var recoveryDone: String { NSLocalizedString("plaud.recovery_done", value: "Rescued — lock cleared and card erased. The official PLAUD app can now bind it like a new card.", comment: "") }
+        static var recoveryFailed: String { NSLocalizedString("plaud.recovery_failed", value: "Rescue failed — the card rejected every key Nomily has. Contact PLAUD support with the SN above.", comment: "") }
         // ★ Official-app parity (2026-10-21): scan-first flow + card controls
         static var scanNearby: String { NSLocalizedString("plaud.scan_nearby", value: "Scan for nearby cards", comment: "Scan action for PLAUD cards (no key needed)") }
         static func cardSelected(_ name: String) -> String {

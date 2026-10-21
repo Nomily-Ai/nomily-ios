@@ -67,6 +67,8 @@ struct DirectConnectSection: View {
     @State private var message: String?
     @State private var showHandoverConfirm = false
     @State private var handedOver = false
+    @State private var showRecoveryConfirm = false
+    @State private var recoveryDoneShown = false
     @State private var releasedNote = false
     @State private var showRename = false
     @State private var nameDraft = ""
@@ -341,6 +343,20 @@ struct DirectConnectSection: View {
                 direct.deactivate()
                 message = nil
             }
+            // ★ Device recovery (9th round: "Nomily 无法匹配 + 官方中国版加不上"):
+            // when the on-device lock matches NO app any more, the documented
+            // escape is a force-clear handshake with each historical client id,
+            // then a full wipe. Lives here because it is the last resort of the
+            // same hand-back story.
+            Button(L10n.Plaud.recoveryButton) {
+                showRecoveryConfirm = true
+            }
+            .disabled(direct.phase.isBusy && !direct.phase.isConnected)
+            if recoveryDoneShown {
+                Label(L10n.Plaud.recoveryDone, systemImage: "checkmark.seal.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.green)
+            }
             if handedOver && direct.pairedSN == nil {
                 VStack(alignment: .leading, spacing: 6) {
                     Label(L10n.Plaud.handoverDone, systemImage: "checkmark.circle.fill")
@@ -370,6 +386,22 @@ struct DirectConnectSection: View {
             Button(L10n.Common.cancel, role: .cancel) {}
         } message: {
             Text(L10n.Plaud.handoverConfirmMsg)
+        }
+        .confirmationDialog(
+            L10n.Plaud.recoveryConfirmTitle,
+            isPresented: $showRecoveryConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.Plaud.recoveryConfirmAction, role: .destructive) {
+                direct.startRecovery()
+            }
+            Button(L10n.Common.cancel, role: .cancel) {}
+        } message: {
+            Text(L10n.Plaud.recoveryConfirmMsg)
+        }
+        .onChange(of: direct.syncMessage) { msg in
+            if msg == L10n.Plaud.recoveryDone { recoveryDoneShown = true }
+            if msg == L10n.Plaud.recoveryRunning { recoveryDoneShown = false }
         }
     }
 
