@@ -586,6 +586,27 @@ enum L10n {
             value: "Model (default whisper-1)",
             comment: "Placeholder for the custom ASR model name"
         ) }
+        static var customLoadModels: String { NSLocalizedString(
+            "asr.custom_load_models",
+            value: "Load model list",
+            comment: "Button: fetch the model list from the custom ASR server"
+        ) }
+        static var customModelsManual: String { NSLocalizedString(
+            "asr.custom_models_manual",
+            value: "Enter manually",
+            comment: "Button: abandon the fetched model list and type the name by hand"
+        ) }
+        static func customModelsLoaded(_ count: Int) -> String {
+            String(format: NSLocalizedString(
+                "asr.custom_models_loaded",
+                value: "%d transcription-capable model(s) from the server",
+                comment: "Caption under the custom ASR model picker"), count)
+        }
+        static var customModelsNone: String { NSLocalizedString(
+            "asr.custom_models_none",
+            value: "No usable model list from the server — type the model name manually.",
+            comment: "Shown when the custom ASR server has no /models or the filter is empty"
+        ) }
         static var customLanguage: String { NSLocalizedString(
             "asr.custom_language",
             value: "Language hint (optional, e.g. zh)",

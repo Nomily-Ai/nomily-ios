@@ -910,6 +910,90 @@ struct ASRProvidersView: View {
         configService.scheduleSave()
     }
 
+    /// ★ 2026-10-21: model dropdown for the custom (API-key) ASR server.
+    /// Filled from `GET {base}/v1/models` and filtered to transcription-
+    /// capable models only — chat/embedding/image models would just fail at
+    /// transcribe time, so they are not offered. Manual entry stays available
+    /// as a fallback (some servers ship no usable /models).
+    @State private var customModelChoices: [String] = []
+    @State private var customModelTotal = 0
+    @State private var customModelLoading = false
+    @State private var customModelManual = false
+    @State private var customModelNotice: String?
+
+    private var customModelBinding: Binding<String> {
+        Binding(
+            get: { configService.config.asrProviders.custom?.model ?? "" },
+            set: {
+                writeCustom(AppConfig.AsrProviders.Custom(
+                    endpoint: configService.config.asrProviders.custom?.endpoint ?? "",
+                    apiKey: configService.config.asrProviders.custom?.apiKey,
+                    model: $0.isEmpty ? nil : $0,
+                    language: configService.config.asrProviders.custom?.language))
+            })
+    }
+
+    @ViewBuilder
+    private var customModelRow: some View {
+        if !customModelChoices.isEmpty && !customModelManual {
+            Picker(L10n.ASR.customModel, selection: customModelBinding) {
+                ForEach(customModelChoices, id: \.self) { Text($0).tag($0) }
+                if !customModelChoices.contains(customModelBinding.wrappedValue),
+                   !customModelBinding.wrappedValue.isEmpty {
+                    Text(customModelBinding.wrappedValue).tag(customModelBinding.wrappedValue)
+                }
+            }
+            .labelsHidden()
+            if let notice = customModelNotice {
+                Text(notice).font(.caption2).foregroundStyle(.secondary)
+            }
+            Button(L10n.ASR.customModelsManual, systemImage: "keyboard") {
+                customModelManual = true
+            }
+        } else {
+            TextField(L10n.ASR.customModel, text: customModelBinding)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button {
+                Task { await loadCustomModels() }
+            } label: {
+                if customModelLoading {
+                    ProgressView()
+                } else {
+                    Label(L10n.ASR.customLoadModels, systemImage: "list.bullet")
+                        .font(.footnote)
+                }
+            }
+            .disabled(customModelLoading
+                      || (configService.config.asrProviders.custom?.endpoint.isEmpty ?? true))
+            if let notice = customModelNotice {
+                Text(notice).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func loadCustomModels() async {
+        guard let custom = configService.config.asrProviders.custom,
+              !custom.endpoint.isEmpty else {
+            customModelNotice = L10n.ASR.customModelsNone
+            return
+        }
+        customModelLoading = true
+        customModelNotice = nil
+        defer { customModelLoading = false }
+        if let result = await CustomASR.listModels(endpoint: custom.endpoint,
+                                                   apiKey: custom.apiKey ?? "") {
+            customModelChoices = result.models
+            customModelTotal = result.total
+            customModelManual = false
+            customModelNotice = L10n.ASR.customModelsLoaded(result.models.count)
+        } else {
+            customModelChoices = []
+            customModelManual = false
+            customModelNotice = L10n.ASR.customModelsNone
+        }
+    }
+
     private var customSection: some View {
         Section {
             TextField(L10n.ASR.customEndpoint, text: Binding(
@@ -921,6 +1005,10 @@ struct ASRProvidersView: View {
                         model: configService.config.asrProviders.custom?.model,
                         language: configService.config.asrProviders.custom?.language))
                     customProbe = .idle
+                    // A model list fetched from the previous endpoint is now stale.
+                    customModelChoices = []
+                    customModelNotice = nil
+                    customModelManual = false
                 }))
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
@@ -936,17 +1024,7 @@ struct ASRProvidersView: View {
                 }))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-            TextField(L10n.ASR.customModel, text: Binding(
-                get: { configService.config.asrProviders.custom?.model ?? "" },
-                set: {
-                    writeCustom(AppConfig.AsrProviders.Custom(
-                        endpoint: configService.config.asrProviders.custom?.endpoint ?? "",
-                        apiKey: configService.config.asrProviders.custom?.apiKey,
-                        model: $0.isEmpty ? nil : $0,
-                        language: configService.config.asrProviders.custom?.language))
-                }))
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+            customModelRow
             TextField(L10n.ASR.customLanguage, text: Binding(
                 get: { configService.config.asrProviders.custom?.language ?? "" },
                 set: {
@@ -1006,6 +1084,9 @@ struct ASRProvidersView: View {
         if result.ok {
             customProbeDetail = result.detail
             customProbe = .success
+            // Key is proven good — fetch the model dropdown for free, so the
+            // user's next tap is picking a model, not hunting for a button.
+            await loadCustomModels()
         } else {
             customProbe = .failed(result.error ?? L10n.ASR.verifyFailed)
         }

@@ -1346,3 +1346,7 @@
 "plaud.sync_downloading" = "正在传输第 %d 个文件…";
 "plaud.sync_done" = "全部录音已拉取。";
 "plaud.sync_failed" = "拉取失败：%@";
+"asr.custom_load_models" = "获取模型列表";
+"asr.custom_models_manual" = "手动输入";
+"asr.custom_models_loaded" = "服务器返回 %d 个支持转录的模型";
+"asr.custom_models_none" = "未获取到模型列表，请手动填写模型名。";

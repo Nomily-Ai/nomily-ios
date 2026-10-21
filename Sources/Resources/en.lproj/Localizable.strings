@@ -1244,3 +1244,7 @@
 "plaud.sync_downloading" = "Transferring file %d…";
 "plaud.sync_done" = "All recordings pulled.";
 "plaud.sync_failed" = "Pull failed: %@";
+"asr.custom_load_models" = "Load model list";
+"asr.custom_models_manual" = "Enter manually";
+"asr.custom_models_loaded" = "%d transcription-capable model(s) from the server";
+"asr.custom_models_none" = "No usable model list from the server — type the model name manually.";

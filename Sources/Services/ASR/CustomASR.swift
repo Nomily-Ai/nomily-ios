@@ -154,6 +154,64 @@ struct CustomASR {
         var error: String?
     }
 
+    // MARK: Model list (dropdown in settings)
+
+    struct ModelListResult {
+        var models: [String]
+        /// Raw ids before the transcription filter — used by the UI to fall
+        /// back to "show everything" when the filter would empty the list.
+        var total: Int
+    }
+
+    /// `GET {base}/v1/models` — the OpenAI-compatible listing. The UI only
+    /// offers models that can actually transcribe audio; chat/embedding/image
+    /// models would just produce failures the user can't debug.
+    static func listModels(endpoint: String, apiKey: String, timeout: TimeInterval = 8) async -> ModelListResult? {
+        guard var base = normalizedBase(endpoint), let root = URL(string: base) else {
+            return nil
+        }
+        base = root.deletingLastPathComponent().appendingPathComponent("models").absoluteString
+        guard let url = URL(string: base) else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.timeoutInterval = timeout
+        req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        if !apiKey.isEmpty {
+            req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let list = json["data"] as? [[String: Any]] else { return nil }
+            let all = list.compactMap { $0["id"] as? String }.sorted()
+            guard !all.isEmpty else { return nil }
+            let capable = all.filter { isTranscriptionCapable($0) }
+            // Never dead-end: an exotic naming scheme that filters to zero
+            // still gets a dropdown (all models) rather than nothing.
+            return ModelListResult(models: capable.isEmpty ? all : capable, total: all.count)
+        } catch {
+            log.info("custom listModels failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// Heuristic allowlist over model ids, tuned to what the OpenAI-compatible
+    /// transcription ecosystem actually serves (OpenAI, Groq, SiliconFlow,
+    /// faster-whisper-server, speaches, FunASR deployments…). Chat-only,
+    /// embedding, image and TTS models are excluded even when they mention
+    /// "audio" (e.g. `gpt-4o-audio-preview` cannot serve /audio/transcriptions).
+    static func isTranscriptionCapable(_ id: String) -> Bool {
+        let lower = id.lowercased()
+        let blocked = ["tts", "embedding", "dall-e", "image", "moderation", "moderator",
+                       "audio-preview", "realtime", "guard"]
+        if blocked.contains(where: { lower.contains($0) }) { return false }
+        let allowed = ["whisper", "transcribe", "transcription", "asr", "speech",
+                       "sensevoice", "paraformer", "funasr", "canary", "parakeet",
+                       "moonshine", "voxtral", "fireredasr", "audio"]
+        return allowed.contains { lower.contains($0) }
+    }
+
     /// "Is this server reachable and is the key accepted?"
     ///
     /// `GET {base}/models` is part of the OpenAI-compatible surface and every
