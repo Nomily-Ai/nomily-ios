@@ -63,10 +63,10 @@ struct DirectConnectSection: View {
     @ObservedObject var direct: PlaudDirectService
     @State private var clientId = ""
     @State private var clientSecret = ""
-    @State private var domain = ""
     @State private var busy = false
     @State private var message: String?
-    @State private var showFactoryConfirm = false
+    @State private var showHandoverConfirm = false
+    @State private var handedOver = false
     @State private var releasedNote = false
     @State private var showRename = false
     @State private var nameDraft = ""
@@ -84,6 +84,7 @@ struct DirectConnectSection: View {
         mainSection
         if direct.isConfigured {
             transferPrefsSection
+            handoverSection
         }
     }
 
@@ -101,15 +102,6 @@ struct DirectConnectSection: View {
             Text(L10n.Plaud.directHeader)
         } footer: {
             Text(L10n.Plaud.directFooter)
-        }
-        .confirmationDialog(L10n.Plaud.factoryResetTitle, isPresented: $showFactoryConfirm, titleVisibility: .visible) {
-            Button(L10n.Plaud.erase, role: .destructive) {
-                direct.releaseDevice(factoryReset: true)
-                releasedNote = true
-            }
-            Button(L10n.Common.cancel, role: .cancel) {}
-        } message: {
-            Text(L10n.Plaud.factoryResetMsg)
         }
     }
 
@@ -178,24 +170,6 @@ struct DirectConnectSection: View {
             Label(L10n.Plaud.released, systemImage: "checkmark.circle")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-        }
-        if direct.isConfigured {
-            // ★ Return / hand-back guarantee (2026-10-21 user question "7 天无理由"):
-            // takeover must be reversible — these two release the card so the
-            // official app (or a buyer) can pair it again as if new.
-            Button(L10n.Plaud.unbindKeep, role: .destructive) {
-                direct.releaseDevice(factoryReset: false)
-                releasedNote = true
-            }
-            .disabled(!direct.phase.isConnected)
-            Button(L10n.Plaud.factoryReset, role: .destructive) {
-                showFactoryConfirm = true
-            }
-            .disabled(!direct.phase.isConnected)
-            Button(L10n.Plaud.deactivate, role: .destructive) {
-                direct.deactivate()
-                message = nil
-            }
         }
     }
 
@@ -332,6 +306,73 @@ struct DirectConnectSection: View {
         }
     }
 
+    /// Hand the card back to PLAUD's own app (2026-10-21 8th round: "增加一个
+    /// 切换通过官方 app 绑定的按钮，会解绑卡片清除录音恢复出厂设置").
+    ///
+    /// Why one purpose-built exit instead of the old "factory reset" row: the BLE
+    /// work was already there, but it never said *why* you would want it, and the
+    /// user was left to discover on their own that a bound card is invisible to
+    /// the official app. So this button does the full hand-back — `depair(clear:)`
+    /// + cloud unbind + radio released — and then prints the three steps that
+    /// actually decide whether the official app can pair (quit Nomily, forget the
+    /// OS-level pairing, then pair). "Unbind but keep recordings" stays as the
+    /// non-destructive variant, and deactivate stays as the local-only reset.
+    private var handoverSection: some View {
+        Section {
+            Button(L10n.Plaud.handover) {
+                // Enabled even while disconnected: the common case is "the card
+                // is asleep and the official app won't pair", and a greyed-out
+                // row there explains nothing. Say what is missing instead.
+                if direct.phase.isConnected {
+                    showHandoverConfirm = true
+                } else {
+                    message = L10n.Plaud.notConnected
+                }
+            }
+            Button(L10n.Plaud.unbindKeep, role: .destructive) {
+                if direct.phase.isConnected {
+                    direct.releaseDevice(factoryReset: false)
+                    releasedNote = true
+                } else {
+                    message = L10n.Plaud.notConnected
+                }
+            }
+            Button(L10n.Plaud.deactivate, role: .destructive) {
+                direct.deactivate()
+                message = nil
+            }
+            if handedOver && direct.pairedSN == nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(L10n.Plaud.handoverDone, systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text(L10n.Plaud.handoverStep1)
+                    Text(L10n.Plaud.handoverStep2)
+                    Text(L10n.Plaud.handoverStep3)
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(L10n.Plaud.handoverHeader)
+        } footer: {
+            Text(L10n.Plaud.handoverFooter)
+        }
+        .confirmationDialog(
+            L10n.Plaud.handoverConfirmTitle,
+            isPresented: $showHandoverConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.Plaud.handoverConfirmAction, role: .destructive) {
+                direct.releaseDevice(factoryReset: true)
+                releasedNote = true
+                handedOver = true
+            }
+            Button(L10n.Common.cancel, role: .cancel) {}
+        } message: {
+            Text(L10n.Plaud.handoverConfirmMsg)
+        }
+    }
+
     private var scanButton: some View {
         Button {
             message = nil
@@ -349,14 +390,15 @@ struct DirectConnectSection: View {
 
     @ViewBuilder
     private var setupFields: some View {
+        // ★ Two fields only (2026-10-21 8th round: "填写 2 个值，下面那个没有用的
+        // 则不用填写去掉那个框"). The third box was the platform host — it only ever
+        // held `PlaudDirectService.defaultDomain`, and a hand-typed host could
+        // only break sign-in. The service still reads the stored value, so an
+        // existing custom host keeps working; new setups just get the default.
         TextField(L10n.Plaud.clientId, text: $clientId)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
         SecureField(L10n.Plaud.clientSecret, text: $clientSecret)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-        TextField(L10n.Plaud.domain, text: $domain, prompt: Text(verbatim: PlaudDirectService.defaultDomain))
-            .keyboardType(.URL)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
         Button {
@@ -380,7 +422,7 @@ struct DirectConnectSection: View {
         do {
             try await direct.activate(
                 clientId: clientId, secret: clientSecret,
-                domain: domain.isEmpty ? PlaudDirectService.defaultDomain : domain
+                domain: PlaudDirectService.defaultDomain
             )
             // A card picked before activation now proceeds automatically —
             // the official app behaves the same way (select → key → connect).

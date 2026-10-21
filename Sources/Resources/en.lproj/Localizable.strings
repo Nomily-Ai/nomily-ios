@@ -1265,6 +1265,16 @@
 "plaud.factory_reset_msg" = "All recordings on the card will be erased and the binding released — the card becomes like new. This cannot be undone.";
 "plaud.erase" = "Erase";
 "plaud.released" = "Card released — the official PLAUD app can pair it again.";
+"plaud.handover_header" = "Switch back to the official app";
+"plaud.handover" = "Hand back to the official app (unbind + erase card)";
+"plaud.handover_confirm_title" = "Hand the card back to the official app?";
+"plaud.handover_confirm_msg" = "This releases Nomily's binding and erases every recording on the card — it goes back to factory state, so the official PLAUD app can pair it like a new card. Erased recordings cannot be recovered; pull anything you need first.";
+"plaud.handover_confirm_action" = "Unbind and erase";
+"plaud.handover_done" = "Handed back — binding released, card erased.";
+"plaud.handover_step1" = "① Swipe Nomily away (a full quit, not just background) — otherwise our Bluetooth link still holds the card.";
+"plaud.handover_step2" = "② Settings → Bluetooth: if a PLAUD entry is still listed, tap ⓘ and Forget This Device.";
+"plaud.handover_step3" = "③ Open the official PLAUD app → Add device → scan and pair. Wake the card with a short press first.";
+"plaud.handover_footer" = "A card can be bound to one app at a time — that is why the official app cannot see it while Nomily holds it. To come back later, just scan and pair again; your Client ID / Secret stay saved.";
 "scanner.add_title" = "Add device";
 "scanner.pick_hint" = "Pick a device type, then scan for it";
 "scanner.category_vobot" = "V05E";

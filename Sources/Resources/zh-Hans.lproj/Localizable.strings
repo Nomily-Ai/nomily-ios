@@ -1367,6 +1367,16 @@
 "plaud.factory_reset_msg" = "卡内所有录音将被清空并解除绑定，卡片恢复全新状态。此操作不可撤销。";
 "plaud.erase" = "清空";
 "plaud.released" = "已解绑——官方 PLAUD App 可重新配对该卡。";
+"plaud.handover_header" = "切换回官方 App";
+"plaud.handover" = "交还给官方 App（解绑并清空卡片）";
+"plaud.handover_confirm_title" = "交还给官方 App？";
+"plaud.handover_confirm_msg" = "会解除 Nomily 的绑定，并抹掉卡上的全部录音——卡片恢复出厂状态，之后官方 PLAUD App 可以像新卡一样配对。抹掉的录音无法恢复，请先拉取需要的内容。";
+"plaud.handover_confirm_action" = "解绑并清空";
+"plaud.handover_done" = "已交还：绑定已解除，卡上录音已清空。";
+"plaud.handover_step1" = "① 上滑彻底退出 Nomily（不是切到后台），否则蓝牙连接还在占用卡片。";
+"plaud.handover_step2" = "② 设置 → 蓝牙：若列表里还有 PLAUD 的条目，点 ⓘ 忽略此设备。";
+"plaud.handover_step3" = "③ 打开官方 PLAUD App → 添加设备 → 扫描并配对（先短按录音键唤醒卡片）。";
+"plaud.handover_footer" = "一张卡同一时刻只能被一个 App 绑定——所以 Nomily 握着它时官方 App 看不到它。以后想回来用 Nomily，重新扫描配对即可，Client ID / Secret 不用重填。";
 "scanner.add_title" = "添加设备";
 "scanner.pick_hint" = "选择设备类型，再进行扫描";
 "scanner.category_vobot" = "V05E";

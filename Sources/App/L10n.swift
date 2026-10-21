@@ -131,6 +131,19 @@ enum L10n {
         static var factoryResetMsg: String { NSLocalizedString("plaud.factory_reset_msg", value: "All recordings on the card will be erased and the binding released — the card becomes like new. This cannot be undone.", comment: "") }
         static var erase: String { NSLocalizedString("plaud.erase", value: "Erase", comment: "") }
         static var released: String { NSLocalizedString("plaud.released", value: "Card released — the official PLAUD app can pair it again.", comment: "") }
+        // ★ 2026-10-21 (8th round): one purpose-built exit — "switching back to
+        // the official app" is unbind + erase + the three steps nobody guesses
+        // (quit Nomily, forget the OS pairing, then pair in the official app).
+        static var handoverHeader: String { NSLocalizedString("plaud.handover_header", value: "Switch back to the official app", comment: "Section header for handing the card back to PLAUD's own app") }
+        static var handover: String { NSLocalizedString("plaud.handover", value: "Hand back to the official app (unbind + erase card)", comment: "Hands the card back: releases our binding and wipes the card") }
+        static var handoverConfirmTitle: String { NSLocalizedString("plaud.handover_confirm_title", value: "Hand the card back to the official app?", comment: "") }
+        static var handoverConfirmMsg: String { NSLocalizedString("plaud.handover_confirm_msg", value: "This releases Nomily's binding and erases every recording on the card — it goes back to factory state, so the official PLAUD app can pair it like a new card. Erased recordings cannot be recovered; pull anything you need first.", comment: "") }
+        static var handoverConfirmAction: String { NSLocalizedString("plaud.handover_confirm_action", value: "Unbind and erase", comment: "") }
+        static var handoverDone: String { NSLocalizedString("plaud.handover_done", value: "Handed back — binding released, card erased.", comment: "") }
+        static var handoverStep1: String { NSLocalizedString("plaud.handover_step1", value: "① Swipe Nomily away (a full quit, not just background) — otherwise our Bluetooth link still holds the card.", comment: "") }
+        static var handoverStep2: String { NSLocalizedString("plaud.handover_step2", value: "② Settings → Bluetooth: if a PLAUD entry is still listed, tap ⓘ and Forget This Device.", comment: "") }
+        static var handoverStep3: String { NSLocalizedString("plaud.handover_step3", value: "③ Open the official PLAUD app → Add device → scan and pair. Wake the card with a short press first.", comment: "") }
+        static var handoverFooter: String { NSLocalizedString("plaud.handover_footer", value: "A card can be bound to one app at a time — that is why the official app cannot see it while Nomily holds it. To come back later, just scan and pair again; your Client ID / Secret stay saved.", comment: "") }
         // ★ Official-app parity (2026-10-21): scan-first flow + card controls
         static var scanNearby: String { NSLocalizedString("plaud.scan_nearby", value: "Scan for nearby cards", comment: "Scan action for PLAUD cards (no key needed)") }
         static func cardSelected(_ name: String) -> String {

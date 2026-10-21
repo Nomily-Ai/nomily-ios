@@ -1076,6 +1076,14 @@ final class PlaudDirectService: NSObject, ObservableObject {
         stopStatePolling()
         Task { @MainActor in self.stopLiveTranscription() }
         PlaudDeviceAgent.shared.depair(clear: factoryReset)
+        // ★ 2026-10-21 (8th round, "切换回官方 App"): `depair` releases the keys it
+        // stored, but it does not necessarily drop the central-side link. If we
+        // keep it, the official app can see the card on scan and still fail to
+        // connect — which reads as "官方 App 用不了". So free the radio here:
+        // disconnect the agent and drop the scan results.
+        PlaudDeviceAgent.shared.disconnect()
+        scanned = []
+        selectedCard = nil
         Task { [weak self] in
             guard let self else { return }
             do {
