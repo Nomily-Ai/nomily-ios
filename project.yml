@@ -52,6 +52,17 @@ targets:
       # watchOS companion ships — it can't be installed on its own.
       - target: nomily_watch
         embed: true
+      # ★ 2026-10-21: the official PLAUD device SDKs (arm64 device builds,
+      # v1.0.15 from github.com/Plaud-AI/plaud-sdk-public). They own the
+      # Note Pro's encrypted BLE protocol (SN signature + RSA/ChaCha session)
+      # that our own RecorderLink layer can't do without partner credentials.
+      # `PlaudLink` (work in progress) wraps them behind `any RecorderLink`.
+      - framework: Frameworks/PlaudBleSDK.framework
+        embed: true
+      - framework: Frameworks/PlaudDeviceBasicSDK.framework
+        embed: true
+      - framework: Frameworks/PlaudWiFiSDK.framework
+        embed: true
     info:
       path: Sources/App/Info.plist
       properties:
@@ -60,7 +71,7 @@ targets:
         # Must track `nomily_watch`'s build number — watchOS refuses to install
         # a companion whose version doesn't match its host, and an embedded
         # watch app one build ahead is enough to trip it. Bump both or neither.
-        CFBundleVersion: "68"
+        CFBundleVersion: "69"
         # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
         # appropriate when the app's crypto use is exempt from US export
         # documentation requirements:
@@ -200,7 +211,7 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         # Must track the iPhone app's build number — watchOS refuses to install
         # a companion whose version doesn't match its host.
-        CFBundleVersion: "68"
+        CFBundleVersion: "69"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.nomily.app
         NSMicrophoneUsageDescription: Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.
@@ -301,7 +312,7 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         # Must match the parent App — when an embedded binary's version numbers differ from the host's, watchOS
         # refuses to install the whole App.
-        CFBundleVersion: "68"
+        CFBundleVersion: "69"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

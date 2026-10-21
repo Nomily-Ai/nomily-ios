@@ -1304,3 +1304,23 @@
 "poster.template_minimal" = "简约";
 "poster.template_midnight" = "暗夜";
 "poster.template_business" = "商务";
+
+// PLAUD cloud sync (2026-10-21)
+"plaud.nav_title" = "PLAUD";
+"plaud.signin_header" = "登录";
+"plaud.email" = "PLAUD 账号邮箱";
+"plaud.code" = "验证码";
+"plaud.send_code" = "发送验证码";
+"plaud.code_sent" = "验证码已发送，请查收邮箱。";
+"plaud.sign_in" = "登录";
+"plaud.connected_header" = "PLAUD 账号";
+"plaud.account" = "邮箱";
+"plaud.sync_header" = "云同步";
+"plaud.sync_now" = "立即同步录音";
+"plaud.sync_footer" = "下载官方 PLAUD App 已上传到云端的原始音频。新录音会出现在资料库，并用你自己的 ASR/LLM 密钥转写。";
+"plaud.sync_result" = "已下载 %d 条，已存在 %d 条";
+"plaud.sign_out" = "退出登录";
+"plaud.guide_header" = "工作方式";
+"plaud.guide_audio" = "从 PLAUD 云端拉取原始音频——不使用官方转写结果";
+"plaud.guide_keys" = "转写与摘要始终使用你自己的 ASR/LLM 密钥";
+"plaud.guide_app" = "官方 PLAUD App 不受任何影响——不做解绑";

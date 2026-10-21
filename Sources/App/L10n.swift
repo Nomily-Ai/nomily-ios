@@ -70,6 +70,30 @@ enum L10n {
 
     // MARK: - Settings
 
+    /// PLAUD cloud sync (2026-10-21 dual-mode support).
+    enum Plaud {
+        static var navTitle: String { NSLocalizedString("plaud.nav_title", value: "PLAUD", comment: "Settings page title for PLAUD cloud sync") }
+        static var signInHeader: String { NSLocalizedString("plaud.signin_header", value: "Sign in", comment: "PLAUD email+code sign-in section") }
+        static var emailPlaceholder: String { NSLocalizedString("plaud.email", value: "PLAUD account email", comment: "") }
+        static var codePlaceholder: String { NSLocalizedString("plaud.code", value: "Verification code", comment: "") }
+        static var sendCode: String { NSLocalizedString("plaud.send_code", value: "Send verification code", comment: "") }
+        static var codeSent: String { NSLocalizedString("plaud.code_sent", value: "Code sent — check your email.", comment: "") }
+        static var signIn: String { NSLocalizedString("plaud.sign_in", value: "Sign in", comment: "") }
+        static var connectedHeader: String { NSLocalizedString("plaud.connected_header", value: "PLAUD account", comment: "") }
+        static var accountLabel: String { NSLocalizedString("plaud.account", value: "Email", comment: "") }
+        static var syncHeader: String { NSLocalizedString("plaud.sync_header", value: "Cloud sync", comment: "") }
+        static var syncNow: String { NSLocalizedString("plaud.sync_now", value: "Sync recordings now", comment: "") }
+        static var syncFooter: String { NSLocalizedString("plaud.sync_footer", value: "Downloads the original audio that the official PLAUD app uploaded to the cloud. New recordings appear in the library and are transcribed with your own ASR/LLM keys.", comment: "") }
+        static func syncResult(_ done: Int, _ skipped: Int) -> String {
+            String(format: NSLocalizedString("plaud.sync_result", value: "Downloaded %d, already present %d", comment: "Cloud sync pass result"), done, skipped)
+        }
+        static var signOut: String { NSLocalizedString("plaud.sign_out", value: "Sign out", comment: "") }
+        static var guideHeader: String { NSLocalizedString("plaud.guide_header", value: "How this works", comment: "") }
+        static var guideAudio: String { NSLocalizedString("plaud.guide_audio", value: "Pulls the ORIGINAL audio from the PLAUD cloud — never the official transcript", comment: "") }
+        static var guideKeys: String { NSLocalizedString("plaud.guide_keys", value: "Transcription and summaries always use your own ASR/LLM keys", comment: "") }
+        static var guideOfficialApp: String { NSLocalizedString("plaud.guide_app", value: "The official PLAUD app keeps working untouched — nothing is unbound", comment: "") }
+    }
+
     enum Settings {
         static var asrProviders: String { NSLocalizedString("settings.asr_providers", comment: "") }
         static var llmProviders: String { NSLocalizedString("settings.llm_providers", comment: "") }

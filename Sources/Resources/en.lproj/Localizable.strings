@@ -1202,3 +1202,23 @@
 "summarize.chip_custom" = "Custom";
 "summarize.default_badge" = "Default";
 "summarize.set_default" = "Set as default";
+
+// PLAUD cloud sync (2026-10-21)
+"plaud.nav_title" = "PLAUD";
+"plaud.signin_header" = "Sign in";
+"plaud.email" = "PLAUD account email";
+"plaud.code" = "Verification code";
+"plaud.send_code" = "Send verification code";
+"plaud.code_sent" = "Code sent — check your email.";
+"plaud.sign_in" = "Sign in";
+"plaud.connected_header" = "PLAUD account";
+"plaud.account" = "Email";
+"plaud.sync_header" = "Cloud sync";
+"plaud.sync_now" = "Sync recordings now";
+"plaud.sync_footer" = "Downloads the original audio that the official PLAUD app uploaded to the cloud. New recordings appear in the library and are transcribed with your own ASR/LLM keys.";
+"plaud.sync_result" = "Downloaded %d, already present %d";
+"plaud.sign_out" = "Sign out";
+"plaud.guide_header" = "How this works";
+"plaud.guide_audio" = "Pulls the ORIGINAL audio from the PLAUD cloud — never the official transcript";
+"plaud.guide_keys" = "Transcription and summaries always use your own ASR/LLM keys";
+"plaud.guide_app" = "The official PLAUD app keeps working untouched — nothing is unbound";
