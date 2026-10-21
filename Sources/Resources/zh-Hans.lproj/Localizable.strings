@@ -719,6 +719,10 @@
 "watch.status_recording" = "Apple Watch 正在录音";
 "watch.status_transferring" = "正在从 Apple Watch 传输…";
 "watch.status_out_of_range" = "超出范围";
+"watch.transfer_stalled" = "手表已离线 · 传输暂停";
+"watch.transfer_watch_offline" = "传输过程中手表离线了。录音还在手表上，重新连上后会自动送达。";
+"watch.transfer_gave_up" = "手表传输没有响应。打开手表 App 重新发送这段录音。";
+"watch.hide_transfer_status" = "隐藏此状态";
 
 "summarize.delete_title" = "删除模板？";
 "summarize.delete_message" = "删除“%@”？此操作无法撤销。";
@@ -1316,6 +1320,12 @@
 "plaud.connected_header" = "PLAUD 账号";
 "plaud.account" = "邮箱";
 "plaud.sync_header" = "云同步";
+"plaud.cloud_header" = "云模式（从 PLAUD 云端拉取）";
+"plaud.cloud_recordings" = "云端录音";
+"plaud.cloud_recordings_count" = "%d 条";
+"plaud.pull_from_cloud" = "从云端拉取录音";
+"plaud.cloud_progress" = "%d/%d · %@";
+"plaud.cloud_mode_footer" = "云模式完全不走蓝牙：用官方 App 的 PLAUD 账号登录，把已经上传到云端的录音拉下来。卡片可以继续给官方 App 用，但只有官方 App 同步过的录音才会出现在这里。";
 "plaud.sync_now" = "立即同步录音";
 "plaud.sync_footer" = "下载官方 PLAUD App 已上传到云端的原始音频。新录音会出现在资料库，并用你自己的 ASR/LLM 密钥转写。";
 "plaud.sync_result" = "已下载 %d 条，已存在 %d 条";
@@ -1403,6 +1413,8 @@
 "plaud.downloading_single" = "正在传输…";
 "plaud.device_info_header" = "设备";
 "plaud.device_name" = "名称";
+"plaud.serial_number" = "序列号";
+"plaud.copy_sn" = "复制序列号";
 "plaud.rename" = "重命名";
 "plaud.rename_message" = "只修改本 App 里显示的名称，卡片本身不受影响。留空则恢复为型号名称。";
 "plaud.storage_used" = "已用 %@";
@@ -1415,6 +1427,13 @@
 "plaud.delete_selected" = "删除 %d 条";
 "plaud.delete_selected_title" = "从卡上删除选中的录音？";
 "plaud.delete_selected_message" = "%d 条录音会从卡片上抹掉，无法恢复。要留副本请先拉取。";
+"plaud.queued_behind_transfer" = "已加入传输队列（排队 %d 条）。";
+"plaud.sync_stalled_reset" = "上一次传输卡住了，已重置，正在重新开始。";
+"plaud.sync_cancelled" = "已停止传输。";
+"plaud.sync_skipped" = "有一条超时，已跳过（还剩 %d 条）。";
+"plaud.sync_done_with_skips" = "完成，有 %d 条超时，点单条可重试。";
+"plaud.sync_failed_one" = "跳过一条：%@";
+"plaud.stop_transfer" = "停止";
 "plaud.not_connected" = "请先连接卡片。";
 "plaud.connecting_then_record" = "正在连接卡片，连上后立刻开始录音。";
 "plaud.card_files" = "卡上录音";

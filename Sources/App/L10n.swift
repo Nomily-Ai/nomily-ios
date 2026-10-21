@@ -82,6 +82,18 @@ enum L10n {
         static var connectedHeader: String { NSLocalizedString("plaud.connected_header", value: "PLAUD account", comment: "") }
         static var accountLabel: String { NSLocalizedString("plaud.account", value: "Email", comment: "") }
         static var syncHeader: String { NSLocalizedString("plaud.sync_header", value: "Cloud sync", comment: "") }
+        // ★ 2026-10-21 (6th round): cloud mode is now a first-class mode, not a
+        // compatibility footnote.
+        static var cloudHeader: String { NSLocalizedString("plaud.cloud_header", value: "Cloud mode (pull from PLAUD cloud)", comment: "Second mode under direct connect") }
+        static var cloudRecordings: String { NSLocalizedString("plaud.cloud_recordings", value: "In the cloud", comment: "How many recordings the account holds online") }
+        static func cloudRecordingsCount(_ count: Int) -> String {
+            String(format: NSLocalizedString("plaud.cloud_recordings_count", value: "%d clip(s)", comment: ""), count)
+        }
+        static var pullFromCloud: String { NSLocalizedString("plaud.pull_from_cloud", value: "Pull recordings from cloud", comment: "") }
+        static func cloudProgress(_ index: Int, _ total: Int, _ name: String) -> String {
+            String(format: NSLocalizedString("plaud.cloud_progress", value: "%d/%d · %@", comment: "Cloud pull progress; %d index, %d total, %@ file name"), index, total, name)
+        }
+        static var cloudModeFooter: String { NSLocalizedString("plaud.cloud_mode_footer", value: "Cloud mode uses no Bluetooth: sign in with the PLAUD account the official app uses, and pull what it already uploaded. The card keeps working with the official app — but a recording only shows up here after that app has synced it.", comment: "") }
         static var syncNow: String { NSLocalizedString("plaud.sync_now", value: "Sync recordings now", comment: "") }
         static var syncFooter: String { NSLocalizedString("plaud.sync_footer", value: "Downloads the original audio that the official PLAUD app uploaded to the cloud. New recordings appear in the library and are transcribed with your own ASR/LLM keys.", comment: "") }
         static func syncResult(_ done: Int, _ skipped: Int) -> String {
@@ -180,6 +192,8 @@ enum L10n {
         // ★ 2026-10-21 (4th round): rename + storage bar
         static var deviceInfoHeader: String { NSLocalizedString("plaud.device_info_header", value: "Device", comment: "Section header for the card's name row in device info") }
         static var deviceName: String { NSLocalizedString("plaud.device_name", value: "Name", comment: "The card's display name") }
+        static var serialNumber: String { NSLocalizedString("plaud.serial_number", value: "Serial number", comment: "The card's product SN shown in device info") }
+        static var copySN: String { NSLocalizedString("plaud.copy_sn", value: "Copy serial number", comment: "") }
         static var rename: String { NSLocalizedString("plaud.rename", value: "Rename", comment: "Rename the card as it appears in the app") }
         static var renameMessage: String { NSLocalizedString("plaud.rename_message", value: "Only changes the name in this app — the card itself is untouched. Leave it empty to go back to the model name.", comment: "") }
         static func storageUsed(_ value: String) -> String {
@@ -207,6 +221,22 @@ enum L10n {
         static func deleteSelectedMessage(_ count: Int) -> String {
             String(format: NSLocalizedString("plaud.delete_selected_message", value: "%d recording(s) will be erased from the card and cannot be recovered. Pull them first if you want to keep a copy.", comment: ""), count)
         }
+        // ★ 2026-10-21 (6th round): transfer watchdog / retry feedback
+        static func queuedBehindTransfer(_ added: Int, _ queued: Int) -> String {
+            String(format: NSLocalizedString("plaud.queued_behind_transfer", value: "Added %d to the transfer queue (%d waiting).", comment: "Feedback when a pull is tapped while another transfer is still running"), added, queued)
+        }
+        static var syncStalledReset: String { NSLocalizedString("plaud.sync_stalled_reset", value: "The last transfer stalled — reset, starting again.", comment: "") }
+        static var syncCancelled: String { NSLocalizedString("plaud.sync_cancelled", value: "Transfer stopped.", comment: "") }
+        static func syncSkipped(_ remaining: Int) -> String {
+            String(format: NSLocalizedString("plaud.sync_skipped", value: "One file timed out and was skipped (%d left).", comment: ""), remaining)
+        }
+        static func syncDoneWithSkips(_ count: Int) -> String {
+            String(format: NSLocalizedString("plaud.sync_done_with_skips", value: "Done — %d file(s) timed out. Tap a row to retry.", comment: ""), count)
+        }
+        static func syncFailedOne(_ message: String) -> String {
+            String(format: NSLocalizedString("plaud.sync_failed_one", value: "Skipped one file: %@", comment: ""), message)
+        }
+        static var stopTransfer: String { NSLocalizedString("plaud.stop_transfer", value: "Stop", comment: "Stop the running card transfer") }
 
         static var pairRejected: String { NSLocalizedString("plaud.pair_rejected", value: "The card refused the connection — unbind it once in the official PLAUD app (Settings → device → unbind), then retry.", comment: "") }
         static var cloudNote: String { NSLocalizedString("plaud.cloud_note", value: "Optional compatibility path. Requires a PLAUD account registered with an EMAIL (phone-number accounts are rejected). The card stays bound to the official app.", comment: "") }
@@ -1809,6 +1839,11 @@ enum L10n {
         static var statusRecording: String { NSLocalizedString("watch.status_recording", comment: "") }
         static var statusTransferring: String { NSLocalizedString("watch.status_transferring", comment: "") }
         static var statusOutOfRange: String { NSLocalizedString("watch.status_out_of_range", comment: "") }
+        // ★ 2026-10-21: stuck-transfer escapes on the status strip
+        static var transferStalled: String { NSLocalizedString("watch.transfer_stalled", value: "Watch offline — transfer paused", comment: "The watch stopped heartbeating mid-transfer") }
+        static var transferWatchOffline: String { NSLocalizedString("watch.transfer_watch_offline", value: "The watch went offline mid-transfer. The clip stays on the watch and arrives when it reconnects.", comment: "") }
+        static var transferGaveUp: String { NSLocalizedString("watch.transfer_gave_up", value: "The watch transfer stopped responding. Open the watch app to resend the clip.", comment: "") }
+        static var hideTransferStatus: String { NSLocalizedString("watch.hide_transfer_status", value: "Hide this status", comment: "Close the watch transfer strip") }
 
         // MARK: Recording home screen (★ fourteenth revision 2026-10-16)
         //

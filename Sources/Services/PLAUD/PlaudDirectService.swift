@@ -221,6 +221,15 @@ final class PlaudDirectService: NSObject, ObservableObject {
     private var pendingDeletes: [Int] = []
     private var deletePumpScheduled = false
     private var deletePumpGeneration = 0
+    /// Last time the export pipeline showed any sign of life (progress /
+    /// completion / error / next file). The watchdog compares against this.
+    private var lastSyncActivity = Date.distantPast
+    private var syncWatchdog: Task<Void, Never>?
+    /// Sessions the watchdog gave up on — kept so "retry" doesn't spin on the
+    /// same broken file within one sitting.
+    private var stalledSessions: Set<Int> = []
+    /// How many files this pass had to skip (surfaced in the finish message).
+    @Published private(set) var downloadSkipped = 0
     private var currentExportSession: Int?
     /// Session ids already pulled into the library (persisted) — the card
     /// keeps files until deleted, so dedup is what makes re-syncs cheap.
@@ -602,6 +611,11 @@ final class PlaudDirectService: NSObject, ObservableObject {
         // would still hold the files, and the UI already dropped them optimistically.
         pendingDeletes.removeAll()
         deletePumpScheduled = false
+        // Same for a transfer: the export dies with the link, so the queue and
+        // the watchdog must go too — otherwise `isSyncing` stays true and every
+        // later pull is silently swallowed (the "下载无法传输" report).
+        hardResetSync(keepCardFiles: true)
+        stalledSessions.removeAll()
         liveStreaming = false
         livePCMBytes = 0
         clearRecordClock()
@@ -700,6 +714,16 @@ final class PlaudDirectService: NSObject, ObservableObject {
             setRecordNotice(L10n.Plaud.notConnected)
             return
         }
+        // ★ 2026-10-21 (6th round, "点击下载无法传输 / 卡在 2/6"): a transfer that
+        // stalled mid-queue used to hold `isSyncing` forever. Every later tap
+        // then just appended to a dead queue — the button looked broken. So a
+        // tap arriving at a silent transfer first *reclaims* the link, then
+        // starts a fresh queue with what the user asked for.
+        if isSyncing, isSyncStalled {
+            log.warning("plaud sync looked stalled (\(Int(Date().timeIntervalSince(self.lastSyncActivity)))s of silence) — resetting before a new pull")
+            hardResetSync(keepCardFiles: true)
+            setSyncMessage(L10n.Plaud.syncStalledReset)
+        }
         let unique = files.filter { file in
             // Skip what is already queued *and* what the card is exporting right
             // now — re-queueing the in-flight session would export it twice and
@@ -712,9 +736,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
         pendingDownloads.append(contentsOf: bles)
         if isSyncing {
             // A transfer is already running: just widen the queue, keep the bar
-            // honest by growing the denominator.
+            // honest by growing the denominator. Say so — silently growing the
+            // queue is what made the row button look dead.
             DispatchQueue.main.async { self.downloadTotal += bles.count }
-            setSyncMessage(L10n.Plaud.syncDownloading(pendingDownloads.count))
+            setSyncMessage(L10n.Plaud.queuedBehindTransfer(bles.count, pendingDownloads.count))
             return
         }
         setSyncing(true)
@@ -725,6 +750,103 @@ final class PlaudDirectService: NSObject, ObservableObject {
         }
         setSyncMessage(L10n.Plaud.syncDownloading(bles.count))
         downloadNext()
+    }
+
+    // MARK: - Transfer watchdog
+
+    /// "No progress, no completion, no error" is the one state the SDK does not
+    /// report — and it is exactly what the card produces when it falls asleep or
+    /// drops mid-file. `isSyncStalled` is how the rest of the class asks.
+    private var isSyncStalled: Bool {
+        isSyncing && Date().timeIntervalSince(lastSyncActivity) > Self.syncSilenceLimit
+    }
+
+    /// Silence allowed before a transfer is declared stalled. A single 20 MB
+    /// file at ~20 KB/s still ticks the progress callback dozens of times a
+    /// second, so 20 s of complete quiet means the link is gone, not slow.
+    private static let syncSilenceLimit: TimeInterval = 20
+
+    private func noteSyncActivity() {
+        lastSyncActivity = Date()
+    }
+
+    private func startSyncWatchdog() {
+        syncWatchdog?.cancel()
+        syncWatchdog = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                guard self.isSyncing else { return }
+                guard self.isSyncStalled else { continue }
+                log.warning("plaud export stalled on session \(self.currentExportSession ?? -1) — skipping")
+                self.skipStalledExport()
+            }
+        }
+    }
+
+    private func stopSyncWatchdog() {
+        syncWatchdog?.cancel()
+        syncWatchdog = nil
+    }
+
+    /// Drop the current file, move on to the next one. The card keeps the
+    /// recording (nothing is deleted), so a later retry can still pull it.
+    private func skipStalledExport() {
+        if let stalled = currentExportSession {
+            stalledSessions.insert(stalled)
+        }
+        // Tell the card to stop pushing; otherwise it keeps streaming into a
+        // channel nobody drains and the next export inherits the mess.
+        PlaudDeviceAgent.shared.stopDownloadFile()
+        currentExportSession = nil
+        noteSyncActivity()
+        let remaining = pendingDownloads.count
+        DispatchQueue.main.async {
+            self.downloadSkipped += 1
+            self.downloadProgress = 0
+            self.downloadSpeed = ""
+        }
+        if remaining == 0 {
+            finishSync()
+        } else {
+            setSyncMessage(L10n.Plaud.syncSkipped(remaining))
+            downloadNext()
+        }
+    }
+
+    /// User pressed "停止" (or switching pages forced it): stop the SDK, clear
+    /// the queue, and say so. Never leaves `isSyncing` stuck.
+    func cancelSync() {
+        guard isSyncing else { return }
+        PlaudDeviceAgent.shared.stopDownloadFile()
+        hardResetSync(keepCardFiles: true)
+        setSyncMessage(L10n.Plaud.syncCancelled)
+    }
+
+    private func hardResetSync(keepCardFiles: Bool) {
+        pendingDownloads.removeAll()
+        currentExportSession = nil
+        stopSyncWatchdog()
+        setSyncing(false)
+        noteSyncActivity()
+        DispatchQueue.main.async {
+            self.downloadProgress = 0
+            self.downloadSpeed = ""
+        }
+        _ = keepCardFiles
+    }
+
+    private func finishSync() {
+        currentExportSession = nil
+        stopSyncWatchdog()
+        setSyncing(false)
+        let skipped = downloadSkipped
+        DispatchQueue.main.async {
+            self.downloadProgress = 0
+            self.downloadSpeed = ""
+            self.downloadSkipped = 0
+        }
+        setSyncMessage(skipped > 0 ? L10n.Plaud.syncDoneWithSkips(skipped) : L10n.Plaud.syncDone)
     }
 
     /// Delete one recording from the card. Removed from the list immediately so
@@ -1007,9 +1129,26 @@ final class PlaudDirectService: NSObject, ObservableObject {
             self.cardFiles = mapped
             self.cardFilesLoaded = true
         }
-        let fresh = files.filter { !syncedSessions.contains($0.sessionId) }
+        let fresh = files.filter {
+            !syncedSessions.contains($0.sessionId) && !stalledSessions.contains($0.sessionId)
+        }
         log.info("plaud file list: \(files.count) on card, \(fresh.count) new (probe=\(probeOnly))")
         if probeOnly { return }
+        // ★ 2026-10-21 (6th round): a file list that lands **while a transfer is
+        // running** must extend the queue, not replace it. Replacing it dropped
+        // the files already queued behind the current one, and the old code's
+        // "nothing new → setSyncing(false)" turned the bar off while an export
+        // was still running (the card kept pushing; the UI said stopped).
+        if isSyncing {
+            let queued = Set(pendingDownloads.map(\.sessionId))
+            let extra = fresh.filter {
+                $0.sessionId != currentExportSession && !queued.contains($0.sessionId)
+            }
+            guard !extra.isEmpty else { return }
+            pendingDownloads.append(contentsOf: extra)
+            DispatchQueue.main.async { self.downloadTotal += extra.count }
+            return
+        }
         guard !fresh.isEmpty else {
             setSyncing(false)
             setSyncMessage(nil)
@@ -1027,17 +1166,13 @@ final class PlaudDirectService: NSObject, ObservableObject {
 
     private func downloadNext() {
         guard let next = pendingDownloads.first else {
-            currentExportSession = nil
-            setSyncing(false)
-            setSyncMessage(L10n.Plaud.syncDone)
-            DispatchQueue.main.async {
-                self.downloadProgress = 0
-                self.downloadSpeed = ""
-            }
+            finishSync()
             return
         }
         pendingDownloads.removeFirst()
         currentExportSession = next.sessionId
+        noteSyncActivity()
+        startSyncWatchdog()
         setSyncMessage(L10n.Plaud.syncDownloading(pendingDownloads.count + 1))
         DispatchQueue.main.async {
             self.downloadProgress = 0
@@ -1059,6 +1194,9 @@ final class PlaudDirectService: NSObject, ObservableObject {
         // are no longer exporting (user deleted it / cancelled) must not move
         // the bar.
         guard currentExportSession == sessionId else { return }
+        // Feed the watchdog **before** the UI throttle: activity is about "the
+        // link is alive", not "the bar moved".
+        noteSyncActivity()
         // ★ Throttle (2026-10-21 "the transfer stutters"): the callback fires for
         // every packet — dozens of times a second. Publishing each one rebuilds
         // the whole file list on the main thread, which competes with the SDK's
@@ -1078,6 +1216,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// directory under a friendly timestamped name and register it.
     func handleExportComplete(sessionId: Int, outputPath: String) {
         currentExportSession = nil
+        noteSyncActivity()
         markSynced(sessionId)
         DispatchQueue.main.async {
             self.downloadDone += 1
@@ -1127,13 +1266,24 @@ final class PlaudDirectService: NSObject, ObservableObject {
 
     func handleExportError(sessionId: Int, message: String) {
         currentExportSession = nil
+        noteSyncActivity()
         log.error("plaud export error for \(sessionId): \(message, privacy: .public)")
-        setSyncMessage(L10n.Plaud.syncFailed(message))
-        pendingDownloads.removeAll()
-        setSyncing(false)
+        // ★ 2026-10-21 (6th round, "卡在 2/6"): one bad file used to wipe the
+        // WHOLE queue, so a six-file auto-pull died at the first refusal and the
+        // user lost the four that were still fine. Skip and continue instead;
+        // the counters say how many were missed.
+        stalledSessions.insert(sessionId)
         DispatchQueue.main.async {
+            self.downloadSkipped += 1
             self.downloadProgress = 0
             self.downloadSpeed = ""
+        }
+        if pendingDownloads.isEmpty {
+            finishSync()
+            setSyncMessage(L10n.Plaud.syncFailed(message))
+        } else {
+            setSyncMessage(L10n.Plaud.syncFailedOne(message))
+            downloadNext()
         }
     }
 

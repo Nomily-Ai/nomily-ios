@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// PLAUD sheet — dual mode (2026-10-21).
 ///
@@ -69,6 +70,7 @@ struct DirectConnectSection: View {
     @State private var releasedNote = false
     @State private var showRename = false
     @State private var nameDraft = ""
+    @State private var copiedSN = false
 
     var body: some View {
         nameSection
@@ -259,18 +261,20 @@ struct DirectConnectSection: View {
             .padding(.vertical, 2)
         }
         Button(L10n.Plaud.syncFromCard) { direct.syncFromCard() }
-            .disabled(direct.isSyncing)
+            .disabled(direct.isRecording)
 
         Button(L10n.Plaud.disconnect) { direct.disconnect() }
     }
 
-    /// Name + rename (2026-10-21: "需要支持修改设备名称").
+    /// Name + SN + rename (2026-10-21: "需要支持修改设备名称" / "设备详情要有产品的 SN").
     ///
     /// Shown whenever we know which card this is (`pairedSN` or a live link), so
-    /// the name can be fixed from Settings even while the card is asleep.
+    /// the name can be fixed and the SN read off from Settings even while the
+    /// card is asleep.
     @ViewBuilder
     private var nameSection: some View {
-        if direct.pairedSN != nil || direct.phase.isConnected {
+        let sn = direct.pairedSN ?? { if case .connected(let s) = direct.phase { return s }; return nil }()
+        if sn != nil || direct.phase.isConnected {
             Section {
                 HStack {
                     Text(L10n.Plaud.deviceName)
@@ -285,6 +289,27 @@ struct DirectConnectSection: View {
                     }
                     .buttonStyle(.borderless)
                     .accessibilityLabel(L10n.Plaud.rename)
+                }
+                if let sn {
+                    HStack {
+                        Text(L10n.Plaud.serialNumber)
+                        Spacer()
+                        // Selectable: the SN is what you paste into a support
+                        // ticket or the official app's device list.
+                        Text(sn)
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Button {
+                            UIPasteboard.general.string = sn
+                            copiedSN = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copiedSN = false }
+                        } label: {
+                            Image(systemName: copiedSN ? "checkmark" : "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(L10n.Plaud.copySN)
+                    }
                 }
             } header: {
                 Text(L10n.Plaud.deviceInfoHeader)
@@ -587,6 +612,16 @@ struct PlaudCardFilesView: View {
                         if !direct.downloadSpeed.isEmpty {
                             Text(direct.downloadSpeed)
                         }
+                        // ★ 2026-10-21 (6th round): the transfer could stall (card
+                        // asleep / dropped) and there was no way out of the bar —
+                        // every later "pull" just queued behind a dead transfer.
+                        // The service's watchdog skips after 20 s of silence; this
+                        // is the human override.
+                        Button(L10n.Plaud.stopTransfer, role: .destructive) {
+                            direct.cancelSync()
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.borderless)
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -776,7 +811,12 @@ struct PlaudCardFilesView: View {
                         .font(.title3)
                 }
                 .buttonStyle(.borderless)
-                .disabled(direct.isSyncing || direct.isRecording)
+                // ★ 2026-10-21 (6th round): do NOT grey this out while a
+                // transfer runs. That is exactly when the user taps it (the
+                // previous transfer looks stuck), and a disabled button reads as
+                // "下载无法传输". The service now appends to the live queue — or
+                // resets a stalled one — so a tap always does something.
+                .disabled(direct.isRecording)
                 .accessibilityLabel(L10n.Plaud.pullThisFile)
             }
         }
@@ -1005,10 +1045,14 @@ struct PlaudLedgerRow: View {
 /// is "add", this page is "manage", both drive the same service.
 struct PlaudDeviceDetailView: View {
     @ObservedObject private var direct = PlaudDirectService.shared
+    @ObservedObject private var plaud = PlaudCloudService.shared
 
     var body: some View {
         Form {
             DirectConnectSection(direct: direct)
+            // Same second mode as the add-device sheet: reachable from device
+            // info too, so the cloud path is never hidden behind "add device".
+            CloudSyncSection(plaud: plaud)
         }
         .navigationTitle(L10n.Plaud.deviceDetailTitle)
         .navigationBarTitleDisplayMode(.inline)
@@ -1033,7 +1077,20 @@ struct PlaudDeviceDetailView: View {
 
 // MARK: - Cloud sync (compatibility)
 
-private struct CloudSyncSection: View {
+// MARK: - Cloud mode
+
+/// **云模式** — the second way to get recordings off a PLAUD card: sign in with
+/// the PLAUD consumer account (email OTP) and pull what the official app has
+/// already uploaded.
+///
+/// Why it exists next to direct connect (user: "直连模式下面要增加一个云模式"):
+/// · Direct connect reads the card itself — no account, no internet, but the
+///   card must be awake and paired with THIS app (the official app loses access).
+/// · Cloud mode touches no Bluetooth at all: the card keeps working with the
+///   official app, and whatever that app already synced can be fetched here.
+///   The trade-off is freshness — a recording only exists in the cloud after the
+///   official app uploaded it.
+struct CloudSyncSection: View {
     @ObservedObject var plaud: PlaudCloudService
     @State private var email = ""
     @State private var code = ""
@@ -1041,20 +1098,50 @@ private struct CloudSyncSection: View {
     @State private var busy = false
     @State private var message: String?
     @State private var syncSummary: String?
+    /// How many recordings the cloud holds for this account (nil = not read).
+    @State private var cloudCount: Int?
+    /// "3/12 · name.mp3" while a pull is running.
+    @State private var progressLine: String?
 
     var body: some View {
         Section {
             if plaud.isSignedIn {
                 LabeledContent(L10n.Plaud.accountLabel, value: plaud.email ?? "")
-                Button(L10n.Plaud.syncNow) { Task { await sync() } }
+                HStack {
+                    Text(L10n.Plaud.cloudRecordings)
+                    Spacer()
+                    Text(cloudCount.map(L10n.Plaud.cloudRecordingsCount) ?? L10n.Plaud.historyUnknown)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        Task { await refreshCount() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
                     .disabled(busy)
-                if busy { ProgressView() }
+                    .accessibilityLabel(L10n.Plaud.refresh)
+                }
+                Button(L10n.Plaud.pullFromCloud) { Task { await sync() } }
+                    .disabled(busy)
+                    .accessibilityIdentifier("plaudCloudPull")
+                if busy {
+                    if let progressLine {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.mini)
+                            Text(progressLine).font(.footnote).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        ProgressView()
+                    }
+                }
                 if let syncSummary {
                     Text(syncSummary).font(.footnote).foregroundStyle(.secondary)
                 }
                 Button(L10n.Plaud.signOut, role: .destructive) {
                     plaud.signOut()
                     codeSent = false
+                    cloudCount = nil
+                    syncSummary = nil
                 }
             } else {
                 TextField(L10n.Plaud.emailPlaceholder, text: $email)
@@ -1079,11 +1166,26 @@ private struct CloudSyncSection: View {
                     .foregroundStyle(.secondary)
             }
         } header: {
-            Text(L10n.Plaud.syncHeader)
+            Text(L10n.Plaud.cloudHeader)
         } footer: {
-            if plaud.isSignedIn {
-                Text(L10n.Plaud.syncFooter)
-            }
+            Text(plaud.isSignedIn ? L10n.Plaud.syncFooter : L10n.Plaud.cloudModeFooter)
+        }
+        // Read the count as soon as the section is on screen with a live token:
+        // "how many are up there" is the first thing the user wants to know
+        // before deciding to pull.
+        .task(id: plaud.isSignedIn) {
+            guard plaud.isSignedIn, cloudCount == nil else { return }
+            await refreshCount()
+        }
+    }
+
+    private func refreshCount() async {
+        busy = true
+        defer { busy = false }
+        do {
+            cloudCount = try await plaud.listFiles().count
+        } catch {
+            message = error.localizedDescription
         }
     }
 
@@ -1107,6 +1209,7 @@ private struct CloudSyncSection: View {
         do {
             try await plaud.verify(code, email: email)
             code = ""
+            await refreshCount()
         } catch {
             message = error.localizedDescription
         }
@@ -1115,10 +1218,21 @@ private struct CloudSyncSection: View {
     private func sync() async {
         busy = true
         syncSummary = nil
-        defer { busy = false }
+        progressLine = nil
+        defer {
+            busy = false
+            progressLine = nil
+        }
         do {
-            let (done, skipped) = try await PlaudCloudService.shared.syncAll { _, _, _ in }
+            let (done, skipped) = try await PlaudCloudService.shared.syncAll { index, total, name in
+                // Progress hops to the main actor: the closure is called from a
+                // background task owned by the service.
+                Task { @MainActor in
+                    progressLine = L10n.Plaud.cloudProgress(index + 1, total, name)
+                }
+            }
             syncSummary = L10n.Plaud.syncResult(done, skipped)
+            await refreshCount()
         } catch {
             syncSummary = error.localizedDescription
         }

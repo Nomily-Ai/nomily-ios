@@ -46,17 +46,79 @@ struct WatchStatusRow: View {
                         .font(.footnote.monospacedDigit())
                         .foregroundStyle(.secondary)
                 } else {
-                    ProgressView().controlSize(.mini)
-                    Text(L10n.Watch.statusTransferring)
-                        .font(.footnote.weight(.medium))
+                    if isStale {
+                        // The wrist stopped beating: it is out of range or
+                        // asleep. Claiming "transferring…" with a spinner here
+                        // was the "一直卡在 Apple Watch 传输上" report.
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                        Text(L10n.Watch.transferStalled)
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.orange)
+                    } else {
+                        ProgressView().controlSize(.mini)
+                        Text(L10n.Watch.statusTransferring)
+                            .font(.footnote.weight(.medium))
+                    }
                     Spacer()
+                    // Elapsed seconds: a spinner with no number is
+                    // indistinguishable from a frozen one.
+                    Text(transferElapsed)
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
+
+                // ★ 2026-10-21: a way out. The strip is driven by the wrist's
+                // own queue; if that queue wedged, only this button can clear it.
+                Button {
+                    watch.dismissTransferNotice()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(L10n.Watch.hideTransferStatus)
             }
             .padding(.horizontal)
             .padding(.vertical, 7)
             .background(Color(uiColor: .secondarySystemBackground))
             .onReceive(tick) { now = $0 }
+        } else if let notice = watch.watchTransferNotice {
+            // The watchdog gave up (or the wrist went quiet): say so once, with
+            // the same dismiss affordance, instead of dropping the row silently.
+            HStack(spacing: 8) {
+                Image(systemName: "applewatch.slash")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Text(notice)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    watch.dismissTransferNotice()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(L10n.Watch.hideTransferStatus)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 7)
+            .background(Color(uiColor: .secondarySystemBackground))
         }
+    }
+
+    /// "0:42" from the moment the wrist said a transfer was pending.
+    private var transferElapsed: String {
+        guard let since = watch.watchTransferSince else { return "" }
+        let total = max(0, Int(now.timeIntervalSince(since)))
+        return total >= 60
+            ? String(format: "%d:%02d", total / 60, total % 60)
+            : String(format: "%ds", total)
     }
 
     private var trailingText: String {

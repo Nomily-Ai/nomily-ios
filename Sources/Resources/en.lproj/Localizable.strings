@@ -718,6 +718,10 @@
 "watch.status_recording" = "Recording on Apple Watch";
 "watch.status_transferring" = "Transferring from Apple Watch…";
 "watch.status_out_of_range" = "Out of range";
+"watch.transfer_stalled" = "Watch offline — transfer paused";
+"watch.transfer_watch_offline" = "The watch went offline mid-transfer. The clip stays on the watch and arrives when it reconnects.";
+"watch.transfer_gave_up" = "The watch transfer stopped responding. Open the watch app to resend the clip.";
+"watch.hide_transfer_status" = "Hide this status";
 
 "summarize.delete_title" = "Delete template?";
 "summarize.delete_message" = "Delete “%@”? This cannot be undone.";
@@ -1214,6 +1218,12 @@
 "plaud.connected_header" = "PLAUD account";
 "plaud.account" = "Email";
 "plaud.sync_header" = "Cloud sync";
+"plaud.cloud_header" = "Cloud mode (pull from PLAUD cloud)";
+"plaud.cloud_recordings" = "In the cloud";
+"plaud.cloud_recordings_count" = "%d clip(s)";
+"plaud.pull_from_cloud" = "Pull recordings from cloud";
+"plaud.cloud_progress" = "%d/%d · %@";
+"plaud.cloud_mode_footer" = "Cloud mode uses no Bluetooth: sign in with the PLAUD account the official app uses, and pull what it already uploaded. The card keeps working with the official app — but a recording only shows up here after that app has synced it.";
 "plaud.sync_now" = "Sync recordings now";
 "plaud.sync_footer" = "Downloads the original audio that the official PLAUD app uploaded to the cloud. New recordings appear in the library and are transcribed with your own ASR/LLM keys.";
 "plaud.sync_result" = "Downloaded %d, already present %d";
@@ -1301,6 +1311,8 @@
 "plaud.downloading_single" = "Transferring…";
 "plaud.device_info_header" = "Device";
 "plaud.device_name" = "Name";
+"plaud.serial_number" = "Serial number";
+"plaud.copy_sn" = "Copy serial number";
 "plaud.rename" = "Rename";
 "plaud.rename_message" = "Only changes the name in this app — the card itself is untouched. Leave it empty to go back to the model name.";
 "plaud.storage_used" = "Used %@";
@@ -1313,6 +1325,13 @@
 "plaud.delete_selected" = "Delete %d";
 "plaud.delete_selected_title" = "Delete the selected recordings from the card?";
 "plaud.delete_selected_message" = "%d recording(s) will be erased from the card and cannot be recovered. Pull them first if you want to keep a copy.";
+"plaud.queued_behind_transfer" = "Added %d to the transfer queue (%d waiting).";
+"plaud.sync_stalled_reset" = "The last transfer stalled — reset, starting again.";
+"plaud.sync_cancelled" = "Transfer stopped.";
+"plaud.sync_skipped" = "One file timed out and was skipped (%d left).";
+"plaud.sync_done_with_skips" = "Done — %d file(s) timed out. Tap a row to retry.";
+"plaud.sync_failed_one" = "Skipped one file: %@";
+"plaud.stop_transfer" = "Stop";
 "plaud.not_connected" = "Connect the card first.";
 "plaud.connecting_then_record" = "Connecting to the card — recording starts as soon as it answers.";
 "plaud.card_files" = "Recordings on the card";

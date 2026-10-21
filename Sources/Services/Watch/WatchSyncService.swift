@@ -50,7 +50,14 @@ final class WatchSyncService: NSObject, ObservableObject {
     @Published private(set) var isWatchRecording = false
     @Published private(set) var watchRecordingSince: Date?
     @Published private(set) var isWatchTransferring = false
+    /// When the wrist first told us a transfer was pending — drives the elapsed
+    /// counter and the give-up timer on the status strip.
+    @Published private(set) var watchTransferSince: Date?
     @Published private(set) var lastWatchHeartbeat: Date?
+    /// Set when a pending transfer was declared dead, so the strip can say why
+    /// instead of vanishing without a word.
+    @Published private(set) var watchTransferNotice: String?
+    private var transferWatchdog: Timer?
 
     private let config: ConfigService
     private let library: Library
@@ -184,10 +191,79 @@ final class WatchSyncService: NSObject, ObservableObject {
     private func apply(watchState context: [String: Any]) {
         guard let beat = context[WatchLinkMessage.heartbeatKey] as? Double else { return }
         isWatchRecording = context[WatchLinkMessage.recordingKey] as? Bool ?? false
-        isWatchTransferring = context[WatchLinkMessage.transferPendingKey] as? Bool ?? false
+        let transferring = context[WatchLinkMessage.transferPendingKey] as? Bool ?? false
+        if transferring, !isWatchTransferring {
+            watchTransferSince = Date()
+            watchTransferNotice = nil
+        }
+        if !transferring {
+            watchTransferSince = nil
+        }
+        isWatchTransferring = transferring
         watchRecordingSince = (context[WatchLinkMessage.recordingSinceKey] as? Double)
             .map(Date.init(timeIntervalSince1970:))
         lastWatchHeartbeat = Date(timeIntervalSince1970: beat)
+        updateTransferWatchdog()
+    }
+
+    // MARK: - Transfer watchdog (2026-10-21: "一直卡在 Apple Watch 传输上")
+
+    /// The wrist sets `transferPending` from its own WatchConnectivity queue and
+    /// only clears it after the phone's store-ack. Two things can leave that
+    /// flag stuck for ever: the wrist going out of range mid-transfer (its
+    /// application context freezes, and a frozen `true` looks identical to a
+    /// live one), or the file sitting in the daemon queue while this app is
+    /// suspended. In both cases the strip used to spin forever with no way out.
+    ///
+    /// Two escapes:
+    /// · 90 s of heartbeat silence → we stop *claiming* a live transfer and say
+    ///   the watch is offline (the file itself is not lost: it lands whenever
+    ///   the watch reconnects).
+    /// · 5 minutes of a beating watch still saying "pending" → declare it dead
+    ///   and clear, because WatchConnectivity would have moved a healthy
+    ///   transfer by then.
+    private func updateTransferWatchdog() {
+        guard isWatchTransferring else {
+            transferWatchdog?.invalidate()
+            transferWatchdog = nil
+            return
+        }
+        guard transferWatchdog == nil else { return }
+        transferWatchdog = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkTransferHealth() }
+        }
+    }
+
+    private func checkTransferHealth() {
+        guard isWatchTransferring else {
+            transferWatchdog?.invalidate()
+            transferWatchdog = nil
+            return
+        }
+        let since = watchTransferSince ?? lastWatchHeartbeat ?? Date()
+        let elapsed = Date().timeIntervalSince(since)
+        let beatAge = lastWatchHeartbeat.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
+        if beatAge > 90 || elapsed > 300 {
+            // Honest, not silent: the clip is still on the wrist and will be
+            // re-offered, so "gave up on the status" must not read as "lost".
+            watchTransferNotice = beatAge > 90
+                ? L10n.Watch.transferWatchOffline
+                : L10n.Watch.transferGaveUp
+            isWatchTransferring = false
+            watchTransferSince = nil
+            transferWatchdog?.invalidate()
+            transferWatchdog = nil
+        }
+    }
+
+    /// The user closed the transfer strip by hand. Only the *status* is
+    /// dismissed — a file that does arrive is still imported and acked.
+    func dismissTransferNotice() {
+        isWatchTransferring = false
+        watchTransferSince = nil
+        watchTransferNotice = nil
+        transferWatchdog?.invalidate()
+        transferWatchdog = nil
     }
 
     // MARK: - Home-screen expression (★ 2026-10-16 thirteenth revision)
@@ -265,6 +341,10 @@ final class WatchSyncService: NSObject, ObservableObject {
         // watch's own push about it ever arrives. Recording state is left
         // alone: the wrist may already be on to the next take.
         isWatchTransferring = false
+        watchTransferSince = nil
+        watchTransferNotice = nil
+        transferWatchdog?.invalidate()
+        transferWatchdog = nil
         NotificationCenter.default.post(name: .libraryDidChange, object: nil)
         NotificationCenter.default.post(name: .watchClipDidArrive, object: nil)
         log.info("watch clip stored: \(url.lastPathComponent, privacy: .public) (\(size) bytes)")
