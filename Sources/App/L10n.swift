@@ -73,6 +73,7 @@ enum L10n {
     /// PLAUD cloud sync (2026-10-21 dual-mode support).
     enum Plaud {
         static var navTitle: String { NSLocalizedString("plaud.nav_title", value: "PLAUD", comment: "Settings page title for PLAUD cloud sync") }
+        static var entryCaption: String { NSLocalizedString("plaud.entry_caption", value: "Cloud sync & device link", comment: "Caption on the PLAUD entry row in the Device segment") }
         static var signInHeader: String { NSLocalizedString("plaud.signin_header", value: "Sign in", comment: "PLAUD email+code sign-in section") }
         static var emailPlaceholder: String { NSLocalizedString("plaud.email", value: "PLAUD account email", comment: "") }
         static var codePlaceholder: String { NSLocalizedString("plaud.code", value: "Verification code", comment: "") }

@@ -35,7 +35,9 @@ struct SettingsView: View {
                 NavigationLink(L10n.Settings.recordings) { RecordingsSettingsView() }
                 NavigationLink(L10n.Settings.summarizeTemplates) { SummarizeTemplatesView() }
                 NavigationLink(L10n.Settings.devicesAndLibrary) { DevicesLibraryView() }
-                NavigationLink(L10n.Plaud.navTitle) { PlaudSettingsView() }
+                // PLAUD moved out of Settings (2026-10-21): it is a device-scoped
+                // feature, not an app-wide setting. Entry now lives on the
+                // Recordings tab → Device segment, next to the other recorder cards.
                 // ⛔ **DingTalk A1 is deliberately NOT here** (removed 2026-10-18).
                 //
                 // User's words: "The A1 recorder card's key should not appear in the app's general settings —

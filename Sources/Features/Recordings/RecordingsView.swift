@@ -50,6 +50,76 @@ struct RecordingsView: View {
         recorderTarget?.identity ?? "none"
     }
 
+    @ViewBuilder
+    private var deviceContent: some View {
+        if let client = bluetooth.client {
+            DeviceFilesView(
+                client: client,
+                library: library,
+                env: env,
+                onFileTransferred: { name in
+                    Task { @MainActor in
+                        if let item = await Self.buildLibraryItem(for: name) {
+                            transferredClipItem = item
+                            segment = .library
+                            showClipDetail = true
+                        } else {
+                            segment = .library
+                        }
+                    }
+                },
+                onFastTransferDone: {
+                    segment = .library
+                }
+            )
+        } else if let matched = bluetooth.matchedRecorder {
+            // Non-D·NOTE recorder card (TicNote): shares the same device page with the scan page
+            // (list / download / quick transfer / recording controls), no longer D·NOTE's empty-state copy.
+            // ⚠️ Use only `matchedRecorder`; **do not** reverse-derive from the ledger: the SN carried by `DiscoveredRecorder`
+            // (`identityText`) comes from the advertisement and serves as the download-dedup key (`deviceSerial`),
+            // and reconstructing it would drop the SN, silently breaking the "already downloaded" check.
+            RecorderDeviceView(recorder: matched, session: recorderSession)
+        } else {
+            EmptyStateView(
+                L10n.Recordings.noDeviceConnected,
+                systemImage: "waveform.slash",
+                message: L10n.Recordings.noDeviceMessage
+            )
+        }
+    }
+
+    /// Fixed entry row pinned to the bottom of the Device segment. A
+    /// `NavigationLink` placed here still resolves against the enclosing
+    /// NavigationStack, so it pushes `PlaudSettingsView` normally.
+    private var plaudEntryRow: some View {
+        NavigationLink {
+            PlaudSettingsView()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "waveform.badge.magnifyingglass")
+                    .font(.title3)
+                    .foregroundStyle(Color.appAccent)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.Plaud.navTitle).font(.body.bold())
+                    Text(L10n.Plaud.entryCaption)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
+        .padding(.bottom, 8)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -93,40 +163,12 @@ struct RecordingsView: View {
 
             switch segment {
             case .device:
-                if let client = bluetooth.client {
-                    DeviceFilesView(
-                        client: client,
-                        library: library,
-                        env: env,
-                        onFileTransferred: { name in
-                            Task { @MainActor in
-                                if let item = await Self.buildLibraryItem(for: name) {
-                                    transferredClipItem = item
-                                    segment = .library
-                                    showClipDetail = true
-                                } else {
-                                    segment = .library
-                                }
-                            }
-                        },
-                        onFastTransferDone: {
-                            segment = .library
-                        }
-                    )
-                } else if let matched = bluetooth.matchedRecorder {
-                    // Non-D·NOTE recorder card (TicNote): shares the same device page with the scan page
-                    // (list / download / quick transfer / recording controls), no longer D·NOTE's empty-state copy.
-                    // ⚠️ Use only `matchedRecorder`; **do not** reverse-derive from the ledger: the SN carried by `DiscoveredRecorder`
-                    // (`identityText`) comes from the advertisement and serves as the download-dedup key (`deviceSerial`),
-                    // and reconstructing it would drop the SN, silently breaking the "already downloaded" check.
-                    RecorderDeviceView(recorder: matched, session: recorderSession)
-                } else {
-                    EmptyStateView(
-                        L10n.Recordings.noDeviceConnected,
-                        systemImage: "waveform.slash",
-                        message: L10n.Recordings.noDeviceMessage
-                    )
-                }
+                // PLAUD entry pinned below the device content (2026-10-21):
+                // visible in all three branches (D·NOTE / recorder card / empty),
+                // because PLAUD is its own device family — it neither shares the
+                // BLE scan page nor appears under app-wide Settings.
+                deviceContent
+                    .safeAreaInset(edge: .bottom) { plaudEntryRow }
             case .library:
                 LibraryView()
             }

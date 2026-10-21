@@ -1205,6 +1205,7 @@
 
 // PLAUD cloud sync (2026-10-21)
 "plaud.nav_title" = "PLAUD";
+"plaud.entry_caption" = "Cloud sync & device link";
 "plaud.signin_header" = "Sign in";
 "plaud.email" = "PLAUD account email";
 "plaud.code" = "Verification code";

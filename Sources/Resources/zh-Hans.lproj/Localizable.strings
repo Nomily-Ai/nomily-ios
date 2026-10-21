@@ -1307,6 +1307,7 @@
 
 // PLAUD cloud sync (2026-10-21)
 "plaud.nav_title" = "PLAUD";
+"plaud.entry_caption" = "云同步与设备接入";
 "plaud.signin_header" = "登录";
 "plaud.email" = "PLAUD 账号邮箱";
 "plaud.code" = "验证码";
