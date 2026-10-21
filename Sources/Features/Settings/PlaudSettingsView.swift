@@ -385,6 +385,12 @@ struct DirectConnectSection: View {
 struct PlaudCardFilesView: View {
     @ObservedObject private var direct = PlaudDirectService.shared
     @State private var showInfo = false
+    /// Multi-select on the card's list ("不只滑动，还要能多选拉取/删除"). Same
+    /// state shape as `LibraryView` (`isSelecting` + `selectedIDs`), so the two
+    /// lists behave identically.
+    @State private var isSelecting = false
+    @State private var selectedIDs: Set<Int> = []
+    @State private var showBatchDeleteConfirm = false
     /// Same epoch anchor as `RecorderControl.tickAnchor` — see the note there.
     static let tickAnchor = Date(timeIntervalSince1970: 0)
 
@@ -415,11 +421,34 @@ struct PlaudCardFilesView: View {
             filesSection
         }
         .listStyle(.insetGrouped)
+        // Selection bar floats over the list's own bottom edge (same placement
+        // LibraryView uses) instead of a toolbar sheet — no second sheet to
+        // dismiss, and the list keeps scrolling underneath.
+        .safeAreaInset(edge: .bottom) {
+            if isSelecting { selectionBar }
+        }
         .refreshable {
             direct.refreshVitals()
             direct.refreshCardRecordings()
         }
         .sheet(isPresented: $showInfo) { PlaudDeviceInfoSheet() }
+        .alert(L10n.Plaud.deleteSelectedTitle, isPresented: $showBatchDeleteConfirm) {
+            Button(L10n.Common.cancel, role: .cancel) {}
+            Button(L10n.Common.delete, role: .destructive) {
+                direct.delete(files: selectedFiles)
+                exitSelection()
+            }
+        } message: {
+            Text(L10n.Plaud.deleteSelectedMessage(selectedFiles.count))
+        }
+        .onChange(of: direct.cardFiles) { files in
+            // Keep the tick set in sync with reality: a file deleted from the
+            // card (by us or by the card itself) must not stay ticked, and an
+            // empty list has nothing left to select.
+            let alive = Set(files.map(\.sessionID))
+            selectedIDs.formIntersection(alive)
+            if files.isEmpty, isSelecting { exitSelection() }
+        }
     }
 
     // MARK: - ① one row: the way into device info
@@ -595,19 +624,126 @@ struct PlaudCardFilesView: View {
                 }
             }
         } header: {
-            HStack {
+            HStack(spacing: 8) {
                 Text(L10n.Plaud.cardFiles)
                 Spacer()
                 if direct.cardFilesLoaded {
                     Text("\(direct.cardFiles.count)").foregroundStyle(.secondary)
                 }
+                // Selection entry point sits on the section header rather than
+                // the nav bar: this page lives inside the recordings tab, whose
+                // top bar already carries the pill + record control.
+                if !direct.isRecording && !direct.cardFiles.isEmpty {
+                    Button(isSelecting ? L10n.Common.cancel : L10n.Plaud.selectFiles) {
+                        if isSelecting { exitSelection() } else { enterSelection() }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Color.appAccent)
+                }
             }
+            .textCase(nil)
+        }
+    }
+
+    // MARK: - multi-select
+
+    private var selectedFiles: [PlaudDirectService.PlaudCardFile] {
+        // In card order, not set order: the transfer queue then pulls in the
+        // order the user sees.
+        direct.cardFiles.filter { selectedIDs.contains($0.sessionID) }
+    }
+
+    private var allFilesSelected: Bool {
+        !direct.cardFiles.isEmpty
+            && Set(direct.cardFiles.map(\.sessionID)).isSubset(of: selectedIDs)
+    }
+
+    private func enterSelection() {
+        withAnimation(.easeInOut(duration: 0.2)) { isSelecting = true }
+    }
+
+    private func exitSelection() {
+        selectedIDs.removeAll()
+        withAnimation(.easeInOut(duration: 0.2)) { isSelecting = false }
+    }
+
+    private func toggle(_ file: PlaudDirectService.PlaudCardFile) {
+        if selectedIDs.contains(file.sessionID) {
+            selectedIDs.remove(file.sessionID)
+        } else {
+            selectedIDs.insert(file.sessionID)
+        }
+    }
+
+    /// 全选 / 取消全选 + 拉取 N + 删除 N. Mirrors `LibraryView.selectionBar`.
+    private var selectionBar: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Button {
+                    if allFilesSelected {
+                        selectedIDs.removeAll()
+                    } else {
+                        selectedIDs = Set(direct.cardFiles.map(\.sessionID))
+                    }
+                } label: {
+                    Text(allFilesSelected
+                         ? L10n.Plaud.deselectAllFiles
+                         : L10n.Plaud.selectAllFilesCount(direct.cardFiles.count))
+                        .font(.subheadline)
+                }
+                .disabled(direct.cardFiles.isEmpty)
+
+                Spacer()
+
+                Text(L10n.Plaud.selectedFilesCount(selectedIDs.count))
+                    .font(.subheadline)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    direct.download(files: selectedFiles)
+                    exitSelection()
+                } label: {
+                    Label(L10n.Plaud.pullSelected(selectedIDs.count),
+                          systemImage: "arrow.down.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button(role: .destructive) {
+                    showBatchDeleteConfirm = true
+                } label: {
+                    Label(L10n.Plaud.deleteSelected(selectedIDs.count), systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            // Nothing ticked = neither action has anything to do. Grey both out
+            // rather than letting the tap pop "select something first".
+            .disabled(selectedFiles.isEmpty)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+        // The bar exists for selection only; a recording start (card key) must
+        // not leave a dangling bar over a list that just went stale.
+        .onChange(of: direct.isRecording) { recording in
+            if recording, isSelecting { exitSelection() }
         }
     }
 
     @ViewBuilder
     private func row(_ file: PlaudDirectService.PlaudCardFile) -> some View {
+        let ticked = selectedIDs.contains(file.sessionID)
         HStack(spacing: 10) {
+            if isSelecting {
+                Image(systemName: ticked ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(ticked ? Color.appAccent : Color.secondary)
+            }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(Self.dateText(file)).font(.body)
@@ -632,20 +768,33 @@ struct PlaudCardFilesView: View {
                 .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
-            Button {
-                direct.download(file: file)
-            } label: {
-                Image(systemName: "arrow.down.circle")
-                    .font(.title3)
+            if !isSelecting {
+                Button {
+                    direct.download(file: file)
+                } label: {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.title3)
+                }
+                .buttonStyle(.borderless)
+                .disabled(direct.isSyncing || direct.isRecording)
+                .accessibilityLabel(L10n.Plaud.pullThisFile)
             }
-            .buttonStyle(.borderless)
-            .disabled(direct.isSyncing || direct.isRecording)
-            .accessibilityLabel(L10n.Plaud.pullThisFile)
         }
         .padding(.vertical, 2)
-        // Swipe is the only delete path (2026-10-21: "no popup — tap delete and
-        // it's gone"). `allowsFullSwipe` keeps one gesture enough for a full
-        // swipe, which is how the other cards' lists behave.
+        .contentShape(Rectangle())
+        // Tapping toggles in selection mode; long-press is the shortcut into it
+        // (the Photos idiom) and ticks the row that was pressed.
+        .onTapGesture {
+            if isSelecting { toggle(file) }
+        }
+        .onLongPressGesture {
+            guard !isSelecting, !direct.isRecording else { return }
+            enterSelection()
+            selectedIDs = [file.sessionID]
+        }
+        // Swipe is the only single-row delete path (2026-10-21: "no popup — tap
+        // delete and it's gone"). `allowsFullSwipe` keeps one gesture enough for
+        // a full swipe, which is how the other cards' lists behave.
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
                 direct.delete(file: file)

@@ -188,6 +188,25 @@ enum L10n {
         static func storageLeft(_ value: String) -> String {
             String(format: NSLocalizedString("plaud.storage_left", value: "Free %@", comment: "Storage bar label; %@ = size like 58.4 GB"), value)
         }
+        // ★ 2026-10-21 (5th round): multi-select on the card's recording list
+        static var selectFiles: String { NSLocalizedString("plaud.select_files", value: "Select", comment: "Enter multi-select mode on the card's recording list") }
+        static func selectedFilesCount(_ count: Int) -> String {
+            String(format: NSLocalizedString("plaud.selected_files_count", value: "%d selected", comment: "Multi-select footer; %d = how many recordings are ticked"), count)
+        }
+        static func selectAllFilesCount(_ count: Int) -> String {
+            String(format: NSLocalizedString("plaud.select_all_files", value: "Select all (%d)", comment: "Multi-select footer; %d = how many recordings the card holds"), count)
+        }
+        static var deselectAllFiles: String { NSLocalizedString("plaud.deselect_all_files", value: "Deselect all", comment: "Multi-select footer: clear the ticked recordings") }
+        static func pullSelected(_ count: Int) -> String {
+            String(format: NSLocalizedString("plaud.pull_selected", value: "Pull %d", comment: "Multi-select action: download the ticked recordings; %d = count"), count)
+        }
+        static func deleteSelected(_ count: Int) -> String {
+            String(format: NSLocalizedString("plaud.delete_selected", value: "Delete %d", comment: "Multi-select action: erase the ticked recordings from the card; %d = count"), count)
+        }
+        static var deleteSelectedTitle: String { NSLocalizedString("plaud.delete_selected_title", value: "Delete the selected recordings from the card?", comment: "") }
+        static func deleteSelectedMessage(_ count: Int) -> String {
+            String(format: NSLocalizedString("plaud.delete_selected_message", value: "%d recording(s) will be erased from the card and cannot be recovered. Pull them first if you want to keep a copy.", comment: ""), count)
+        }
 
         static var pairRejected: String { NSLocalizedString("plaud.pair_rejected", value: "The card refused the connection — unbind it once in the official PLAUD app (Settings → device → unbind), then retry.", comment: "") }
         static var cloudNote: String { NSLocalizedString("plaud.cloud_note", value: "Optional compatibility path. Requires a PLAUD account registered with an EMAIL (phone-number accounts are rejected). The card stays bound to the official app.", comment: "") }

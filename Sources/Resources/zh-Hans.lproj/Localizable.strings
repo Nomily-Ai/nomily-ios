@@ -1407,6 +1407,14 @@
 "plaud.rename_message" = "只修改本 App 里显示的名称，卡片本身不受影响。留空则恢复为型号名称。";
 "plaud.storage_used" = "已用 %@";
 "plaud.storage_left" = "剩余 %@";
+"plaud.select_files" = "选择";
+"plaud.selected_files_count" = "已选 %d 条";
+"plaud.select_all_files" = "全选（%d）";
+"plaud.deselect_all_files" = "取消全选";
+"plaud.pull_selected" = "拉取 %d 条";
+"plaud.delete_selected" = "删除 %d 条";
+"plaud.delete_selected_title" = "从卡上删除选中的录音？";
+"plaud.delete_selected_message" = "%d 条录音会从卡片上抹掉，无法恢复。要留副本请先拉取。";
 "plaud.not_connected" = "请先连接卡片。";
 "plaud.connecting_then_record" = "正在连接卡片，连上后立刻开始录音。";
 "plaud.card_files" = "卡上录音";

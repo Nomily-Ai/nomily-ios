@@ -1305,6 +1305,14 @@
 "plaud.rename_message" = "Only changes the name in this app — the card itself is untouched. Leave it empty to go back to the model name.";
 "plaud.storage_used" = "Used %@";
 "plaud.storage_left" = "Free %@";
+"plaud.select_files" = "Select";
+"plaud.selected_files_count" = "%d selected";
+"plaud.select_all_files" = "Select all (%d)";
+"plaud.deselect_all_files" = "Deselect all";
+"plaud.pull_selected" = "Pull %d";
+"plaud.delete_selected" = "Delete %d";
+"plaud.delete_selected_title" = "Delete the selected recordings from the card?";
+"plaud.delete_selected_message" = "%d recording(s) will be erased from the card and cannot be recovered. Pull them first if you want to keep a copy.";
 "plaud.not_connected" = "Connect the card first.";
 "plaud.connecting_then_record" = "Connecting to the card — recording starts as soon as it answers.";
 "plaud.card_files" = "Recordings on the card";

@@ -216,6 +216,11 @@ final class PlaudDirectService: NSObject, ObservableObject {
     private var userTokenAt = Date.distantPast
     private var isInitialized = false
     private var pendingDownloads: [BleFile] = []
+    /// Session ids waiting for their turn to be erased (multi-select delete).
+    /// One `deleteFile` command in flight at a time — see `pumpDeletes`.
+    private var pendingDeletes: [Int] = []
+    private var deletePumpScheduled = false
+    private var deletePumpGeneration = 0
     private var currentExportSession: Int?
     /// Session ids already pulled into the library (persisted) — the card
     /// keeps files until deleted, so dedup is what makes re-syncs cheap.
@@ -593,6 +598,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
         cardFileCount = nil
         cardFiles = []
         cardFilesLoaded = false
+        // A queued batch delete is meaningless once the link is gone: the card
+        // would still hold the files, and the UI already dropped them optimistically.
+        pendingDeletes.removeAll()
+        deletePumpScheduled = false
         liveStreaming = false
         livePCMBytes = 0
         clearRecordClock()
@@ -678,15 +687,43 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Download ONE recording off the card. Queued through the same serial queue
     /// as a full sync, so a per-row tap can't run two BLE transfers at once.
     func download(file: PlaudCardFile) {
-        guard phase.isConnected, !isSyncing else { return }
-        let ble = BleFile("", file.sessionID, file.size)
-        setSyncing(true)
-        setSyncMessage(L10n.Plaud.syncDownloading(1))
-        pendingDownloads = [ble]
-        DispatchQueue.main.async {
-            self.downloadTotal = 1
-            self.downloadDone = 0
+        download(files: [file])
+    }
+
+    /// Pull several recordings at once — the multi-select bar on the card list.
+    ///
+    /// Appends instead of replacing `pendingDownloads`: a row tap may already be
+    /// mid-queue, and wiping it would silently abandon the file the card is
+    /// currently exporting (`currentExportSession` would then never be cleared).
+    func download(files: [PlaudCardFile]) {
+        guard phase.isConnected else {
+            setRecordNotice(L10n.Plaud.notConnected)
+            return
         }
+        let unique = files.filter { file in
+            // Skip what is already queued *and* what the card is exporting right
+            // now — re-queueing the in-flight session would export it twice and
+            // clear `currentExportSession` while the first copy is still writing.
+            file.sessionID != currentExportSession
+                && !pendingDownloads.contains { $0.sessionId == file.sessionID }
+        }
+        guard !unique.isEmpty else { return }
+        let bles = unique.map { BleFile("", $0.sessionID, $0.size) }
+        pendingDownloads.append(contentsOf: bles)
+        if isSyncing {
+            // A transfer is already running: just widen the queue, keep the bar
+            // honest by growing the denominator.
+            DispatchQueue.main.async { self.downloadTotal += bles.count }
+            setSyncMessage(L10n.Plaud.syncDownloading(pendingDownloads.count))
+            return
+        }
+        setSyncing(true)
+        DispatchQueue.main.async {
+            self.downloadTotal = bles.count
+            self.downloadDone = 0
+            self.downloadProgress = 0
+        }
+        setSyncMessage(L10n.Plaud.syncDownloading(bles.count))
         downloadNext()
     }
 
@@ -694,6 +731,17 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// the row can't be tapped twice; the card's own `bleDeleteFile` answer
     /// triggers a re-read that reconciles reality.
     func delete(file: PlaudCardFile) {
+        delete(files: [file])
+    }
+
+    /// Erase several recordings (multi-select bar), one command at a time.
+    ///
+    /// The card answers each `deleteFile` asynchronously; firing ten of them
+    /// back to back puts ten commands in front of whatever else is on the BLE
+    /// channel. So: optimistic UI removal right away, then a pump that sends the
+    /// next id when the previous answer arrives (1 s fallback if an answer is
+    /// ever lost, so the queue can't wedge).
+    func delete(files: [PlaudCardFile]) {
         guard phase.isConnected else {
             setRecordNotice(L10n.Plaud.notConnected)
             return
@@ -706,18 +754,50 @@ final class PlaudDirectService: NSObject, ObservableObject {
         // transfer was running — and since the card auto-pulls, a transfer is
         // running most of the time, so the swipe button looked dead ("点击删除
         // 不了"). Only the file that is *currently* being exported has to wait.
-        guard currentExportSession != file.sessionID else {
+        let targets = files.filter { $0.sessionID != currentExportSession }
+        guard !targets.isEmpty else {
             setSyncMessage(L10n.Plaud.recordBusy)
             return
         }
-        PlaudDeviceAgent.shared.deleteFile(sessionId: file.sessionID)
+        if targets.count != files.count {
+            setSyncMessage(L10n.Plaud.recordBusy)
+        }
         DispatchQueue.main.async {
-            self.cardFiles.removeAll { $0.sessionID == file.sessionID }
+            let ids = Set(targets.map(\.sessionID))
+            self.cardFiles.removeAll { ids.contains($0.sessionID) }
             self.cardFileCount = self.cardFiles.count
-            self.syncedSessions.remove(file.sessionID)
+            ids.forEach { self.syncedSessions.remove($0) }
             self.pulledSessions = self.syncedSessions
             UserDefaults.standard.set(Array(self.syncedSessions), forKey: "plaud.synced_sessions")
         }
+        pendingDeletes.append(contentsOf: targets.map(\.sessionID))
+        pumpDeletes()
+    }
+
+    /// Send the next queued `deleteFile` (one in flight at a time).
+    private func pumpDeletes() {
+        guard !deletePumpScheduled else { return }
+        guard !pendingDeletes.isEmpty else { return }
+        guard phase.isConnected else {
+            pendingDeletes.removeAll()
+            return
+        }
+        let sid = pendingDeletes.removeFirst()
+        PlaudDeviceAgent.shared.deleteFile(sessionId: sid)
+        deletePumpScheduled = true
+        let generation = deletePumpGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self, self.deletePumpGeneration == generation else { return }
+            self.deletePumpScheduled = false
+            self.pumpDeletes()
+        }
+    }
+
+    /// Called on every `bleDeleteFile` answer: release the gate and move on.
+    private func deleteAnswered() {
+        deletePumpGeneration &+= 1
+        deletePumpScheduled = false
+        pumpDeletes()
     }
 
     // MARK: - Device ledger (Settings → Devices & Library)
@@ -1482,8 +1562,14 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
 
     func bleDeleteFile(sessionId: Int, status: Int) {
         log.info("plaud delete file \(sessionId) status \(status)")
+        // Release the one-in-flight gate first, so a batch delete does not wait
+        // out the 1 s fallback between every file.
+        deleteAnswered()
+        // Re-reading the list per deleted file would fire N `getFileList`s in a
+        // row (each one a full BLE round trip). Only reconcile once the queue
+        // is drained — or when a single swipe-delete is all there was.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            guard self.phase.isConnected else { return }
+            guard self.phase.isConnected, self.pendingDeletes.isEmpty else { return }
             self.refreshCardRecordings()
         }
     }
