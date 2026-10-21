@@ -18,6 +18,9 @@ struct RecordingsView: View {
     /// The single source of truth for the recording session. The record button in the header and the device page share the same one —
     /// **never keep separate copies**: two states would each optimistically flip on their own, and the UI would immediately contradict itself.
     @ObservedObject private var recorderSession: RecorderSessionModel
+    /// Only used to decide whether a PLAUD card occupies the device segment —
+    /// the card view itself observes the same service.
+    @ObservedObject private var plaudDirect = PlaudDirectService.shared
 
     init(session: RecorderSessionModel) {
         _recorderSession = ObservedObject(wrappedValue: session)
@@ -79,6 +82,11 @@ struct RecordingsView: View {
             // (`identityText`) comes from the advertisement and serves as the download-dedup key (`deviceSerial`),
             // and reconstructing it would drop the SN, silently breaking the "already downloaded" check.
             RecorderDeviceView(recorder: matched, session: recorderSession)
+        } else if plaudDirect.phase.isConnected || plaudDirect.pairedSN != nil {
+            // A PLAUD card is on this segment (live or remembered). The D·NOTE
+            // empty-state copy ("scan your device") would contradict the card
+            // rendered right above it, so show nothing instead.
+            EmptyView()
         } else {
             EmptyStateView(
                 L10n.Recordings.noDeviceConnected,

@@ -145,6 +145,9 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// (device pages), so the answer must NOT kick off a download queue — the
     /// user only asked to look.
     private var fileListProbeOnly = false
+    /// SN we are trying to re-bind automatically (`reconnect()`). Cleared as
+    /// soon as the card is seen or the attempt is abandoned.
+    private var reconnectTarget: String?
 
     private let session: URLSession
     private let exportQueue = DispatchQueue(label: "com.nomily.app.plaud-export")
@@ -185,7 +188,11 @@ final class PlaudDirectService: NSObject, ObservableObject {
         session = URLSession(configuration: cfg)
         super.init()
         PlaudDeviceAgent.shared.delegate = self
-        if let sn = pairedSN { phase = .connected(sn: sn) }
+        // ★ `paired_sn` means "we have paired with this card before", NOT
+        // "the card is connected right now". Claiming `.connected` at launch
+        // would print a live-looking card (battery/history) for a link that
+        // does not exist — the same nil-≠-0 rule as everywhere else. The row
+        // and the device card read `pairedSN` and offer a reconnect instead.
     }
 
     // MARK: - Activation
@@ -312,13 +319,40 @@ final class PlaudDirectService: NSObject, ObservableObject {
             }
             setPhase(.scanning)
             clearScanned()
+            reconnectTarget = nil
+            PlaudDeviceAgent.shared.startScan()
+        }
+    }
+
+    /// Reconnect a **previously paired** card without making the user pick it
+    /// out of a scan list (the situation after every app relaunch, or after the
+    /// card went to sleep). Scans in the background and binds as soon as the
+    /// stored SN shows up.
+    func reconnect() {
+        guard let sn = pairedSN else {
+            startScan()
+            return
+        }
+        guard isConfigured else {
+            setPhase(.failed(PlaudCloudService.PlaudError
+                .badResponse("Direct connect is not activated yet.").localizedDescription))
+            return
+        }
+        Task {
+            try? await ensureInitialized()
+            setPhase(.connecting(name: Self.modelName(for: sn)))
+            clearScanned()
+            reconnectTarget = sn
             PlaudDeviceAgent.shared.startScan()
         }
     }
 
     func stopScan() {
         PlaudDeviceAgent.shared.stopScan()
-        if phase == .scanning { setPhase(pairedSN.map { Phase.connected(sn: $0) } ?? .idle) }
+        reconnectTarget = nil
+        // Cancelling a scan says nothing about the link — never promote it to
+        // "connected" (that bug made a stale card look live after relaunch).
+        if phase == .scanning { setPhase(.idle) }
     }
 
     /// User tapped a card in the scan list. Connecting needs credentials; the
@@ -329,12 +363,24 @@ final class PlaudDirectService: NSObject, ObservableObject {
             setPhase(.idle)
             return
         }
-        connectSelected()
+        connect(card)
     }
 
     /// Connect the previously selected card (called right after activation).
     func connectSelected() {
-        guard let card = selectedCard, let ble = cachedBleDevices[card.sn] else {
+        guard let card = selectedCard else {
+            setPhase(.failed(L10n.Plaud.cardGone))
+            return
+        }
+        connect(card)
+    }
+
+    /// Bind a specific card. Takes the card by value on purpose: the
+    /// auto-reconnect path calls this from the SDK's scan callback, where the
+    /// published `selectedCard` may not have been written yet (that race made
+    /// reconnect always say "card is out of range").
+    private func connect(_ card: ScannedCard) {
+        guard let ble = cachedBleDevices[card.sn] else {
             setPhase(.failed(L10n.Plaud.cardGone))
             return
         }
@@ -636,6 +682,13 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             .map { ScannedCard(sn: $0.serialNumber, name: Self.displayName($0), rssi: Int($0.rssi)) }
             .sorted { $0.rssi > $1.rssi }
         setScanned(cards)
+        // Auto-bind the card we were told to reconnect as soon as its
+        // advertisement arrives (`reconnect()` path).
+        if let target = reconnectTarget, let card = cards.first(where: { $0.sn == target }) {
+            reconnectTarget = nil
+            DispatchQueue.main.async { self.selectedCard = card }
+            connect(card)
+        }
     }
 
     private static func displayName(_ dev: BleDevice) -> String {
@@ -644,7 +697,16 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
     }
 
     func bleScanOverTime() {
-        if phase == .scanning { setPhase(pairedSN.map { Phase.connected(sn: $0) } ?? .idle) }
+        // Scan timed out. Still not connected — say so instead of re-asserting
+        // the last known SN as a live link.
+        if phase == .scanning || reconnectTarget != nil {
+            reconnectTarget = nil
+            if case .connecting = phase {
+                setPhase(.failed(L10n.Plaud.cardGone))
+            } else {
+                setPhase(.idle)
+            }
+        }
     }
 
     /// 0 = disconnected, 1 = GATT up (handshake still pending), 2/-1/-2 = failed.
@@ -692,7 +754,17 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
     /// @required — recorder state push. `state == 4099` (or 1) = recording.
     func blePenState(state: Int, privacy: Int, keyState: Int, uDisk: Int, findMyToken: Int, hasSndpKey: Int, deviceAccessToken: Int) {
         log.info("plaud pen state \(state) privacy \(privacy) key \(keyState)")
-        DispatchQueue.main.async { self.isRecording = (state == 4099 || state == 1) }
+        let nowRecording = (state == 4099 || state == 1)
+        let wasRecording = isRecording
+        DispatchQueue.main.async { self.isRecording = nowRecording }
+        // A recording that just ended adds a file to the card — re-read the
+        // count so "recordings on card" doesn't lag one clip behind reality.
+        if wasRecording && !nowRecording {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                guard self.phase.isConnected else { return }
+                self.refreshCardRecordings()
+            }
+        }
     }
 
     func bleDeviceDisconnectErr() {

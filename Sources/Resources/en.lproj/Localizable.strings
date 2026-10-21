@@ -1285,4 +1285,5 @@
 "plaud.refresh" = "Refresh";
 "plaud.state_connected" = "Connected";
 "plaud.state_disconnected" = "Not connected";
+"plaud.reconnect" = "Reconnect";
 "plaud.device_detail_title" = "PLAUD card";

@@ -45,8 +45,16 @@ struct PlaudAddSheet: View {
 struct PlaudDeviceCard: View {
     @ObservedObject private var direct = PlaudDirectService.shared
 
+    /// SN of the card the BLE link is actually up for. `nil` = not connected
+    /// (even when a card is remembered — see the note in `PlaudDirectService.init`).
+    private var connectedSN: String? {
+        if case .connected(let sn) = direct.phase { return sn }
+        return nil
+    }
+
     var body: some View {
-        if case .connected(let sn) = direct.phase {
+        if let sn = connectedSN ?? direct.pairedSN {
+            let isLive = connectedSN != nil
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
                     Image(systemName: "waveform")
@@ -55,12 +63,12 @@ struct PlaudDeviceCard: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("PLAUD").font(.body.bold())
                         Text(sn).font(.caption2.monospaced()).foregroundStyle(.secondary)
-                        if let fw = direct.firmware {
+                        if let fw = direct.firmware, isLive {
                             Text(fw).font(.caption2).foregroundStyle(.secondary)
                         }
                     }
                     Spacer()
-                    if let battery = direct.battery {
+                    if let battery = direct.battery, isLive {
                         Label(
                             "\(battery)%" + (direct.isCharging ? " \(L10n.Plaud.charging)" : ""),
                             systemImage: direct.isCharging ? "battery.100percent.bolt" : "battery.75percent"
@@ -69,8 +77,20 @@ struct PlaudDeviceCard: View {
                         .foregroundStyle(.secondary)
                     }
                 }
+                if !isLive {
+                    // Remembered but not linked: say so, and offer the one tap
+                    // that fixes it, instead of showing stale live data.
+                    HStack {
+                        Text(L10n.Plaud.stateDisconnected)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button(L10n.Plaud.reconnect) { direct.reconnect() }
+                            .font(.footnote)
+                    }
+                }
                 // ★ Official-app parity: recording state + stop from the app.
-                if direct.isRecording {
+                if direct.isRecording && isLive {
                     HStack {
                         Label(L10n.Plaud.recordingNow, systemImage: "record.circle")
                             .font(.footnote)
@@ -82,28 +102,30 @@ struct PlaudDeviceCard: View {
                         .font(.footnote)
                     }
                 }
-                if let total = direct.storageTotal, let free = direct.storageFree, total > 0 {
-                    Text("\(L10n.TicNoteCard.storageFree) \(Self.storageLine(total: total, free: free))")
+                if isLive {
+                    if let total = direct.storageTotal, let free = direct.storageFree, total > 0 {
+                        Text("\(L10n.TicNoteCard.storageFree) \(Self.storageLine(total: total, free: free))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    // History count — same "unknown is not zero" rule as the settings row.
+                    Text("\(L10n.Plaud.cardRecordings) "
+                         + (direct.cardFileCount.map(L10n.Plaud.cardRecordingsCount) ?? L10n.Plaud.historyUnknown))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                }
-                // History count — same "unknown is not zero" rule as the settings row.
-                Text("\(L10n.Plaud.cardRecordings) "
-                     + (direct.cardFileCount.map(L10n.Plaud.cardRecordingsCount) ?? L10n.Plaud.historyUnknown))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Button {
-                    direct.syncFromCard()
-                } label: {
-                    if direct.isSyncing {
-                        HStack { ProgressView(); Text(L10n.Plaud.syncFromCard) }
-                    } else {
-                        Label(L10n.Plaud.syncFromCard, systemImage: "square.and.arrow.down")
+                    Button {
+                        direct.syncFromCard()
+                    } label: {
+                        if direct.isSyncing {
+                            HStack { ProgressView(); Text(L10n.Plaud.syncFromCard) }
+                        } else {
+                            Label(L10n.Plaud.syncFromCard, systemImage: "square.and.arrow.down")
+                        }
                     }
-                }
-                .disabled(direct.isSyncing)
-                if let msg = direct.syncMessage {
-                    Text(msg).font(.caption2).foregroundStyle(.secondary)
+                    .disabled(direct.isSyncing)
+                    if let msg = direct.syncMessage {
+                        Text(msg).font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
             }
             .padding(14)
@@ -204,6 +226,15 @@ struct DirectConnectSection: View {
                 Label(L10n.Plaud.cardSelected(selected.name), systemImage: "checkmark.circle")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            }
+            // Remembered card, no live link (relaunch / card asleep): one tap
+            // re-binds it by SN instead of asking the user to pick it again.
+            if let sn = direct.pairedSN {
+                Label("\(L10n.Plaud.stateDisconnected) · \(sn)",
+                      systemImage: "antenna.radiowaves.left.and.right.slash")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Button(L10n.Plaud.reconnect) { direct.reconnect() }
             }
             scanButton
         }
@@ -443,6 +474,14 @@ struct PlaudDeviceDetailView: View {
             // vitals and the history count, but do NOT start a transfer (that is
             // `refreshCardRecordings`'s probe-only contract).
             guard direct.phase.isConnected else { return }
+            direct.refreshVitals()
+            direct.refreshCardRecordings()
+        }
+        // A link that comes up while this page is open (reconnect, or the card
+        // waking up) must fill the rows in — `onAppear` alone ran too early and
+        // left "Not read yet" on screen forever.
+        .onChange(of: direct.phase) { newPhase in
+            guard newPhase.isConnected else { return }
             direct.refreshVitals()
             direct.refreshCardRecordings()
         }

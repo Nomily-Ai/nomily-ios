@@ -139,6 +139,7 @@ enum L10n {
         static var refresh: String { NSLocalizedString("plaud.refresh", value: "Refresh", comment: "Re-read the card's state / recording count") }
         static var stateConnected: String { NSLocalizedString("plaud.state_connected", value: "Connected", comment: "") }
         static var stateDisconnected: String { NSLocalizedString("plaud.state_disconnected", value: "Not connected", comment: "") }
+        static var reconnect: String { NSLocalizedString("plaud.reconnect", value: "Reconnect", comment: "Re-bind a card we have paired with before") }
         static var deviceDetailTitle: String { NSLocalizedString("plaud.device_detail_title", value: "PLAUD card", comment: "Navigation title of the PLAUD device page") }
 
         static var pairRejected: String { NSLocalizedString("plaud.pair_rejected", value: "The card refused the connection — unbind it once in the official PLAUD app (Settings → device → unbind), then retry.", comment: "") }

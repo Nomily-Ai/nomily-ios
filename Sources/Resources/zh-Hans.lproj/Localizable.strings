@@ -1387,4 +1387,5 @@
 "plaud.refresh" = "刷新";
 "plaud.state_connected" = "已连接";
 "plaud.state_disconnected" = "未连接";
+"plaud.reconnect" = "重新连接";
 "plaud.device_detail_title" = "PLAUD 设备";
