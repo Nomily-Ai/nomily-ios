@@ -1389,6 +1389,14 @@
 "plaud.state_disconnected" = "未连接";
 "plaud.reconnect" = "重新连接";
 "plaud.device_detail_title" = "PLAUD 设备";
+"plaud.delete_from_card" = "从卡上删除";
+"plaud.delete_from_card_title" = "从卡上删除这条录音？";
+"plaud.delete_from_card_msg" = "删除后无法恢复。想保留请先拉取到资料库。";
+"plaud.saved_to_library" = "已拉取";
+"plaud.marks_title" = "打点";
+"plaud.marks_count" = "%d 处打点";
+"plaud.marks_live" = "本次打点";
+"plaud.recording_now_on_card" = "卡片正在录音——停止后列表会自动刷新。";
 "plaud.not_connected" = "请先连接卡片。";
 "plaud.card_files" = "卡上录音";
 "plaud.card_files_empty" = "卡上暂无录音。";

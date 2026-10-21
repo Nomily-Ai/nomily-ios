@@ -99,7 +99,8 @@ struct RecordingsView: View {
 
     /// Removed 2026-10-21: the bottom-pinned PLAUD entry row. User feedback:
     /// the entry belongs in the add-device flow (scan page), which now opens
-    /// `PlaudAddSheet`; a connected card appears via `PlaudDeviceCard` above.
+    /// `PlaudAddSheet`; a connected card appears through the PLAUD branch of
+    /// `deviceContent` above (`PlaudCardFilesView`, one full-width List).
 
     var body: some View {
         VStack(spacing: 0) {
@@ -147,11 +148,13 @@ struct RecordingsView: View {
                 // ★ 2026-10-21: PLAUD moved to the ADD-DEVICE flow (scan page
                 // → PlaudAddSheet) per user feedback; when a PLAUD card IS
                 // connected it shows here as a device card like the others.
-                // The old bottom-pinned entry row is gone.
-                VStack(spacing: 0) {
-                    PlaudDeviceCard()
-                    deviceContent
-                }
+                //
+                // ★ 2nd round: no separate floating card above the list any more.
+                // The PLAUD branch of `deviceContent` now renders one
+                // `List(.insetGrouped)` page (identity → recording → files on the
+                // card), the same shape V05E / TicNote use. Stacking a centered
+                // card on top of a list was what made PLAUD look like a popup.
+                deviceContent
             case .library:
                 LibraryView()
             }

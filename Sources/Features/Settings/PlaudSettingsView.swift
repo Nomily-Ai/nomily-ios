@@ -37,182 +37,6 @@ struct PlaudAddSheet: View {
     }
 }
 
-// MARK: - Device-page card (device segment)
-
-/// Shown in the Recordings tab's device segment while the card is connected
-/// (direct mode) — PLAUD sits next to the other recorder devices, mirroring
-/// how D·NOTE / TicNote present themselves there.
-struct PlaudDeviceCard: View {
-    @ObservedObject private var direct = PlaudDirectService.shared
-
-    /// SN of the card the BLE link is actually up for. `nil` = not connected
-    /// (even when a card is remembered — see the note in `PlaudDirectService.init`).
-    private var connectedSN: String? {
-        if case .connected(let sn) = direct.phase { return sn }
-        return nil
-    }
-
-    var body: some View {
-        if let sn = connectedSN ?? direct.pairedSN {
-            let isLive = connectedSN != nil
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
-                    Image(systemName: "waveform")
-                        .font(.title3)
-                        .foregroundStyle(Color.appAccent)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("PLAUD").font(.body.bold())
-                        Text(sn).font(.caption2.monospaced()).foregroundStyle(.secondary)
-                        if let fw = direct.firmware, isLive {
-                            Text(fw).font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer()
-                    if let battery = direct.battery, isLive {
-                        Label(
-                            "\(battery)%" + (direct.isCharging ? " \(L10n.Plaud.charging)" : ""),
-                            systemImage: direct.isCharging ? "battery.100percent.bolt" : "battery.75percent"
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    }
-                }
-                if !isLive {
-                    // Remembered but not linked: say so, and offer the one tap
-                    // that fixes it, instead of showing stale live data.
-                    HStack {
-                        Text(L10n.Plaud.stateDisconnected)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button(L10n.Plaud.reconnect) { direct.reconnect() }
-                            .font(.footnote)
-                    }
-                }
-                // ★ Recording control + clock (2026-10-21). The clock follows the
-                // card's own millisecond counter when it reports, otherwise our
-                // anchor — so it ticks, and it never "looks recording" for a
-                // command the card refused.
-                if isLive {
-                    TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        HStack(spacing: 10) {
-                            if direct.isRecording {
-                                Label(L10n.Plaud.recordingElapsed(Self.elapsedText(direct)),
-                                      systemImage: "record.circle")
-                                    .font(.footnote)
-                                    .foregroundStyle(.red)
-                                Spacer()
-                                Button(L10n.Plaud.stopRecord, role: .destructive) {
-                                    direct.stopRecording()
-                                }
-                                .font(.footnote)
-                            } else if direct.isPaused {
-                                Label(L10n.Plaud.recordingPaused, systemImage: "pause.circle")
-                                    .font(.footnote)
-                                    .foregroundStyle(.orange)
-                                Spacer()
-                                Button(L10n.Plaud.resumeRecord) { direct.resumeRecording() }
-                                    .font(.footnote)
-                            } else {
-                                Button {
-                                    direct.startRecording()
-                                } label: {
-                                    Label(L10n.Plaud.startRecord, systemImage: "record.circle")
-                                }
-                                .font(.footnote)
-                                Spacer()
-                            }
-                        }
-                    }
-                    // Live level: proof the card is actually feeding audio to us.
-                    LevelMeter(level: direct.liveLevel)
-                        .frame(height: 4)
-                    if let notice = direct.recordNotice {
-                        Text(notice)
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
-                    // ★ Live transcript (2026-10-21): the card's PCM is fed to
-                    // on-device speech while recording, so text appears here as
-                    // the card hears it — the same behaviour the other cards
-                    // have on the 实时 tab.
-                    if !direct.liveTranscript.isEmpty {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(L10n.Plaud.liveTranscript)
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Text(direct.liveTranscript)
-                                .font(.caption)
-                                .foregroundStyle(.primary)
-                                .lineLimit(5)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                if isLive {
-                    if let total = direct.storageTotal, let free = direct.storageFree, total > 0 {
-                        Text("\(L10n.TicNoteCard.storageFree) \(Self.storageLine(total: total, free: free))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    // History count — same "unknown is not zero" rule as the settings row.
-                    Text("\(L10n.Plaud.cardRecordings) "
-                         + (direct.cardFileCount.map(L10n.Plaud.cardRecordingsCount) ?? L10n.Plaud.historyUnknown))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Button {
-                        direct.syncFromCard()
-                    } label: {
-                        if direct.isSyncing {
-                            HStack { ProgressView(); Text(L10n.Plaud.syncFromCard) }
-                        } else {
-                            Label(L10n.Plaud.syncFromCard, systemImage: "square.and.arrow.down")
-                        }
-                    }
-                    .disabled(direct.isSyncing)
-                    if let msg = direct.syncMessage {
-                        Text(msg).font(.caption2).foregroundStyle(.secondary)
-                    }
-                    // Disconnect stays reachable from the home card too — it was
-                    // previously only in Settings, and "断开连接没效果" was partly
-                    // "there is no visible response anywhere".
-                    Button(L10n.Plaud.disconnect) { direct.disconnect() }
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(14)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal)
-            .padding(.top, 8)
-        }
-    }
-
-    /// "free / total". The SDK reports **bytes**; the old formatter divided by
-    /// 1e6 and printed "GB", which turned a 64 GB card into "62541 GB".
-    static func storageLine(total: Int, free: Int) -> String {
-        let gb: (Int) -> String = {
-            $0 >= 1_000_000_000
-                ? String(format: "%.1f GB", Double($0) / 1_000_000_000)
-                : String(format: "%.0f MB", Double($0) / 1_000_000)
-        }
-        return "\(gb(free)) / \(gb(total))"
-    }
-
-    /// Clock text: the card's own counter wins; our anchor fills the gaps
-    /// between reports so the number still ticks every second.
-    static func elapsedText(_ direct: PlaudDirectService) -> String {
-        let seconds: TimeInterval
-        if let device = direct.deviceElapsed {
-            seconds = device
-        } else if let start = direct.recordStartedAt {
-            seconds = Date().timeIntervalSince(start)
-        } else {
-            seconds = 0
-        }
-        return PlaudCardFilesView.durationText(max(0, seconds))
-    }
-}
 
 /// Thin loudness bar fed by the live PCM blocks — the visible proof that the
 /// card is streaming audio into the app while recording.
@@ -381,7 +205,7 @@ struct DirectConnectSection: View {
         }
         if direct.isRecording {
             HStack {
-                Label(L10n.Plaud.recordingElapsed(PlaudDeviceCard.elapsedText(direct)),
+                Label(L10n.Plaud.recordingElapsed(PlaudCardFilesView.elapsedText(direct)),
                       systemImage: "record.circle")
                     .foregroundStyle(.red)
                 Spacer()
@@ -426,7 +250,7 @@ struct DirectConnectSection: View {
             HStack {
                 Text(L10n.TicNoteCard.storageFree)
                 Spacer()
-                Text(PlaudDeviceCard.storageLine(total: total, free: free)).foregroundStyle(.secondary)
+                Text(PlaudCardFilesView.storageLine(total: total, free: free)).foregroundStyle(.secondary)
             }
         }
         Button(L10n.Plaud.syncFromCard) { direct.syncFromCard() }
@@ -495,76 +319,302 @@ struct DirectConnectSection: View {
     }
 }
 
-// MARK: - Home device segment: recordings ON the card
+// MARK: - Home device segment: the card's own page
 
-/// The card's own file list, shown in the Recordings tab's device segment —
-/// the same place V05E / TicNote list what they hold.
+/// The PLAUD card as it appears in the Recordings tab's **device segment**.
 ///
-/// Why it lives here and not in the settings device page (2026-10-21 user
-/// request): "the card's recordings belong under the home device section, not
-/// buried in device info". Settings keeps the *controls*; the home segment owns
-/// "what is on the card and can I pull it".
+/// ★ 2026-10-21 (2nd round) — layout parity. This used to be a centered rounded
+/// card floating over the page background, which made PLAUD read as a popup next
+/// to V05E / TicNote / 钉钉 A1 (all of them a full-width `List`). User's words:
+/// "don't put PLAUD's device and library in a centered page — same layout as the
+/// other cards". So: one `List(.insetGrouped)`, in the same order the other cards
+/// use — identity row → recording control → recordings on the card.
+///
+/// Delete (2026-10-21): "the recording files are not only for pulling, there is
+/// also deletion". Deleting is irreversible on the card, so every path (row
+/// button **and** swipe) goes through one confirmation dialog.
 struct PlaudCardFilesView: View {
     @ObservedObject private var direct = PlaudDirectService.shared
+    /// Row awaiting the delete confirmation.
+    @State private var pendingDelete: PlaudDirectService.PlaudCardFile?
+
+    private var connectedSN: String? {
+        if case .connected(let sn) = direct.phase { return sn }
+        return nil
+    }
+
+    private var cardSN: String? { connectedSN ?? direct.pairedSN }
+
+    private var cardName: String {
+        if let sn = cardSN { return PlaudDirectService.modelName(for: sn) }
+        return "PLAUD"
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Text(L10n.Plaud.cardFiles).font(.subheadline.weight(.semibold))
-                if direct.cardFilesLoaded {
-                    Text("\(direct.cardFiles.count)").font(.caption).foregroundStyle(.secondary)
+        List {
+            identitySection
+            if connectedSN != nil { recordingSection }
+            filesSection
+        }
+        .listStyle(.insetGrouped)
+        .refreshable {
+            direct.refreshVitals()
+            direct.refreshCardRecordings()
+        }
+        .confirmationDialog(
+            L10n.Plaud.deleteFromCardTitle,
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(L10n.Common.delete, role: .destructive) {
+                if let file = pendingDelete { direct.delete(file: file) }
+                pendingDelete = nil
+            }
+            Button(L10n.Common.cancel, role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text(L10n.Plaud.deleteFromCardMsg)
+        }
+    }
+
+    // MARK: - ① the card itself
+
+    private var identitySection: some View {
+        Section {
+            HStack(spacing: 10) {
+                Image(systemName: "waveform")
+                    .font(.title3)
+                    .foregroundStyle(Color.appAccent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(cardName).font(.body.weight(.medium))
+                    if let sn = cardSN {
+                        Text(sn).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                    }
+                    if let fw = direct.firmware, connectedSN != nil {
+                        Text(fw).font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
-                Button {
-                    direct.refreshCardRecordings()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .disabled(direct.isRecording)
-                .accessibilityLabel(L10n.Plaud.refresh)
-            }
-
-            if direct.isRecording {
-                // `getFileList` is unavailable mid-recording; say why instead of
-                // showing a stale list as if it were current.
-                Text(L10n.Plaud.recordingNow)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if !direct.cardFilesLoaded {
-                Text(L10n.Plaud.historyUnknown).font(.caption).foregroundStyle(.secondary)
-            } else if direct.cardFiles.isEmpty {
-                Text(L10n.Plaud.cardFilesEmpty).font(.caption).foregroundStyle(.secondary)
-            } else {
-                ForEach(direct.cardFiles) { file in
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(Self.dateText(file)).font(.footnote)
-                            HStack(spacing: 6) {
-                                if let d = file.duration {
-                                    Text(Self.durationText(d))
-                                }
-                                Text(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
-                            }
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                if connectedSN != nil, let battery = direct.battery {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Label(
+                            "\(battery)%",
+                            systemImage: direct.isCharging ? "battery.100percent.bolt" : "battery.75percent"
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        if direct.isCharging {
+                            Text(L10n.Plaud.charging).font(.caption2).foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        Button(L10n.Plaud.pullThisFile) {
-                            direct.download(file: file)
-                        }
-                        .font(.caption)
-                        .buttonStyle(.bordered)
-                        .disabled(direct.isSyncing || direct.isRecording)
                     }
-                    .padding(.vertical, 2)
+                }
+            }
+            if connectedSN == nil {
+                // Remembered but not linked — say so, and offer the one tap that
+                // fixes it instead of showing stale live data.
+                HStack {
+                    Text(L10n.Plaud.stateDisconnected).font(.footnote).foregroundStyle(.secondary)
+                    Spacer()
+                    Button(L10n.Plaud.reconnect) { direct.reconnect() }
+                        .font(.footnote)
+                        .buttonStyle(.borderless)
+                }
+            } else {
+                // History count — "not read yet" instead of a fake 0.
+                HStack {
+                    Text(L10n.Plaud.cardRecordings)
+                    Spacer()
+                    Text(direct.cardFileCount.map(L10n.Plaud.cardRecordingsCount) ?? L10n.Plaud.historyUnknown)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        direct.refreshCardRecordings()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(direct.isRecording)
+                    .accessibilityLabel(L10n.Plaud.refresh)
+                }
+                if let total = direct.storageTotal, let free = direct.storageFree, total > 0 {
+                    LabeledContent(L10n.TicNoteCard.storageFree, value: Self.storageLine(total: total, free: free))
+                }
+                Button(L10n.Plaud.disconnect) { direct.disconnect() }
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - ② recording control + clock + level + marks
+
+    @ViewBuilder
+    private var recordingSection: some View {
+        Section {
+            // The clock ticks because the card's own millisecond counter only
+            // arrives with each PCM block; between blocks our anchor fills in.
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                if direct.isRecording {
+                    HStack(spacing: 10) {
+                        Label(L10n.Plaud.recordingElapsed(Self.elapsedText(direct)),
+                              systemImage: "record.circle")
+                            .foregroundStyle(.red)
+                        Spacer()
+                        Button(L10n.Plaud.stopRecord, role: .destructive) {
+                            direct.stopRecording()
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                } else if direct.isPaused {
+                    HStack(spacing: 10) {
+                        Label(L10n.Plaud.recordingPaused, systemImage: "pause.circle")
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        Button(L10n.Plaud.resumeRecord) { direct.resumeRecording() }
+                            .buttonStyle(.borderless)
+                    }
+                } else {
+                    Button {
+                        direct.startRecording()
+                    } label: {
+                        Label(L10n.Plaud.startRecord, systemImage: "record.circle")
+                    }
+                }
+            }
+            if direct.isRecording || direct.liveStreaming {
+                LevelMeter(level: direct.liveLevel)
+                    .frame(height: 6)
+            }
+            // ★ 打点 (bookmarks pressed on the card while recording). The card
+            // pushes them via `bleMarking` — this is the live proof that a press
+            // registered, exactly what the user asked to "sync".
+            HStack {
+                Label(L10n.Plaud.marksLive, systemImage: "bookmark")
+                Spacer()
+                Text(direct.recordMarks.isEmpty
+                     ? "—"
+                     : L10n.Plaud.marksCount(direct.recordMarks.count))
+                    .foregroundStyle(direct.recordMarks.isEmpty ? Color.secondary : Color.appAccent)
+            }
+            if let notice = direct.recordNotice {
+                Text(notice).font(.footnote).foregroundStyle(.orange)
+            }
+            if !direct.liveTranscript.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.Plaud.liveTranscript)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(direct.liveTranscript)
+                        .font(.footnote)
+                        .lineLimit(6)
                 }
             }
         }
-        .padding(14)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal)
     }
+
+    // MARK: - ③ recordings ON the card
+
+    private var filesSection: some View {
+        Section {
+            if direct.isRecording {
+                // `getFileList` is unavailable mid-recording; say why instead of
+                // showing a stale list as if it were current.
+                Text(L10n.Plaud.recordingNowOnCard)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if !direct.cardFilesLoaded {
+                Text(L10n.Plaud.historyUnknown)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if direct.cardFiles.isEmpty {
+                Text(L10n.Plaud.cardFilesEmpty)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(direct.cardFiles) { file in
+                    row(file)
+                }
+            }
+        } header: {
+            HStack {
+                Text(L10n.Plaud.cardFiles)
+                Spacer()
+                if direct.cardFilesLoaded {
+                    Text("\(direct.cardFiles.count)").foregroundStyle(.secondary)
+                }
+            }
+        } footer: {
+            if let msg = direct.syncMessage {
+                Text(msg)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ file: PlaudDirectService.PlaudCardFile) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(Self.dateText(file)).font(.body)
+                    if file.marks > 0 {
+                        Label("\(file.marks)", systemImage: "bookmark.fill")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.appAccent)
+                            .accessibilityLabel(L10n.Plaud.marksCount(file.marks))
+                    }
+                }
+                HStack(spacing: 6) {
+                    if let d = file.duration {
+                        Text(Self.durationText(d)).monospacedDigit()
+                    }
+                    Text(Self.sizeText(file.size))
+                    if direct.pulledSessions.contains(file.sessionID) {
+                        Label(L10n.Plaud.savedToLibrary, systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Button {
+                direct.download(file: file)
+            } label: {
+                Image(systemName: "arrow.down.circle")
+                    .font(.title3)
+            }
+            .buttonStyle(.borderless)
+            .disabled(direct.isSyncing || direct.isRecording)
+            .accessibilityLabel(L10n.Plaud.pullThisFile)
+
+            Button {
+                pendingDelete = file
+            } label: {
+                Image(systemName: "trash")
+                    .font(.body)
+            }
+            .buttonStyle(.borderless)
+            .tint(.red)
+            // Same lock as the pull button: a batch transfer owns the card's
+            // serial command queue — interleaving a delete mid-batch would
+            // desync the bookkeeping on both ends.
+            .disabled(direct.isSyncing || direct.isRecording)
+            .accessibilityLabel(L10n.Plaud.deleteFromCard)
+        }
+        .padding(.vertical, 2)
+        // Swipe is the gesture the other cards' lists already teach (TicNote:
+        // `.onDelete`); keep it alongside the explicit button.
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                pendingDelete = file
+            } label: {
+                Label(L10n.Common.delete, systemImage: "trash")
+            }
+            .disabled(direct.isRecording)
+        }
+    }
+
+    // MARK: - formatting
 
     private static func dateText(_ file: PlaudDirectService.PlaudCardFile) -> String {
         guard let date = file.approxDate else { return "#\(file.sessionID)" }
@@ -573,9 +623,38 @@ struct PlaudCardFilesView: View {
         return fmt.string(from: date)
     }
 
+    private static func sizeText(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
     static func durationText(_ seconds: TimeInterval) -> String {
         let total = Int(seconds.rounded())
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    /// "free / total". The SDK reports **bytes**; the old formatter divided by
+    /// 1e6 and printed "GB", which turned a 64 GB card into "62541 GB".
+    static func storageLine(total: Int, free: Int) -> String {
+        let gb: (Int) -> String = {
+            $0 >= 1_000_000_000
+                ? String(format: "%.1f GB", Double($0) / 1_000_000_000)
+                : String(format: "%.0f MB", Double($0) / 1_000_000)
+        }
+        return "\(gb(free)) / \(gb(total))"
+    }
+
+    /// Clock text: the card's own counter wins; our anchor fills the gaps
+    /// between reports so the number still ticks every second.
+    static func elapsedText(_ direct: PlaudDirectService) -> String {
+        let seconds: TimeInterval
+        if let device = direct.deviceElapsed {
+            seconds = device
+        } else if let start = direct.recordStartedAt {
+            seconds = Date().timeIntervalSince(start)
+        } else {
+            seconds = 0
+        }
+        return durationText(max(0, seconds))
     }
 }
 

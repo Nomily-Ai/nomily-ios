@@ -5,6 +5,24 @@ struct KnownDevice: Identifiable {
     let name: String
 }
 
+/// The PLAUD card as the top-left pill needs to see it.
+///
+/// ★ 2026-10-21: PLAUD cards are **not** `DnoteClient`s and not `RecorderLink`s
+/// either, so the pill had no idea they existed — it kept showing some other
+/// device's name (or `DNOTE`) while a PLAUD card was connected, and tapping it
+/// fell through to a recorder scan that can never find one. This value type is
+/// the bridge: the pill renders the name / link state / recording state from it.
+struct PlaudPillState: Equatable {
+    let name: String
+    let sn: String
+    let isConnected: Bool
+    let isRecording: Bool
+    /// Scanning or binding in progress — shows the spinner.
+    let isBusy: Bool
+    /// Ledger id (`plaud-<SN>`), so the picker can tick the right row.
+    var ledgerID: String { "plaud-\(sn)" }
+}
+
 /// Persistent top-left chrome. Three modes:
 ///  1. No known devices → "Add Device" onboarding CTA
 ///  2. Known device(s) → split pill: left tap → DeviceSheet, right tap → device picker menu
@@ -25,18 +43,20 @@ struct ConnectionPill: View {
     /// (the card is asleep, waiting for its next broadcast), so it must be able to show **which attempt** this is,
     /// otherwise the user will think it's stuck — which is exactly why they keep tapping reconnect.
     let recorderReconnectState: BluetoothCoordinator.RecorderReconnectState?
+    /// The remembered / connected PLAUD card, when it is the identity to show.
+    let plaud: PlaudPillState?
     let onTapDevice: () -> Void
     let onAddDevice: () -> Void
     let onSelectDevice: (String) -> Void
     let onRemoveDevice: (KnownDevice) -> Void
 
     private var isConnected: Bool {
-        client != nil || recorderLink?.isConnected == true
+        client != nil || recorderLink?.isConnected == true || plaud?.isConnected == true
     }
 
     /// The spinning state: manual connecting, or auto-reconnecting.
     private var isBusy: Bool {
-        isReconnecting || recorderReconnectState != nil
+        isReconnecting || recorderReconnectState != nil || plaud?.isBusy == true
     }
 
     private var activeName: String {
@@ -45,6 +65,10 @@ struct ConnectionPill: View {
         // After disconnection, `recorderLink` is already nil, so the name only comes from these sources — the reconnection
         // state carries one (fetched from the identity cache), which is more accurate than `knownDevices.first`.
         if let name = recorderReconnectState?.deviceName, !name.isEmpty { return name }
+        // ★ "last connected device" (2026-10-21 user request). PLAUD is remembered
+        // by SN, not by a live link, so without this the pill fell back to whatever
+        // ledger row happened to sort first.
+        if let plaud { return plaud.name }
         return knownDevices.first?.name ?? "DNOTE"
     }
 
@@ -118,7 +142,8 @@ struct ConnectionPill: View {
                     .foregroundColor(isConnected ? .primary : .secondary)
 
                 if client?.lastDeviceInfo?.isRecording == true ||
-                    (recorderLink?.isConnected == true && recorderIsRecording) {
+                    (recorderLink?.isConnected == true && recorderIsRecording) ||
+                    plaud?.isRecording == true {
                     Circle()
                         .fill(.red)
                         .frame(width: 8, height: 8)
@@ -147,7 +172,8 @@ struct ConnectionPill: View {
                             Text(device.name)
                         } icon: {
                             if client?.peripheral.identifier.uuidString == device.id ||
-                                recorderLink?.peripheral.identifier.uuidString == device.id {
+                                recorderLink?.peripheral.identifier.uuidString == device.id ||
+                                plaud?.ledgerID == device.id {
                                 Image(systemName: "checkmark.circle.fill")
                             } else {
                                 Image(systemName: "circle")

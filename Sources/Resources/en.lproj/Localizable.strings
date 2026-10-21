@@ -1287,6 +1287,14 @@
 "plaud.state_disconnected" = "Not connected";
 "plaud.reconnect" = "Reconnect";
 "plaud.device_detail_title" = "PLAUD card";
+"plaud.delete_from_card" = "Delete from card";
+"plaud.delete_from_card_title" = "Delete this recording from the card?";
+"plaud.delete_from_card_msg" = "It is erased from the card and cannot be recovered. Pull it first if you want to keep it.";
+"plaud.saved_to_library" = "Pulled";
+"plaud.marks_title" = "Marks";
+"plaud.marks_count" = "%d mark(s)";
+"plaud.marks_live" = "Marks this recording";
+"plaud.recording_now_on_card" = "Recording on the card — the list refreshes when it stops.";
 "plaud.not_connected" = "Connect the card first.";
 "plaud.card_files" = "Recordings on the card";
 "plaud.card_files_empty" = "No recordings on the card.";

@@ -56,6 +56,15 @@ final class PlaudDirectService: NSObject, ObservableObject {
             if case .connected = self { return true }
             return false
         }
+
+        /// Scanning or binding — the UI shows a spinner and must not start a
+        /// second attempt (two scans race and clear each other's state).
+        var isBusy: Bool {
+            switch self {
+            case .scanning, .connecting: return true
+            default: return false
+            }
+        }
     }
 
     struct ScannedCard: Identifiable, Equatable {
@@ -75,6 +84,8 @@ final class PlaudDirectService: NSObject, ObservableObject {
         let duration: TimeInterval?
         /// Card-reported recording start (unix seconds), when the file carries one.
         let recordedAt: Date?
+        /// Bookmarks ("打点") the user pressed while recording — `BleFile.penCollect`.
+        let marks: Int
         var id: Int { sessionID }
         /// `sessionId` is documented as "timezone timestamp" — usable as a
         /// fallback time when `recordedAt` is missing.
@@ -132,6 +143,14 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Live transcript text (finals + in-flight hypothesis) for the current
     /// recording. Empty when speech recognition is unavailable/undesired.
     @Published private(set) var liveTranscript = ""
+    /// Bookmarks pressed on the card during THIS recording ("打点"). The card
+    /// pushes them via `bleMarking`; there is no "how many" query mid-recording,
+    /// so this is "what we heard" — same contract as the A1's remark count.
+    @Published private(set) var recordMarks: [UInt32] = []
+    /// Sessions already pulled into the library. Mirrors the private
+    /// `syncedSessions` set — that one lives behind `UserDefaults` and would not
+    /// republish, so the card list could not show "already saved" after a pull.
+    @Published private(set) var pulledSessions: Set<Int> = []
     @Published private(set) var isPaused = false
     /// How many recordings sit ON the card right now (the SDK's `getFileList`
     /// answer). `nil` = never asked / card not connected — the UI shows a dash
@@ -190,6 +209,8 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// SN we are trying to re-bind automatically (`reconnect()`). Cleared as
     /// soon as the card is seen or the attempt is abandoned.
     private var reconnectTarget: String?
+    /// Periodic `getState()` while connected (see `startStatePolling`).
+    private var statePollTask: Task<Void, Never>?
 
     private let session: URLSession
     private let exportQueue = DispatchQueue(label: "com.nomily.app.plaud-export")
@@ -268,6 +289,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
         pairedSN = d.string(forKey: "plaud.paired_sn")
         deleteAfterSync = d.bool(forKey: "plaud.delete_after_sync")
         syncedSessions = Set(d.array(forKey: "plaud.synced_sessions") as? [Int] ?? [])
+        pulledSessions = syncedSessions
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 30
         session = URLSession(configuration: cfg)
@@ -300,6 +322,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
 
     func deactivate() {
         PlaudDeviceAgent.shared.disconnect()
+        stopStatePolling()
         isConfigured = false
         isInitialized = false
         userToken = nil
@@ -425,6 +448,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
         }
         Task {
             try? await ensureInitialized()
+            // Wake the card first: after a sleep it stops advertising, and a
+            // scan alone would run out before it ever shows up (the reported
+            // "tapping PLAUD does not connect / wake it").
+            PlaudDeviceAgent.shared.setDeviceActive(status: 1)
             setPhase(.connecting(name: Self.modelName(for: sn)))
             clearScanned()
             reconnectTarget = sn
@@ -432,8 +459,22 @@ final class PlaudDirectService: NSObject, ObservableObject {
         }
     }
 
-    func stopScan() {
-        PlaudDeviceAgent.shared.stopScan()
+    /// Connect a card we know by SN only (the pill / picker hands us the ledger
+    /// id `plaud-<SN>`). ★ 2026-10-21: needed because the "remembered" marker can
+    /// be empty (first launch after an unbind, or data restored from a backup)
+    /// while the ledger row is still there — and then tapping that row used to
+    /// fall into the recorder-card scan, which can never find a PLAUD card.
+    func connectKnown(sn: String) {
+        guard !phase.isBusy, !phase.isConnected else { return }
+        if pairedSN != sn {
+            pairedSN = sn
+            UserDefaults.standard.set(sn, forKey: "plaud.paired_sn")
+            rememberInLedger(sn: sn)
+        }
+        reconnect()
+    }
+
+    func stopScan() {        PlaudDeviceAgent.shared.stopScan()
         reconnectTarget = nil
         // Cancelling a scan says nothing about the link — never promote it to
         // "connected" (that bug made a stale card look live after relaunch).
@@ -480,10 +521,14 @@ final class PlaudDirectService: NSObject, ObservableObject {
         // pushing PCM that nobody reads, which is exactly the "disconnect looks
         // like it did nothing, card still busy" symptom.
         if liveStreaming { PlaudDeviceAgent.shared.stopSyncFile() }
+        stopStatePolling()
         Task { @MainActor in self.stopLiveTranscription() }
         PlaudDeviceAgent.shared.disconnect()
-        pairedSN = nil
-        UserDefaults.standard.removeObject(forKey: "plaud.paired_sn")
+        // ★ Keep `pairedSN` (2026-10-21). Disconnecting is not unbinding: the
+        // card stays "remembered", which is what lets the pill show its name and
+        // lets one tap reconnect. Clearing it here made `reconnect()` impossible
+        // (it needs the SN) and forced a full re-scan after every disconnect.
+        // Unbind paths (`deactivate` / `releaseDevice`) still clear it.
         cardFileCount = nil
         cardFiles = []
         cardFilesLoaded = false
@@ -547,6 +592,34 @@ final class PlaudDirectService: NSObject, ObservableObject {
         downloadNext()
     }
 
+    /// Delete one recording from the card. Removed from the list immediately so
+    /// the row can't be tapped twice; the card's own `bleDeleteFile` answer
+    /// triggers a re-read that reconciles reality.
+    func delete(file: PlaudCardFile) {
+        guard phase.isConnected else {
+            setRecordNotice(L10n.Plaud.notConnected)
+            return
+        }
+        guard !isRecording else {
+            setRecordNotice(L10n.Plaud.recordingNow)
+            return
+        }
+        guard !isSyncing else {
+            // A batch owns the card's serial command queue; a delete squeezed
+            // into it would desync the bookkeeping on both ends.
+            setSyncMessage(L10n.Plaud.recordBusy)
+            return
+        }
+        PlaudDeviceAgent.shared.deleteFile(sessionId: file.sessionID)
+        DispatchQueue.main.async {
+            self.cardFiles.removeAll { $0.sessionID == file.sessionID }
+            self.cardFileCount = self.cardFiles.count
+            self.syncedSessions.remove(file.sessionID)
+            self.pulledSessions = self.syncedSessions
+            UserDefaults.standard.set(Array(self.syncedSessions), forKey: "plaud.synced_sessions")
+        }
+    }
+
     // MARK: - Device ledger (Settings → Devices & Library)
 
     /// Write this card into `config.devices` so it is listed next to the other
@@ -568,6 +641,33 @@ final class PlaudDirectService: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - State polling (card → app sync)
+
+    /// Ask the card for its state every few seconds while connected.
+    ///
+    /// ★ Why polling (2026-10-21 user: "if recording starts on the PLAUD device,
+    /// Nomily must sync too"): starting a recording **on the card** pushes
+    /// nothing to us — `blePenState` is an *answer*, only sent in reply to
+    /// `getState()`. Without this loop the app kept showing "Start recording"
+    /// for a card that had been recording for minutes.
+    private func startStatePolling() {
+        statePollTask?.cancel()
+        statePollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                guard self.phase.isConnected else { continue }
+                PlaudDeviceAgent.shared.getState()
+                PlaudDeviceAgent.shared.getChargingState()
+            }
+        }
+    }
+
+    private func stopStatePolling() {
+        statePollTask?.cancel()
+        statePollTask = nil
+    }
+
     // MARK: Release (unbind) — return-to-seller / hand-back support
 
     /// Unbind the card so ANOTHER app (the official PLAUD app, or a buyer's)
@@ -587,6 +687,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
         guard case .connected(let sn) = phase else { return }
         log.info("plaud release (factoryReset=\(factoryReset)) sn=\(sn, privacy: .public)")
         if liveStreaming { PlaudDeviceAgent.shared.stopSyncFile() }
+        stopStatePolling()
         Task { @MainActor in self.stopLiveTranscription() }
         PlaudDeviceAgent.shared.depair(clear: factoryReset)
         Task { [weak self] in
@@ -673,7 +774,8 @@ final class PlaudDirectService: NSObject, ObservableObject {
                 sessionID: f.sessionId,
                 size: f.size,
                 duration: seconds > 0 ? seconds : nil,
-                recordedAt: stamp > 0 ? Date(timeIntervalSince1970: TimeInterval(stamp)) : nil
+                recordedAt: stamp > 0 ? Date(timeIntervalSince1970: TimeInterval(stamp)) : nil,
+                marks: f.penCollect
             )
         }
         .sorted { $0.sessionID > $1.sessionID }
@@ -774,6 +876,8 @@ final class PlaudDirectService: NSObject, ObservableObject {
     private func markSynced(_ sessionId: Int) {
         syncedSessions.insert(sessionId)
         UserDefaults.standard.set(Array(syncedSessions), forKey: "plaud.synced_sessions")
+        let snapshot = syncedSessions
+        DispatchQueue.main.async { self.pulledSessions = snapshot }
     }
 
     // MARK: - State marshalling
@@ -944,6 +1048,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         }
         DispatchQueue.main.async { self.selectedCard = nil }
         setPhase(.connected(sn: sn))
+        startStatePolling()
         // Pull vitals right away, then auto-pull the file list like the
         // official template does.
         refreshVitals()
@@ -966,10 +1071,17 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         }
     }
 
-    /// @required — recorder state push. `state == 4099` (or 1) = recording.
+    /// @required — recorder state push.
+    ///
+    /// ⚠️ **`state == 1` is IDLE** (verified on hardware 2026-10-21): the card
+    /// answers every 3 s poll with `state 1, privacy 1, key 0` while it is doing
+    /// nothing, so treating 1 as "recording" made the app claim a recording that
+    /// never happened — the clock even ticked, because we then opened a sync-file
+    /// channel on a stale session. Recording is the high-bit value (4099) that the
+    /// official app's state dump showed.
     func blePenState(state: Int, privacy: Int, keyState: Int, uDisk: Int, findMyToken: Int, hasSndpKey: Int, deviceAccessToken: Int) {
-        log.info("plaud pen state \(state) privacy \(privacy) key \(keyState)")
-        let nowRecording = (state == 4099 || state == 1)
+        log.info("plaud pen state \(state) privacy \(privacy) key \(keyState) udisk \(uDisk)")
+        let nowRecording = (state == 4099)
         let wasRecording = isRecording
         DispatchQueue.main.async {
             self.isRecording = nowRecording
@@ -1030,6 +1142,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.recordSessionID = sessionId
             self.recordBytes = start
             self.recordNotice = nil
+            self.recordMarks = []
             // `startTime` is the card's own start stamp (unix seconds). Using it
             // keeps the clock honest when we TAKE OVER a recording that was
             // started by the physical key before the app was listening.
@@ -1125,6 +1238,15 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         log.info("plaud data complete")
     }
 
+    /// Bookmark pressed on the card ("打点"). Pushed while recording, so the app
+    /// can show the count live instead of only finding out after the transfer.
+    func bleMarking(sessionId: Int, status: Int, markList: [UInt32]) {
+        log.info("plaud marking sid=\(sessionId) status=\(status) count=\(markList.count)")
+        DispatchQueue.main.async {
+            self.recordMarks = markList
+        }
+    }
+
     func bleSyncFileStop() {
         log.info("plaud sync-file stopped")
         DispatchQueue.main.async { self.liveStreaming = false }
@@ -1148,6 +1270,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
 
     func bleDeviceDisconnectErr() {
         log.warning("plaud device dropped")
+        stopStatePolling()
         DispatchQueue.main.async { self.cardFileCount = nil }
         if case .connected = phase { setPhase(.idle) }
     }

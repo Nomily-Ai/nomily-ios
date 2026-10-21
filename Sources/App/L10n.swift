@@ -160,6 +160,17 @@ enum L10n {
             String(format: NSLocalizedString("plaud.record_failed", value: "The card refused to record (code %d).", comment: ""), status)
         }
         static var deviceDetailTitle: String { NSLocalizedString("plaud.device_detail_title", value: "PLAUD card", comment: "Navigation title of the PLAUD device page") }
+        // ★ 2026-10-21 (2nd round): delete-on-card + bookmark ("打点") sync
+        static var deleteFromCard: String { NSLocalizedString("plaud.delete_from_card", value: "Delete from card", comment: "Row action: erase one recording on the card") }
+        static var deleteFromCardTitle: String { NSLocalizedString("plaud.delete_from_card_title", value: "Delete this recording from the card?", comment: "") }
+        static var deleteFromCardMsg: String { NSLocalizedString("plaud.delete_from_card_msg", value: "It is erased from the card and cannot be recovered. Pull it first if you want to keep it.", comment: "") }
+        static var savedToLibrary: String { NSLocalizedString("plaud.saved_to_library", value: "Pulled", comment: "This recording is already in the library") }
+        static var marksTitle: String { NSLocalizedString("plaud.marks_title", value: "Marks", comment: "Bookmarks pressed on the card while recording") }
+        static func marksCount(_ count: Int) -> String {
+            String(format: NSLocalizedString("plaud.marks_count", value: "%d mark(s)", comment: "How many bookmarks a recording carries; %d = number"), count)
+        }
+        static var marksLive: String { NSLocalizedString("plaud.marks_live", value: "Marks this recording", comment: "Live count of marks pressed during the current recording") }
+        static var recordingNowOnCard: String { NSLocalizedString("plaud.recording_now_on_card", value: "Recording on the card — the list refreshes when it stops.", comment: "") }
 
         static var pairRejected: String { NSLocalizedString("plaud.pair_rejected", value: "The card refused the connection — unbind it once in the official PLAUD app (Settings → device → unbind), then retry.", comment: "") }
         static var cloudNote: String { NSLocalizedString("plaud.cloud_note", value: "Optional compatibility path. Requires a PLAUD account registered with an EMAIL (phone-number accounts are rejected). The card stays bound to the official app.", comment: "") }

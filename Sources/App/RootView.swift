@@ -11,6 +11,7 @@ struct RootView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var bluetooth: BluetoothCoordinator
     @EnvironmentObject private var configService: ConfigService
+    @ObservedObject private var plaudDirect = PlaudDirectService.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var showScanner = false
     @State private var showDevice = false
@@ -75,6 +76,35 @@ struct RootView: View {
     /// Reconnection entry for the recorder card: the user taps the pill or the "Add Device" page, see `connectRecorderDevice`.
     private var autoReconnectCandidates: [KnownDevice] {
         knownDevices.filter { !configService.isRecorderRecord($0.id) }
+    }
+
+    /// ★ Top-left pill identity for a PLAUD card (2026-10-21).
+    ///
+    /// Only offered when no other device is live: D·NOTE and the recorder cards
+    /// own the pill while they are connected, and PLAUD must never steal the
+    /// label from them. When nothing else is up, the card we paired with **last**
+    /// is the honest answer to "which device did I use before" — that is exactly
+    /// the user's "顶部设备显示应该是上一次链接过的设备名称".
+    private var plaudPill: PlaudPillState? {
+        guard bluetooth.client == nil, bluetooth.recorderLink == nil else { return nil }
+        guard let sn = plaudDirect.pairedSN else { return nil }
+        let ledgerID = "plaud-\(sn)"
+        // A card whose ledger row was removed stays silent in the pill — unless it
+        // is actually connected, where pretending otherwise would be a lie.
+        if !plaudDirect.phase.isConnected {
+            guard configService.config.devices[ledgerID] != nil else { return nil }
+            // …and only when it really is the **last** device used. Otherwise a
+            // remembered PLAUD would hijack the label from the TicNote the user
+            // actually unplugged a minute ago.
+            if let newest = knownDevices.first, newest.id != ledgerID { return nil }
+        }
+        return PlaudPillState(
+            name: PlaudDirectService.modelName(for: sn),
+            sn: sn,
+            isConnected: plaudDirect.phase.isConnected,
+            isRecording: plaudDirect.isRecording,
+            isBusy: plaudDirect.phase.isBusy
+        )
     }
 
     var body: some View {
@@ -346,6 +376,7 @@ struct RootView: View {
                             knownDevices: knownDevices,
                             isReconnecting: isReconnecting,
                             recorderReconnectState: bluetooth.recorderReconnectState,
+                            plaud: plaudPill,
                             onTapDevice: handlePillTap,
                             onAddDevice: { showScanner = true },
                             onSelectDevice: handleSelectDevice,
@@ -370,16 +401,55 @@ struct RootView: View {
         } else if bluetooth.recorderLink?.isConnected == true,
                   let recorder = bluetooth.matchedRecorder {
             openedRecorder = recorder
+        } else if plaudDirect.pairedSN != nil {
+            // ★ 2026-10-21 user report: "tapping the PLAUD pill in the top-left
+            // does not connect or wake the device". It used to fall through to
+            // `connectToDevice(id:)`, which scans for a `RecorderLink` — a PLAUD
+            // card never advertises as one, so the tap went nowhere.
+            //
+            // Now: connected → jump to its page; remembered → wake it up and
+            // bind (reconnect() also fires the admin "device active" command,
+            // which is what actually gets a sleeping card to answer).
+            if plaudDirect.phase.isConnected {
+                selectedTab = .recordings
+            } else if !plaudDirect.phase.isBusy {
+                plaudDirect.reconnect()
+            }
         } else if let first = knownDevices.first {
             // A connect attempt is already in flight (spinner showing) —
             // tapping again would start a second scan on the same device and
             // the two would race to set/clear `isReconnecting` (3op2cmn).
             guard !isReconnecting else { return }
-            Task { await connectToDevice(id: first.id) }
+            if first.id.hasPrefix("plaud-") {
+                openPlaud(ledgerID: first.id)
+            } else {
+                Task { await connectToDevice(id: first.id) }
+            }
         }
     }
 
+    /// Wake / bind a PLAUD card identified by its ledger id (`plaud-<SN>`),
+    /// then land the user on the page that shows what is on it.
+    ///
+    /// Kept in one place because three entries hit the same path: the pill, the
+    /// pill's device picker, and (defensively) `connectToDevice`.
+    private func openPlaud(ledgerID: String) {
+        let sn = String(ledgerID.dropFirst("plaud-".count))
+        guard !sn.isEmpty else { return }
+        if plaudDirect.phase.isConnected, plaudDirect.pairedSN == sn {
+            selectedTab = .recordings
+            return
+        }
+        plaudDirect.connectKnown(sn: sn)
+    }
+
     private func handleSelectDevice(_ id: String) {
+        // PLAUD rows in the picker are ledger ids (`plaud-<SN>`) — they have no
+        // `RecorderLink` to connect through, so route them to the card service.
+        if id.hasPrefix("plaud-") {
+            openPlaud(ledgerID: id)
+            return
+        }
         if bluetooth.client?.peripheral.identifier.uuidString == id {
             showDevice = true
         } else if bluetooth.recorderLink?.isConnected == true,
@@ -402,6 +472,17 @@ struct RootView: View {
     }
 
     private func removeKnownDevice(_ device: KnownDevice) {
+        // PLAUD: "remove" drops the ledger row (so it no longer sits next to the
+        // other cards) and closes the link. The BLE credential/binding is NOT
+        // erased here — that is the explicit "unbind card" action on the card's
+        // own settings page, and wiping it from a menu tap would be a nasty
+        // surprise. Reconnecting later re-creates the row automatically.
+        if device.id.hasPrefix("plaud-") {
+            plaudDirect.disconnect()
+            configService.config.devices.removeValue(forKey: device.id)
+            configService.scheduleSave()
+            return
+        }
         if bluetooth.client?.peripheral.identifier.uuidString == device.id ||
             bluetooth.recorderLink?.peripheral.identifier.uuidString == device.id {
             bluetooth.disconnect()
@@ -411,6 +492,12 @@ struct RootView: View {
     }
 
     private func connectToDevice(id: String) async {
+        // Defensive: a PLAUD ledger id must never reach the recorder-card scan
+        // (it has no advertisement to match, so the scan would just time out).
+        if id.hasPrefix("plaud-") {
+            openPlaud(ledgerID: id)
+            return
+        }
         // Spinner from the first await: the recording-state check below
         // waits on the command lock, and that wait is the user's only
         // feedback until the old link is torn down.
