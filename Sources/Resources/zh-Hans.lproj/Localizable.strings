@@ -1307,7 +1307,6 @@
 
 // PLAUD cloud sync (2026-10-21)
 "plaud.nav_title" = "PLAUD";
-"plaud.entry_caption" = "云同步与设备接入";
 "plaud.signin_header" = "登录";
 "plaud.email" = "PLAUD 账号邮箱";
 "plaud.code" = "验证码";
@@ -1350,3 +1349,11 @@
 "asr.custom_models_manual" = "手动输入";
 "asr.custom_models_loaded" = "服务器返回 %d 个支持转录的模型";
 "asr.custom_models_none" = "未获取到模型列表，请手动填写模型名。";
+"plaud.add_title" = "添加 PLAUD 设备";
+"plaud.add_row_caption" = "直连取原始录音（官方 SDK）";
+"plaud.unbind_keep" = "解绑卡片（保留录音）";
+"plaud.factory_reset" = "恢复出厂（清空卡片）";
+"plaud.factory_reset_title" = "清空卡内全部内容？";
+"plaud.factory_reset_msg" = "卡内所有录音将被清空并解除绑定，卡片恢复全新状态。此操作不可撤销。";
+"plaud.erase" = "清空";
+"plaud.released" = "已解绑——官方 PLAUD App 可重新配对该卡。";

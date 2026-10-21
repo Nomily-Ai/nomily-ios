@@ -1205,7 +1205,6 @@
 
 // PLAUD cloud sync (2026-10-21)
 "plaud.nav_title" = "PLAUD";
-"plaud.entry_caption" = "Cloud sync & device link";
 "plaud.signin_header" = "Sign in";
 "plaud.email" = "PLAUD account email";
 "plaud.code" = "Verification code";
@@ -1248,3 +1247,11 @@
 "asr.custom_models_manual" = "Enter manually";
 "asr.custom_models_loaded" = "%d transcription-capable model(s) from the server";
 "asr.custom_models_none" = "No usable model list from the server — type the model name manually.";
+"plaud.add_title" = "Add PLAUD device";
+"plaud.add_row_caption" = "Direct connect — pull the original recordings";
+"plaud.unbind_keep" = "Unbind card (keep recordings)";
+"plaud.factory_reset" = "Factory reset (erase card)";
+"plaud.factory_reset_title" = "Erase everything on the card?";
+"plaud.factory_reset_msg" = "All recordings on the card will be erased and the binding released — the card becomes like new. This cannot be undone.";
+"plaud.erase" = "Erase";
+"plaud.released" = "Card released — the official PLAUD app can pair it again.";

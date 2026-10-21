@@ -12,6 +12,11 @@ struct ScannerSheet: View {
     /// another flow (`RecorderSheet`), not the D·NOTE device page.
     @State private var connectingRecorder: DiscoveredRecorder?
     @State private var openedRecorder: DiscoveredRecorder?
+    /// ★ 2026-10-21: PLAUD (Note Pro / Note Pin S) uses the official SDK and
+    /// its own direct-connect flow — it does NOT ride the generic scan list
+    /// (that list only shows D·NOTE + our own recorder cards). The entry row
+    /// below opens `PlaudAddSheet`.
+    @State private var showPlaudAdd = false
 
     var body: some View {
         NavigationStack {
@@ -34,6 +39,10 @@ struct ScannerSheet: View {
                 .alert(L10n.Scanner.connectionFailed, isPresented: errorBinding, actions: {
                     Button(L10n.Common.ok, role: .cancel) { connectError = nil }
                 }, message: { Text(connectError ?? "") })
+                .safeAreaInset(edge: .bottom) { plaudAddRow }
+                .sheet(isPresented: $showPlaudAdd) {
+                    PlaudAddSheet()
+                }
         }
         // ★ 2026-10-14: Pass `.deviceInfo` — user quote
         //   > "When adding a device, do not show recording time; directly display device information,
@@ -62,6 +71,37 @@ struct ScannerSheet: View {
         .onDisappear {
             bluetooth.stopScan()
         }
+    }
+
+    /// Fixed "add a PLAUD card" row — visible in every scanner state
+    /// (empty / no-new-devices / list) so the entry point never disappears.
+    private var plaudAddRow: some View {
+        Button {
+            showPlaudAdd = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "waveform")
+                    .font(.title3)
+                    .foregroundStyle(Color.appAccent)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.Plaud.navTitle).font(.body.bold())
+                    Text(L10n.Plaud.addRowCaption)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
+        .padding(.bottom, 8)
     }
 
     @ViewBuilder

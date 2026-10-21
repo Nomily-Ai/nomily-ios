@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// PLAUD settings — dual mode (2026-10-21).
+/// PLAUD sheet — dual mode (2026-10-21).
 ///
 /// **Direct connect (primary, recommended)** — SDK takeover, same mental
 /// model as the other recorder cards (A1): fill the developer Client ID +
@@ -11,29 +11,102 @@ import SwiftUI
 /// **Cloud sync (secondary, compatibility)** — sign in with an EMAIL-based
 /// consumer account and download what the official app uploaded. Kept for
 /// users who don't want to unbind from the official app.
-struct PlaudSettingsView: View {
+///
+/// Entry point: the ADD-DEVICE flow (ScannerSheet row → this sheet), per
+/// user feedback — not the device page bottom and not Settings. The former
+/// `PlaudSettingsView` wrapper was folded into `PlaudAddSheet`.
+struct PlaudAddSheet: View {
     @ObservedObject private var direct = PlaudDirectService.shared
     @ObservedObject private var plaud = PlaudCloudService.shared
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        Form {
-            DirectConnectSection(direct: direct)
-            CloudSyncSection(plaud: plaud)
+        NavigationStack {
+            Form {
+                DirectConnectSection(direct: direct)
+                CloudSyncSection(plaud: plaud)
+            }
+            .navigationTitle(L10n.Plaud.addTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(L10n.Common.done) { dismiss() }
+                }
+            }
         }
-        .navigationTitle(L10n.Plaud.navTitle)
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-// MARK: - Direct connect (primary)
+// MARK: - Device-page card (device segment)
 
-private struct DirectConnectSection: View {
+/// Shown in the Recordings tab's device segment while the card is connected
+/// (direct mode) — PLAUD sits next to the other recorder devices, mirroring
+/// how D·NOTE / TicNote present themselves there.
+struct PlaudDeviceCard: View {
+    @ObservedObject private var direct = PlaudDirectService.shared
+
+    var body: some View {
+        if case .connected(let sn) = direct.phase {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Image(systemName: "waveform")
+                        .font(.title3)
+                        .foregroundStyle(Color.appAccent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PLAUD").font(.body.bold())
+                        Text(sn).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if let battery = direct.battery {
+                        Label("\(battery)%", systemImage: direct.battery == 100 ? "battery.100percent.bolt" : "battery.75percent")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let total = direct.storageTotal, let free = direct.storageFree, total > 0 {
+                    Text(Self.storageLine(total: total, free: free))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Button {
+                    direct.syncFromCard()
+                } label: {
+                    if direct.isSyncing {
+                        HStack { ProgressView(); Text(L10n.Plaud.syncFromCard) }
+                    } else {
+                        Label(L10n.Plaud.syncFromCard, systemImage: "square.and.arrow.down")
+                    }
+                }
+                .disabled(direct.isSyncing)
+                if let msg = direct.syncMessage {
+                    Text(msg).font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .padding(14)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
+            .padding(.top, 8)
+        }
+    }
+
+    private static func storageLine(total: Int, free: Int) -> String {
+        let mb: (Int) -> String = { $0 >= 1_000_000 ? String(format: "%.1f GB", Double($0) / 1_000_000) : "\($0 / 1000) MB" }
+        return "\(L10n.TicNoteCard.storageFree) \(mb(free)) / \(mb(total))"
+    }
+}
+
+/// Internal (not private) on purpose: `PlaudAddSheet` — the **add device**
+/// flow opened from the scan page — reuses this exact section, so the
+/// first-time credential setup and the scan/connect list live in ONE place.
+struct DirectConnectSection: View {
     @ObservedObject var direct: PlaudDirectService
     @State private var clientId = ""
     @State private var clientSecret = ""
     @State private var domain = ""
     @State private var busy = false
     @State private var message: String?
+    @State private var showFactoryConfirm = false
+    @State private var releasedNote = false
 
     var body: some View {
         Section {
@@ -46,6 +119,15 @@ private struct DirectConnectSection: View {
             Text(L10n.Plaud.directHeader)
         } footer: {
             Text(L10n.Plaud.directFooter)
+        }
+        .confirmationDialog(L10n.Plaud.factoryResetTitle, isPresented: $showFactoryConfirm, titleVisibility: .visible) {
+            Button(L10n.Plaud.erase, role: .destructive) {
+                direct.releaseDevice(factoryReset: true)
+                releasedNote = true
+            }
+            Button(L10n.Common.cancel, role: .cancel) {}
+        } message: {
+            Text(L10n.Plaud.factoryResetMsg)
         }
     }
 
@@ -90,6 +172,21 @@ private struct DirectConnectSection: View {
             Text(msg).font(.footnote).foregroundStyle(.secondary)
         }
         Toggle(L10n.Plaud.deleteAfterSync, isOn: $direct.deleteAfterSync)
+        if releasedNote {
+            Label(L10n.Plaud.released, systemImage: "checkmark.circle")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        // ★ Return / hand-back guarantee (2026-10-21 user question "7 天无理由"):
+        // takeover must be reversible — these two release the card so the
+        // official app (or a buyer) can pair it again as if new.
+        Button(L10n.Plaud.unbindKeep, role: .destructive) {
+            direct.releaseDevice(factoryReset: false)
+            releasedNote = true
+        }
+        Button(L10n.Plaud.factoryReset, role: .destructive) {
+            showFactoryConfirm = true
+        }
         Button(L10n.Plaud.deactivate, role: .destructive) {
             direct.deactivate()
             message = nil

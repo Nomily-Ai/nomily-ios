@@ -88,37 +88,9 @@ struct RecordingsView: View {
         }
     }
 
-    /// Fixed entry row pinned to the bottom of the Device segment. A
-    /// `NavigationLink` placed here still resolves against the enclosing
-    /// NavigationStack, so it pushes `PlaudSettingsView` normally.
-    private var plaudEntryRow: some View {
-        NavigationLink {
-            PlaudSettingsView()
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "waveform.badge.magnifyingglass")
-                    .font(.title3)
-                    .foregroundStyle(Color.appAccent)
-                    .frame(width: 28)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.Plaud.navTitle).font(.body.bold())
-                    Text(L10n.Plaud.entryCaption)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.bold())
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal)
-        .padding(.bottom, 8)
-    }
+    /// Removed 2026-10-21: the bottom-pinned PLAUD entry row. User feedback:
+    /// the entry belongs in the add-device flow (scan page), which now opens
+    /// `PlaudAddSheet`; a connected card appears via `PlaudDeviceCard` above.
 
     var body: some View {
         VStack(spacing: 0) {
@@ -163,12 +135,14 @@ struct RecordingsView: View {
 
             switch segment {
             case .device:
-                // PLAUD entry pinned below the device content (2026-10-21):
-                // visible in all three branches (D·NOTE / recorder card / empty),
-                // because PLAUD is its own device family — it neither shares the
-                // BLE scan page nor appears under app-wide Settings.
-                deviceContent
-                    .safeAreaInset(edge: .bottom) { plaudEntryRow }
+                // ★ 2026-10-21: PLAUD moved to the ADD-DEVICE flow (scan page
+                // → PlaudAddSheet) per user feedback; when a PLAUD card IS
+                // connected it shows here as a device card like the others.
+                // The old bottom-pinned entry row is gone.
+                VStack(spacing: 0) {
+                    PlaudDeviceCard()
+                    deviceContent
+                }
             case .library:
                 LibraryView()
             }

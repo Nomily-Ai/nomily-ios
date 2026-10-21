@@ -81,6 +81,11 @@ final class PlaudDirectService: NSObject, ObservableObject {
     @Published private(set) var pairedSN: String?
     @Published private(set) var syncMessage: String?
     @Published private(set) var isSyncing = false
+    /// Live device vitals for the device-page card (populated by the SDK
+    /// power/storage callbacks; nil until the card reports them).
+    @Published private(set) var battery: Int?
+    @Published private(set) var storageFree: Int?
+    @Published private(set) var storageTotal: Int?
     @Published var deleteAfterSync: Bool {
         didSet { UserDefaults.standard.set(deleteAfterSync, forKey: "plaud.delete_after_sync") }
     }
@@ -276,6 +281,60 @@ final class PlaudDirectService: NSObject, ObservableObject {
         pairedSN = nil
         UserDefaults.standard.removeObject(forKey: "plaud.paired_sn")
         setPhase(.idle)
+    }
+
+    // MARK: Release (unbind) — return-to-seller / hand-back support
+
+    /// Unbind the card so ANOTHER app (the official PLAUD app, or a buyer's)
+    /// can pair it again as if new. This is the guarantee behind the 7-day
+    /// no-reason return: takeover is fully reversible.
+    ///
+    /// Two layers:
+    ///   1. BLE `depair(clear:)` — the card firmware forgets this app's
+    ///      binding keys. With `clear: true` it also erases every recording,
+    ///      i.e. true factory condition. Afterwards the card re-advertises
+    ///      (its MAC changes) and any app can pair it from scratch.
+    ///   2. Cloud `POST /developer/api/open/partner/sdk/unbind` — clears the
+    ///      partner-cloud binding record so no stale bind_history lingers.
+    ///      Best-effort: the card-side depair is what actually frees the
+    ///      hardware; the cloud record only matters for SDK recovery flows.
+    func releaseDevice(factoryReset: Bool) {
+        guard case .connected(let sn) = phase else { return }
+        log.info("plaud release (factoryReset=\(factoryReset)) sn=\(sn, privacy: .public)")
+        PlaudDeviceAgent.shared.depair(clear: factoryReset)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.ensureInitialized()
+                try await self.cloudUnbind(sn: sn)
+            } catch {
+                log.warning("plaud cloud unbind skipped: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        pendingDownloads.removeAll()
+        currentExportSession = nil
+        pairedSN = nil
+        UserDefaults.standard.removeObject(forKey: "plaud.paired_sn")
+        battery = nil
+        storageFree = nil
+        storageTotal = nil
+        setPhase(.idle)
+    }
+
+    private func cloudUnbind(sn: String) async throws {
+        guard let url = URL(string: "https://\(domain)/developer/api/open/partner/sdk/unbind") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(userToken ?? "")", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let type = sn.hasPrefix("882") ? "notepins" : "notepro"
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["type": type, "sn": sn])
+        let (_, resp) = try await session.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        log.info("plaud cloud unbind HTTP \(code)")
+        guard (200..<300).contains(code) else {
+            throw PlaudCloudService.PlaudError.badResponse("Cloud unbind HTTP \(code).")
+        }
     }
 
     /// Pull the file list off the card and download everything new.
@@ -486,11 +545,21 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
 
     func bleStorage(total: Int, free: Int, duration: Int) {
         log.info("plaud storage total=\(total) free=\(free)")
+        DispatchQueue.main.async {
+            self.storageTotal = total
+            self.storageFree = free
+        }
     }
 
-    func blePowerChange(power: Int, oldPower: Int) {}
+    func blePowerChange(power: Int, oldPower: Int) {
+        DispatchQueue.main.async { self.battery = power }
+    }
 
-    func bleChargingState(isCharging: Bool, level: Int) {}
+    func bleChargingState(isCharging: Bool, level: Int) {
+        if level > 0 {
+            DispatchQueue.main.async { self.battery = level }
+        }
+    }
 
     func bleFileList(bleFiles: [BleFile]) {
         handleFileList(bleFiles)

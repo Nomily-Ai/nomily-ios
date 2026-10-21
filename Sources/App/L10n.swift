@@ -73,7 +73,6 @@ enum L10n {
     /// PLAUD cloud sync (2026-10-21 dual-mode support).
     enum Plaud {
         static var navTitle: String { NSLocalizedString("plaud.nav_title", value: "PLAUD", comment: "Settings page title for PLAUD cloud sync") }
-        static var entryCaption: String { NSLocalizedString("plaud.entry_caption", value: "Cloud sync & device link", comment: "Caption on the PLAUD entry row in the Device segment") }
         static var signInHeader: String { NSLocalizedString("plaud.signin_header", value: "Sign in", comment: "PLAUD email+code sign-in section") }
         static var emailPlaceholder: String { NSLocalizedString("plaud.email", value: "PLAUD account email", comment: "") }
         static var codePlaceholder: String { NSLocalizedString("plaud.code", value: "Verification code", comment: "") }
@@ -95,6 +94,8 @@ enum L10n {
         static var guideOfficialApp: String { NSLocalizedString("plaud.guide_app", value: "The official PLAUD app keeps working untouched — nothing is unbound", comment: "") }
 
         // Direct connect (SDK takeover) — the primary mode (2026-10-21)
+        static var addTitle: String { NSLocalizedString("plaud.add_title", value: "Add PLAUD device", comment: "Title of the add-device sheet opened from the scan page") }
+        static var addRowCaption: String { NSLocalizedString("plaud.add_row_caption", value: "Direct connect — pull the original recordings", comment: "Caption on the PLAUD row in the scan page") }
         static var directHeader: String { NSLocalizedString("plaud.direct_header", value: "Direct connect (recommended)", comment: "SDK direct-connect section header") }
         static var directFooter: String { NSLocalizedString("plaud.direct_footer", value: "Scans the card over Bluetooth and pulls the ORIGINAL audio files directly — no PLAUD account involved. First takeover requires unbinding the card once in the official PLAUD app (recordings on the card are kept).", comment: "") }
         static var clientId: String { NSLocalizedString("plaud.client_id", value: "Client ID", comment: "PLAUD developer Client ID field") }
@@ -112,6 +113,12 @@ enum L10n {
         static var syncFromCard: String { NSLocalizedString("plaud.sync_from_card", value: "Pull recordings from card", comment: "") }
         static var deleteAfterSync: String { NSLocalizedString("plaud.delete_after_sync", value: "Delete from card after pull", comment: "") }
         static var deactivate: String { NSLocalizedString("plaud.deactivate", value: "Deactivate direct connect", comment: "") }
+        static var unbindKeep: String { NSLocalizedString("plaud.unbind_keep", value: "Unbind card (keep recordings)", comment: "Release the card so another app can pair it; recordings stay") }
+        static var factoryReset: String { NSLocalizedString("plaud.factory_reset", value: "Factory reset (erase card)", comment: "Unbind AND wipe all recordings — for returns") }
+        static var factoryResetTitle: String { NSLocalizedString("plaud.factory_reset_title", value: "Erase everything on the card?", comment: "") }
+        static var factoryResetMsg: String { NSLocalizedString("plaud.factory_reset_msg", value: "All recordings on the card will be erased and the binding released — the card becomes like new. This cannot be undone.", comment: "") }
+        static var erase: String { NSLocalizedString("plaud.erase", value: "Erase", comment: "") }
+        static var released: String { NSLocalizedString("plaud.released", value: "Card released — the official PLAUD app can pair it again.", comment: "") }
         static var pairRejected: String { NSLocalizedString("plaud.pair_rejected", value: "The card refused the connection — unbind it once in the official PLAUD app (Settings → device → unbind), then retry.", comment: "") }
         static var cloudNote: String { NSLocalizedString("plaud.cloud_note", value: "Optional compatibility path. Requires a PLAUD account registered with an EMAIL (phone-number accounts are rejected). The card stays bound to the official app.", comment: "") }
         static func syncStarting(_ count: Int) -> String {
