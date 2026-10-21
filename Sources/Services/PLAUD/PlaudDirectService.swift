@@ -65,6 +65,22 @@ final class PlaudDirectService: NSObject, ObservableObject {
         var id: String { sn }
     }
 
+    /// One recording sitting on the card. Deliberately a value copy of the SDK's
+    /// `BleFile`: the SDK object is mutable and lives on its own queue, so the UI
+    /// must not read it directly.
+    struct PlaudCardFile: Identifiable, Equatable {
+        let sessionID: Int
+        let size: Int
+        /// Card-reported duration in seconds (nil when the SDK can't derive it).
+        let duration: TimeInterval?
+        /// Card-reported recording start (unix seconds), when the file carries one.
+        let recordedAt: Date?
+        var id: Int { sessionID }
+        /// `sessionId` is documented as "timezone timestamp" — usable as a
+        /// fallback time when `recordedAt` is missing.
+        var approxDate: Date? { recordedAt ?? (sessionID > 1_600_000_000 ? Date(timeIntervalSince1970: TimeInterval(sessionID)) : nil) }
+    }
+
     /// SDK officially supports NotePro (881) / NotePin S (882).
     static let supportedSNPrefixes = ["881", "882"]
     /// Header example domain; no CN platform host exists yet (probed 2026-10-21).
@@ -91,6 +107,32 @@ final class PlaudDirectService: NSObject, ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var isCharging = false
     @Published private(set) var firmware: String?
+    /// ★ Recording clock (2026-10-21). `startedAt` is our anchor when the card
+    /// confirms a start; `deviceElapsed` is the card's OWN millisecond counter
+    /// from `blePcmData`. The UI shows `deviceElapsed ?? now-startedAt`, so the
+    /// clock follows the card when it reports and never freezes in between.
+    @Published private(set) var recordStartedAt: Date?
+    @Published private(set) var deviceElapsed: TimeInterval?
+    @Published private(set) var recordSessionID: Int?
+    /// Live file on the card for this session (bytes written so far) — the SDK's
+    /// "real-time duration through the sync-file offset".
+    @Published private(set) var recordBytes: Int = 0
+    /// Why a start/stop was refused (space full / U-disk mode / busy / wrong mode).
+    @Published private(set) var recordNotice: String?
+    /// Recordings currently on the card, newest first, for the home device
+    /// segment. Empty + `cardFilesLoaded == false` = "not read yet" (never a
+    /// claim that the card is empty).
+    @Published private(set) var cardFiles: [PlaudCardFile] = []
+    @Published private(set) var cardFilesLoaded = false
+    /// Live PCM stream state (the sync-file channel opened while recording).
+    @Published private(set) var liveStreaming = false
+    @Published private(set) var livePCMBytes = 0
+    /// 0…1 loudness of the newest PCM block (drives the level meter while recording).
+    @Published private(set) var liveLevel: Double = 0
+    /// Live transcript text (finals + in-flight hypothesis) for the current
+    /// recording. Empty when speech recognition is unavailable/undesired.
+    @Published private(set) var liveTranscript = ""
+    @Published private(set) var isPaused = false
     /// How many recordings sit ON the card right now (the SDK's `getFileList`
     /// answer). `nil` = never asked / card not connected — the UI shows a dash
     /// instead of a fake "0", because "0 recordings" and "don't know yet" are
@@ -157,6 +199,49 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// the library's device filter show a **PLAUD** group (and row badges).
     /// Without it the clips would read as "imported files".
     var library: Library?
+
+    /// Injected by `AppEnvironment` (main actor). On a successful handshake the
+    /// card is written into the **same device ledger** the other three recorder
+    /// cards use (`config.devices`), which is what makes it show up in
+    /// Settings → Devices & Library → Known devices instead of living only in
+    /// PLAUD's own sheet.
+    /// Receives every decoded PCM block while a recording is live (16-bit LE,
+    /// whatever the card sends). A live-transcription sink attaches here; when
+    /// nothing is attached the blocks are simply metered and dropped.
+    var liveAudioSink: ((Data) -> Void)?
+
+    /// On-device live transcription for the current recording (see
+    /// `PlaudLiveTranscriber`). Lives only while a recording is live.
+    private var liveTranscriber: PlaudLiveTranscriber?
+
+    /// Begin transcribing the live PCM stream (no-op when speech is not
+    /// authorized — recording itself never depends on ASR).
+    @MainActor private func startLiveTranscription() {
+        liveTranscriber?.stop()
+        guard let transcriber = PlaudLiveTranscriber.makeIfPermitted() else {
+            log.info("plaud live transcript unavailable (no permission)")
+            return
+        }
+        transcriber.onTextChange = { [weak self, weak transcriber] in
+            guard let self, let transcriber else { return }
+            let parts = transcriber.finals + (transcriber.partial.isEmpty ? [] : [transcriber.partial])
+            self.liveTranscript = parts.joined(separator: "\n")
+        }
+        transcriber.start()
+        liveTranscriber = transcriber
+        // `blePcmData` arrives on the SDK's queue; the buffer itself hops to
+        // the main actor here.
+        liveAudioSink = { [weak transcriber] pcm in
+            Task { @MainActor in transcriber?.append(pcm) }
+        }
+    }
+
+    @MainActor private func stopLiveTranscription() {
+        liveTranscriber?.stop()
+        liveTranscriber = nil
+        liveAudioSink = nil
+        liveTranscript = ""
+    }
 
     /// Injected by `AppEnvironment` (main actor). On a successful handshake the
     /// card is written into the **same device ledger** the other three recorder
@@ -391,33 +476,75 @@ final class PlaudDirectService: NSObject, ObservableObject {
     }
 
     func disconnect() {
+        // Close the live channel first: leaving it open makes the card keep
+        // pushing PCM that nobody reads, which is exactly the "disconnect looks
+        // like it did nothing, card still busy" symptom.
+        if liveStreaming { PlaudDeviceAgent.shared.stopSyncFile() }
+        Task { @MainActor in self.stopLiveTranscription() }
         PlaudDeviceAgent.shared.disconnect()
         pairedSN = nil
         UserDefaults.standard.removeObject(forKey: "plaud.paired_sn")
         cardFileCount = nil
+        cardFiles = []
+        cardFilesLoaded = false
+        liveStreaming = false
+        livePCMBytes = 0
+        clearRecordClock()
+        isRecording = false
+        isPaused = false
+        battery = nil
+        storageFree = nil
+        storageTotal = nil
+        firmware = nil
+        setRecordNotice(nil)
         setPhase(.idle)
     }
 
     // MARK: - Card controls (official-app parity)
 
-    /// Stop the card's ongoing recording from the app.
-    func stopRecording() {
-        PlaudDeviceAgent.shared.stopRecord()
-        // The card answers via blePenState; optimistically flip so the button
-        // doesn't look stuck if the state push is slow.
-        DispatchQueue.main.async { self.isRecording = false }
+    /// Start a recording on the card.
+    ///
+    /// ⚠️ The SDK is **asynchronous**: `startRecord()` sends the command and the
+    /// truth comes back in `bleRecordStart(status:)`. Nothing here may set
+    /// `isRecording = true` optimistically — that is exactly how the old build
+    /// ended up with a button that "did nothing": it flipped a local flag, the
+    /// card refused (busy / no space), and the UI quietly lied.
+    func startRecording() {
+        guard phase.isConnected else {
+            setRecordNotice(L10n.Plaud.notConnected)
+            return
+        }
+        setRecordNotice(nil)
+        PlaudDeviceAgent.shared.startRecord()
     }
 
-    /// Start a recording from the app (remote record).
-    func startRecording() {
-        PlaudDeviceAgent.shared.startRecord()
-        DispatchQueue.main.async { self.isRecording = true }
+    /// Stop the card's ongoing recording.
+    func stopRecording() {
+        guard phase.isConnected else { return }
+        setRecordNotice(nil)
+        PlaudDeviceAgent.shared.stopRecord()
     }
+
+    /// Pause / resume (the SDK exposes both; official app has pause).
+    func pauseRecording() { PlaudDeviceAgent.shared.pauseRecord() }
+    func resumeRecording() { PlaudDeviceAgent.shared.resumeRecord() }
 
     /// Pull battery/charging straight from the card.
     func refreshVitals() {
         PlaudDeviceAgent.shared.getChargingState()
         PlaudDeviceAgent.shared.getState()
+        PlaudDeviceAgent.shared.getStorage()
+    }
+
+    /// Download ONE recording off the card. Queued through the same serial queue
+    /// as a full sync, so a per-row tap can't run two BLE transfers at once.
+    func download(file: PlaudCardFile) {
+        guard phase.isConnected, !isSyncing else { return }
+        let ble = BleFile("", file.sessionID, file.size)
+        setSyncing(true)
+        setSyncMessage(L10n.Plaud.syncDownloading(1))
+        pendingDownloads = [ble]
+        downloadNext()
     }
 
     // MARK: - Device ledger (Settings → Devices & Library)
@@ -459,6 +586,8 @@ final class PlaudDirectService: NSObject, ObservableObject {
     func releaseDevice(factoryReset: Bool) {
         guard case .connected(let sn) = phase else { return }
         log.info("plaud release (factoryReset=\(factoryReset)) sn=\(sn, privacy: .public)")
+        if liveStreaming { PlaudDeviceAgent.shared.stopSyncFile() }
+        Task { @MainActor in self.stopLiveTranscription() }
         PlaudDeviceAgent.shared.depair(clear: factoryReset)
         Task { [weak self] in
             guard let self else { return }
@@ -504,6 +633,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Pull the file list off the card and download everything new.
     func syncFromCard() {
         guard phase.isConnected else { return }
+        guard !isRecording else {
+            setRecordNotice(L10n.Plaud.recordingNow)
+            return
+        }
         fileListProbeOnly = false
         setSyncMessage(nil)
         PlaudDeviceAgent.shared.getFileList(startSessionId: 0)
@@ -514,6 +647,13 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// history count can be shown before the user decides to pull.
     func refreshCardRecordings() {
         guard phase.isConnected else { return }
+        // The SDK documents `getFileList` as unavailable **while recording**;
+        // sending it anyway poisons the command queue and the list never comes
+        // back. The list refreshes itself right after `bleRecordStop`.
+        guard !isRecording else {
+            log.info("plaud file list skipped: card is recording")
+            return
+        }
         fileListProbeOnly = true
         PlaudDeviceAgent.shared.getFileList(startSessionId: 0)
     }
@@ -524,10 +664,26 @@ final class PlaudDirectService: NSObject, ObservableObject {
         let probeOnly = fileListProbeOnly
         fileListProbeOnly = false
         // The count is meaningful on BOTH paths — it is the card's history size.
-        let count = files.count
-        DispatchQueue.main.async { self.cardFileCount = count }
+        let mapped: [PlaudCardFile] = files.map { f in
+            // ⚠️ `BleFile.duration()` is **milliseconds** (verified on hardware:
+            // taken as seconds a 1.9 MB clip displayed as "7166:20").
+            let seconds = f.size > 0 ? Double(f.duration()) / 1000.0 : 0
+            let stamp = f.utsStamp()
+            return PlaudCardFile(
+                sessionID: f.sessionId,
+                size: f.size,
+                duration: seconds > 0 ? seconds : nil,
+                recordedAt: stamp > 0 ? Date(timeIntervalSince1970: TimeInterval(stamp)) : nil
+            )
+        }
+        .sorted { $0.sessionID > $1.sessionID }
+        DispatchQueue.main.async {
+            self.cardFileCount = mapped.count
+            self.cardFiles = mapped
+            self.cardFilesLoaded = true
+        }
         let fresh = files.filter { !syncedSessions.contains($0.sessionId) }
-        log.info("plaud file list: \(count) on card, \(fresh.count) new (probe=\(probeOnly))")
+        log.info("plaud file list: \(files.count) on card, \(fresh.count) new (probe=\(probeOnly))")
         if probeOnly { return }
         guard !fresh.isEmpty else {
             setSyncing(false)
@@ -636,6 +792,49 @@ final class PlaudDirectService: NSObject, ObservableObject {
     }
     private func setScanned(_ cards: [ScannedCard]) {
         DispatchQueue.main.async { self.scanned = cards }
+    }
+    private func setRecordNotice(_ text: String?) {
+        DispatchQueue.main.async { self.recordNotice = text }
+    }
+
+    /// Clear the running clock. Main-queue only (call sites are already marshalled).
+    private func clearRecordClock() {
+        recordStartedAt = nil
+        deviceElapsed = nil
+        recordSessionID = nil
+        recordBytes = 0
+        liveLevel = 0
+    }
+
+    /// Peak level of a 16-bit LE PCM block, normalised to 0…1.
+    ///
+    /// Peak (not RMS) on purpose: it is a "is the card hearing anything" meter,
+    /// and a short word should visibly move it.
+    static func peakLevel(of data: Data) -> Double {
+        guard data.count >= 2 else { return 0 }
+        var peak = 0
+        data.withUnsafeBytes { raw in
+            let samples = raw.bindMemory(to: Int16.self)
+            for s in samples {
+                let v = abs(Int(s))
+                if v > peak { peak = v }
+            }
+        }
+        return min(1.0, Double(peak) / 32_768.0 * 3.0)   // ×3 so normal speech is visible
+    }
+
+    /// Human-readable reason for a non-zero `bleRecordStart` status.
+    /// Mapping straight from the SDK header (1 space full / 2 U-disk / 3 hardware /
+    /// 4 busy / 255 wrong mode) — silence here is what makes a button look dead.
+    private func recordRefusal(_ status: Int) -> String {
+        switch status {
+        case 1:  return L10n.Plaud.recordSpaceFull
+        case 2:  return L10n.Plaud.recordUDisk
+        case 3:  return L10n.Plaud.recordHardware
+        case 4:  return L10n.Plaud.recordBusy
+        case 255: return L10n.Plaud.recordWrongMode
+        default: return L10n.Plaud.recordFailed(status)
+        }
     }
 }
 
@@ -748,7 +947,23 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         // Pull vitals right away, then auto-pull the file list like the
         // official template does.
         refreshVitals()
-        PlaudDeviceAgent.shared.getFileList(startSessionId: 0)
+        // ★ If the card is ALREADY recording (started by its own key), attach to
+        // that session instead of pretending it is idle: without a sync-file
+        // channel there is no clock and no live audio, and the user sees a
+        // "Start recording" button for a card that is busy recording.
+        let current = PlaudDeviceAgent.shared.getCurrentSessionID()
+        if current > 0 {
+            log.info("plaud attached to a recording already in progress (sid \(current))")
+            DispatchQueue.main.async {
+                self.isRecording = true
+                self.recordSessionID = current
+                if self.recordStartedAt == nil { self.recordStartedAt = Date() }
+            }
+            PlaudDeviceAgent.shared.syncFile(sessionId: current, start: 0, end: 0)
+            DispatchQueue.main.async { self.liveStreaming = true }
+        } else {
+            PlaudDeviceAgent.shared.getFileList(startSessionId: 0)
+        }
     }
 
     /// @required — recorder state push. `state == 4099` (or 1) = recording.
@@ -756,15 +971,179 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         log.info("plaud pen state \(state) privacy \(privacy) key \(keyState)")
         let nowRecording = (state == 4099 || state == 1)
         let wasRecording = isRecording
-        DispatchQueue.main.async { self.isRecording = nowRecording }
-        // A recording that just ended adds a file to the card — re-read the
-        // count so "recordings on card" doesn't lag one clip behind reality.
+        DispatchQueue.main.async {
+            self.isRecording = nowRecording
+            // The card stopped on its own (key press / out of space): clear the
+            // clock here too, otherwise the timer keeps running on screen.
+            if wasRecording && !nowRecording { self.clearRecordClock() }
+        }
         if wasRecording && !nowRecording {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 guard self.phase.isConnected else { return }
                 self.refreshCardRecordings()
             }
         }
+        // ★ A recording that was started by the card's own key never produces a
+        // `bleRecordStart` for us, so this push is the ONLY place we learn about
+        // it. Without an anchor the clock sat at 0:00 while audio flowed
+        // (hardware, 2026-10-21); without a sync-file channel there is no
+        // duration and no PCM at all.
+        if nowRecording && recordStartedAt == nil {
+            attachToRunningRecording()
+        }
+    }
+
+    /// Start following a recording we did **not** start (physical key, or it was
+    /// already running when we connected).
+    private func attachToRunningRecording() {
+        let sid = PlaudDeviceAgent.shared.getCurrentSessionID()
+        log.info("plaud attaching to a running recording (sid \(sid))")
+        DispatchQueue.main.async {
+            self.isRecording = true
+            // Last-resort anchor: the card's own stamp is unknown here, so the
+            // clock starts now and gets corrected by `blePcmData.millsec`.
+            if self.recordStartedAt == nil { self.recordStartedAt = Date() }
+            if sid > 0 { self.recordSessionID = sid }
+            self.liveStreaming = true
+        }
+        guard sid > 0 else { return }
+        PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: 0, end: 0)
+        Task { @MainActor in self.startLiveTranscription() }
+    }
+
+    // MARK: Recording callbacks (the whole interaction hangs on these)
+    //
+    // Before 2026-10-21 none of these were implemented, so `startRecord()` /
+    // `stopRecord()` sent bytes to the card and the app never heard back: the
+    // buttons "did nothing" and no duration ever appeared. The SDK answers
+    // asynchronously — start/stop are only true once these fire.
+
+    func bleRecordStart(sessionId: Int, start: Int, status: Int, scene: Int, startTime: Int, reason: Int) {
+        log.info("plaud record start sid=\(sessionId) start=\(start) status=\(status) scene=\(scene) startTime=\(startTime) reason=\(reason)")
+        guard status == 0 else {
+            DispatchQueue.main.async { self.isRecording = false }
+            setRecordNotice(recordRefusal(status))
+            return
+        }
+        DispatchQueue.main.async {
+            self.isRecording = true
+            self.recordSessionID = sessionId
+            self.recordBytes = start
+            self.recordNotice = nil
+            // `startTime` is the card's own start stamp (unix seconds). Using it
+            // keeps the clock honest when we TAKE OVER a recording that was
+            // started by the physical key before the app was listening.
+            if startTime > 1_600_000_000 {
+                self.recordStartedAt = Date(timeIntervalSince1970: TimeInterval(startTime))
+            } else {
+                self.recordStartedAt = Date()
+            }
+            // `start` > 0 = the card was already recording: the elapsed byte
+            // count alone can't give seconds, so let the PCM clock correct it.
+            if start == 0 { self.deviceElapsed = nil }
+        }
+        // ★ Open the sync-file channel: that is what makes the SDK push
+        // `blePcmData` (real-time duration + audio for live transcription).
+        // Without this call a recording is silent to the app until it stops.
+        if !isSyncing {
+            PlaudDeviceAgent.shared.syncFile(sessionId: sessionId, start: start, end: 0)
+            DispatchQueue.main.async {
+                self.liveStreaming = true
+                self.livePCMBytes = 0
+            }
+            Task { @MainActor in self.startLiveTranscription() }
+        }
+    }
+
+    func bleRecordResume(sessionId: Int, start: Int, status: Int, scene: Int, startTime: Int) {
+        log.info("plaud record resume sid=\(sessionId) start=\(start) status=\(status)")
+        guard status == 0 else {
+            setRecordNotice(recordRefusal(status))
+            return
+        }
+        DispatchQueue.main.async {
+            self.isRecording = true
+            self.isPaused = false
+            self.recordSessionID = sessionId
+            self.recordBytes = start
+            if self.recordStartedAt == nil { self.recordStartedAt = Date() }
+        }
+    }
+
+    func bleRecordPause(sessionId: Int, reason: Int, fileExist: Bool, fileSize: Int) {
+        log.info("plaud record pause sid=\(sessionId) fileSize=\(fileSize)")
+        DispatchQueue.main.async {
+            self.isPaused = true
+            self.isRecording = false
+        }
+    }
+
+    func bleRecordStop(sessionId: Int, reason: Int, fileExist: Bool, fileSize: Int) {
+        log.info("plaud record stop sid=\(sessionId) reason=\(reason) exist=\(fileExist) size=\(fileSize)")
+        PlaudDeviceAgent.shared.stopSyncFile()
+        Task { @MainActor in self.stopLiveTranscription() }
+        DispatchQueue.main.async {
+            self.clearRecordClock()
+            self.isRecording = false
+            self.isPaused = false
+            self.liveStreaming = false
+        }
+        // The stop just wrote a file to the card — re-read the list so the home
+        // segment shows it immediately instead of lagging one clip behind.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            guard self.phase.isConnected else { return }
+            self.refreshCardRecordings()
+        }
+    }
+
+    /// Live audio + the card's own recording clock.
+    ///
+    /// `millsec` is the card's elapsed recording time — the number to show. The
+    /// PCM payload is what a live transcript needs; we keep a rolling level
+    /// meter here and forward the buffer to the live sink when one is attached.
+    func blePcmData(sessionId: Int, millsec: Int, pcmData: Data, isMusic: Bool) {
+        let seconds = Double(millsec) / 1000
+        DispatchQueue.main.async {
+            // ⚠️ `millsec == 0` means the card did not stamp this block. Taking
+            // it at face value pinned the clock at 0:00 while audio flowed
+            // (seen on hardware); only a positive, non-decreasing report may
+            // move `deviceElapsed`, otherwise the local anchor keeps ticking.
+            if seconds > 0 {
+                self.deviceElapsed = max(self.deviceElapsed ?? 0, seconds)
+            }
+            if self.recordStartedAt == nil {
+                self.recordStartedAt = Date().addingTimeInterval(-max(0, seconds))
+            }
+            self.livePCMBytes += pcmData.count
+            self.liveLevel = Self.peakLevel(of: pcmData)
+            if !self.isRecording { self.isRecording = true }
+        }
+        liveAudioSink?(pcmData)
+    }
+
+    func bleDataComplete() {
+        log.info("plaud data complete")
+    }
+
+    func bleSyncFileStop() {
+        log.info("plaud sync-file stopped")
+        DispatchQueue.main.async { self.liveStreaming = false }
+    }
+
+    func bleDecodeFail(start: Int) {
+        log.warning("plaud decode fail at offset \(start)")
+    }
+
+    func bleDeleteFile(sessionId: Int, status: Int) {
+        log.info("plaud delete file \(sessionId) status \(status)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            guard self.phase.isConnected else { return }
+            self.refreshCardRecordings()
+        }
+    }
+
+    func bleDepair(_ status: Int) {
+        log.info("plaud depair status \(status)")
     }
 
     func bleDeviceDisconnectErr() {

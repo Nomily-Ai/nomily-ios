@@ -140,6 +140,25 @@ enum L10n {
         static var stateConnected: String { NSLocalizedString("plaud.state_connected", value: "Connected", comment: "") }
         static var stateDisconnected: String { NSLocalizedString("plaud.state_disconnected", value: "Not connected", comment: "") }
         static var reconnect: String { NSLocalizedString("plaud.reconnect", value: "Reconnect", comment: "Re-bind a card we have paired with before") }
+        static var notConnected: String { NSLocalizedString("plaud.not_connected", value: "Connect the card first.", comment: "") }
+        static var liveTranscript: String { NSLocalizedString("plaud.live_transcript", value: "Live transcript", comment: "On-device live transcription of the card's audio") }
+        static var cardFiles: String { NSLocalizedString("plaud.card_files", value: "Recordings on the card", comment: "Home device segment: the card's own file list") }
+        static var cardFilesEmpty: String { NSLocalizedString("plaud.card_files_empty", value: "No recordings on the card.", comment: "") }
+        static var pauseRecord: String { NSLocalizedString("plaud.pause_record", value: "Pause", comment: "") }
+        static var resumeRecord: String { NSLocalizedString("plaud.resume_record", value: "Resume", comment: "") }
+        static var recordingPaused: String { NSLocalizedString("plaud.recording_paused", value: "Paused", comment: "") }
+        static var pullThisFile: String { NSLocalizedString("plaud.pull_this_file", value: "Pull", comment: "Download one recording from the card") }
+        static func recordingElapsed(_ text: String) -> String {
+            String(format: NSLocalizedString("plaud.recording_elapsed", value: "Recording · %@", comment: "Live recording clock on the card row; %@ = mm:ss"), text)
+        }
+        static var recordSpaceFull: String { NSLocalizedString("plaud.record_space_full", value: "The card refused: storage is full.", comment: "") }
+        static var recordUDisk: String { NSLocalizedString("plaud.record_udisk", value: "The card is in U-disk mode — leave that mode first.", comment: "") }
+        static var recordHardware: String { NSLocalizedString("plaud.record_hardware", value: "The card reported a hardware error.", comment: "") }
+        static var recordBusy: String { NSLocalizedString("plaud.record_busy", value: "The card is busy — try again in a moment.", comment: "") }
+        static var recordWrongMode: String { NSLocalizedString("plaud.record_wrong_mode", value: "The card is not in recording mode.", comment: "") }
+        static func recordFailed(_ status: Int) -> String {
+            String(format: NSLocalizedString("plaud.record_failed", value: "The card refused to record (code %d).", comment: ""), status)
+        }
         static var deviceDetailTitle: String { NSLocalizedString("plaud.device_detail_title", value: "PLAUD card", comment: "Navigation title of the PLAUD device page") }
 
         static var pairRejected: String { NSLocalizedString("plaud.pair_rejected", value: "The card refused the connection — unbind it once in the official PLAUD app (Settings → device → unbind), then retry.", comment: "") }

@@ -89,17 +89,64 @@ struct PlaudDeviceCard: View {
                             .font(.footnote)
                     }
                 }
-                // ★ Official-app parity: recording state + stop from the app.
-                if direct.isRecording && isLive {
-                    HStack {
-                        Label(L10n.Plaud.recordingNow, systemImage: "record.circle")
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                        Spacer()
-                        Button(L10n.Plaud.stopRecord, role: .destructive) {
-                            direct.stopRecording()
+                // ★ Recording control + clock (2026-10-21). The clock follows the
+                // card's own millisecond counter when it reports, otherwise our
+                // anchor — so it ticks, and it never "looks recording" for a
+                // command the card refused.
+                if isLive {
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        HStack(spacing: 10) {
+                            if direct.isRecording {
+                                Label(L10n.Plaud.recordingElapsed(Self.elapsedText(direct)),
+                                      systemImage: "record.circle")
+                                    .font(.footnote)
+                                    .foregroundStyle(.red)
+                                Spacer()
+                                Button(L10n.Plaud.stopRecord, role: .destructive) {
+                                    direct.stopRecording()
+                                }
+                                .font(.footnote)
+                            } else if direct.isPaused {
+                                Label(L10n.Plaud.recordingPaused, systemImage: "pause.circle")
+                                    .font(.footnote)
+                                    .foregroundStyle(.orange)
+                                Spacer()
+                                Button(L10n.Plaud.resumeRecord) { direct.resumeRecording() }
+                                    .font(.footnote)
+                            } else {
+                                Button {
+                                    direct.startRecording()
+                                } label: {
+                                    Label(L10n.Plaud.startRecord, systemImage: "record.circle")
+                                }
+                                .font(.footnote)
+                                Spacer()
+                            }
                         }
-                        .font(.footnote)
+                    }
+                    // Live level: proof the card is actually feeding audio to us.
+                    LevelMeter(level: direct.liveLevel)
+                        .frame(height: 4)
+                    if let notice = direct.recordNotice {
+                        Text(notice)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                    // ★ Live transcript (2026-10-21): the card's PCM is fed to
+                    // on-device speech while recording, so text appears here as
+                    // the card hears it — the same behaviour the other cards
+                    // have on the 实时 tab.
+                    if !direct.liveTranscript.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L10n.Plaud.liveTranscript)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text(direct.liveTranscript)
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                                .lineLimit(5)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 if isLive {
@@ -126,6 +173,12 @@ struct PlaudDeviceCard: View {
                     if let msg = direct.syncMessage {
                         Text(msg).font(.caption2).foregroundStyle(.secondary)
                     }
+                    // Disconnect stays reachable from the home card too — it was
+                    // previously only in Settings, and "断开连接没效果" was partly
+                    // "there is no visible response anywhere".
+                    Button(L10n.Plaud.disconnect) { direct.disconnect() }
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(14)
@@ -135,11 +188,46 @@ struct PlaudDeviceCard: View {
         }
     }
 
-    /// "free / total" only — the caller owns the label, so the same string
-    /// serves the compact card (one line) and the settings row (label + value).
+    /// "free / total". The SDK reports **bytes**; the old formatter divided by
+    /// 1e6 and printed "GB", which turned a 64 GB card into "62541 GB".
     static func storageLine(total: Int, free: Int) -> String {
-        let mb: (Int) -> String = { $0 >= 1_000_000 ? String(format: "%.1f GB", Double($0) / 1_000_000) : "\($0 / 1000) MB" }
-        return "\(mb(free)) / \(mb(total))"
+        let gb: (Int) -> String = {
+            $0 >= 1_000_000_000
+                ? String(format: "%.1f GB", Double($0) / 1_000_000_000)
+                : String(format: "%.0f MB", Double($0) / 1_000_000)
+        }
+        return "\(gb(free)) / \(gb(total))"
+    }
+
+    /// Clock text: the card's own counter wins; our anchor fills the gaps
+    /// between reports so the number still ticks every second.
+    static func elapsedText(_ direct: PlaudDirectService) -> String {
+        let seconds: TimeInterval
+        if let device = direct.deviceElapsed {
+            seconds = device
+        } else if let start = direct.recordStartedAt {
+            seconds = Date().timeIntervalSince(start)
+        } else {
+            seconds = 0
+        }
+        return PlaudCardFilesView.durationText(max(0, seconds))
+    }
+}
+
+/// Thin loudness bar fed by the live PCM blocks — the visible proof that the
+/// card is streaming audio into the app while recording.
+struct LevelMeter: View {
+    let level: Double
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.15))
+                Capsule()
+                    .fill(Color.appAccent)
+                    .frame(width: max(2, geo.size.width * min(1, max(0, level))))
+            }
+        }
     }
 }
 
@@ -293,12 +381,20 @@ struct DirectConnectSection: View {
         }
         if direct.isRecording {
             HStack {
-                Label(L10n.Plaud.recordingNow, systemImage: "record.circle")
+                Label(L10n.Plaud.recordingElapsed(PlaudDeviceCard.elapsedText(direct)),
+                      systemImage: "record.circle")
                     .foregroundStyle(.red)
                 Spacer()
                 Button(L10n.Plaud.stopRecord, role: .destructive) {
                     direct.stopRecording()
                 }
+            }
+        } else if direct.isPaused {
+            HStack {
+                Label(L10n.Plaud.recordingPaused, systemImage: "pause.circle")
+                    .foregroundStyle(.orange)
+                Spacer()
+                Button(L10n.Plaud.resumeRecord) { direct.resumeRecording() }
             }
         } else {
             Button {
@@ -306,6 +402,9 @@ struct DirectConnectSection: View {
             } label: {
                 Label(L10n.Plaud.startRecord, systemImage: "record.circle")
             }
+        }
+        if let notice = direct.recordNotice {
+            Text(notice).font(.footnote).foregroundStyle(.orange)
         }
         // ★ History count (2026-10-21 user request "录音跟历史条数"): how many
         // recordings the card is holding right now, re-readable on demand.
@@ -393,6 +492,90 @@ struct DirectConnectSection: View {
         } catch {
             message = error.localizedDescription
         }
+    }
+}
+
+// MARK: - Home device segment: recordings ON the card
+
+/// The card's own file list, shown in the Recordings tab's device segment —
+/// the same place V05E / TicNote list what they hold.
+///
+/// Why it lives here and not in the settings device page (2026-10-21 user
+/// request): "the card's recordings belong under the home device section, not
+/// buried in device info". Settings keeps the *controls*; the home segment owns
+/// "what is on the card and can I pull it".
+struct PlaudCardFilesView: View {
+    @ObservedObject private var direct = PlaudDirectService.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(L10n.Plaud.cardFiles).font(.subheadline.weight(.semibold))
+                if direct.cardFilesLoaded {
+                    Text("\(direct.cardFiles.count)").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    direct.refreshCardRecordings()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(direct.isRecording)
+                .accessibilityLabel(L10n.Plaud.refresh)
+            }
+
+            if direct.isRecording {
+                // `getFileList` is unavailable mid-recording; say why instead of
+                // showing a stale list as if it were current.
+                Text(L10n.Plaud.recordingNow)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if !direct.cardFilesLoaded {
+                Text(L10n.Plaud.historyUnknown).font(.caption).foregroundStyle(.secondary)
+            } else if direct.cardFiles.isEmpty {
+                Text(L10n.Plaud.cardFilesEmpty).font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(direct.cardFiles) { file in
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(Self.dateText(file)).font(.footnote)
+                            HStack(spacing: 6) {
+                                if let d = file.duration {
+                                    Text(Self.durationText(d))
+                                }
+                                Text(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(L10n.Plaud.pullThisFile) {
+                            direct.download(file: file)
+                        }
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                        .disabled(direct.isSyncing || direct.isRecording)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+        .padding(14)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+    }
+
+    private static func dateText(_ file: PlaudDirectService.PlaudCardFile) -> String {
+        guard let date = file.approxDate else { return "#\(file.sessionID)" }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MM-dd HH:mm"
+        return fmt.string(from: date)
+    }
+
+    static func durationText(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
 
