@@ -385,6 +385,8 @@ struct DirectConnectSection: View {
 struct PlaudCardFilesView: View {
     @ObservedObject private var direct = PlaudDirectService.shared
     @State private var showInfo = false
+    /// Same epoch anchor as `RecorderControl.tickAnchor` — see the note there.
+    static let tickAnchor = Date(timeIntervalSince1970: 0)
 
     private var connectedSN: String? {
         if case .connected(let sn) = direct.phase { return sn }
@@ -401,8 +403,13 @@ struct PlaudCardFilesView: View {
     var body: some View {
         List {
             identitySection
+            // ★ 2026-10-21: the record row lives HERE (home → Device), never in
+            // the device-info sheet — the user's own words were "the record
+            // button does not belong in device info". It stays visible while
+            // the card is asleep too: a tap wakes the card and starts the
+            // recording once the bind answers (`startRecordingWhenReady`).
+            recordingSection
             if connectedSN != nil {
-                recordingSection
                 transferSection
             }
             filesSection
@@ -459,10 +466,13 @@ struct PlaudCardFilesView: View {
         Section {
             // The clock ticks because the card's own millisecond counter only
             // arrives with each PCM block; between blocks our anchor fills in.
-            TimelineView(.periodic(from: .now, by: 1)) { _ in
+            // ⚠️ Anchor to the epoch, not `.now`: `from: .now` re-phases on every
+            // body evaluation, so the second hand visible got stuck/delayed
+            // (the same trap `RecorderControl` documents).
+            TimelineView(.periodic(from: Self.tickAnchor, by: 1)) { context in
                 if direct.isRecording {
                     HStack(spacing: 10) {
-                        Label(L10n.Plaud.recordingElapsed(Self.elapsedText(direct)),
+                        Label(L10n.Plaud.recordingElapsed(Self.elapsedText(direct, at: context.date)),
                               systemImage: "record.circle")
                             .foregroundStyle(.red)
                         Spacer()
@@ -481,10 +491,19 @@ struct PlaudCardFilesView: View {
                     }
                 } else {
                     Button {
-                        direct.startRecording()
+                        direct.startRecordingWhenReady()
                     } label: {
-                        Label(L10n.Plaud.startRecord, systemImage: "record.circle")
+                        HStack {
+                            Label(L10n.Plaud.startRecord, systemImage: "record.circle")
+                            Spacer()
+                            if connectedSN == nil {
+                                Text(L10n.Plaud.stateDisconnected)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
+                    .disabled(direct.phase.isBusy)
                 }
             }
             if direct.isRecording || direct.liveStreaming {
@@ -495,13 +514,15 @@ struct PlaudCardFilesView: View {
             // every 3 s via `bleAgent.getMarking(sessionId:)` — `bleMarking` is
             // an answer, not a push, so without the poll the count only appeared
             // after the recording ended.
-            HStack {
-                Label(L10n.Plaud.marksLive, systemImage: "bookmark")
-                Spacer()
-                Text(direct.recordMarks.isEmpty
-                     ? "—"
-                     : L10n.Plaud.marksCount(direct.recordMarks.count))
-                    .foregroundStyle(direct.recordMarks.isEmpty ? Color.secondary : Color.appAccent)
+            if direct.isRecording || !direct.recordMarks.isEmpty {
+                HStack {
+                    Label(L10n.Plaud.marksLive, systemImage: "bookmark")
+                    Spacer()
+                    Text(direct.recordMarks.isEmpty
+                         ? "—"
+                         : L10n.Plaud.marksCount(direct.recordMarks.count))
+                        .foregroundStyle(direct.recordMarks.isEmpty ? Color.secondary : Color.appAccent)
+                }
             }
             if let notice = direct.recordNotice {
                 Text(notice).font(.footnote).foregroundStyle(.orange)
@@ -676,16 +697,75 @@ struct PlaudCardFilesView: View {
 
     /// Clock text: the card's own counter wins; our anchor fills the gaps
     /// between reports so the number still ticks every second.
-    static func elapsedText(_ direct: PlaudDirectService) -> String {
+    ///
+    /// `at` exists so a `TimelineView` can pass its own phase date — calling
+    /// `Date()` inside the body would make the header clock freeze whenever the
+    /// view happened to be re-evaluated off-beat.
+    static func elapsedText(_ direct: PlaudDirectService, at date: Date = Date()) -> String {
         let seconds: TimeInterval
         if let device = direct.deviceElapsed {
             seconds = device
         } else if let start = direct.recordStartedAt {
-            seconds = Date().timeIntervalSince(start)
+            seconds = date.timeIntervalSince(start)
         } else {
             seconds = 0
         }
         return durationText(max(0, seconds))
+    }
+}
+
+/// Compact record button for the **tab header**, next to Device / Library.
+///
+/// Why it exists twice (here and inside `PlaudCardFilesView`): V05E and TicNote
+/// both put their `RecorderControl` in this row so the button survives a switch
+/// to "Library" — without it, a user browsing their recordings mid-recording had
+/// no way to stop the card short of walking back to the device segment.
+struct PlaudRecordControl: View {
+    @ObservedObject private var direct = PlaudDirectService.shared
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if direct.isRecording {
+                TimelineView(.periodic(from: PlaudCardFilesView.tickAnchor, by: 1)) { context in
+                    Text(PlaudCardFilesView.elapsedText(direct, at: context.date))
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.red)
+                        .frame(minWidth: 44, alignment: .trailing)
+                }
+                // "N marks so far" — the card itself gives no feedback for its
+                // bookmark key, so this badge is the only proof a press landed.
+                if !direct.recordMarks.isEmpty {
+                    Label("\(direct.recordMarks.count)", systemImage: "bookmark.fill")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption2.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.orange)
+                        .accessibilityLabel(L10n.Plaud.marksCount(direct.recordMarks.count))
+                }
+            }
+            Button {
+                if direct.isRecording {
+                    direct.stopRecording()
+                } else {
+                    direct.startRecordingWhenReady()
+                }
+            } label: {
+                ZStack {
+                    Image(systemName: direct.isRecording ? "stop.circle.fill" : "record.circle")
+                        .font(.system(size: 30, weight: .regular))
+                        .foregroundColor(.red)
+                        .opacity(direct.phase.isBusy ? 0.3 : 1)
+                    if direct.phase.isBusy {
+                        ProgressView().controlSize(.mini)
+                    }
+                }
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(direct.phase.isBusy)
+            .accessibilityLabel(direct.isRecording ? L10n.Plaud.stopRecord : L10n.Plaud.startRecord)
+        }
+        .animation(.none, value: direct.isRecording)
     }
 }
 

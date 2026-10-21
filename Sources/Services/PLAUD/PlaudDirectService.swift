@@ -176,6 +176,12 @@ final class PlaudDirectService: NSObject, ObservableObject {
     @Published var deleteAfterSync: Bool {
         didSet { UserDefaults.standard.set(deleteAfterSync, forKey: "plaud.delete_after_sync") }
     }
+    /// ★ 2026-10-21: "record now" tapped while the link is still down. The home
+    /// page keeps ONE record button (device info no longer has any), so a tap on
+    /// a sleeping card must wake it and start on its own — being told "not
+    /// connected, go open device info first" is the exact round-trip the user
+    /// asked us to remove.
+    private var pendingStartAfterConnect = false
 
     // MARK: Credentials (UserDefaults; nomily already stores plaud.email there)
 
@@ -601,6 +607,35 @@ final class PlaudDirectService: NSObject, ObservableObject {
     }
 
     // MARK: - Card controls (official-app parity)
+
+    /// Home-page record button. One tap, whether or not the card is awake yet.
+    ///
+    /// · connected  → send `startRecord()` straight away;
+    /// · remembered but asleep → wake + bind, then start as soon as `bleBind`
+    ///   says status 0 (see the `pendingStartAfterConnect` consumer there);
+    /// · no card at all → tell the user why nothing happened instead of a
+    ///   silent no-op (the "button does nothing" class of bug).
+    func startRecordingWhenReady() {
+        guard !isRecording else { return }
+        if phase.isConnected {
+            startRecording()
+            return
+        }
+        guard pairedSN != nil else {
+            setRecordNotice(L10n.Plaud.notConnected)
+            return
+        }
+        pendingStartAfterConnect = true
+        setRecordNotice(L10n.Plaud.connectingThenRecord)
+        if !phase.isBusy { reconnect() }
+    }
+
+    /// Cancel a queued "start after connect" (user changed their mind).
+    func cancelPendingStart() {
+        guard pendingStartAfterConnect else { return }
+        pendingStartAfterConnect = false
+        setRecordNotice(nil)
+    }
 
     /// Start a recording on the card.
     ///
@@ -1032,6 +1067,18 @@ final class PlaudDirectService: NSObject, ObservableObject {
     // MARK: - State marshalling
 
     private func setPhase(_ p: Phase) {
+        // A queued "record after connect" is only meaningful while a link is on
+        // its way up. Any other verdict (failed / idle) must drop it, otherwise
+        // the next unrelated connect would start recording out of nowhere.
+        if pendingStartAfterConnect {
+            switch p {
+            case .failed, .idle:
+                pendingStartAfterConnect = false
+                DispatchQueue.main.async { self.recordNotice = nil }
+            default:
+                break
+            }
+        }
         DispatchQueue.main.async { self.phase = p }
     }
     private func clearScanned() {
@@ -1099,6 +1146,12 @@ final class PlaudDirectService: NSObject, ObservableObject {
 private final class ExportHandler: NSObject, AudioExportCallback {
     private weak var service: PlaudDirectService?
     private let sessionId: Int
+    /// ⚠️ The SDK fires `onProgress` **per BLE packet** (tens per second). An
+    /// `os_log` call per packet is not free — it formats a string and hands it
+    /// to the logging daemon on the same queue that is draining the transfer, so
+    /// logging every packet adds exactly the stutter the user reported. One line
+    /// per 10 % is plenty to reconstruct a transfer after the fact.
+    private var lastLogged = -10
 
     init(service: PlaudDirectService, sessionId: Int) {
         self.service = service
@@ -1107,7 +1160,10 @@ private final class ExportHandler: NSObject, AudioExportCallback {
     }
 
     func onProgress(_ progress: Int, message: String) {
-        log.info("plaud export \(self.sessionId): \(progress)% \(message, privacy: .public)")
+        if progress >= 100 || progress - lastLogged >= 10 {
+            lastLogged = progress
+            log.info("plaud export \(self.sessionId): \(progress)% \(message, privacy: .public)")
+        }
         service?.handleExportProgress(sessionId: sessionId, progress: progress)
     }
 
@@ -1223,6 +1279,18 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             // Auto-pull: a card that just connected with recordings on it should
             // start transferring them without a tap (2026-10-21 request).
             autoPullNewRecordings()
+            // Honour a "record now" tap that arrived while the card was asleep.
+            // A short beat, because `startRecord` right on top of the bind
+            // handshake gets refused by the card (it is still reading its own
+            // storage); 0.6 s matches the gap the official app leaves.
+            if pendingStartAfterConnect {
+                pendingStartAfterConnect = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    guard self.phase.isConnected, !self.isRecording else { return }
+                    self.setRecordNotice(nil)
+                    PlaudDeviceAgent.shared.startRecord()
+                }
+            }
         }
     }
 

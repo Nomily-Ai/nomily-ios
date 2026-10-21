@@ -141,6 +141,7 @@ enum L10n {
         static var stateDisconnected: String { NSLocalizedString("plaud.state_disconnected", value: "Not connected", comment: "") }
         static var reconnect: String { NSLocalizedString("plaud.reconnect", value: "Reconnect", comment: "Re-bind a card we have paired with before") }
         static var notConnected: String { NSLocalizedString("plaud.not_connected", value: "Connect the card first.", comment: "") }
+        static var connectingThenRecord: String { NSLocalizedString("plaud.connecting_then_record", value: "Connecting to the card — recording starts as soon as it answers.", comment: "Feedback after tapping record while the card is asleep") }
         static var liveTranscript: String { NSLocalizedString("plaud.live_transcript", value: "Live transcript", comment: "On-device live transcription of the card's audio") }
         static var cardFiles: String { NSLocalizedString("plaud.card_files", value: "Recordings on the card", comment: "Home device segment: the card's own file list") }
         static var cardFilesEmpty: String { NSLocalizedString("plaud.card_files_empty", value: "No recordings on the card.", comment: "") }

@@ -53,6 +53,14 @@ struct RecordingsView: View {
         recorderTarget?.identity ?? "none"
     }
 
+    /// PLAUD holds the header record slot when no D·NOTE / TicNote card is
+    /// online and a PLAUD card is either live or remembered. Only one link is
+    /// allowed at a time (`BluetoothCoordinator` enforces it), so the two
+    /// branches can never both want the slot.
+    private var plaudRecordTarget: Bool {
+        recorderTarget == nil && (plaudDirect.phase.isConnected || plaudDirect.pairedSN != nil)
+    }
+
     @ViewBuilder
     private var deviceContent: some View {
         if let client = bluetooth.client {
@@ -133,6 +141,12 @@ struct RecordingsView: View {
                 // Now both device types can connect (see `RecorderSessionModel`).
                 if recorderTarget != nil {
                     RecorderControl(model: recorderSession)
+                } else if plaudRecordTarget {
+                    // ★ 2026-10-21: PLAUD gets the same header slot. Its record
+                    // button used to live inside the device-info sheet, which is
+                    // where the user found it and told us it does not belong
+                    // there; here it is also reachable from the Library segment.
+                    PlaudRecordControl()
                 }
             }
             .padding(.horizontal)

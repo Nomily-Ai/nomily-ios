@@ -1306,6 +1306,7 @@
 "plaud.storage_used" = "Used %@";
 "plaud.storage_left" = "Free %@";
 "plaud.not_connected" = "Connect the card first.";
+"plaud.connecting_then_record" = "Connecting to the card — recording starts as soon as it answers.";
 "plaud.card_files" = "Recordings on the card";
 "plaud.card_files_empty" = "No recordings on the card.";
 "plaud.pause_record" = "Pause";

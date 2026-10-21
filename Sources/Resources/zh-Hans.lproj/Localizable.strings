@@ -1408,6 +1408,7 @@
 "plaud.storage_used" = "已用 %@";
 "plaud.storage_left" = "剩余 %@";
 "plaud.not_connected" = "请先连接卡片。";
+"plaud.connecting_then_record" = "正在连接卡片，连上后立刻开始录音。";
 "plaud.card_files" = "卡上录音";
 "plaud.card_files_empty" = "卡上暂无录音。";
 "plaud.pause_record" = "暂停";
