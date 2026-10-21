@@ -150,11 +150,32 @@ final class PlaudCloudService: ObservableObject {
 
     // MARK: - Recordings
 
+    /// The other known regional host. A one-shot fallback: if the current base
+    /// wholesale-rejects a signed-in call (region mismatch after account/region
+    /// changes), switch once and retry — a customer must never end up with
+    /// "no recordings" because their account lives on the other region.
+    private var alternateBase: String {
+        apiBase.contains(".cn") ? Self.defaultsBase : "https://api.plaud.cn"
+    }
+
+    private func getWithRegionFallback(_ path: String) async throws -> (Data, HTTPURLResponse?) {
+        do {
+            return try await get(path)
+        } catch {
+            let alt = alternateBase
+            guard alt != apiBase else { throw error }
+            log.notice("plaud api base \(self.apiBase, privacy: .public) failed (\(error.localizedDescription, privacy: .public)); retrying on \(alt, privacy: .public)")
+            apiBase = alt
+            UserDefaults.standard.set(alt, forKey: "plaud.api_base")
+            return try await get(path)
+        }
+    }
+
     /// The cloud recording list (non-trash, newest first).
     func listFiles() async throws -> [CloudFile] {
         guard accessToken != nil else { throw PlaudError.notSignedIn }
         let query = "skip=0&limit=200&is_trash=0&sort_by=edit_time&is_desc=true"
-        let (data, _) = try await get("/file/simple/web?\(query)")
+        let (data, _) = try await getWithRegionFallback("/file/simple/web?\(query)")
         let json = try Self.unwrap(data)
         guard let list = (json["data"] as? [[String: Any]]) ?? (json["data"] as? [String: Any]).flatMap({ $0["data"] as? [[String: Any]] }) else {
             return []
@@ -174,7 +195,7 @@ final class PlaudCloudService: ObservableObject {
     /// Returns the on-disk URL, or nil when the audio isn't uploaded yet.
     func downloadAudio(of file: CloudFile) async throws -> URL? {
         guard let token = accessToken else { throw PlaudError.notSignedIn }
-        let (data, _) = try await get("/file/temp-url/\(file.id)?is_opus=1")
+        let (data, _) = try await getWithRegionFallback("/file/temp-url/\(file.id)?is_opus=1")
         let json = try Self.unwrap(data)
         let payload = (json["data"] as? [String: Any]) ?? json
         let urlString = (payload["temp_url_opus"] as? String) ?? (payload["temp_url"] as? String)
