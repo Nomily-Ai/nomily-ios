@@ -91,6 +91,12 @@ final class PlaudDirectService: NSObject, ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var isCharging = false
     @Published private(set) var firmware: String?
+    /// How many recordings sit ON the card right now (the SDK's `getFileList`
+    /// answer). `nil` = never asked / card not connected — the UI shows a dash
+    /// instead of a fake "0", because "0 recordings" and "don't know yet" are
+    /// different claims. Same rule as the A1 `sizeBytes` trap: never let an
+    /// unknown masquerade as a measurement.
+    @Published private(set) var cardFileCount: Int?
     /// The card the user tapped in the scan list (before credentials exist —
     /// the official app shows cards + SN first, key comes after).
     @Published private(set) var selectedCard: ScannedCard?
@@ -135,6 +141,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Session ids already pulled into the library (persisted) — the card
     /// keeps files until deleted, so dedup is what makes re-syncs cheap.
     private var syncedSessions: Set<Int>
+    /// Set while a file-list request is a pure "how many recordings?" probe
+    /// (device pages), so the answer must NOT kick off a download queue — the
+    /// user only asked to look.
+    private var fileListProbeOnly = false
 
     private let session: URLSession
     private let exportQueue = DispatchQueue(label: "com.nomily.app.plaud-export")
@@ -144,6 +154,24 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// the library's device filter show a **PLAUD** group (and row badges).
     /// Without it the clips would read as "imported files".
     var library: Library?
+
+    /// Injected by `AppEnvironment` (main actor). On a successful handshake the
+    /// card is written into the **same device ledger** the other three recorder
+    /// cards use (`config.devices`), which is what makes it show up in
+    /// Settings → Devices & Library → Known devices instead of living only in
+    /// PLAUD's own sheet.
+    var configService: ConfigService?
+
+    /// Ledger key for a card. Prefixed so the device list can tell a PLAUD
+    /// entry apart (it renders richer rows, and it survives `plaud-paired-sn`
+    /// changes for the same SN).
+    static func ledgerID(for sn: String) -> String { "plaud-" + sn }
+
+    /// Product name for the ledger row — the SN prefix tells the model apart
+    /// (881 = Note Pro, 882 = NotePin S), same test `cloudUnbind` uses.
+    static func modelName(for sn: String) -> String {
+        sn.hasPrefix("882") ? "PLAUD NotePin S" : "PLAUD Note Pro"
+    }
 
     private override init() {
         let d = UserDefaults.standard
@@ -183,11 +211,18 @@ final class PlaudDirectService: NSObject, ObservableObject {
         isConfigured = false
         isInitialized = false
         userToken = nil
+        if let sn = pairedSN { forgetLedger(sn: sn) }
         pairedSN = nil
         phase = .idle
         scanned = []
         pendingDownloads.removeAll()
         currentExportSession = nil
+        cardFileCount = nil
+        battery = nil
+        storageFree = nil
+        storageTotal = nil
+        isRecording = false
+        firmware = nil
         let d = UserDefaults.standard
         d.removeObject(forKey: "plaud.client_id")
         d.removeObject(forKey: "plaud.client_secret")
@@ -313,6 +348,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
         PlaudDeviceAgent.shared.disconnect()
         pairedSN = nil
         UserDefaults.standard.removeObject(forKey: "plaud.paired_sn")
+        cardFileCount = nil
         setPhase(.idle)
     }
 
@@ -336,6 +372,27 @@ final class PlaudDirectService: NSObject, ObservableObject {
     func refreshVitals() {
         PlaudDeviceAgent.shared.getChargingState()
         PlaudDeviceAgent.shared.getState()
+    }
+
+    // MARK: - Device ledger (Settings → Devices & Library)
+
+    /// Write this card into `config.devices` so it is listed next to the other
+    /// recorder cards. `ConfigService` is main-actor bound and this is called
+    /// from the SDK's callback queue, hence the hop.
+    private func rememberInLedger(sn: String) {
+        Task { @MainActor [weak self] in
+            self?.configService?.rememberDevice(
+                id: Self.ledgerID(for: sn),
+                name: Self.modelName(for: sn),
+                isRecorder: true
+            )
+        }
+    }
+
+    private func forgetLedger(sn: String) {
+        Task { @MainActor [weak self] in
+            self?.configService?.forgetDevice(id: Self.ledgerID(for: sn))
+        }
     }
 
     // MARK: Release (unbind) — return-to-seller / hand-back support
@@ -368,11 +425,17 @@ final class PlaudDirectService: NSObject, ObservableObject {
         }
         pendingDownloads.removeAll()
         currentExportSession = nil
+        // The card is handed back, so it must also leave the user-visible
+        // device list — a released card is not "my device" any more (same
+        // concluding step `RecorderDeviceView.unbindAndRemove` does).
+        forgetLedger(sn: sn)
         pairedSN = nil
         UserDefaults.standard.removeObject(forKey: "plaud.paired_sn")
         battery = nil
         storageFree = nil
         storageTotal = nil
+        cardFileCount = nil
+        isRecording = false
         setPhase(.idle)
     }
 
@@ -395,15 +458,31 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Pull the file list off the card and download everything new.
     func syncFromCard() {
         guard phase.isConnected else { return }
+        fileListProbeOnly = false
         setSyncMessage(nil)
+        PlaudDeviceAgent.shared.getFileList(startSessionId: 0)
+    }
+
+    /// Ask the card "how many recordings do you hold?" **without** queueing any
+    /// download. Used by the device pages (ledger row / device card) so the
+    /// history count can be shown before the user decides to pull.
+    func refreshCardRecordings() {
+        guard phase.isConnected else { return }
+        fileListProbeOnly = true
         PlaudDeviceAgent.shared.getFileList(startSessionId: 0)
     }
 
     // MARK: - Download queue
 
     private func handleFileList(_ files: [BleFile]) {
+        let probeOnly = fileListProbeOnly
+        fileListProbeOnly = false
+        // The count is meaningful on BOTH paths — it is the card's history size.
+        let count = files.count
+        DispatchQueue.main.async { self.cardFileCount = count }
         let fresh = files.filter { !syncedSessions.contains($0.sessionId) }
-        log.info("plaud file list: \(files.count) on card, \(fresh.count) new")
+        log.info("plaud file list: \(count) on card, \(fresh.count) new (probe=\(probeOnly))")
+        if probeOnly { return }
         guard !fresh.isEmpty else {
             setSyncing(false)
             setSyncMessage(nil)
@@ -595,6 +674,9 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         log.info("plaud bound: \(sn, privacy: .public)")
         pairedSN = sn
         UserDefaults.standard.set(sn, forKey: "plaud.paired_sn")
+        // A bound card is one of "my devices" now — same ledger the other
+        // recorder cards live in, so it appears in Settings → Devices.
+        rememberInLedger(sn: sn)
         // Firmware is read off the advertisement at scan time.
         if let card = selectedCard, card.sn == sn {
             firmware = cachedBleDevices[sn].map { $0.wholeVersion() }
@@ -615,6 +697,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
 
     func bleDeviceDisconnectErr() {
         log.warning("plaud device dropped")
+        DispatchQueue.main.async { self.cardFileCount = nil }
         if case .connected = phase { setPhase(.idle) }
     }
 

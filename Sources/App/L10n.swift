@@ -130,6 +130,17 @@ enum L10n {
         static var startRecord: String { NSLocalizedString("plaud.start_record", value: "Start recording", comment: "") }
         static var disconnect: String { NSLocalizedString("plaud.disconnect", value: "Disconnect", comment: "") }
         static var charging: String { NSLocalizedString("plaud.charging", value: "Charging", comment: "") }
+        // ★ 2026-10-21: card history + device-list rows
+        static var cardRecordings: String { NSLocalizedString("plaud.card_recordings", value: "Recordings on card", comment: "How many recordings the card currently holds") }
+        static func cardRecordingsCount(_ count: Int) -> String {
+            String(format: NSLocalizedString("plaud.card_recordings_count", value: "%d clip(s)", comment: "History count on the card; %d = number"), count)
+        }
+        static var historyUnknown: String { NSLocalizedString("plaud.history_unknown", value: "Not read yet", comment: "Shown when the card's recording count hasn't been read") }
+        static var refresh: String { NSLocalizedString("plaud.refresh", value: "Refresh", comment: "Re-read the card's state / recording count") }
+        static var stateConnected: String { NSLocalizedString("plaud.state_connected", value: "Connected", comment: "") }
+        static var stateDisconnected: String { NSLocalizedString("plaud.state_disconnected", value: "Not connected", comment: "") }
+        static var deviceDetailTitle: String { NSLocalizedString("plaud.device_detail_title", value: "PLAUD card", comment: "Navigation title of the PLAUD device page") }
+
         static var pairRejected: String { NSLocalizedString("plaud.pair_rejected", value: "The card refused the connection — unbind it once in the official PLAUD app (Settings → device → unbind), then retry.", comment: "") }
         static var cloudNote: String { NSLocalizedString("plaud.cloud_note", value: "Optional compatibility path. Requires a PLAUD account registered with an EMAIL (phone-number accounts are rejected). The card stays bound to the official app.", comment: "") }
         static func syncStarting(_ count: Int) -> String {

@@ -83,10 +83,15 @@ struct PlaudDeviceCard: View {
                     }
                 }
                 if let total = direct.storageTotal, let free = direct.storageFree, total > 0 {
-                    Text(Self.storageLine(total: total, free: free))
+                    Text("\(L10n.TicNoteCard.storageFree) \(Self.storageLine(total: total, free: free))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+                // History count — same "unknown is not zero" rule as the settings row.
+                Text("\(L10n.Plaud.cardRecordings) "
+                     + (direct.cardFileCount.map(L10n.Plaud.cardRecordingsCount) ?? L10n.Plaud.historyUnknown))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 Button {
                     direct.syncFromCard()
                 } label: {
@@ -108,9 +113,11 @@ struct PlaudDeviceCard: View {
         }
     }
 
-    private static func storageLine(total: Int, free: Int) -> String {
+    /// "free / total" only — the caller owns the label, so the same string
+    /// serves the compact card (one line) and the settings row (label + value).
+    static func storageLine(total: Int, free: Int) -> String {
         let mb: (Int) -> String = { $0 >= 1_000_000 ? String(format: "%.1f GB", Double($0) / 1_000_000) : "\($0 / 1000) MB" }
-        return "\(L10n.TicNoteCard.storageFree) \(mb(free)) / \(mb(total))"
+        return "\(mb(free)) / \(mb(total))"
     }
 }
 
@@ -269,8 +276,32 @@ struct DirectConnectSection: View {
                 Label(L10n.Plaud.startRecord, systemImage: "record.circle")
             }
         }
+        // ★ History count (2026-10-21 user request "录音跟历史条数"): how many
+        // recordings the card is holding right now, re-readable on demand.
+        // "Not read yet" instead of 0 — an unread count is not a zero.
+        HStack {
+            Text(L10n.Plaud.cardRecordings)
+            Spacer()
+            Text(direct.cardFileCount.map(L10n.Plaud.cardRecordingsCount) ?? L10n.Plaud.historyUnknown)
+                .foregroundStyle(.secondary)
+            Button {
+                direct.refreshCardRecordings()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(L10n.Plaud.refresh)
+        }
+        if let total = direct.storageTotal, let free = direct.storageFree, total > 0 {
+            HStack {
+                Text(L10n.TicNoteCard.storageFree)
+                Spacer()
+                Text(PlaudDeviceCard.storageLine(total: total, free: free)).foregroundStyle(.secondary)
+            }
+        }
         Button(L10n.Plaud.syncFromCard) { direct.syncFromCard() }
             .disabled(direct.isSyncing)
+
         Toggle(L10n.Plaud.deleteAfterSync, isOn: $direct.deleteAfterSync)
         Button(L10n.Plaud.disconnect) { direct.disconnect() }
     }
@@ -330,6 +361,90 @@ struct DirectConnectSection: View {
             direct.connectSelected()
         } catch {
             message = error.localizedDescription
+        }
+    }
+}
+
+// MARK: - Known-devices row + detail page
+
+/// One row in Settings → Devices & Library → Known devices for a PLAUD card.
+///
+/// Why a dedicated row: the generic ledger row only knows name / id / last-seen,
+/// which is all `DeviceRecord` stores. A PLAUD card additionally has live BLE
+/// state the service already holds (battery, charging, recording, firmware,
+/// history count) — showing "PLAUD Note Pro / plaud-881…" and nothing else
+/// would make it the odd one out next to the other cards' pages.
+struct PlaudLedgerRow: View {
+    @ObservedObject private var direct = PlaudDirectService.shared
+    let sn: String
+    let record: AppConfig.DeviceRecord
+
+    private var isThisCardConnected: Bool {
+        if case .connected(let connectedSN) = direct.phase { return connectedSN == sn }
+        return false
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(record.name).font(.body)
+                if direct.isRecording && isThisCardConnected {
+                    Text(L10n.Plaud.recordingNow)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.red)
+                }
+                Spacer()
+                if let battery = direct.battery, isThisCardConnected {
+                    Label(
+                        "\(battery)%" + (direct.isCharging ? " \(L10n.Plaud.charging)" : ""),
+                        systemImage: direct.isCharging ? "battery.100percent.bolt" : "battery.75percent"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .labelStyle(.titleAndIcon)
+                }
+            }
+            Text(sn).font(.caption2.monospaced()).foregroundStyle(.secondary)
+            if let fw = direct.firmware, isThisCardConnected {
+                Text(fw).font(.caption2).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                Text(isThisCardConnected ? L10n.Plaud.stateConnected : L10n.Plaud.stateDisconnected)
+                    .font(.caption2)
+                    .foregroundStyle(isThisCardConnected ? Color.appAccent : .secondary)
+                Text("·").font(.caption2).foregroundStyle(.secondary)
+                Text("\(L10n.Plaud.cardRecordings) "
+                     + (direct.cardFileCount.map(L10n.Plaud.cardRecordingsCount) ?? L10n.Plaud.historyUnknown))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if let last = record.lastConnected {
+                Text(L10n.DevicesLibrary.lastSeen(last)).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// Pushed from the known-devices row. Reuses the exact same control block as
+/// the add-device sheet (`DirectConnectSection`), so recording start/stop,
+/// history count, pull, unbind and factory reset live in ONE place — the sheet
+/// is "add", this page is "manage", both drive the same service.
+struct PlaudDeviceDetailView: View {
+    @ObservedObject private var direct = PlaudDirectService.shared
+
+    var body: some View {
+        Form {
+            DirectConnectSection(direct: direct)
+        }
+        .navigationTitle(L10n.Plaud.deviceDetailTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // Opening the page is a "tell me about this card" request: read the
+            // vitals and the history count, but do NOT start a transfer (that is
+            // `refreshCardRecordings`'s probe-only contract).
+            guard direct.phase.isConnected else { return }
+            direct.refreshVitals()
+            direct.refreshCardRecordings()
         }
     }
 }

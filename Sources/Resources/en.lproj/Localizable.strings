@@ -1279,3 +1279,10 @@
 "plaud.start_record" = "Start recording";
 "plaud.disconnect" = "Disconnect";
 "plaud.charging" = "Charging";
+"plaud.card_recordings" = "Recordings on card";
+"plaud.card_recordings_count" = "%d clip(s)";
+"plaud.history_unknown" = "Not read yet";
+"plaud.refresh" = "Refresh";
+"plaud.state_connected" = "Connected";
+"plaud.state_disconnected" = "Not connected";
+"plaud.device_detail_title" = "PLAUD card";

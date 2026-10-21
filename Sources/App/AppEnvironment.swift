@@ -69,6 +69,9 @@ final class AppEnvironment: ObservableObject {
         // the library's device filter gets its own **PLAUD** group.
         PlaudDirectService.shared.library = library
         PlaudCloudService.shared.library = library
+        // The card also belongs in the device ledger (`config.devices`) so it is
+        // listed alongside V05E / TicNote / A1 in Settings → Devices & Library.
+        PlaudDirectService.shared.configService = config
         let transcription = TranscriptionService(config: config)
         let afterTranscription = Date()
         // ★ 2026-10-16 twelfth revision: the on-disk queue for summary / translation / format conversion. The initialiser has only

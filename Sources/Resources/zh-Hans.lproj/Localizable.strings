@@ -1381,3 +1381,10 @@
 "plaud.start_record" = "开始录音";
 "plaud.disconnect" = "断开连接";
 "plaud.charging" = "充电中";
+"plaud.card_recordings" = "卡上录音";
+"plaud.card_recordings_count" = "%d 条";
+"plaud.history_unknown" = "尚未读取";
+"plaud.refresh" = "刷新";
+"plaud.state_connected" = "已连接";
+"plaud.state_disconnected" = "未连接";
+"plaud.device_detail_title" = "PLAUD 设备";

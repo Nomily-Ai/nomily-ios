@@ -283,6 +283,14 @@ final class ConfigService: ObservableObject {
         config.devices[id]?.isRecorderDevice ?? false
     }
 
+    /// Drop a ledger entry. Used when a card is **released/unbound** (PLAUD
+    /// hand-back, recorder unbind): the device no longer belongs to this
+    /// install, so keeping a row for it would be a lie in the device list.
+    func forgetDevice(id: String) {
+        guard config.devices.removeValue(forKey: id) != nil else { return }
+        scheduleSave()
+    }
+
     /// Persist (or clear) the bond_id for a known device. Creates a stub
     /// record when the peripheral hasn't been remembered yet — can happen
     /// when pairing completes before `rememberDevice` is called during

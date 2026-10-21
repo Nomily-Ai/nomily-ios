@@ -2337,6 +2337,10 @@ struct RecordingsSettingsView: View {
 struct DevicesLibraryView: View {
     @EnvironmentObject private var configService: ConfigService
     @EnvironmentObject private var library: Library
+    /// PLAUD direct-connect service. Its live state (battery, recording,
+    /// history count) is what the PLAUD row adds on top of the plain ledger
+    /// fields the other devices show.
+    @ObservedObject private var plaudDirect = PlaudDirectService.shared
     // Scan the on-disk library so the stats match what the Library tab
     // shows. The manifest (`library.entries`) only tracks device downloads,
     // so imported clips were missing from the total (showed 0).
@@ -2485,28 +2489,78 @@ struct DevicesLibraryView: View {
         }
     }
 
+    /// One row of the known-devices list.
+    ///
+    /// Built from the ledger, PLUS a synthesised entry when a PLAUD card is
+    /// paired but has no ledger row yet — that happens on installs upgraded
+    /// from a build that predates the ledger write, and it would otherwise look
+    /// like "my card disappeared" even though it is connected.
+    private struct DeviceRow: Identifiable {
+        let id: String
+        let record: AppConfig.DeviceRecord
+        let plaudSN: String?
+    }
+
+    private var deviceRows: [DeviceRow] {
+        var rows = sortedDevices.map {
+            DeviceRow(id: $0.0, record: $0.1, plaudSN: Self.plaudSerial(fromLedgerID: $0.0))
+        }
+        if let sn = plaudDirect.pairedSN {
+            let key = PlaudDirectService.ledgerID(for: sn)
+            if !rows.contains(where: { $0.id == key }) {
+                rows.insert(
+                    DeviceRow(id: key, record: .init(name: PlaudDirectService.modelName(for: sn)), plaudSN: sn),
+                    at: 0
+                )
+            }
+        }
+        return rows
+    }
+
     private var devicesSection: some View {
         Section(L10n.DevicesLibrary.knownDevices) {
-            if configService.config.devices.isEmpty {
+            if deviceRows.isEmpty {
                 Text(L10n.DevicesLibrary.noDevicesYet)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(sortedDevices, id: \.0) { id, record in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(record.name).font(.body)
-                        Text(id).font(.caption2.monospaced()).foregroundStyle(.secondary)
-                        if let last = record.lastConnected {
-                            Text(L10n.DevicesLibrary.lastSeen(last)).font(.caption2).foregroundStyle(.secondary)
+                ForEach(deviceRows) { row in
+                    // PLAUD cards live in the SAME ledger (key `plaud-<SN>`) but
+                    // get a richer row + their own page, because they carry live
+                    // BLE state the plain record can't hold.
+                    if let sn = row.plaudSN {
+                        NavigationLink {
+                            PlaudDeviceDetailView()
+                        } label: {
+                            PlaudLedgerRow(sn: sn, record: row.record)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.record.name).font(.body)
+                            Text(row.id).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                            if let last = row.record.lastConnected {
+                                Text(L10n.DevicesLibrary.lastSeen(last)).font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
                 .onDelete { indices in
-                    let keys = sortedDevices.map(\.0)
+                    let keys = deviceRows.map(\.id)
                     for i in indices { configService.config.devices.removeValue(forKey: keys[i]) }
                     configService.scheduleSave()
                 }
             }
         }
+        // Reading the row's history count is a probe, not a transfer.
+        .onAppear {
+            guard plaudDirect.phase.isConnected else { return }
+            plaudDirect.refreshVitals()
+            plaudDirect.refreshCardRecordings()
+        }
+    }
+
+    /// `plaud-881…` → `881…`; nil for every other ledger key.
+    private static func plaudSerial(fromLedgerID id: String) -> String? {
+        id.hasPrefix("plaud-") ? String(id.dropFirst("plaud-".count)) : nil
     }
 
     private var librarySection: some View {
