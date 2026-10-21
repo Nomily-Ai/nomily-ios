@@ -1,10 +1,20 @@
 # Nomily iOS
 
-Native iOS implementation — connects to a D·NOTE recording device over BLE, browses and transfers recordings, drives device settings, and runs ASR (Azure or local Whisper). Project overview and licence: [nomily-app](https://github.com/Nomily-Ai/nomily-app).
+Native iOS companion for AI recorder cards — connects over BLE, browses and transfers recordings, drives device settings, and runs ASR (Azure, local Whisper, or fully on-device). Project overview and licence: [nomily-app](https://github.com/Nomily-Ai/nomily-app).
+
+## Supported devices
+
+| Device | Link | What works |
+|---|---|---|
+| **D·NOTE (TicNote)** | BLE, native protocol | Full control: scan/connect, device settings sheet, recordings with ChaCha20 decryption, Wi-Fi Fast Transfer, live OPUS stream |
+| **钉钉 A1（DingTalk A1 听记卡片）** | BLE, reversed protocol (`FE3C`/`FE1C`/`FE1B`) | Card-secret import from the Mac DingTalk client, recording / stop / marks / battery / storage, encrypted audio pull, UT diagnostic log (`0x000C`) for precise timing |
+| **PLAUD Note Pro** | Official PLAUD Embedded SDK (takeover) + PLAUD cloud | Direct connect pulls the **original audio** off the card over BLE — no PLAUD account involved; live recording control, mark count, batch pull/delete, transfer watchdog; optional **cloud mode** signs in with a PLAUD account (email OTP) and pulls cloud recordings |
+
+PLAUD notes: takeover requires the partner Client ID / Secret from [dev.plaud.ai](https://dev.plaud.ai) (your PLAUD app account is never used for direct connect). The card can be handed back — one tap unbinds it (`depair` + cloud unbind) so the official PLAUD app (China or global build) can pair it again, and a built-in **device recovery** force-clears the on-device ownership lock when a card is locked out of every app.
 
 ## Status
 
-Full-featured companion app: BLE scan/connect, complete device control, recording browse / transfer / decrypt, on-device and Apple Watch recording, live and file transcription (Azure or local Whisper), and Fast Transfer over Wi-Fi.
+Full-featured companion app for three recorder cards (D·NOTE, DingTalk A1, PLAUD Note Pro): BLE scan/connect, complete device control, recording browse / transfer / decrypt, on-device and Apple Watch recording, live and file transcription (Azure, local Whisper, or on-device), and Fast Transfer over Wi-Fi.
 
 - Scan + connect with escalating-timeout retries.
 - Full Device sheet: switches, mic-gain / NR sliders, idle-off picker, Bluetooth-name editor with live byte counter, sync-time, and Format / Factory-reset / Shut-down with destructive confirmations.
