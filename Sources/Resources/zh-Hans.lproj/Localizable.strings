@@ -1397,6 +1397,10 @@
 "plaud.marks_count" = "%d 处打点";
 "plaud.marks_live" = "本次打点";
 "plaud.recording_now_on_card" = "卡片正在录音——停止后列表会自动刷新。";
+"plaud.transfer_header" = "传输";
+"plaud.delete_after_sync_footer" = "录音拉取到资料库后会从卡片上删除。关闭则卡片保留原件。";
+"plaud.device_info_hint" = "显示卡片序列号、固件、电量、存储和连接操作。";
+"plaud.downloading_single" = "正在传输…";
 "plaud.not_connected" = "请先连接卡片。";
 "plaud.card_files" = "卡上录音";
 "plaud.card_files_empty" = "卡上暂无录音。";

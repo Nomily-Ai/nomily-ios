@@ -171,6 +171,11 @@ enum L10n {
         }
         static var marksLive: String { NSLocalizedString("plaud.marks_live", value: "Marks this recording", comment: "Live count of marks pressed during the current recording") }
         static var recordingNowOnCard: String { NSLocalizedString("plaud.recording_now_on_card", value: "Recording on the card — the list refreshes when it stops.", comment: "") }
+        // ★ 2026-10-21 (3rd round): device info behind the pill tap, transfer prefs, progress
+        static var transferHeader: String { NSLocalizedString("plaud.transfer_header", value: "Transfer", comment: "Section title for transfer settings / progress") }
+        static var deleteAfterSyncFooter: String { NSLocalizedString("plaud.delete_after_sync_footer", value: "Once a recording has been pulled into the library it is erased from the card. Off = the card keeps its copy.", comment: "") }
+        static var deviceInfoHint: String { NSLocalizedString("plaud.device_info_hint", value: "Shows the card's serial number, firmware, battery, storage and connection actions.", comment: "Accessibility hint for the row that opens device info") }
+        static var downloadingSingle: String { NSLocalizedString("plaud.downloading_single", value: "Transferring…", comment: "Progress caption while one recording is being pulled") }
 
         static var pairRejected: String { NSLocalizedString("plaud.pair_rejected", value: "The card refused the connection — unbind it once in the official PLAUD app (Settings → device → unbind), then retry.", comment: "") }
         static var cloudNote: String { NSLocalizedString("plaud.cloud_note", value: "Optional compatibility path. Requires a PLAUD account registered with an EMAIL (phone-number accounts are rejected). The card stays bound to the official app.", comment: "") }

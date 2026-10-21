@@ -108,6 +108,14 @@ final class PlaudDirectService: NSObject, ObservableObject {
     @Published private(set) var pairedSN: String?
     @Published private(set) var syncMessage: String?
     @Published private(set) var isSyncing = false
+    /// Transfer feedback (2026-10-21, 3rd round — "downloading needs work").
+    /// `downloadProgress` is the **current file** 0…1, `downloadSpeed` the SDK's
+    /// own live figure ("12.4 KB/s"), and the counters let the header say
+    /// "2 / 5" instead of the bare "Transferring file 2…" that looked stuck.
+    @Published private(set) var downloadProgress: Double = 0
+    @Published private(set) var downloadSpeed: String = ""
+    @Published private(set) var downloadDone: Int = 0
+    @Published private(set) var downloadTotal: Int = 0
     /// Live device vitals for the device-page card (populated by the SDK
     /// power/storage callbacks; nil until the card reports them).
     @Published private(set) var battery: Int?
@@ -589,6 +597,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
         setSyncing(true)
         setSyncMessage(L10n.Plaud.syncDownloading(1))
         pendingDownloads = [ble]
+        DispatchQueue.main.async {
+            self.downloadTotal = 1
+            self.downloadDone = 0
+        }
         downloadNext()
     }
 
@@ -659,6 +671,17 @@ final class PlaudDirectService: NSObject, ObservableObject {
                 guard self.phase.isConnected else { continue }
                 PlaudDeviceAgent.shared.getState()
                 PlaudDeviceAgent.shared.getChargingState()
+                // ★ Marks ("打点") do NOT arrive on their own while recording —
+                // `bleMarking` is an *answer* to `getMarking(sessionId:)`, and the
+                // high-level agent has no such call: it lives on the low-level
+                // `bleAgent`. Without this poll the mark count stayed at 0 until
+                // the recording had finished (user: "打点没有实时同步到手机").
+                if self.isRecording {
+                    let sid = self.recordSessionID ?? PlaudDeviceAgent.shared.getCurrentSessionID()
+                    if sid > 0 {
+                        PlaudDeviceAgent.shared.bleAgent?.getMarking(sid)
+                    }
+                }
             }
         }
     }
@@ -759,6 +782,19 @@ final class PlaudDirectService: NSObject, ObservableObject {
         PlaudDeviceAgent.shared.getFileList(startSessionId: 0)
     }
 
+    /// ★ "Anything on the card transfers by itself" (2026-10-21 user request).
+    ///
+    /// Same read as `syncFromCard`, minus the user-facing guards: the card just
+    /// connected (or just stopped recording), so whatever it holds and we have
+    /// not pulled yet is queued right away. This is the path that makes the
+    /// promise true — a probe-only read would only count the files and leave
+    /// them sitting there.
+    private func autoPullNewRecordings() {
+        guard phase.isConnected, !isRecording, !isSyncing else { return }
+        fileListProbeOnly = false
+        PlaudDeviceAgent.shared.getFileList(startSessionId: 0)
+    }
+
     // MARK: - Download queue
 
     private func handleFileList(_ files: [BleFile]) {
@@ -795,6 +831,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
         setSyncing(true)
         setSyncMessage(L10n.Plaud.syncStarting(fresh.count))
         pendingDownloads = fresh
+        DispatchQueue.main.async {
+            self.downloadTotal = fresh.count
+            self.downloadDone = 0
+        }
         downloadNext()
     }
 
@@ -803,11 +843,19 @@ final class PlaudDirectService: NSObject, ObservableObject {
             currentExportSession = nil
             setSyncing(false)
             setSyncMessage(L10n.Plaud.syncDone)
+            DispatchQueue.main.async {
+                self.downloadProgress = 0
+                self.downloadSpeed = ""
+            }
             return
         }
         pendingDownloads.removeFirst()
         currentExportSession = next.sessionId
         setSyncMessage(L10n.Plaud.syncDownloading(pendingDownloads.count + 1))
+        DispatchQueue.main.async {
+            self.downloadProgress = 0
+            self.downloadSpeed = ""
+        }
         let handler = ExportHandler(service: self, sessionId: next.sessionId)
         PlaudDeviceAgent.shared.exportAudio(
             sessionId: next.sessionId,
@@ -818,11 +866,28 @@ final class PlaudDirectService: NSObject, ObservableObject {
         )
     }
 
+    /// Live transfer feedback from the SDK's export callback.
+    func handleExportProgress(sessionId: Int, progress: Int) {
+        // Same guard as the completion path: a progress event for a session we
+        // are no longer exporting (user deleted it / cancelled) must not move
+        // the bar.
+        guard currentExportSession == sessionId else { return }
+        let speed = PlaudDeviceAgent.shared.getFormattedDownloadSpeed()
+        DispatchQueue.main.async {
+            self.downloadProgress = min(1, max(0, Double(progress) / 100))
+            self.downloadSpeed = speed
+        }
+    }
+
     /// SDK finished writing the transcoded file — move it into the library
     /// directory under a friendly timestamped name and register it.
     func handleExportComplete(sessionId: Int, outputPath: String) {
         currentExportSession = nil
         markSynced(sessionId)
+        DispatchQueue.main.async {
+            self.downloadDone += 1
+            self.downloadProgress = 0
+        }
         let src = URL(fileURLWithPath: outputPath)
         let stamp: String = {
             let fmt = DateFormatter()
@@ -871,6 +936,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
         setSyncMessage(L10n.Plaud.syncFailed(message))
         pendingDownloads.removeAll()
         setSyncing(false)
+        DispatchQueue.main.async {
+            self.downloadProgress = 0
+            self.downloadSpeed = ""
+        }
     }
 
     private func markSynced(_ sessionId: Int) {
@@ -959,6 +1028,7 @@ private final class ExportHandler: NSObject, AudioExportCallback {
 
     func onProgress(_ progress: Int, message: String) {
         log.info("plaud export \(self.sessionId): \(progress)% \(message, privacy: .public)")
+        service?.handleExportProgress(sessionId: sessionId, progress: progress)
     }
 
     func onComplete(outputPath: String) {
@@ -1067,7 +1137,9 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             PlaudDeviceAgent.shared.syncFile(sessionId: current, start: 0, end: 0)
             DispatchQueue.main.async { self.liveStreaming = true }
         } else {
-            PlaudDeviceAgent.shared.getFileList(startSessionId: 0)
+            // Auto-pull: a card that just connected with recordings on it should
+            // start transferring them without a tap (2026-10-21 request).
+            autoPullNewRecordings()
         }
     }
 
@@ -1202,10 +1274,11 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.liveStreaming = false
         }
         // The stop just wrote a file to the card — re-read the list so the home
-        // segment shows it immediately instead of lagging one clip behind.
+        // segment shows it immediately instead of lagging one clip behind, and
+        // pull it right away ("卡片上有录音则自动传输").
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             guard self.phase.isConnected else { return }
-            self.refreshCardRecordings()
+            self.autoPullNewRecordings()
         }
     }
 

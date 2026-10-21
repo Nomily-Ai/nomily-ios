@@ -69,6 +69,13 @@ struct DirectConnectSection: View {
     @State private var releasedNote = false
 
     var body: some View {
+        mainSection
+        if direct.isConfigured {
+            transferPrefsSection
+        }
+    }
+
+    private var mainSection: some View {
         Section {
             // ★ Scan-first (official-app parity): the scan/selection/status
             // block works WITHOUT credentials; the credential form is only
@@ -256,8 +263,22 @@ struct DirectConnectSection: View {
         Button(L10n.Plaud.syncFromCard) { direct.syncFromCard() }
             .disabled(direct.isSyncing)
 
-        Toggle(L10n.Plaud.deleteAfterSync, isOn: $direct.deleteAfterSync)
         Button(L10n.Plaud.disconnect) { direct.disconnect() }
+    }
+
+    /// Transfer preferences (2026-10-21 request: "add an auto-delete-after-
+    /// transfer setting in the PLAUD device info"). Deliberately its **own**
+    /// section outside `connectedControls`: a preference must be reachable while
+    /// the card is away, and burying it under six live rows is why nobody found
+    /// it in the add-device sheet.
+    private var transferPrefsSection: some View {
+        Section {
+            Toggle(L10n.Plaud.deleteAfterSync, isOn: $direct.deleteAfterSync)
+        } header: {
+            Text(L10n.Plaud.transferHeader)
+        } footer: {
+            Text(L10n.Plaud.deleteAfterSyncFooter)
+        }
     }
 
     private var scanButton: some View {
@@ -323,20 +344,21 @@ struct DirectConnectSection: View {
 
 /// The PLAUD card as it appears in the Recordings tab's **device segment**.
 ///
-/// ★ 2026-10-21 (2nd round) — layout parity. This used to be a centered rounded
-/// card floating over the page background, which made PLAUD read as a popup next
-/// to V05E / TicNote / 钉钉 A1 (all of them a full-width `List`). User's words:
-/// "don't put PLAUD's device and library in a centered page — same layout as the
-/// other cards". So: one `List(.insetGrouped)`, in the same order the other cards
-/// use — identity row → recording control → recordings on the card.
+/// ★ 2026-10-21 (3rd round) — "device info belongs behind the top-left device
+/// tap, not on the home page". Battery / SN / storage / firmware are diagnostics:
+/// they belong in the card's own page, which is what the other recorder cards do
+/// too (TicNote: one `cardRow` here → `cardInfoSheet` for the details). So this
+/// page is now three things and nothing else:
 ///
-/// Delete (2026-10-21): "the recording files are not only for pulling, there is
-/// also deletion". Deleting is irreversible on the card, so every path (row
-/// button **and** swipe) goes through one confirmation dialog.
+///   1. one compact row (name + link state) that **opens the device info**;
+///   2. the recording control (start/stop, clock, level, live marks);
+///   3. what is **on** the card, with pull-per-row and swipe-to-delete.
+///
+/// Delete is swipe-only and needs no confirmation (user: "右滑删除…点击删除即可，
+/// 无需在弹窗确认") — the row also lost its trash button for the same reason.
 struct PlaudCardFilesView: View {
     @ObservedObject private var direct = PlaudDirectService.shared
-    /// Row awaiting the delete confirmation.
-    @State private var pendingDelete: PlaudDirectService.PlaudCardFile?
+    @State private var showInfo = false
 
     private var connectedSN: String? {
         if case .connected(let sn) = direct.phase { return sn }
@@ -353,7 +375,10 @@ struct PlaudCardFilesView: View {
     var body: some View {
         List {
             identitySection
-            if connectedSN != nil { recordingSection }
+            if connectedSN != nil {
+                recordingSection
+                transferSection
+            }
             filesSection
         }
         .listStyle(.insetGrouped)
@@ -361,92 +386,47 @@ struct PlaudCardFilesView: View {
             direct.refreshVitals()
             direct.refreshCardRecordings()
         }
-        .confirmationDialog(
-            L10n.Plaud.deleteFromCardTitle,
-            isPresented: Binding(
-                get: { pendingDelete != nil },
-                set: { if !$0 { pendingDelete = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button(L10n.Common.delete, role: .destructive) {
-                if let file = pendingDelete { direct.delete(file: file) }
-                pendingDelete = nil
-            }
-            Button(L10n.Common.cancel, role: .cancel) { pendingDelete = nil }
-        } message: {
-            Text(L10n.Plaud.deleteFromCardMsg)
-        }
+        .sheet(isPresented: $showInfo) { PlaudDeviceInfoSheet() }
     }
 
-    // MARK: - ① the card itself
+    // MARK: - ① one row: the way into device info
 
     private var identitySection: some View {
         Section {
-            HStack(spacing: 10) {
-                Image(systemName: "waveform")
-                    .font(.title3)
-                    .foregroundStyle(Color.appAccent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(cardName).font(.body.weight(.medium))
-                    if let sn = cardSN {
-                        Text(sn).font(.caption2.monospaced()).foregroundStyle(.secondary)
+            Button {
+                showInfo = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "waveform")
+                        .font(.title3)
+                        .foregroundStyle(Color.appAccent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(cardName)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Text(connectedSN != nil ? L10n.Plaud.stateConnected : L10n.Plaud.stateDisconnected)
+                            .font(.caption)
+                            .foregroundStyle(connectedSN != nil ? Color.appAccent : .secondary)
                     }
-                    if let fw = direct.firmware, connectedSN != nil {
-                        Text(fw).font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                if connectedSN != nil, let battery = direct.battery {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Label(
-                            "\(battery)%",
-                            systemImage: direct.isCharging ? "battery.100percent.bolt" : "battery.75percent"
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        if direct.isCharging {
-                            Text(L10n.Plaud.charging).font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-            if connectedSN == nil {
-                // Remembered but not linked — say so, and offer the one tap that
-                // fixes it instead of showing stale live data.
-                HStack {
-                    Text(L10n.Plaud.stateDisconnected).font(.footnote).foregroundStyle(.secondary)
                     Spacer()
-                    Button(L10n.Plaud.reconnect) { direct.reconnect() }
-                        .font(.footnote)
-                        .buttonStyle(.borderless)
-                }
-            } else {
-                // History count — "not read yet" instead of a fake 0.
-                HStack {
-                    Text(L10n.Plaud.cardRecordings)
-                    Spacer()
-                    Text(direct.cardFileCount.map(L10n.Plaud.cardRecordingsCount) ?? L10n.Plaud.historyUnknown)
-                        .foregroundStyle(.secondary)
-                    Button {
-                        direct.refreshCardRecordings()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+                    if direct.isRecording {
+                        Label(L10n.Plaud.recordingNow, systemImage: "record.circle")
+                            .labelStyle(.iconOnly)
+                            .font(.body)
+                            .foregroundStyle(.red)
                     }
-                    .buttonStyle(.borderless)
-                    .disabled(direct.isRecording)
-                    .accessibilityLabel(L10n.Plaud.refresh)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
-                if let total = direct.storageTotal, let free = direct.storageFree, total > 0 {
-                    LabeledContent(L10n.TicNoteCard.storageFree, value: Self.storageLine(total: total, free: free))
-                }
-                Button(L10n.Plaud.disconnect) { direct.disconnect() }
-                    .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityHint(L10n.Plaud.deviceInfoHint)
         }
     }
 
-    // MARK: - ② recording control + clock + level + marks
+    // MARK: - ② recording control + clock + level + live marks
 
     @ViewBuilder
     private var recordingSection: some View {
@@ -485,9 +465,10 @@ struct PlaudCardFilesView: View {
                 LevelMeter(level: direct.liveLevel)
                     .frame(height: 6)
             }
-            // ★ 打点 (bookmarks pressed on the card while recording). The card
-            // pushes them via `bleMarking` — this is the live proof that a press
-            // registered, exactly what the user asked to "sync".
+            // ★ 打点 (bookmarks pressed on the card while recording). Polled
+            // every 3 s via `bleAgent.getMarking(sessionId:)` — `bleMarking` is
+            // an answer, not a push, so without the poll the count only appeared
+            // after the recording ended.
             HStack {
                 Label(L10n.Plaud.marksLive, systemImage: "bookmark")
                 Spacer()
@@ -512,7 +493,38 @@ struct PlaudCardFilesView: View {
         }
     }
 
-    // MARK: - ③ recordings ON the card
+    // MARK: - ③ transfer progress
+
+    /// Why a dedicated block: the old page only had a footer sentence
+    /// ("Transferring file 2…") with no bar and no speed, so a multi-minute BLE
+    /// pull looked frozen. Progress + "2 / 5" + KB/s answer "is it moving".
+    @ViewBuilder
+    private var transferSection: some View {
+        if direct.isSyncing || direct.syncMessage != nil {
+            Section {
+                if direct.isSyncing {
+                    ProgressView(value: direct.downloadProgress)
+                        .progressViewStyle(.linear)
+                    HStack(spacing: 6) {
+                        Text(Self.transferCount(direct))
+                        Spacer()
+                        if !direct.downloadSpeed.isEmpty {
+                            Text(direct.downloadSpeed)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                } else if let msg = direct.syncMessage {
+                    Text(msg).font(.footnote).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text(L10n.Plaud.transferHeader)
+            }
+        }
+    }
+
+    // MARK: - ④ recordings ON the card
 
     private var filesSection: some View {
         Section {
@@ -542,10 +554,6 @@ struct PlaudCardFilesView: View {
                 if direct.cardFilesLoaded {
                     Text("\(direct.cardFiles.count)").foregroundStyle(.secondary)
                 }
-            }
-        } footer: {
-            if let msg = direct.syncMessage {
-                Text(msg)
             }
         }
     }
@@ -586,31 +594,18 @@ struct PlaudCardFilesView: View {
             .buttonStyle(.borderless)
             .disabled(direct.isSyncing || direct.isRecording)
             .accessibilityLabel(L10n.Plaud.pullThisFile)
-
-            Button {
-                pendingDelete = file
-            } label: {
-                Image(systemName: "trash")
-                    .font(.body)
-            }
-            .buttonStyle(.borderless)
-            .tint(.red)
-            // Same lock as the pull button: a batch transfer owns the card's
-            // serial command queue — interleaving a delete mid-batch would
-            // desync the bookkeeping on both ends.
-            .disabled(direct.isSyncing || direct.isRecording)
-            .accessibilityLabel(L10n.Plaud.deleteFromCard)
         }
         .padding(.vertical, 2)
-        // Swipe is the gesture the other cards' lists already teach (TicNote:
-        // `.onDelete`); keep it alongside the explicit button.
-        .swipeActions(edge: .trailing) {
+        // Swipe is the only delete path (2026-10-21: "no popup — tap delete and
+        // it's gone"). `allowsFullSwipe` keeps one gesture enough for a full
+        // swipe, which is how the other cards' lists behave.
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
-                pendingDelete = file
+                direct.delete(file: file)
             } label: {
-                Label(L10n.Common.delete, systemImage: "trash")
+                Label(L10n.Plaud.deleteFromCard, systemImage: "trash")
             }
-            .disabled(direct.isRecording)
+            .disabled(direct.isSyncing || direct.isRecording)
         }
     }
 
@@ -625,6 +620,12 @@ struct PlaudCardFilesView: View {
 
     private static func sizeText(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    /// "2 / 5" for the transfer block; "—" when a single-file pull is running.
+    private static func transferCount(_ direct: PlaudDirectService) -> String {
+        guard direct.downloadTotal > 1 else { return L10n.Plaud.downloadingSingle }
+        return "\(min(direct.downloadDone + 1, direct.downloadTotal)) / \(direct.downloadTotal)"
     }
 
     static func durationText(_ seconds: TimeInterval) -> String {
@@ -655,6 +656,27 @@ struct PlaudCardFilesView: View {
             seconds = 0
         }
         return durationText(max(0, seconds))
+    }
+}
+
+/// The card's **device info** (SN / firmware / battery / storage / history /
+/// disconnect / unbind / transfer prefs) — presented as a sheet from the top-left
+/// pill and from the compact row on the device segment.
+///
+/// Same content as `PlaudDeviceDetailView` (which Settings pushes), so there is
+/// one implementation of "what this card is and can do", two entry points.
+struct PlaudDeviceInfoSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            PlaudDeviceDetailView()
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(L10n.Common.done) { dismiss() }
+                    }
+                }
+        }
     }
 }
 

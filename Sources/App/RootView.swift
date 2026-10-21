@@ -19,6 +19,10 @@ struct RootView: View {
     /// The recorder card detail page (`RecorderSheet`) to open after successful reconnection.
     /// It shares the same responsibility as the same-named state inside the Scan page, but the entry point is on the main interface.
     @State private var openedRecorder: DiscoveredRecorder?
+    /// PLAUD device-info sheet (2026-10-21, 3rd round): the card's SN / battery /
+    /// storage / unbind actions live here, reached by tapping the pill — the home
+    /// page only lists what is ON the card.
+    @State private var showPlaudInfo = false
     @State private var selectedTab: Tab = .recordings
     @State private var streamingTab: Tab?
     @State private var pendingTab: Tab?
@@ -159,6 +163,11 @@ struct RootView: View {
         // `cardInfoContent`), adding another layer of dialog results in a dialog‑in‑dialog.
         .sheet(item: $openedRecorder) { recorder in
             RecorderSheet(recorder: recorder, mode: .deviceInfo)
+        }
+        // PLAUD's own device page — same shape as the recorder cards' device
+        // sheet, which is why the pill opens it for both device families.
+        .sheet(isPresented: $showPlaudInfo) {
+            PlaudDeviceInfoSheet()
         }
         .sheet(isPresented: $showDevice) {
             if let client = bluetooth.client {
@@ -403,18 +412,17 @@ struct RootView: View {
             openedRecorder = recorder
         } else if plaudDirect.pairedSN != nil {
             // ★ 2026-10-21 user report: "tapping the PLAUD pill in the top-left
-            // does not connect or wake the device". It used to fall through to
-            // `connectToDevice(id:)`, which scans for a `RecorderLink` — a PLAUD
-            // card never advertises as one, so the tap went nowhere.
+            // does not connect or wake the device", then (2nd round) "the device
+            // info should only appear when I tap the device in the top-left".
             //
-            // Now: connected → jump to its page; remembered → wake it up and
-            // bind (reconnect() also fires the admin "device active" command,
-            // which is what actually gets a sleeping card to answer).
-            if plaudDirect.phase.isConnected {
-                selectedTab = .recordings
-            } else if !plaudDirect.phase.isBusy {
+            // So the pill now *is* the way into the card's own page: it opens the
+            // device info sheet (SN / firmware / battery / storage / unbind /
+            // transfer prefs), and if the link is down it also kicks a wake +
+            // bind so the page fills in.
+            if !plaudDirect.phase.isConnected, !plaudDirect.phase.isBusy {
                 plaudDirect.reconnect()
             }
+            showPlaudInfo = true
         } else if let first = knownDevices.first {
             // A connect attempt is already in flight (spinner showing) —
             // tapping again would start a second scan on the same device and
@@ -436,11 +444,11 @@ struct RootView: View {
     private func openPlaud(ledgerID: String) {
         let sn = String(ledgerID.dropFirst("plaud-".count))
         guard !sn.isEmpty else { return }
-        if plaudDirect.phase.isConnected, plaudDirect.pairedSN == sn {
-            selectedTab = .recordings
-            return
+        if !plaudDirect.phase.isConnected {
+            plaudDirect.connectKnown(sn: sn)
         }
-        plaudDirect.connectKnown(sn: sn)
+        selectedTab = .recordings
+        showPlaudInfo = true
     }
 
     private func handleSelectDevice(_ id: String) {
