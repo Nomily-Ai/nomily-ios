@@ -63,6 +63,7 @@ struct DirectConnectSection: View {
     @ObservedObject var direct: PlaudDirectService
     @State private var clientId = ""
     @State private var clientSecret = ""
+    @State private var editingKeys = false
     @State private var busy = false
     @State private var message: String?
     @State private var showHandoverConfirm = false
@@ -99,6 +100,22 @@ struct DirectConnectSection: View {
             statusAndControls
             if !direct.isConfigured {
                 setupFields
+            } else if editingKeys {
+                // ★ 2026-10-22: keys are stored after the first activation, so
+                // the form is hidden by default — but "where do I type a new
+                // key?" needs an answer. Prefill from the store so re-activating
+                // with the same values is a no-op and switching apps is easy.
+                setupFields
+            } else {
+                Button(L10n.Plaud.changeKeys) {
+                    clientId = direct.clientId
+                    clientSecret = direct.clientSecret
+                    message = nil
+                    editingKeys = true
+                }
+                Label(L10n.Plaud.keysStoredHint, systemImage: "key.horizontal")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         } header: {
             Text(L10n.Plaud.directHeader)
@@ -459,6 +476,7 @@ struct DirectConnectSection: View {
             // A card picked before activation now proceeds automatically —
             // the official app behaves the same way (select → key → connect).
             direct.connectSelected()
+            editingKeys = false
         } catch {
             message = error.localizedDescription
         }

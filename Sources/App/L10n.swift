@@ -114,6 +114,11 @@ enum L10n {
         static var clientSecret: String { NSLocalizedString("plaud.client_secret", value: "Client Secret", comment: "PLAUD developer Client Secret field") }
         static var domain: String { NSLocalizedString("plaud.domain", value: "Platform domain", comment: "PLAUD developer platform host") }
         static var devHint: String { NSLocalizedString("plaud.dev_hint", value: "One-time setup: get the Client ID and Client Secret at dev.plaud.ai. Your PLAUD app account (phone or email) is NOT involved.", comment: "") }
+        // ★ 2026-10-22: keys are asked exactly once and then live in the local
+        // store - the add-device page goes straight to scanning. This row is
+        // the way back in when the partner account changes.
+        static var changeKeys: String { NSLocalizedString("plaud.change_keys", value: "Change keys (Client ID / Secret)", comment: "Re-open the credential form after the first setup") }
+        static var keysStoredHint: String { NSLocalizedString("plaud.keys_stored_hint", value: "Keys are saved on this phone — connecting never asks for them again. Use “Change keys” only when switching to a different PLAUD developer app.", comment: "") }
         static var directActivate: String { NSLocalizedString("plaud.direct_activate", value: "Activate direct connect", comment: "") }
         static var directActivated: String { NSLocalizedString("plaud.direct_activated", value: "Direct connect active", comment: "") }
         static var scan: String { NSLocalizedString("plaud.scan", value: "Scan for device", comment: "") }

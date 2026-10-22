@@ -1238,6 +1238,8 @@
 "plaud.client_secret" = "Client Secret";
 "plaud.domain" = "Platform domain";
 "plaud.dev_hint" = "One-time setup: get the Client ID and Client Secret at dev.plaud.ai. Your PLAUD app account (phone or email) is NOT involved.";
+"plaud.change_keys" = "Change keys (Client ID / Secret)";
+"plaud.keys_stored_hint" = "Keys are saved on this phone — connecting never asks for them again. Use “Change keys” only when switching to a different PLAUD developer app.";
 "plaud.direct_activate" = "Activate direct connect";
 "plaud.direct_activated" = "Direct connect active";
 "plaud.scan" = "Scan for device";

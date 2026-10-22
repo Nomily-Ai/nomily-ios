@@ -1340,6 +1340,8 @@
 "plaud.client_secret" = "Client Secret";
 "plaud.domain" = "平台域名";
 "plaud.dev_hint" = "一次性配置：到 dev.plaud.ai 获取 Client ID 和 Client Secret。不需要登录你的 PLAUD App 账号（手机号或邮箱都不用）。";
+"plaud.change_keys" = "更换密钥（Client ID / Secret）";
+"plaud.keys_stored_hint" = "密钥已保存在本机——连接时不会再要求输入。只有更换 PLAUD 开发者账号时才需要点「更换密钥」。";
 "plaud.direct_activate" = "激活直连";
 "plaud.direct_activated" = "直连已激活";
 "plaud.scan" = "扫描设备";
