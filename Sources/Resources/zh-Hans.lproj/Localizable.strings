@@ -430,6 +430,7 @@
 
 /* 摘要 */
 "summarize.choose_template" = "选择模板";
+"summarize.short_source_note" = "转写内容很短——已改用简化摘要，未套用完整模板";
 "summarize.summarizing" = "正在生成摘要...";
 "summarize.error" = "错误";
 "summarize.summarizing_with" = "正在使用 %@ 生成摘要...";
@@ -1635,6 +1636,7 @@
 "asr.cloud.http" = "厂商拒绝了请求（HTTP %d）";
 "asr.cloud.missing" = "%@ 没有填写";
 "asr.cloud.bad_endpoint" = "地址不是合法的 URL";
+"asr.cloud.bad_credentials" = "凭据被拒绝——请检查密钥与该账号的权限";
 "asr.cloud.timeout" = "等不到回应——连不上，或者区域填错了";
 "asr.cloud.unreachable" = "连不上这个主机——检查地址或网络";
 "asr.cloud.model" = "模型";
@@ -1649,6 +1651,14 @@
 "asr.cloud.field.accessKey" = "Access key ID";
 "asr.cloud.field.secretKey" = "Secret access key";
 "asr.cloud.field.region" = "区域";
+/* 国内四家（2026-10-22）的字段名 */
+"asr.cloud.field.accessKeyId" = "AccessKey ID";
+"asr.cloud.field.accessKeySecret" = "AccessKey Secret";
+"asr.cloud.field.baiduSecretKey" = "Secret Key";
+"asr.cloud.field.appId" = "APPID";
+"asr.cloud.field.apiSecret" = "API Secret";
+"asr.cloud.field.secretId" = "SecretId";
+"asr.cloud.field.tencentSecretKey" = "SecretKey";
 "find.notify_denied" = "这个 App 的通知权限是关的，断开提醒响不了。到系统设置里打开。";
 "find.open_settings" = "打开系统设置";
 "find.test_alert" = "发一条测试通知";

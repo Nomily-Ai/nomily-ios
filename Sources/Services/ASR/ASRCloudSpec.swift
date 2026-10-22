@@ -61,6 +61,10 @@ struct ASRCloudSpec: Identifiable, Equatable {
     /// Tile colour, same shape as `LLMProviderSpec.tint`.
     var tint: (r: Double, g: Double, b: Double) {
         switch id {
+        case "aliyun":     return (0.98, 0.43, 0.02)   // Aliyun orange
+        case "baidu":      return (0.16, 0.20, 0.88)   // Baidu blue
+        case "xfyun":      return (0.10, 0.36, 0.95)   // iFlytek blue
+        case "tencent":    return (0.00, 0.32, 0.85)   // Tencent cloud blue
         case "google":     return (0.26, 0.52, 0.96)
         case "aws":        return (0.90, 0.55, 0.10)
         case "deepgram":   return (0.05, 0.62, 0.53)
@@ -70,11 +74,91 @@ struct ASRCloudSpec: Identifiable, Equatable {
         }
     }
 
-    static let all: [ASRCloudSpec] = [google, aws, deepgram, assemblyAI, gladia, watson]
+    // ★ 2026-10-22 ("国内 ASR 语音也要加入进去"): the four Chinese vendors lead
+    // the list — this app's primary audience transcribes Chinese, and scrolling
+    // past six western vendors to reach Aliyun would read as an afterthought.
+    static let all: [ASRCloudSpec] = [aliyun, baidu, xfyun, tencent,
+                                      google, aws, deepgram, assemblyAI, gladia, watson]
 
     static func find(_ id: String) -> ASRCloudSpec? { all.first { $0.id == id } }
 
     // MARK: - Catalogue
+
+    static let aliyun = ASRCloudSpec(
+        id: "aliyun",
+        name: "阿里云智能语音",
+        brandAsset: "BrandAliyun",
+        tagline: "Paraformer · 中文识别强项",
+        fields: [
+            Field(id: "accessKeyId", kind: .secret, label: "AccessKey ID",
+                  placeholder: "LTAI…"),
+            Field(id: "accessKeySecret", kind: .secret, label: "AccessKey Secret",
+                  placeholder: "••••••••"),
+        ],
+        defaultEndpoint: "https://nls-meta.cn-shanghai.aliyuncs.com",
+        endpointEditable: false,
+        models: ["录音文件识别（Paraformer）", "一句话识别", "实时语音识别"],
+        console: "ram.console.aliyun.com → 用户 → 创建 AccessKey（需开通「智能语音交互」）",
+        note: "探测用 AccessKey 签名调 nls-meta 的 CreateToken——拿到的 token 就是它家转写真正用的凭据，所以这个探测是真鉴权，不是空跑。"
+    )
+
+    static let baidu = ASRCloudSpec(
+        id: "baidu",
+        name: "百度智能云语音",
+        brandAsset: "BrandBaidu",
+        tagline: "短语音识别 · 中文基础好",
+        fields: [
+            Field(id: "apiKey", kind: .secret, label: "API Key",
+                  placeholder: "应用 API Key"),
+            Field(id: "baiduSecretKey", kind: .secret, label: "Secret Key",
+                  placeholder: "••••••••"),
+        ],
+        defaultEndpoint: "https://aip.baidubce.com",
+        endpointEditable: false,
+        models: ["短语音识别-标准版", "短语音识别-极速版", "远场语音识别"],
+        console: "console.bce.baidu.com → 语音技术 → 应用列表（创建应用后才有 AK/SK）",
+        note: "鉴权走 OAuth2：AK/SK 换 access_token，转写也用同一个 token，所以探测通过即代表凭据可用。"
+    )
+
+    static let xfyun = ASRCloudSpec(
+        id: "xfyun",
+        name: "讯飞开放平台",
+        brandAsset: "BrandXfyun",
+        tagline: "听写/转写 · 中文老牌",
+        fields: [
+            Field(id: "appId", kind: .plain, label: "APPID",
+                  placeholder: "控制台里的 APPID"),
+            Field(id: "apiKey", kind: .secret, label: "API Key",
+                  placeholder: "APIKey"),
+            Field(id: "apiSecret", kind: .secret, label: "API Secret",
+                  placeholder: "••••••••"),
+        ],
+        defaultEndpoint: "https://iat-api.xfyun.cn/v2/iat",
+        endpointEditable: false,
+        models: ["听写 iat（短语音/实时）", "语音转写 asr（长音频）"],
+        console: "console.xfyun.cn → 语音听写/语音转写 → 服务接口认证信息",
+        note: "鉴权是 host+date 的 HMAC-SHA256 签名（date 与服务器时差要在 5 分钟内）。探测成功返回 HTTP 101——它家的识别入口是 WebSocket，握手通过即签名有效。"
+    )
+
+    static let tencent = ASRCloudSpec(
+        id: "tencent",
+        name: "腾讯云语音识别",
+        brandAsset: "BrandTencent",
+        tagline: "录音文件/实时 · 一句话",
+        fields: [
+            Field(id: "secretId", kind: .secret, label: "SecretId",
+                  placeholder: "AKID…"),
+            Field(id: "tencentSecretKey", kind: .secret, label: "SecretKey",
+                  placeholder: "••••••••"),
+            Field(id: "region", kind: .plain, label: "Region",
+                  placeholder: "ap-shanghai"),
+        ],
+        defaultEndpoint: "",
+        endpointEditable: false,
+        models: ["16k_zh 普通话", "16k_en 英语", "16k_yue 粤语", "16k_zh_medical 医疗"],
+        console: "console.cloud.tencent.com → 访问管理 → API 密钥管理",
+        note: "地址固定 asr.tencentcloudapi.com，区域是请求参数（TC3-HMAC-SHA256 签名）。探测调热词表列表——最便宜的已鉴权读。"
+    )
 
     static let google = ASRCloudSpec(
         id: "google",
@@ -186,6 +270,9 @@ struct ASRCloudSpec: Identifiable, Equatable {
         case "aws":
             let r = region.isEmpty ? "us-east-1" : region
             return "https://transcribe.\(r).amazonaws.com"
+        case "tencent":
+            // Fixed host by design; the region travels as an X-TC-Region header.
+            return "https://asr.tencentcloudapi.com"
         default:
             return defaultEndpoint
         }

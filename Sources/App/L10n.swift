@@ -1507,6 +1507,12 @@ enum L10n {
         static var badEndpoint: String {
             NSLocalizedString("asr.cloud.bad_endpoint", value: "The address isn't a valid URL", comment: "")
         }
+        /// Baidu/腾讯 answer 200 with an error object when the key is wrong —
+        /// that is "rejected credentials", not "no answer".
+        static var badCredentials: String {
+            NSLocalizedString("asr.cloud.bad_credentials", value: "The credentials were rejected — check the key and the permissions",
+                              comment: "Probe got an authenticated-but-rejected answer (HTTP 200 + error body)")
+        }
         static var timeout: String {
             NSLocalizedString("asr.cloud.timeout", value: "No answer in time — unreachable, or the region is wrong", comment: "")
         }
@@ -3748,6 +3754,12 @@ enum L10n {
 
     enum Summarize {
         static var chooseTemplate: String { NSLocalizedString("summarize.choose_template", comment: "") }
+        /// Shown in the job notes when the source was so short that the full
+        /// template was replaced by the two-sentence reply.
+        static var shortSourceNote: String {
+            NSLocalizedString("summarize.short_source_note", value: "The transcript is very short — a simplified summary was used instead of the full template",
+                              comment: "Job note: the template was skipped because the source is tiny")
+        }
         static var summarizing: String { NSLocalizedString("summarize.summarizing", comment: "") }
         static var error: String { NSLocalizedString("summarize.error", comment: "") }
         static func summarizingWith(_ provider: String) -> String {

@@ -2393,7 +2393,10 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
                 self.recordSessionID = current
                 if self.recordStartedAt == nil { self.recordStartedAt = Date() }
             }
-            PlaudDeviceAgent.shared.syncFile(sessionId: current, start: 0, end: 0)
+            // The *decode* stream (the one that feeds live transcription)
+            // opens through `openLiveStream` — that is where the audio
+            // actually comes from, and it arms the no-PCM watchdog.
+            openLiveStream(sid: current, start: 0)
             DispatchQueue.main.async { self.liveStreaming = true }
         } else {
             // Auto-pull: a card that just connected with recordings on it should
@@ -2616,22 +2619,28 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         TicNoteDiagLog.log("PLAUD-PCM", "open live stream sid=\(sid) start=\(start)")
         // ★★ 2026-10-22 ("实时转录还是没出文字") — **this was the bug.**
         //
-        // The SDK's `syncFile(sessionId:start:end:)` is protocol CMD 28, whose
-        // payload is `sessionId:u32, lastPosition:u32, fileSize:u32`
-        // (03-逆向/PLAUD/协议标准-PLAUD-2026-10-22.md §4.2). So `start` is
-        // "resume from byte N" and `end` is the file size — not a byte range.
+        // The card pushes decoded PCM through `blePcmData` **only when the sync
+        // request asks for it**: the low-level `BleAgent.syncFile` carries a
+        // `decode:` flag whose doc reads "是否同时返回解码后的数据" with
+        // `blePcmData` listed under it (PlaudBleSDK-Swift.h). The high-level
+        // `PlaudDeviceAgent.syncFile(start:end:)` has no such flag — it is the
+        // raw-Opus file transfer, and nothing in our app decodes Opus frames on
+        // that path. So every take of the day produced **zero** PCM: no
+        // `first block`, no `pcm blocks=`, and an Azure socket that sat silent.
         //
-        // We were passing the **record-start byte offset** (the card reports a
-        // constant 1024, its data offset) with `end: 0`. That asks for
-        // `[1024, 0)` — an inverted range — and the card answers by sending
-        // nothing at all. Diag proof: every session logged
-        // `open live stream … start=1024`, then `watchdog: no PCM 3s after open`,
-        // and **not one** `blocks=` line, across every take of the day.
-        //
-        // A live stream wants the documented 0/0 form ("start=end=0 → push from
-        // the beginning", §5 shortcut table). The offset belongs to the clock,
-        // not to this call.
-        PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: 0, end: 0)
+        // (`start` is "resume from byte N" per CMD 28's payload — for a fresh
+        // take that is the card's data offset, for an attach it is the file
+        // size we just listed. `end: 0` = "to the file end", which for a live
+        // take keeps growing.)
+        if let ble = PlaudDeviceAgent.shared.bleAgent {
+            ble.syncFile(sessionId: sid, start: start, end: 0, decode: true)
+        } else {
+            // The low-level agent appears only after a bind; falling back keeps
+            // the pre-bind attach path harmless instead of crashing.
+            log.warning("plaud live: bleAgent unavailable — falling back to non-decode sync")
+            TicNoteDiagLog.log("PLAUD-PCM", "bleAgent nil — non-decode sync (no PCM expected)")
+            PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: start, end: 0)
+        }
         DispatchQueue.main.async {
             self.liveStreaming = true
             self.livePCMBytes = 0
@@ -2671,9 +2680,13 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
                 PlaudDeviceAgent.shared.stopSyncFile()
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 guard !Task.isCancelled, self.liveStreaming, self.recordSessionID == sid else { return }
-                // 0/0 again: a retry with different parameters would make the two
-                // attempts incomparable, and 0/0 is the documented live form.
-                PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: 0, end: 0)
+                // Same decode flag as the first open: a non-decode retry would
+                // reproduce the exact silence the retry exists to fix.
+                if let ble = PlaudDeviceAgent.shared.bleAgent {
+                    ble.syncFile(sessionId: sid, start: 0, end: 0, decode: true)
+                } else {
+                    PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: 0, end: 0)
+                }
             }
 
             guard self.liveStreaming, self.recordSessionID == sid else { return }
@@ -2981,12 +2994,19 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
     }
 
     func bleSyncFileHead(sessionId: Int, status: Int) {
+        // ★ 2026-10-22: always log to the diag file, not only the failures.
+        // "实时转写没字" was undiagnosable because a rejected CMD 28 and an
+        // accepted one looked identical (this callback used to be silent on
+        // success, and os.log never reaches ticnote-ble.log). status 0 =
+        // the card accepted the stream and (with decode on) will push PCM.
+        TicNoteDiagLog.log("PLAUD-PCM", "sync head sid=\(sessionId) status=\(status)")
         if status != 0 {
             log.warning("plaud sync head status \(status) for \(sessionId)")
         }
     }
 
     func bleSyncFileTail(sessionId: Int, crc: Int) {
+        TicNoteDiagLog.log("PLAUD-PCM", "sync tail sid=\(sessionId) crc=\(crc)")
         log.info("plaud sync tail \(sessionId)")
     }
 

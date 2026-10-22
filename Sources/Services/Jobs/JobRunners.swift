@@ -88,6 +88,13 @@ enum JobRunners {
     ) async throws {
         guard let prompt = job.prompt else { throw JobSourceMissing(what: L10n.Jobs.sourcePrompt) }
         let source = try transcriptText(for: job.clipName)
+        // ★ 2026-10-22 ("转写只有简短一句话的话使用模板，模板文字比一句话还多"):
+        // a meeting-minutes skeleton on a one-sentence voice note produces more
+        // headings than content — the same failure Plaud and Vobot both avoid by
+        // **not applying the full template** to a tiny source. The gate lives
+        // here (the runner), not in the sheet, so the queue re-runs after an app
+        // kill take exactly the same path.
+        let effectivePrompt = Self.adaptedPrompt(templatePrompt: prompt, source: source)
 
         BackgroundKeeper.shared.acquire(.summary)
         defer { BackgroundKeeper.shared.release(.summary) }
@@ -103,7 +110,7 @@ enum JobRunners {
         let outcome: LLMCompletionService.Outcome
         do {
             outcome = try await LLMCompletionService.completeResilient(
-                systemPrompt: prompt,
+                systemPrompt: effectivePrompt,
                 userContent: source,
                 config: config,
                 // ★ Reuse finished chunk sections **only on a retry**. On a first
@@ -145,8 +152,80 @@ enum JobRunners {
 
         // The note goes last: it's part of the **result**, and any earlier step throwing shouldn't leave behind
         // the illusion of "it finished and everything was fine".
-        reporter.notes(notices(for: outcome, config: config), outcome.completion.truncated)
+        var notes = notices(for: outcome, config: config)
+        if effectivePrompt != prompt {
+            notes.append(L10n.Summarize.shortSourceNote)
+        }
+        reporter.notes(notes, outcome.completion.truncated)
         log.info("summary done for \(job.clipName, privacy: .public) via \(outcome.providerKey, privacy: .public)")
+    }
+
+    // MARK: - Short-source adaptation (Plaud/Vobot parity)
+
+    /// Thresholds in "content weight" (CJK characters count one each, Latin
+    /// words count one each — see `contentWeight`). Below the gate the source
+    /// is a sentence or two; below the compact line it is a short paragraph.
+    private static let shortGateWeight = 60
+    private static let compactThreshold = 500
+
+    /// Adapt the template to the size of the source.
+    ///
+    /// * **Tiny** (a sentence or two): the template is replaced entirely by a
+    ///   two-sentence reply prompt. No headings, no tables, no skeleton — the
+    ///   output must never be longer than the thing it summarises.
+    /// * **Short but real** (a short paragraph): the template stays, but with
+    ///   an instruction to drop empty sections and keep the output no longer
+    ///   than the source. This is the "structured minutes on a 30 s note"
+    ///   case that produces three pages of `## 待确认` placeholders.
+    /// * Anything else: the template verbatim.
+    static func adaptedPrompt(templatePrompt: String, source: String) -> String {
+        let weight = contentWeight(source)
+        if weight < shortGateWeight {
+            return NSLocalizedString("summarize.short_prompt", value: """
+            The transcript below is very short — most likely a quick voice note. \
+            Reply in the user's language with at most two short sentences: what was said, \
+            plus any task, date or decision it contains. \
+            Do NOT use headings, tables or template sections, and never write more text than the transcript itself.
+            """, comment: "System prompt replacing the full template when the transcript is a sentence or two")
+        }
+        if weight < compactThreshold {
+            return templatePrompt + "\n\n" + NSLocalizedString("summarize.compact_note", value: """
+            The source text is short. Keep the output shorter than the source: drop every \
+            section that has nothing real to say instead of filling the template with placeholders.
+            """, comment: "Appended to the template prompt when the source is a short paragraph")
+        }
+        return templatePrompt
+    }
+
+    /// One number for "how much is actually said here": CJK characters count
+    /// one each (they are the meaning-bearing unit), Latin words count one
+    /// each. Timestamps and speaker labels ride along, which biases upward —
+    /// fine for a threshold that is deliberately generous.
+    static func contentWeight(_ text: String) -> Int {
+        var cjk = 0
+        var words = 0
+        var inWord = false
+        for ch in text {
+            if isCJK(ch) {
+                cjk += 1
+                inWord = false
+            } else if ch.isLetter {
+                if !inWord { words += 1; inWord = true }
+            } else {
+                inWord = false
+            }
+        }
+        return cjk + words
+    }
+
+    private static func isCJK(_ ch: Character) -> Bool {
+        guard let scalar = ch.unicodeScalars.first else { return false }
+        switch scalar.value {
+        case 0x2E80...0x9FFF, 0x3400...0x4DBF, 0xF900...0xFAFF, 0xFF00...0xFFEF:
+            return true
+        default:
+            return false
+        }
     }
 
     /// Translation. Used to be in `ClipDetailView.runTranslate`, split into a transcript branch and a summary branch.
