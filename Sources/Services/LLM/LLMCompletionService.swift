@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import os.log
 
@@ -303,6 +304,7 @@ struct LLMCompletionService {
     static func completeResilient(
         systemPrompt: String, userContent: String, config: AppConfig,
         allowChunking: Bool = true, preferred: String? = nil,
+        allowSectionReuse: Bool = true,
         onChunk: (@MainActor (Int, Int) -> Void)? = nil
     ) async throws -> Outcome {
         var chain = candidateChain(config)
@@ -317,7 +319,9 @@ struct LLMCompletionService {
         if allowChunking, userContent.count > maxCharsPerRequest {
             return try await completeChunked(
                 systemPrompt: systemPrompt, userContent: userContent,
-                chain: chain, config: config, onChunk: onChunk
+                chain: chain, config: config,
+                allowSectionReuse: allowSectionReuse,
+                onChunk: onChunk
             )
         }
         return try await runChain(
@@ -381,6 +385,7 @@ struct LLMCompletionService {
     private static func completeChunked(
         systemPrompt: String, userContent: String,
         chain: [String], config: AppConfig,
+        allowSectionReuse: Bool,
         onChunk: (@MainActor (Int, Int) -> Void)?
     ) async throws -> Outcome {
         let chunks = split(userContent)
@@ -396,7 +401,26 @@ struct LLMCompletionService {
 
         var warnings: [String] = []
         var sections: [String] = []
+        var reused = 0
         for (index, chunk) in chunks.enumerated() {
+            let key = sectionCacheKey(prompt: sectionSystemPrompt(systemPrompt, index: index, total: chunks.count),
+                                      chunk: chunk)
+            // ★ 2026-10-22 ("有转写但摘要生成不下去"): a 3-hour transcript is six
+            // sequential calls on OpenRouter, i.e. minutes. Before this, one
+            // failure near the end — a dropped Wi-Fi, the app being killed, a
+            // single chunk timing out — threw away every section already paid
+            // for and the retry started again at chunk 1. Now each finished
+            // section is cached under a hash of (instruction + chunk), so a
+            // retry resumes where it stopped. The cache is pruned by age and
+            // lives in Caches (the system may purge it — recomputing is only
+            // slow, never wrong).
+            if allowSectionReuse, let hit = cachedSection(key) {
+                sections.append(hit)
+                reused += 1
+                TicNoteDiagLog.log("LLM", "chunk \(index + 1)/\(chunks.count) reused from cache")
+                await onChunk?(index + 1, chunks.count + 1)
+                continue
+            }
             let outcome = try await runChain(
                 chain: chain,
                 systemPrompt: sectionSystemPrompt(systemPrompt, index: index, total: chunks.count),
@@ -406,8 +430,13 @@ struct LLMCompletionService {
             )
             warnings = outcome.warnings
             sections.append(outcome.completion.text)
+            storeSection(outcome.completion.text, key: key)
+            TicNoteDiagLog.log("LLM", "chunk \(index + 1)/\(chunks.count) ok chars=\(outcome.completion.text.count) provider=\(outcome.providerKey)")
             // The merge step counts as one more unit of progress, otherwise it would sit at "n/n" waiting.
             await onChunk?(index + 1, chunks.count + 1)
+        }
+        if reused > 0 {
+            log.notice("reused \(reused, privacy: .public)/\(chunks.count, privacy: .public) cached sections")
         }
 
         let merged = try await runChain(
@@ -418,6 +447,60 @@ struct LLMCompletionService {
         )
         await onChunk?(chunks.count + 1, chunks.count + 1)
         return merged
+    }
+
+    // MARK: - Per-chunk section cache (resume a long summary)
+
+    /// Directory holding one file per finished section.
+    private static var sectionCacheDirectory: URL? {
+        guard let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let dir = base.appendingPathComponent("llm-sections", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Hash of (instruction + chunk text). Both halves matter: the same
+    /// transcript summarised with a different template must **not** reuse the
+    /// old sections — that is the "changed the template, got the old summary"
+    /// class of bug.
+    private static func sectionCacheKey(prompt: String, chunk: String) -> String {
+        let digest = SHA256.hash(data: Data((prompt + "\u{0}" + chunk).utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func cachedSection(_ key: String) -> String? {
+        guard let dir = sectionCacheDirectory else { return nil }
+        let url = dir.appendingPathComponent("\(key).txt")
+        guard let text = try? String(contentsOf: url, encoding: .utf8),
+              !text.isEmpty else { return nil }
+        // Touch the file so the prune below keeps what is actually in use.
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+        return text
+    }
+
+    private static func storeSection(_ text: String, key: String) {
+        guard let dir = sectionCacheDirectory, !text.isEmpty else { return }
+        try? text.data(using: .utf8)?.write(to: dir.appendingPathComponent("\(key).txt"), options: .atomic)
+        pruneSectionCache(dir)
+    }
+
+    /// Two-day retention, and only when the folder actually grew — a running
+    /// summary touches this once per chunk, and a directory scan per chunk on a
+    /// six-chunk run is wasted work.
+    private static func pruneSectionCache(_ dir: URL) {
+        let keys: [URLResourceKey] = [.contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: keys, options: .skipsHiddenFiles
+        ), files.count > 40 else { return }
+        let cutoff = Date().addingTimeInterval(-2 * 24 * 3600)
+        for file in files {
+            let modified = (try? file.resourceValues(forKeys: Set(keys)))?.contentModificationDate
+            if let modified, modified < cutoff {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
     }
 
     /// The chunking instruction. **Appended after the original system prompt**, so that every constraint in the template

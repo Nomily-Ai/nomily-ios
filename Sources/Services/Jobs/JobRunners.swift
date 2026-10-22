@@ -106,6 +106,11 @@ enum JobRunners {
                 systemPrompt: prompt,
                 userContent: source,
                 config: config,
+                // ★ Reuse finished chunk sections **only on a retry**. On a first
+                // run there is nothing cached anyway, and on a deliberate
+                // "generate again" the user expects new text — resurrecting the
+                // old sections would make the button look like it did nothing.
+                allowSectionReuse: job.attempts > 0,
                 onChunk: { done, total in reporter.progress(done, total) }
             )
         } catch {
