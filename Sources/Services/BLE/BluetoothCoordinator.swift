@@ -981,6 +981,13 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
             do {
                 let result = try await group.next()!
                 group.cancelAll()
+                // ★ 2026-10-22 ("当前 V05E 里面没有卡片丢失的板块，其他的卡片有"):
+                // the D·NOTE/V05E card is the one family that does **not** go
+                // through `adoptRecorderLink`, so it needs its own registration
+                // here — otherwise its "find card" page has no name to look for
+                // and its drops are recorded without a label.
+                PlaudCardFinder.shared.register(cardName: peripheral.name,
+                                                label: result.displayName)
                 return result
             } catch {
                 // Resume the continuation BEFORE cancelling the task
@@ -1290,6 +1297,14 @@ extension BluetoothCoordinator: CBCentralManagerDelegate {
                 return
             }
             if self.client?.peripheral.identifier == peripheral.identifier {
+                // ★ 2026-10-22: record the drop for the shared find page before the
+                // client is discarded. `userInitiatedDisconnect` is the flag that
+                // already distinguishes "the user tapped disconnect" from "the card
+                // walked away", so reuse it instead of inventing a second rule.
+                let finderName = self.client?.displayName
+                let lostUnexpectedly = !self.userInitiatedDisconnect
+                PlaudCardFinder.shared.noteDisconnected(unexpected: lostUnexpectedly,
+                                                        cardName: finderName)
                 self.client?.handleDisconnect(error: error)
                 self.client = nil
                 self.connectedDeviceSID = nil

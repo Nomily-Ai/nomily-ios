@@ -340,6 +340,14 @@ enum L10n {
             String(format: NSLocalizedString("plaud.card_selected", value: "Selected: %@ — activate below to connect", comment: ""), name)
         }
         static var cardGone: String { NSLocalizedString("plaud.card_gone", value: "The selected card is out of range — scan again.", comment: "") }
+        /// ★ 2026-10-22: a switch with no visible progress is indistinguishable from
+        /// a tap that did nothing, which is exactly how the bug was reported.
+        static func switching(_ card: String) -> String {
+            String(format: NSLocalizedString("plaud.switching", value: "Switching to %@…", comment: "Card switch in progress; %@ = card name"), card)
+        }
+        static func switchFailed(_ card: String) -> String {
+            String(format: NSLocalizedString("plaud.switch_failed", value: "Couldn't reach %@ — wake the card and try again.", comment: "Card switch gave up after 15 s; %@ = card name"), card)
+        }
         static var recordingNow: String { NSLocalizedString("plaud.recording_now", value: "Card is recording", comment: "") }
         static var stopRecord: String { NSLocalizedString("plaud.stop_record", value: "Stop recording", comment: "") }
         static var startRecord: String { NSLocalizedString("plaud.start_record", value: "Start recording", comment: "") }
@@ -1431,7 +1439,20 @@ enum L10n {
     enum ASRCloud {
         static var title: String {
             NSLocalizedString("asr.cloud.title", value: "Cloud services",
-                              comment: "Section header: Google / AWS / Deepgram / AssemblyAI / Gladia / IBM Watson")
+                              comment: "Section header: Azure / Google / AWS / Deepgram / AssemblyAI / Gladia / IBM Watson")
+        }
+        /// ★ 2026-10-22: Azure sits at the top of this list now, and the one thing
+        /// that matters about it is that it is the only vendor **wired into the
+        /// engine** — otherwise the list reads as "seven equivalent options".
+        static var azureWired: String {
+            NSLocalizedString("asr.cloud.azure_wired", value: "Wired into transcription",
+                              comment: "Badge on the Azure row: its credentials actually drive the transcription pipeline")
+        }
+        static var needsVerify: String {
+            NSLocalizedString("asr.cloud.needs_verify", value: "Verify", comment: "Azure row: key present but never verified")
+        }
+        static var credentials: String {
+            NSLocalizedString("asr.cloud.credentials", value: "Credentials", comment: "Section header inside the Azure sheet")
         }
         static var footer: String {
             NSLocalizedString("asr.cloud.footer",

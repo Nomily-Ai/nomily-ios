@@ -38,6 +38,13 @@ struct DeviceSheet: View {
                     behaviorSection(switches)
                         .disabled(isRecording)
                 }
+                // ★ 2026-10-22 ("当前 V05E 里面没有卡片丢失的板块，其他的卡片有"):
+                // the V05E / D·NOTE card has its own device page (this one, driven by
+                // `DnoteClient`) instead of `RecorderSheet`, so the shared "find card"
+                // section has to be mounted here too. Same component, same behaviour:
+                // last-seen time + place, the 20-entry history, the RSSI radar and the
+                // drop alert. `isConnected` decides between "connected" and the radar.
+                FindCardSection(connected: client.isConnected)
                 dangerZone
                     .disabled(isRecording)
                 disconnectSection
@@ -145,6 +152,9 @@ struct DeviceSheet: View {
         .task {
             await refresh()
         }
+        // The find-card scan costs radio time and is only useful while its section
+        // is on screen — same contract as `RecorderSheet` / `PlaudDeviceDetailView`.
+        .onDisappear { PlaudCardFinder.shared.setScanning(false) }
     }
 
     // MARK: sections

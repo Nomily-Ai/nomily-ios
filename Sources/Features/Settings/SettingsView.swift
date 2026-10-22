@@ -406,14 +406,12 @@ struct ASRProvidersView: View {
     /// 2026-10-15: to read the transcription queue state (`pending` / `inFlight`).
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
-    @State private var azureVerify: VerifyState = .idle
     /// Active connectivity test for the local server (added 2026-10-13).
     /// `detail` / `warning` are separated: `VerifyState.success` carries no value,
     /// And after "connected", a detail line and a warning line for "a port did not respond" must be shown.
     @State private var localProbe: VerifyState = .idle
     @State private var localProbeDetail: String?
     @State private var localProbeWarning: String?
-    @State private var showAzureHelp = false
     @State private var showLeaveWarning = false
     /// Connectivity/auth test for the custom (OpenAI-compatible) server.
     @State private var customProbe: VerifyState = .idle
@@ -429,10 +427,12 @@ struct ASRProvidersView: View {
     var body: some View {
         Form {
             transcriptionSection
-            azureSection
-            // ★ 2026-10-22: the six cloud vendors sit between Azure and the
-            // self-hosted options — they are "someone else's cloud", like Azure,
-            // and above the LAN/WSS servers someone runs themselves.
+            // ★ 2026-10-22 ("ASR 里面 Azure Speech 这个没有在云转写里面"):
+            // Azure's own section used to sit here, **above** the cloud list — so
+            // the only vendor that can actually transcribe was the one missing
+            // from "云转写". It is now the first row of `ASRCloudSection` (its
+            // sheet is `AzureSpeechSheet`), which keeps one list of cloud vendors
+            // instead of two places writing the same credentials.
             ASRCloudSection()
             localSection
             customSection
@@ -440,9 +440,6 @@ struct ASRProvidersView: View {
         }
         .navigationTitle(L10n.Settings.asrProviders)
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { azureVerify = storedAzureVerify }
-        .onDisappear { configService.saveNow() }
-        .sheet(isPresented: $showAzureHelp) { AzureSpeechSetupGuide() }
         // Partial or unverified configurations are excluded from transcription; report this before returning so the user isn’t surprised during transcription.
         .navigationBarBackButtonHidden(azureNeedsAttention)
         .toolbar {
@@ -473,15 +470,6 @@ struct ASRProvidersView: View {
 
     private var azureIncomplete: Bool {
         azureKeyMissing || azureRegionMissing
-    }
-
-    /// When re‑entering the page, show the previous verification result; otherwise “Saved” and “Verified usable” look identical in the UI.
-    private var storedAzureVerify: VerifyState {
-        switch configService.config.asrProviders.azure?.verification {
-        case true: return .success
-        case false: return .failed(L10n.ASR.lastVerifyFailed)
-        case nil: return .idle
-        }
     }
 
     private var configuredASR: [(key: String, label: String)] {
@@ -656,96 +644,6 @@ struct ASRProvidersView: View {
         .padding(.vertical, 2)
     }
 
-    private var azureSection: some View {
-        Section {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    SecureField(L10n.ASR.subscriptionKey, text: azureKeyBinding)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.body.monospaced())
-                    keyHint(configService.config.asrProviders.azure?.key)
-                    if azureKeyMissing {
-                        fieldError(L10n.ASR.keyRequired)
-                    }
-                    // The reason for verification failure must be displayed in the UI: changing the button to a red X alone leaves the user unaware of “why”.
-                    if case .failed(let reason) = azureVerify {
-                        fieldError(reason)
-                    }
-                }
-                verifyButton(azureVerify) {
-                    let key = configService.config.asrProviders.azure?.key ?? ""
-                    let region = configService.config.asrProviders.azure?.region ?? ""
-                    // No network call while a required field is empty — the
-                    // user gets a per-field hint instead of the provider's
-                    // English "Key and region required".
-                    guard !key.isEmpty, !region.isEmpty else {
-                        // The per-field hints below are already on screen for
-                        // whichever box is empty; nothing to add here.
-                        azureVerify = .idle
-                        return
-                    }
-                    azureVerify = .verifying
-                    let r = await LLMModelService.verifyAzure(key: key, region: region)
-                    azureVerify = r.ok ? .success : .failed(r.error ?? L10n.ASR.verifyFailed)
-                    // The conclusion must be persisted: only then will the next page load distinguish between "saved" and "verification passed",
-                    // and the transcription pipeline will know that these credentials have been rejected.
-                    var azure = configService.config.asrProviders.azure ?? .init(key: key, region: region)
-                    azure.verifiedFingerprint = AppConfig.AsrProviders.Azure.fingerprint(key: key, region: region)
-                    azure.verifiedOK = r.ok
-                    configService.config.asrProviders.azure = azure
-                    configService.scheduleSave()
-                }
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                TextField(L10n.ASR.region, text: azureRegionBinding)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                if azureRegionMissing {
-                    fieldError(L10n.ASR.regionRequired)
-                }
-            }
-            azureStatusRow
-        } header: {
-            HStack(spacing: 4) {
-                Text(L10n.ASR.azureSpeech)
-                Spacer()
-                Button(L10n.ASR.azureHowToGetKey) { showAzureHelp = true }
-                    .buttonStyle(.plain)
-                    .font(.caption)
-                    .foregroundColor(.accentColor)
-                    .textCase(nil)
-            }
-        } footer: {
-            // Providing only the key‑retrieval step leaves the user unable to judge “why configure” and “where the audio was sent”.
-            // Since the page lacks a save button, without clear wording the user won’t know whether those previous entries count.
-            Text(L10n.ASR.azurePurposeFooter + "\n\n" + L10n.ASR.autosaveNote)
-        }
-    }
-
-    /// “Filled” and “Usable” are different: only after successful verification can we claim the configuration is usable.
-    @ViewBuilder
-    private var azureStatusRow: some View {
-        switch azureVerify {
-        case .success:
-            Label(L10n.ASR.statusVerified, systemImage: "checkmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.green)
-        case .verifying:
-            Text(L10n.ASR.statusVerifying)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        case .failed:
-            EmptyView()   // The failure reason is already displayed below the key field.
-        case .idle:
-            if !azureIncomplete {
-                Text(L10n.ASR.statusUnverified)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
     private var localSection: some View {
         Section {
             VStack(alignment: .leading, spacing: 2) {
@@ -889,33 +787,6 @@ struct ASRProvidersView: View {
         Text(text)
             .font(.caption2)
             .foregroundStyle(.red)
-    }
-
-    private var azureKeyBinding: Binding<String> {
-        Binding(
-            get: { configService.config.asrProviders.azure?.key ?? "" },
-            set: { new in
-                var azure = configService.config.asrProviders.azure ?? .init(key: "", region: "")
-                azure.key = new
-                configService.config.asrProviders.azure = azure
-                // Changing credentials invalidates the previous verification result.
-                azureVerify = .idle
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var azureRegionBinding: Binding<String> {
-        Binding(
-            get: { configService.config.asrProviders.azure?.region ?? "" },
-            set: { new in
-                var azure = configService.config.asrProviders.azure ?? .init(key: "", region: "")
-                azure.region = new
-                configService.config.asrProviders.azure = azure
-                azureVerify = .idle
-                configService.scheduleSave()
-            }
-        )
     }
 
     // MARK: - Custom (OpenAI-compatible) server
@@ -1552,6 +1423,15 @@ private struct ProviderConfigSheet: View {
         return list
     }
 
+    /// Unfiltered list for the pushed picker: the picker has its **own** search,
+    /// and handing it the in-form query would have made "the list looks empty"
+    /// read as "this vendor has no models".
+    private var pickerOptions: [String] {
+        var list = models.isEmpty ? spec.curatedModels : models
+        if !model.isEmpty, !list.contains(model) { list.insert(model, at: 0) }
+        return list
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -1612,9 +1492,24 @@ private struct ProviderConfigSheet: View {
                             .autocorrectionDisabled()
                             .font(.body.monospaced())
                     } else {
-                        Picker(L10n.LLM.model, selection: modelBinding) {
-                            Text(L10n.LLM.selectModel).tag("")
-                            ForEach(options, id: \.self) { Text($0).tag($0) }
+                        // ★ 2026-10-22: was an inline `Picker`. See `ModelPickerView`
+                        // for why the first tap used to be swallowed — the pushed
+                        // list re-laid itself out mid-animation.
+                        NavigationLink {
+                            ModelPickerView(title: L10n.LLM.model,
+                                            options: pickerOptions,
+                                            current: model,
+                                            allowsEmpty: true) { picked in
+                                modelBinding.wrappedValue = picked
+                            }
+                        } label: {
+                            LabeledContent(L10n.LLM.model) {
+                                Text(model.isEmpty ? L10n.LLM.selectModel : model)
+                                    .font(model.isEmpty ? .body : .body.monospaced())
+                                    .foregroundStyle(model.isEmpty ? .secondary : .primary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
                         }
                     }
 
@@ -1706,6 +1601,10 @@ private struct ProviderConfigSheet: View {
                     }
                 }
             }
+            // A focused text field swallows the first tap on the next row (it is
+            // spend dismissing the keyboard). This page is mostly fields, so let
+            // the scroll dismiss the keyboard instead of eating taps.
+            .scrollDismissesKeyboard(.immediately)
             .navigationTitle(spec.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1860,7 +1759,7 @@ private struct ProviderConfigSheet: View {
 
 // MARK: - Azure Speech setup guide
 
-private struct AzureSpeechSetupGuide: View {
+struct AzureSpeechSetupGuide: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -2441,6 +2340,25 @@ struct DevicesLibraryView: View {
 
     private var devicesSection: some View {
         Section(L10n.DevicesLibrary.knownDevices) {
+            // ★ 2026-10-22 ("切换卡片点击了但是没有同步切换卡片过去"): a switch is a
+            // BLE round trip — wake, scan, bind — and it produced **no** visible
+            // change until it finished (or silently failed). This line makes it
+            // observable, and the row roles below flip the instant `pairedSN`
+            // moves, so the list agrees with the card being switched to.
+            if let note = plaudDirect.switchNote {
+                HStack(spacing: 8) {
+                    if plaudDirect.phase.isBusy {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.caption)
+                    }
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
             if deviceRows.isEmpty {
                 Text(L10n.DevicesLibrary.noDevicesYet)
                     .foregroundStyle(.secondary)

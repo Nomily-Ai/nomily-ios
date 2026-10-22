@@ -106,6 +106,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
     @Published private(set) var scanned: [ScannedCard] = []
     @Published private(set) var isConfigured = false
     @Published private(set) var pairedSN: String?
+    /// ★ 2026-10-22 ("切换卡片点击了但是没有同步切换过去"): "switching to X…" /
+    /// "couldn't reach X" — the one line that makes a card switch visible while it
+    /// is happening. Cleared the moment a link comes up.
+    @Published private(set) var switchNote: String?
     @Published private(set) var syncMessage: String?
     @Published private(set) var isSyncing = false
     /// Transfer feedback (2026-10-21, 3rd round — "downloading needs work").
@@ -345,6 +349,8 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// SN we are trying to re-bind automatically (`reconnect()`). Cleared as
     /// soon as the card is seen or the attempt is abandoned.
     private var reconnectTarget: String?
+    /// Bounded wait behind `switchNote` (see `switchCard(to:)`).
+    private var switchWatchdog: Task<Void, Never>?
     // MARK: Device Recovery (docs.plaud.ai "Recovering a Plaud device")
     /// ★ 2026-10-21 (9th round): a card whose cloud and local bind state went
     /// out-of-sync locks EVERY app out — our normal handshake no longer matches
@@ -1094,15 +1100,21 @@ final class PlaudDirectService: NSObject, ObservableObject {
 
     /// Switch to a **different** remembered card.
     ///
-    /// 2026-10-22 ("我点击下来选项卡片的时候无法正确切换到对应卡片"): the ledger in
-    /// Settings → Devices listed several cards, but every PLAUD row opened the
-    /// same page — the one for `pairedSN` — so tapping card B showed card A and
-    /// nothing switched. The row now calls this instead.
+    /// 2026-10-22 ("我点击下来选项卡片的时候无法正确切换到对应卡片", then again after the
+    /// first attempt: "当前切换卡片点击了但是没有同步切换卡片过去"). Two separate defects,
+    /// and the second one is why the first fix looked like it did nothing:
     ///
-    /// It reuses `reconnect()`'s scan-and-match path rather than the SDK's
-    /// `connectBySN`: that path is the one that also goes through `ensureInitialized`
-    /// (token) and the bind callbacks that write `pairedSN`, so a switch ends in
-    /// the same state a normal connect does.
+    /// 1. The ledger rows all pushed the page bound to `pairedSN`, so tapping card B
+    ///    showed card A. (Fixed in `DevicesLibraryView` — only the active row pushes.)
+    /// 2. **`pairedSN` was left pointing at the old card while the scan ran.** Every
+    ///    downstream reader keys off it: the ledger row picks "push" vs "switch" from
+    ///    it, the pill draws its name from it, and `reconnect()` scans for *it*. So
+    ///    even when the target card was found and bound, the UI still described the
+    ///    old card — the switch looked like it never happened.
+    ///
+    /// So: point `pairedSN` at the target **first**, tell the UI what is going on
+    /// (`switchNote`), tear the old link down, then let `reconnect()` do the
+    /// scan-and-bind it already knows how to do.
     func switchCard(to sn: String) {
         guard !(sn == pairedSN && phase.isConnected) else { return }
         guard isConfigured else {
@@ -1110,17 +1122,43 @@ final class PlaudDirectService: NSObject, ObservableObject {
                 .badResponse("Direct connect is not activated yet.").localizedDescription))
             return
         }
-        if phase.isConnected { disconnect() }
-        Task {
-            try? await ensureInitialized()
-            // A sleeping card stops advertising; wake it before scanning, same as
-            // `reconnect()` — otherwise the scan finishes before it appears.
-            PlaudDeviceAgent.shared.setDeviceActive(status: 1)
-            setPhase(.connecting(name: Self.modelName(for: sn)))
-            clearScanned()
-            reconnectTarget = sn
-            PlaudDeviceAgent.shared.startScan()
-            TicNoteDiagLog.log("PLAUD", "switching card to \(sn)")
+        let targetName = Self.storedName(for: sn)
+        let wasConnected = phase.isConnected
+        TicNoteDiagLog.log("PLAUD", "switch \(pairedSN ?? "-") -> \(sn) connected=\(wasConnected)")
+        // ① Remember the target before anything else — see defect 2 above.
+        pairedSN = sn
+        UserDefaults.standard.set(sn, forKey: "plaud.paired_sn")
+        rememberInLedger(sn: sn)
+        // ② Say so on the page: a tap that produces no visible change is
+        //    indistinguishable from a tap that did nothing.
+        setSwitchNote(L10n.Plaud.switching(targetName))
+        armSwitchWatchdog(sn: sn)
+        // ③ Drop the old link. The SDK needs a beat to actually release the
+        //    connection; scanning immediately after would race it and find nothing.
+        if wasConnected { disconnect() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (wasConnected ? 0.9 : 0.1)) {
+            self.reconnect()
+        }
+    }
+
+    /// "Switching to …" banner + a bounded wait, so a failed switch says so instead
+    /// of leaving a spinner that never resolves.
+    private func setSwitchNote(_ text: String?) {
+        DispatchQueue.main.async { self.switchNote = text }
+    }
+
+    private func armSwitchWatchdog(sn: String) {
+        switchWatchdog?.cancel()
+        switchWatchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            guard self.switchNote != nil, self.pairedSN == sn else { return }
+            // Still "switching" after 15 s: the card is asleep, out of range, or
+            // bound to another phone. Say which card, and keep the choice stored so
+            // a retry does not have to find it again from scratch.
+            TicNoteDiagLog.log("PLAUD", "switch to \(sn) timed out")
+            self.setSwitchNote(L10n.Plaud.switchFailed(Self.storedName(for: sn)))
+            self.setPhase(.failed(L10n.Plaud.cardGone))
         }
     }
 
@@ -2154,6 +2192,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         // advertisement arrives (`reconnect()` path).
         if let target = reconnectTarget, let card = cards.first(where: { $0.sn == target }) {
             reconnectTarget = nil
+            TicNoteDiagLog.log("PLAUD", "scan hit for target \(target) — binding")
             DispatchQueue.main.async { self.selectedCard = card }
             connect(card)
         }
@@ -2240,6 +2279,13 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         }
         DispatchQueue.main.async { self.selectedCard = nil }
         setPhase(.connected(sn: sn))
+        // ★ 2026-10-22: the switch (if any) is finished — drop the "switching to…"
+        // banner and stand the watchdog down, or a late timeout would report a
+        // success as a failure.
+        switchWatchdog?.cancel()
+        switchWatchdog = nil
+        setSwitchNote(nil)
+        TicNoteDiagLog.log("PLAUD", "bound \(sn)")
         // 任务八 · 8.1: the link is up, so "when did I last have it" is now.
         // The advertised name is what the proximity scan has to match, and it
         // only exists in the scan cache — capture it while it is still there.

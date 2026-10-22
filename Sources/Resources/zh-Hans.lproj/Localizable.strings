@@ -1418,6 +1418,8 @@
 "plaud.scan_nearby" = "扫描附近卡片";
 "plaud.card_selected" = "已选择：%@——在下方激活后连接";
 "plaud.card_gone" = "所选卡片不在附近——请重新扫描。";
+"plaud.switching" = "正在切换到 %@…";
+"plaud.switch_failed" = "找不到 %@——请唤醒卡片后重试。";
 "plaud.recording_now" = "卡片正在录音";
 "plaud.stop_record" = "停止录音";
 "plaud.start_record" = "开始录音";
@@ -1612,6 +1614,9 @@
 "settings.group.library" = "资料与任务";
 "settings.group.general" = "通用";
 "asr.cloud.title" = "云转写服务";
+"asr.cloud.azure_wired" = "已接入转写引擎";
+"asr.cloud.needs_verify" = "待验证";
+"asr.cloud.credentials" = "凭据";
 "asr.cloud.footer" = "点一家填写凭据。测试按钮会真的向该厂商签一个只读请求并计时——通过说明凭据在这台手机上可用，且不消耗任何音频额度。";
 "asr.cloud.test" = "测试凭据与延迟";
 "asr.cloud.testing" = "测试中…";

@@ -999,16 +999,26 @@ struct WatchBotFace: View {
     ///   "eyes → wave" switch: the ring completes → the wave lights up as the ring
     ///   recedes. On an early release the arc simply recedes with `holdProgress`.
     /// * `allowsHitTesting(false)` — it rides the whole face; tappable would break the page.
+    /// Stroke width of the hold ring.
+    private var holdRingWidth: CGFloat { max(4, size * 0.06) }
+
     @ViewBuilder
     private var holdLayer: some View {
         if holdProgress > 0.002 {
+            // ★ 2026-10-22 ("那个红色的圈底部是被遮挡了"): the ring used to be drawn
+            // on a `1.14 × size` path while the layout box was **also** `1.14 × size`.
+            // A stroked circle is centred on its path, so `lineWidth / 2` (≈ 3.6 pt on
+            // a 40 mm, 4.5 pt on a 49 mm) hung **outside** the box — and the only side
+            // without slack was the bottom, where the caption line sits 6 pt below.
+            // The result was the ring's 6-o'clock edge disappearing under the byte
+            // counter. Shrinking the path by exactly `lineWidth` puts the stroke's
+            // outer edge back on the box boundary: no layout change, no clipping
+            // change, 6 pt of real clearance under the ring on every size.
             Circle()
                 .trim(from: 0, to: holdProgress)
-                .stroke(
-                    tint,
-                    style: StrokeStyle(lineWidth: max(4, size * 0.06), lineCap: .round)
-                )
-                .frame(width: size * 1.14, height: size * 1.14)
+                .stroke(tint, style: StrokeStyle(lineWidth: holdRingWidth, lineCap: .round))
+                .frame(width: size * 1.14 - holdRingWidth,
+                       height: size * 1.14 - holdRingWidth)
                 .rotationEffect(.degrees(-90)) // start at 12 o'clock, like the old ring
                 .opacity(sweepFading ? 0 : 1)
                 .animation(.easeOut(duration: 0.4), value: sweepFading)

@@ -16,9 +16,18 @@ struct ASRCloudSection: View {
 
     @EnvironmentObject private var configService: ConfigService
     @State private var editing: ASRCloudSpec?
+    @State private var showAzure = false
 
     var body: some View {
         Section {
+            // ★ 2026-10-22 ("ASR 里面 Azure Speech 这个没有在云转写里面"):
+            // Azure leads the list — it is the only vendor here that the
+            // transcription engine can actually use today, so it must not be the
+            // one missing from "云转写".
+            Button { showAzure = true } label: {
+                AzureCloudRow()
+            }
+            .tint(.primary)
             ForEach(ASRCloudSpec.all) { spec in
                 Button { editing = spec } label: {
                     ASRCloudRow(spec: spec)
@@ -33,6 +42,65 @@ struct ASRCloudSection: View {
         .sheet(item: $editing) { spec in
             ASRCloudSheet(spec: spec)
                 .environmentObject(configService)
+        }
+        .sheet(isPresented: $showAzure) {
+            AzureSpeechSheet()
+                .environmentObject(configService)
+        }
+    }
+}
+
+// MARK: - Azure row
+
+/// The wired one. Deliberately says **已接入** instead of the generic
+/// "ready / needs key" badge: among six configurable-but-not-routed vendors, the
+/// user needs to know which one produces transcripts *now*.
+private struct AzureCloudRow: View {
+    @EnvironmentObject private var configService: ConfigService
+
+    private var azure: AppConfig.AsrProviders.Azure? {
+        configService.config.asrProviders.azure
+    }
+
+    private var verified: Bool { azure?.verification == true }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(LinearGradient(
+                    colors: [Color(red: 0.0, green: 0.47, blue: 0.83),
+                             Color(red: 0.0, green: 0.47, blue: 0.83).opacity(0.72)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 32, height: 32)
+                .overlay {
+                    Image("BrandAzure")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundStyle(.white)
+                        .padding(7)
+                }
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.ASR.azureSpeech).foregroundStyle(.primary)
+                Text(azure?.region.isEmpty == false
+                     ? (azure?.region ?? "")
+                     : L10n.ASRCloud.azureWired)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if verified {
+                Text(L10n.ASRCloud.ready).font(.caption2).foregroundStyle(.green)
+            } else if azure?.key.isEmpty == false {
+                Text(L10n.ASRCloud.needsVerify).font(.caption2).foregroundStyle(.orange)
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 }
@@ -190,9 +258,24 @@ private struct ASRCloudSheet: View {
                             .autocorrectionDisabled()
                             .font(.body.monospaced())
                     } else {
-                        Picker(L10n.ASRCloud.model, selection: modelBinding) {
-                            Text(L10n.LLM.selectModel).tag("")
-                            ForEach(options, id: \.self) { Text($0).tag($0) }
+                        // ★ 2026-10-22: was an inline `Picker` — the first tap was
+                        // swallowed while the pushed list re-laid itself out. See
+                        // `ModelPickerView`.
+                        NavigationLink {
+                            ModelPickerView(title: L10n.ASRCloud.model,
+                                            options: options,
+                                            current: model,
+                                            allowsEmpty: true) { picked in
+                                modelBinding.wrappedValue = picked
+                            }
+                        } label: {
+                            LabeledContent(L10n.ASRCloud.model) {
+                                Text(model.isEmpty ? L10n.LLM.selectModel : model)
+                                    .font(model.isEmpty ? .body : .body.monospaced())
+                                    .foregroundStyle(model.isEmpty ? .secondary : .primary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
                         }
                     }
                     if spec.canFetchModels {
@@ -239,6 +322,9 @@ private struct ASRCloudSheet: View {
                     }
                 }
             }
+            // Same reason as the LLM sheet: a focused field must not eat the first
+            // tap on the model row.
+            .scrollDismissesKeyboard(.immediately)
             .navigationTitle(spec.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

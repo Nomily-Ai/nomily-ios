@@ -178,10 +178,11 @@ struct WatchRecorderView: View {
     /// recording). Both gestures are misfire-prone, so neither stops outright any more;
     /// the deliberate hold-to-stop needs no confirmation by construction.
     @State private var showStopConfirm = false
-    /// The "tap refused" hint state: a stray tap during recording shows "long-press to
-    /// stop" for two seconds in place of the byte counter, then falls back.
-    @State private var hintTask: Task<Void, Never>?
-    @State private var showStopHint = false
+    /// ★ 2026-10-22: the confirmation **auto-closes after 2 s** and the take keeps
+    /// rolling — user: "这个地方在 2s 后自动结束…默认不动则继续". A prompt that waits
+    /// forever on a watch either gets answered by accident or leaves the user
+    /// staring at a modal while the recording they wanted keeps running.
+    @State private var stopConfirmTask: Task<Void, Never>?
 
     /// Usable length of one side of the watch face: the actual screen width minus a 6pt inset on each side.
     ///
@@ -311,10 +312,14 @@ struct WatchRecorderView: View {
         // the default the user most often wants after a misfire.
         .alert(L10n.Watch.stopConfirmTitle, isPresented: $showStopConfirm) {
             Button(L10n.Watch.stopConfirmAction, role: .destructive) {
+                // The 2-second timer must not fire *after* the answer was given.
+                stopConfirmTask?.cancel()
                 tapGateUntil = Date().addingTimeInterval(0.5)
                 model.stop()
             }
-            Button(L10n.Watch.continueAction, role: .cancel) {}
+            Button(L10n.Watch.continueAction, role: .cancel) {
+                stopConfirmTask?.cancel()
+            }
         } message: {
             Text(L10n.Watch.stopConfirmMessage)
         }
@@ -340,24 +345,17 @@ struct WatchRecorderView: View {
     @ViewBuilder
     private var caption: some View {
         if model.isRecording {
-            // ★ 2026-10-20: a stray tap during recording flashes the stop hint here in
-            // place of the byte counter — the tap itself is refused, so the user needs
-            // to be told what *would* end the take.
-            if showStopHint {
-                Text(L10n.Watch.holdToStop)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .transition(.opacity)
-            } else {
-                Text(WatchFormat.bytes(model.currentBytes))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(styleStore.style.tint)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .monospacedDigit()
-            }
+            // ★ 2026-10-22: the "tap refused, long-press to stop" hint is gone —
+            // a tap now asks "End / Keep recording" outright (see `askStopConfirm`),
+            // so there is nothing left for a second, weaker hint to explain. That
+            // line goes back to being the byte counter, which is the only hard
+            // evidence that audio is reaching the file.
+            Text(WatchFormat.bytes(model.currentBytes))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(styleStore.style.tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .monospacedDigit()
         } else {
             Text(L10n.Watch.holdToRecord)
                 .font(.system(size: 11, weight: .medium))
@@ -381,33 +379,40 @@ struct WatchRecorderView: View {
         }
     }
 
-    /// Tap. While idle = poke; **while recording = refused with a hint** (anti-mistouch).
+    /// Tap. While idle = poke; **while recording = the "end / keep" prompt**.
     ///
     /// ★ 2026-10-20: a tap used to stop the take, which is exactly the misfire the user
-    /// reported ("录音结束…防止误触中断") — a cuff brush reads as a tap. Stopping is now
-    /// **hold** (deliberate) or **double-tap/shake with a confirmation**. A stray tap
-    /// gets a haptic plus a hint line instead of silently ending the recording.
+    /// reported ("录音结束…防止误触中断") — a cuff brush reads as a tap.
+    ///
+    /// ★ 2026-10-22 (user: "如果是手势控制点击了后就弹出结束跟继续录音，…2s 后自动结束…
+    /// 默认不动则继续"): the tap used to be **refused** with a hint line. It now opens the
+    /// same two-button prompt the pinch and the shake use, and that prompt closes
+    /// itself after two seconds with "keep recording" as the answer. Same prompt,
+    /// same default, every gesture — a stray touch can no longer end a take, and it
+    /// no longer needs a second, weaker explanation of what *would*.
     private func handleTap() {
         guard Date() >= tapGateUntil else { return }
         if model.isRecording {
             WKInterfaceDevice.current().play(.click)
-            flashStopHint()
+            askStopConfirm()
         } else {
             pokeTick += 1
         }
     }
 
-    /// Tap refused during recording — flash the "long-press to stop" hint for 2 s.
-    ///
-    /// Named `flashStopHint` (not `showStopHint`): the `@State` boolean it drives is
-    /// `showStopHint`, and the two can't share a name in the same type.
-    private func flashStopHint() {
-        hintTask?.cancel()
-        withAnimation(.easeIn(duration: 0.15)) { showStopHint = true }
-        hintTask = Task { @MainActor in
+    /// Show "End this recording? / End · Keep recording" and **arm the 2-second
+    /// auto-close**. Every recording-state gesture funnels through here so the three
+    /// of them can never drift apart again.
+    private func askStopConfirm() {
+        stopConfirmTask?.cancel()
+        showStopConfirm = true
+        stopConfirmTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.3)) { showStopHint = false }
+            // Timeout = "keep recording", never "end". The user asked for the
+            // default to be the safe one, and it also matches what the alert's
+            // cancel button does.
+            showStopConfirm = false
         }
     }
 
@@ -422,7 +427,7 @@ struct WatchRecorderView: View {
     private func handleToggle() {
         guard Date() >= tapGateUntil else { return }
         if model.isRecording {
-            showStopConfirm = true
+            askStopConfirm()
         } else {
             model.toggleRecording()
         }
@@ -658,7 +663,9 @@ struct WatchRecorderView: View {
             // produce by accident while moving, and it used to end the take outright.
             // (The detector fires on the main queue, so the @State write is safe.)
             guard !model.isRecording else {
-                showStopConfirm = true
+                // ★ 2026-10-22: same prompt as tap / pinch, and it closes itself
+                // after 2 s with "keep recording" — see `askStopConfirm`.
+                askStopConfirm()
                 return
             }
             // ★ Revision fourteen: the eyes **spin in circles** (user: "shaking makes the eyes spin in circles with a dizzy feel
