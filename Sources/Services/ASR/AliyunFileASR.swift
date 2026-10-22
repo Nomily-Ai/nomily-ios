@@ -183,6 +183,9 @@ struct AliyunFileASR {
             ("RegionId", region),
             ("SignatureMethod", "HMAC-SHA1"),
             ("SignatureNonce", UUID().uuidString),
+            // Same requirement the probe hit live (2026-10-22): POP rejects
+            // requests that omit it.
+            ("SignatureVersion", "1.0"),
             ("Timestamp", iso8601Basic()),
             ("Version", version),
         ] + extraParams

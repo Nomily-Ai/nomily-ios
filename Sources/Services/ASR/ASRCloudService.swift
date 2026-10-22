@@ -192,6 +192,9 @@ enum ASRCloudService {
             ("Format", "JSON"),
             ("SignatureMethod", "HMAC-SHA1"),
             ("SignatureNonce", UUID().uuidString),
+            // ★ Verified live 2026-10-22: nls-meta now rejects the request
+            // without this ("SignatureVersion is mandatory for this action").
+            ("SignatureVersion", "1.0"),
             ("Timestamp", iso8601Basic()),
             ("Version", "2019-02-28"),
         ].sorted { $0.0 < $1.0 }
