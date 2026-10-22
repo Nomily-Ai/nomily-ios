@@ -176,6 +176,12 @@ enum L10n {
         static var resumeRecord: String { NSLocalizedString("plaud.resume_record", value: "Resume", comment: "Resume a paused take") }
         static var pausedHint: String { NSLocalizedString("plaud.paused_hint", value: "Paused — the take is still open on the card.", comment: "Shown under the controls while paused") }
         static var syncPreemptedByRecord: String { NSLocalizedString("plaud.sync_preempted", value: "Transfer paused for the recording — it resumes after you stop.", comment: "A running transfer was stopped so the live audio stream could open") }
+        /// The card accepted the recording but never pushed audio. Said out loud
+        /// because "listening…" with no text for ten minutes is indistinguishable
+        /// from a rendering bug — and the take itself is unaffected either way.
+        static var liveNoStream: String { NSLocalizedString("plaud.live_no_stream", value: "The card isn't sending live audio, so there's no real-time text. The recording itself is unaffected — it will be transcribed when you stop.", comment: "PCM never arrived; live subtitle unavailable") }
+        static var pauseFailed: String { NSLocalizedString("plaud.pause_failed", value: "The card didn't pause. It may be busy transferring — try again in a moment.", comment: "Pause command went unanswered twice") }
+        static var resumeFailed: String { NSLocalizedString("plaud.resume_failed", value: "The card didn't resume. Tap 继续 again — if it still refuses, stop the take and start a new one.", comment: "Resume command went unanswered twice") }
         static var navTitle: String { NSLocalizedString("plaud.nav_title", value: "PLAUD", comment: "Settings page title for PLAUD cloud sync") }
         static var signInHeader: String { NSLocalizedString("plaud.signin_header", value: "Sign in", comment: "PLAUD email+code sign-in section") }
         static var emailPlaceholder: String { NSLocalizedString("plaud.email", value: "PLAUD account email", comment: "") }

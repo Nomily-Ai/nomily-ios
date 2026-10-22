@@ -251,6 +251,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Lives on the class body, not the extension that owns the method — Swift
     /// does not allow stored properties in extensions.
     private var liveWatchdog: Task<Void, Never>?
+    /// Ack watchdog for pause/resume (CMD 21 / CMD 140). Same class-body rule.
+    private var recordCommandWatchdog: Task<Void, Never>?
+    /// When the take was paused, so its length can exclude the gap on resume.
+    private var pausedAt: Date?
     private var userToken: String?
     private var userTokenAt = Date.distantPast
     private var isInitialized = false
@@ -1170,8 +1174,72 @@ final class PlaudDirectService: NSObject, ObservableObject {
     }
 
     /// Pause / resume (the SDK exposes both; official app has pause).
-    func pauseRecording() { PlaudDeviceAgent.shared.pauseRecord() }
-    func resumeRecording() { PlaudDeviceAgent.shared.resumeRecord() }
+    ///
+    /// ★ 2026-10-22 ("暂停后点击继续无法继续录音"): the button used to be a bare
+    /// fire-and-forget `resumeRecord()`. Three things were missing, and each one
+    /// alone is enough to make "继续" look dead:
+    ///
+    /// 1. **No ack tracking.**  CMD 140 (resume) is answered by
+    ///    `bleRecordResume`; if the card refuses (busy, mode switched, session
+    ///    already closed) nothing on screen changed and the button stayed on
+    ///    "继续" — indistinguishable from a lost tap.
+    /// 2. **The sync pipe was never reopened.**  Opening the live channel is what
+    ///    makes the card push PCM, and a pause tears that channel down. Resuming
+    ///    recording without re-issuing CMD 28 gives a take that is running on the
+    ///    card while the app hears silence — "no text again", for a new reason.
+    /// 3. **The ASR session had been left for dead.**  Azure closes an idle
+    ///    websocket, so a pause longer than ~20 s leaves nothing to feed when the
+    ///    audio comes back.
+    func pauseRecording() {
+        guard isRecording else { return }
+        TicNoteDiagLog.log("PLAUD-REC", "pause requested sid=\(recordSessionID ?? -1)")
+        PlaudDeviceAgent.shared.pauseRecord()
+        armRecordCommandWatchdog(.pause)
+    }
+
+    func resumeRecording() {
+        guard isPaused else { return }
+        TicNoteDiagLog.log("PLAUD-REC", "resume requested sid=\(recordSessionID ?? -1)")
+        PlaudDeviceAgent.shared.resumeRecord()
+        armRecordCommandWatchdog(.resume)
+    }
+
+    /// Retry a pause/resume once, then say so.
+    ///
+    /// The card answers these commands in well under a second when it answers at
+    /// all; 2.5 s is long enough to rule out BLE queueing and short enough that
+    /// the user still associates the result with their tap.
+    private func armRecordCommandWatchdog(_ command: RecordCommand) {
+        recordCommandWatchdog?.cancel()
+        let sidAtRequest = recordSessionID
+        recordCommandWatchdog = Task { @MainActor [weak self] in
+            for attempt in 1...2 {
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                guard !Task.isCancelled, let self else { return }
+                guard self.recordSessionID == sidAtRequest else { return }
+                // Did the state actually move?
+                switch command {
+                case .pause:  if self.isPaused { return }
+                case .resume: if self.isRecording && !self.isPaused { return }
+                }
+                guard attempt == 1 else { break }
+                TicNoteDiagLog.log("PLAUD-REC", "\(command.rawValue) not acked in 2.5s — retrying")
+                switch command {
+                case .pause:  PlaudDeviceAgent.shared.pauseRecord()
+                case .resume: PlaudDeviceAgent.shared.resumeRecord()
+                }
+            }
+            guard let self else { return }
+            let moved = command == .pause ? self.isPaused : (self.isRecording && !self.isPaused)
+            guard !moved else { return }
+            TicNoteDiagLog.log("PLAUD-REC", "\(command.rawValue) failed twice — surfacing it")
+            self.setRecordNotice(command == .pause ? L10n.Plaud.pauseFailed : L10n.Plaud.resumeFailed)
+        }
+    }
+
+    private enum RecordCommand: String {
+        case pause, resume
+    }
 
     /// Pull battery/charging straight from the card.
     func refreshVitals() {
@@ -1913,6 +1981,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
         recordSessionID = nil
         recordBytes = 0
         liveLevel = 0
+        pausedAt = nil
     }
 
     /// Session id of the recording that is running right now, from either source.
@@ -2309,6 +2378,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.recordNotice = nil
             self.recordMarks = []
             self.recordMarkCount = 0
+            self.pausedAt = nil
             self.marksSessionID = sessionId
             self.markingProbeStrikes = 0
             self.marksAvailableLive = true
@@ -2355,12 +2425,29 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             setSyncMessage(L10n.Plaud.syncPreemptedByRecord)
         }
         TicNoteDiagLog.log("PLAUD-PCM", "open live stream sid=\(sid) start=\(start)")
-        PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: start, end: 0)
+        // ★★ 2026-10-22 ("实时转录还是没出文字") — **this was the bug.**
+        //
+        // The SDK's `syncFile(sessionId:start:end:)` is protocol CMD 28, whose
+        // payload is `sessionId:u32, lastPosition:u32, fileSize:u32`
+        // (03-逆向/PLAUD/协议标准-PLAUD-2026-10-22.md §4.2). So `start` is
+        // "resume from byte N" and `end` is the file size — not a byte range.
+        //
+        // We were passing the **record-start byte offset** (the card reports a
+        // constant 1024, its data offset) with `end: 0`. That asks for
+        // `[1024, 0)` — an inverted range — and the card answers by sending
+        // nothing at all. Diag proof: every session logged
+        // `open live stream … start=1024`, then `watchdog: no PCM 3s after open`,
+        // and **not one** `blocks=` line, across every take of the day.
+        //
+        // A live stream wants the documented 0/0 form ("start=end=0 → push from
+        // the beginning", §5 shortcut table). The offset belongs to the clock,
+        // not to this call.
+        PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: 0, end: 0)
         DispatchQueue.main.async {
             self.liveStreaming = true
             self.livePCMBytes = 0
         }
-        armLiveWatchdog(sid: sid, start: start)
+        armLiveWatchdog(sid: sid)
     }
 
     /// "Nothing is arriving" self-heal, and the reason it exists:
@@ -2371,28 +2458,48 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
     /// for two builds. Guessing a sleep duration would just trade one silent
     /// failure for another, so instead: if **not one PCM block** lands within
     /// three seconds of opening the stream, close it and open it again once.
-    /// Either way the diag log says which happened.
-    private func armLiveWatchdog(sid: Int, start: Int) {
+    ///
+    /// ★ 2026-10-22: a second window was added. Silently retrying forever is
+    /// how "实时转录没字" survived several builds — the screen said "listening"
+    /// while nothing was arriving. If the retry also comes back empty, the panel
+    /// is told, so the failure is visible instead of looking like a bug in the
+    /// text renderer.
+    private func armLiveWatchdog(sid: Int) {
         liveWatchdog?.cancel()
         liveWatchdog = Task { @MainActor [weak self] in
             guard let self else { return }
-            let baseline = self.livePCMBytes
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            guard !Task.isCancelled else { return }
+
+            // Attempt 1 → 2.
+            for attempt in 1...2 {
+                let baseline = self.livePCMBytes
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard !Task.isCancelled else { return }
+                guard self.liveStreaming, self.recordSessionID == sid else { return }
+                if self.livePCMBytes > baseline { return }   // audio is flowing
+                guard attempt == 1 else { break }
+
+                TicNoteDiagLog.log("PLAUD-PCM", "watchdog: no PCM 3s after open — re-issuing syncFile sid=\(sid) start=0")
+                PlaudDeviceAgent.shared.stopSyncFile()
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard !Task.isCancelled, self.liveStreaming, self.recordSessionID == sid else { return }
+                // 0/0 again: a retry with different parameters would make the two
+                // attempts incomparable, and 0/0 is the documented live form.
+                PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: 0, end: 0)
+            }
+
             guard self.liveStreaming, self.recordSessionID == sid else { return }
-            guard self.livePCMBytes <= baseline else { return }
-            TicNoteDiagLog.log("PLAUD-PCM", "watchdog: no PCM 3s after open — re-issuing syncFile sid=\(sid) start=\(start)")
-            PlaudDeviceAgent.shared.stopSyncFile()
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard !Task.isCancelled, self.liveStreaming, self.recordSessionID == sid else { return }
-            PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: start, end: 0)
-            // One retry only. A second failure is not a timing problem, and a
-            // loop here would hammer the card for the whole take.
+            TicNoteDiagLog.log("PLAUD-PCM", "watchdog: still no PCM after 2 opens — giving up sid=\(sid)")
+            // The recording itself is fine — this is only the live channel. Say
+            // exactly that, so nobody thinks their take is being lost.
+            self.liveASRNotice = L10n.Plaud.liveNoStream
         }
     }
 
     func bleRecordResume(sessionId: Int, start: Int, status: Int, scene: Int, startTime: Int) {
         log.info("plaud record resume sid=\(sessionId) start=\(start) status=\(status)")
+        TicNoteDiagLog.log("PLAUD-REC", "resume acked sid=\(sessionId) status=\(status)")
+        recordCommandWatchdog?.cancel()
+        recordCommandWatchdog = nil
         guard status == 0 else {
             setRecordNotice(recordRefusal(status))
             return
@@ -2402,15 +2509,52 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.isPaused = false
             self.recordSessionID = sessionId
             self.recordBytes = start
+            // The clock must not count the pause. Wall-clock elapsed is
+            // `now - recordStartedAt`, so shift the anchor forward by exactly the
+            // time the take was paused — the displayed length then matches the
+            // audio that actually got recorded.
+            if let pausedAt = self.pausedAt, let started = self.recordStartedAt {
+                self.recordStartedAt = started.addingTimeInterval(Date().timeIntervalSince(pausedAt))
+            }
+            self.pausedAt = nil
+            // Drop any PCM-derived clock: it was frozen at the pause, and letting
+            // it win would hold the displayed time still after resuming.
+            self.deviceElapsed = nil
             if self.recordStartedAt == nil { self.recordStartedAt = Date() }
+            self.recordNotice = nil
+        }
+        // ★ The card stopped pushing PCM when it paused; resuming the recording
+        // does **not** reopen the channel that carries it. Close whatever is left
+        // of the old one and ask again, using the same stop → 400 ms → CMD 28
+        // sequence the live watchdog uses.
+        Task { @MainActor in
+            PlaudDeviceAgent.shared.stopSyncFile()
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard self.isRecording, self.recordSessionID == sessionId else { return }
+            TicNoteDiagLog.log("PLAUD-PCM", "reopening live stream after resume sid=\(sessionId)")
+            self.openLiveStream(sid: sessionId, start: 0)
+            // Azure closes an idle socket, so a long pause leaves the engine gone.
+            // `startLiveTranscription` keeps the existing lines for the same take.
+            self.startLiveTranscription(sessionID: sessionId)
         }
     }
 
     func bleRecordPause(sessionId: Int, reason: Int, fileExist: Bool, fileSize: Int) {
         log.info("plaud record pause sid=\(sessionId) fileSize=\(fileSize)")
+        TicNoteDiagLog.log("PLAUD-REC", "pause acked sid=\(sessionId) fileSize=\(fileSize)")
+        recordCommandWatchdog?.cancel()
+        recordCommandWatchdog = nil
         DispatchQueue.main.async {
             self.isPaused = true
             self.isRecording = false
+            self.pausedAt = Date()
+            // Freeze the clock at the pause position so it doesn't keep counting
+            // during the pause (the anchor is shifted again on resume).
+            if let started = self.recordStartedAt {
+                self.deviceElapsed = max(self.deviceElapsed ?? 0,
+                                         Date().timeIntervalSince(started))
+            }
+            self.recordBytes = fileSize > 0 ? fileSize : self.recordBytes
         }
     }
 
@@ -2452,6 +2596,11 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         // ~200 blocks, so a dead live transcript can be told apart from a dead
         // stream without a syslog session.
         pcmBlockCount += 1
+        // First block is logged on its own line as well: 200 blocks is ~30 s of
+        // audio, and "did the stream open at all" needs an answer in seconds.
+        if pcmBlockCount == 1 {
+            TicNoteDiagLog.log("PLAUD-PCM", "first block sid=\(sessionId) bytes=\(bytes) elapsed=\(Int(seconds))s")
+        }
         if pcmBlockCount % 200 == 0 {
             TicNoteDiagLog.log("PLAUD-PCM", "blocks=\(pcmBlockCount) bytes=\(bytes) elapsed=\(Int(seconds))s")
         }
