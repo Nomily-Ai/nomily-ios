@@ -1381,3 +1381,11 @@
 "plaud.record_wrong_mode" = "The card is not in recording mode.";
 "plaud.record_failed" = "The card refused to record (code %d).";
 "plaud.live_transcript" = "Live transcript";
+"plaud.live_badge" = "Live";
+"plaud.live_waiting" = "Listening — text shows up after the first sentence.";
+"plaud.live_idle" = "Nothing transcribed yet. Text appears here while the card records.";
+"plaud.live_expand" = "Full transcript";
+"plaud.live_copy" = "Copy";
+"plaud.live_copied" = "Copied";
+"plaud.live_needs_permission" = "Live transcription needs Speech Recognition permission — allow it in Settings → Nomily. The card still records without text.";
+"plaud.live_model_missing" = "The offline speech model for this language isn't installed on this iPhone, so live text is off. The recording itself is unaffected.";

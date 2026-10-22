@@ -1483,3 +1483,11 @@
 "plaud.record_wrong_mode" = "卡片不在录音模式。";
 "plaud.record_failed" = "卡片拒绝录音（错误码 %d）。";
 "plaud.live_transcript" = "实时转写";
+"plaud.live_badge" = "实时";
+"plaud.live_waiting" = "正在听——说完第一句，文字就会出现在这里。";
+"plaud.live_idle" = "还没有转写内容。卡片录音时，文字会实时出现在这里。";
+"plaud.live_expand" = "完整转写";
+"plaud.live_copy" = "复制";
+"plaud.live_copied" = "已复制";
+"plaud.live_needs_permission" = "实时转写需要「语音识别」权限，请在 设置 → Nomily 中允许。录音本身不受影响，只是没有文字。";
+"plaud.live_model_missing" = "这台 iPhone 没有安装该语言的离线语音模型，实时文字已关闭。录音本身不受影响。";

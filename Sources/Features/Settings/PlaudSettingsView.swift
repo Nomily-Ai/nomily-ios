@@ -742,15 +742,15 @@ struct PlaudCardFilesView: View {
             if let notice = direct.recordNotice {
                 Text(notice).font(.footnote).foregroundStyle(.orange)
             }
-            if !direct.liveTranscript.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.Plaud.liveTranscript)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(direct.liveTranscript)
-                        .font(.footnote)
-                        .lineLimit(6)
-                }
+            // ★ 2026-10-22 ("the live transcript cannot keep up"): this used to be
+            // a `Text(...).lineLimit(6)` footnote. `lineLimit` keeps the FIRST six
+            // lines, so after six sentences the screen never changed again even
+            // though recognition kept producing text — it looked like the text
+            // lagged behind the speaker. The panel renders timestamped segments
+            // and auto-scrolls to the newest line instead, and it stays visible
+            // after stopping so the take you just finished can still be read.
+            if direct.isRecording || !direct.liveSegments.isEmpty || direct.liveASRNotice != nil {
+                PlaudLiveTranscriptPanel(direct: direct)
             }
         }
     }

@@ -199,6 +199,14 @@ enum L10n {
         static var notConnected: String { NSLocalizedString("plaud.not_connected", value: "Connect the card first.", comment: "") }
         static var connectingThenRecord: String { NSLocalizedString("plaud.connecting_then_record", value: "Connecting to the card — recording starts as soon as it answers.", comment: "Feedback after tapping record while the card is asleep") }
         static var liveTranscript: String { NSLocalizedString("plaud.live_transcript", value: "Live transcript", comment: "On-device live transcription of the card's audio") }
+        static var liveBadge: String { NSLocalizedString("plaud.live_badge", value: "Live", comment: "Small badge next to the live transcript title while the card is recording") }
+        static var liveWaiting: String { NSLocalizedString("plaud.live_waiting", value: "Listening — text shows up after the first sentence.", comment: "Live transcript placeholder while the engine has not produced any text yet") }
+        static var liveIdle: String { NSLocalizedString("plaud.live_idle", value: "Nothing transcribed yet. Text appears here while the card records.", comment: "Live transcript placeholder when no take has been transcribed") }
+        static var liveExpand: String { NSLocalizedString("plaud.live_expand", value: "Full transcript", comment: "Open the live transcript full screen") }
+        static var liveCopy: String { NSLocalizedString("plaud.live_copy", value: "Copy", comment: "Copy the live transcript") }
+        static var liveCopied: String { NSLocalizedString("plaud.live_copied", value: "Copied", comment: "Confirmation after copying the live transcript") }
+        static var liveNeedsPermission: String { NSLocalizedString("plaud.live_needs_permission", value: "Live transcription needs Speech Recognition permission — allow it in Settings → Nomily, or the card still records without text.", comment: "Live transcript unavailable: speech permission missing") }
+        static var liveModelMissing: String { NSLocalizedString("plaud.live_model_missing", value: "The offline speech model for this language isn't installed on this iPhone, so live text is off. The recording itself is unaffected.", comment: "Live transcript unavailable: on-device model not installed") }
         static var cardFiles: String { NSLocalizedString("plaud.card_files", value: "Recordings on the card", comment: "Home device segment: the card's own file list") }
         static var cardFilesEmpty: String { NSLocalizedString("plaud.card_files_empty", value: "No recordings on the card.", comment: "") }
         static var pauseRecord: String { NSLocalizedString("plaud.pause_record", value: "Pause", comment: "") }

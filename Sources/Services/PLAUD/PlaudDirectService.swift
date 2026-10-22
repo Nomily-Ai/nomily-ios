@@ -155,6 +155,14 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Live transcript text (finals + in-flight hypothesis) for the current
     /// recording. Empty when speech recognition is unavailable/undesired.
     @Published private(set) var liveTranscript = ""
+    /// The same transcript as timestamped lines — what the panel renders.
+    @Published private(set) var liveSegments: [PlaudLiveSegment] = []
+    /// The in-flight hypothesis (not yet a committed line).
+    @Published private(set) var livePartial = ""
+    /// Why live transcription is silent (`nil` = working / not started). Shown
+    /// instead of an empty box, because "no text" and "no permission" look
+    /// identical on screen and only one of them is the user's to fix.
+    @Published private(set) var liveASRNotice: String?
     /// Bookmarks pressed on the card during THIS recording ("打点"). The card
     /// pushes them via `bleMarking`; there is no "how many" query mid-recording,
     /// so this is "what we heard" — same contract as the A1's remark count.
@@ -278,6 +286,9 @@ final class PlaudDirectService: NSObject, ObservableObject {
     private var fileListProbeOnly = false
     /// Rate limit for `handleExportProgress` — the SDK reports per packet.
     private var lastProgressPublish = Date.distantPast
+    /// Throttle for the live level meter (see `blePcmData`) — a published change
+    /// per PCM block rebuilt the whole device list dozens of times a second.
+    private var lastLevelPublish = Date.distantPast
     /// SN we are trying to re-bind automatically (`reconnect()`). Cleared as
     /// soon as the card is seen or the attempt is abandoned.
     private var reconnectTarget: String?
@@ -341,9 +352,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Settings → Devices & Library → Known devices instead of living only in
     /// PLAUD's own sheet.
     /// Receives every decoded PCM block while a recording is live (16-bit LE,
-    /// whatever the card sends). A live-transcription sink attaches here; when
-    /// nothing is attached the blocks are simply metered and dropped.
-    var liveAudioSink: ((Data) -> Void)?
+    /// whatever the card sends) **plus the card's own clock for that block**.
+    /// A live-transcription sink attaches here; when nothing is attached the
+    /// blocks are simply metered and dropped.
+    var liveAudioSink: ((Data, TimeInterval) -> Void)?
 
     /// On-device live transcription for the current recording (see
     /// `PlaudLiveTranscriber`). Lives only while a recording is live.
@@ -351,31 +363,54 @@ final class PlaudDirectService: NSObject, ObservableObject {
 
     /// Begin transcribing the live PCM stream (no-op when speech is not
     /// authorized — recording itself never depends on ASR).
+    ///
+    /// ★ 2026-10-22 ("the live text lags / is unreadable"): the transcriber now
+    ///   owns timestamps and a segment model, and this method mirrors those into
+    ///   published state instead of a single joined string. The card's clock is
+    ///   passed through with every block, so each line knows when it was said.
     @MainActor private func startLiveTranscription() {
         liveTranscriber?.stop()
-        guard let transcriber = PlaudLiveTranscriber.makeIfPermitted() else {
+        liveTranscriber = nil
+        liveSegments = []
+        livePartial = ""
+        liveTranscript = ""
+        liveASRNotice = nil
+
+        // Spoken language: the same preference the live page persists. Falling
+        // back to the device locale is the old behaviour and stays the default.
+        let preferred = configService?.config.lastSourceLang
+        guard let transcriber = PlaudLiveTranscriber.makeIfPermitted(localeID: preferred) else {
+            liveASRNotice = L10n.Plaud.liveNeedsPermission
             log.info("plaud live transcript unavailable (no permission)")
             return
         }
         transcriber.onTextChange = { [weak self, weak transcriber] in
             guard let self, let transcriber else { return }
-            let parts = transcriber.finals + (transcriber.partial.isEmpty ? [] : [transcriber.partial])
-            self.liveTranscript = parts.joined(separator: "\n")
+            self.liveSegments = transcriber.segments
+            self.livePartial = transcriber.partial
+            self.liveTranscript = transcriber.fullText
         }
         transcriber.start()
+        switch transcriber.unavailable {
+        case .modelMissing: liveASRNotice = L10n.Plaud.liveModelMissing
+        case .noRecognizer, .notAuthorized: liveASRNotice = L10n.Plaud.liveNeedsPermission
+        case .none: liveASRNotice = nil
+        }
         liveTranscriber = transcriber
-        // `blePcmData` arrives on the SDK's queue; the buffer itself hops to
-        // the main actor here.
-        liveAudioSink = { [weak transcriber] pcm in
-            Task { @MainActor in transcriber?.append(pcm) }
+        // Called straight from the SDK's BLE queue: the transcriber hands the
+        // block to its own serial queue, so nothing here touches the main actor.
+        liveAudioSink = { [weak transcriber] pcm, elapsed in
+            transcriber?.append(pcm, elapsed: elapsed)
         }
     }
 
+    /// Stop feeding audio. ⚠️ Deliberately **keeps** the transcript: the text of
+    /// the take you just finished is the whole point of a live transcript, and
+    /// it used to be wiped the moment the card stopped.
     @MainActor private func stopLiveTranscription() {
         liveTranscriber?.stop()
         liveTranscriber = nil
         liveAudioSink = nil
-        liveTranscript = ""
     }
 
     /// Injected by `AppEnvironment` (main actor). On a successful handshake the
@@ -1965,6 +2000,16 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
     /// meter here and forward the buffer to the live sink when one is attached.
     func blePcmData(sessionId: Int, millsec: Int, pcmData: Data, isMusic: Bool) {
         let seconds = Double(millsec) / 1000
+        // ★ 2026-10-22: measure the block **here**, on the SDK's queue. This used
+        //   to run inside the `main.async` below, i.e. a full pass over the PCM
+        //   buffer on the main thread for every block the card pushed — pure
+        //   competition with SwiftUI while the live transcript is on screen.
+        let level = Self.peakLevel(of: pcmData)
+        let bytes = pcmData.count
+        // The level meter cannot show more than ~20 steps a second anyway; every
+        // extra publish rebuilds the device list.
+        let publishLevel = Date().timeIntervalSince(lastLevelPublish) > 0.05
+        if publishLevel { lastLevelPublish = Date() }
         DispatchQueue.main.async {
             // ⚠️ `millsec == 0` means the card did not stamp this block. Taking
             // it at face value pinned the clock at 0:00 while audio flowed
@@ -1976,11 +2021,11 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             if self.recordStartedAt == nil {
                 self.recordStartedAt = Date().addingTimeInterval(-max(0, seconds))
             }
-            self.livePCMBytes += pcmData.count
-            self.liveLevel = Self.peakLevel(of: pcmData)
+            self.livePCMBytes += bytes
+            if publishLevel { self.liveLevel = level }
             if !self.isRecording { self.isRecording = true }
         }
-        liveAudioSink?(pcmData)
+        liveAudioSink?(pcmData, seconds)
     }
 
     func bleDataComplete() {
