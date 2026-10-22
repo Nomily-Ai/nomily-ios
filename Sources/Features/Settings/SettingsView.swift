@@ -1313,14 +1313,9 @@ struct LLMProvidersView: View {
             }
 
             ProviderGridSection(
-                title: L10n.LLM.gridOverseas,
+                title: L10n.LLM.gridTitle,
                 footer: L10n.LLM.gridFooter,
-                specs: LLMProviderSpec.overseas
-            )
-            ProviderGridSection(
-                title: L10n.LLM.gridDomestic,
-                footer: nil,
-                specs: LLMProviderSpec.domestic
+                specs: LLMProviderSpec.all
             )
         }
         .navigationTitle(L10n.Settings.llmProviders)
@@ -1393,6 +1388,14 @@ private struct ProviderRow: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 8)
+            // Last measured round trip, if this provider was ever probed. Shown on
+            // the row rather than only inside the sheet, because "which of these is
+            // actually fast" is a question you have while looking at the list.
+            if let ms = LLMLatencyMemory.millis(for: spec.id) {
+                Text("\(ms) ms")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
             status
         }
     }
@@ -1501,6 +1504,8 @@ private struct ProviderConfigSheet: View {
     @State private var manualModel = false
     @State private var fetchHint: String?
     @State private var modelQuery = ""
+    @State private var probing = false
+    @State private var probe: LLMConnectivityService.Result?
 
     private var key: String { configService.config.llmProviders.apiKeyValue(for: spec.storage) ?? "" }
     private var model: String { configService.config.llmProviders.modelValue(for: spec.storage) ?? "" }
@@ -1643,6 +1648,29 @@ private struct ProviderConfigSheet: View {
                     .font(.footnote)
                 }
 
+                // Probe last, and after the model row: it needs a key *and* a model,
+                // and it is the only row that spends a token of quota, so it should
+                // be the last thing on the page you touch.
+                Section {
+                    Button {
+                        Task { await runProbe() }
+                    } label: {
+                        probeRow
+                    }
+                    .disabled(probing || !canProbe)
+                } header: {
+                    Text(L10n.LLM.testSection)
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L10n.LLM.testNote)
+                        if !canProbe {
+                            Text(spec.keyRequired && key.isEmpty ? L10n.LLM.testNeedKey : L10n.LLM.testNeedModel)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .font(.footnote)
+                }
+
                 if spec.id == "ollama" {
                     Section { SetupAssistantRow() }
                 }
@@ -1723,6 +1751,55 @@ private struct ProviderConfigSheet: View {
         }
     }
 
+    // MARK: - Probe
+
+    private var canProbe: Bool {
+        !model.isEmpty && (!spec.keyRequired || !key.isEmpty)
+    }
+
+    @ViewBuilder
+    private var probeRow: some View {
+        HStack(spacing: 10) {
+            if probing {
+                ProgressView().controlSize(.small)
+                Text(L10n.LLM.testRunning).foregroundStyle(.primary)
+            } else if let probe {
+                Image(systemName: probe.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(probe.ok ? Color.green : Color.red)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(probe.ok ? L10n.LLM.testOK(probe.millis) : (probe.error ?? ""))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                    if probe.ok {
+                        Text("\(L10n.LLM.testBand(probe.millis)) · \(probe.detail ?? "")")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                Image(systemName: "bolt.horizontal.circle").foregroundStyle(.primary)
+                Text(L10n.LLM.testButton).foregroundStyle(.primary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func runProbe() async {
+        probing = true
+        probe = nil
+        let result = await LLMConnectivityService.test(
+            spec: spec, endpoint: endpoint, apiKey: key, model: model
+        )
+        guard !Task.isCancelled else { probing = false; return }
+        probing = false
+        probe = result
+        // Only a pass is worth remembering: a failure is usually a half-typed key,
+        // and caching that would put a stale "N ms" on the row of a provider that
+        // has since been fixed.
+        if result.ok { LLMLatencyMemory.save(result.millis, for: spec.id) }
+        else { LLMLatencyMemory.clear(spec.id) }
+    }
+
     // MARK: - Bindings
 
     private var keyBinding: Binding<String> {
@@ -1732,6 +1809,7 @@ private struct ProviderConfigSheet: View {
                 configService.config.llmProviders.setAPIKey(new, for: spec.storage)
                 configService.config.llmProviders.autoSelectPrimaryIfFirst()
                 verify = .idle
+                probe = nil
                 configService.scheduleSave()
             }
         )
@@ -1743,6 +1821,7 @@ private struct ProviderConfigSheet: View {
             set: { new in
                 configService.config.llmProviders.setEndpointURL(new, for: spec.storage)
                 verify = .idle
+                probe = nil
                 configService.scheduleSave()
             }
         )
@@ -1753,6 +1832,7 @@ private struct ProviderConfigSheet: View {
             get: { model },
             set: { new in
                 configService.config.llmProviders.setModel(new, for: spec.storage)
+                probe = nil
                 configService.scheduleSave()
             }
         )

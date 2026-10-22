@@ -1262,17 +1262,17 @@ enum L10n {
         }
 
         // MARK: Provider grid (★ 2026-10-22, every provider in one grid)
-        static var gridOverseas: String {
-            NSLocalizedString("llm.grid.overseas", value: "Mainstream providers",
-                              comment: "Section header: ChatGPT / Claude / Gemini / OpenRouter / Ollama / Custom")
-        }
-        static var gridDomestic: String {
-            NSLocalizedString("llm.grid.domestic", value: "Chinese providers",
-                              comment: "Section header: Qwen / DeepSeek / Doubao / Volcengine Ark")
+        //
+        // One section, no 国内/国外 split: 2026-10-22 "不要分国内外，直接都按照模型加入进去".
+        // Which vendor is Chinese is not a distinction the app acts on — the
+        // endpoint, the key and the model are the same three fields either way.
+        static var gridTitle: String {
+            NSLocalizedString("llm.grid.title", value: "Providers",
+                              comment: "Section header for the single provider list (no domestic/overseas split)")
         }
         static var gridFooter: String {
             NSLocalizedString("llm.grid.footer",
-                              value: "Each icon opens its own settings with the address already filled in — you add a key and pick a model. The list only offers models that can hold a conversation; embedding, speech and image models are filtered out.",
+                              value: "Tap one to configure it — the address is already filled in, you add a key and pick a model. Only models that can actually write a transcript summary are listed; embedding, speech and image models are filtered out.",
                               comment: "Explains the icon grid and the chat-only model filter")
         }
         static var endpointFixedByAPI: String {
@@ -1296,6 +1296,72 @@ enum L10n {
         static var useCuratedModels: String {
             NSLocalizedString("llm.use_curated_models", value: "Back to the built-in list",
                               comment: "Switch the model row back from free text to the curated picker")
+        }
+
+        // MARK: Connectivity + latency probe (★ 2026-10-22)
+        static var testSection: String {
+            NSLocalizedString("llm.test.section", value: "Connection",
+                              comment: "Section header for the connectivity/latency test")
+        }
+        static var testButton: String {
+            NSLocalizedString("llm.test.button", value: "Test connection and latency",
+                              comment: "Runs one 1-token chat request and reports the round trip")
+        }
+        static var testRunning: String {
+            NSLocalizedString("llm.test.running", value: "Testing…", comment: "")
+        }
+        static func testOK(_ ms: Int) -> String {
+            String(format: NSLocalizedString("llm.test.ok", value: "Connected · %d ms",
+                                             comment: "Probe succeeded; %d is the round-trip time"), ms)
+        }
+        static func testBand(_ ms: Int) -> String {
+            let comment = "Latency band, shown after the ms figure"
+            switch ms {
+            case ..<800:
+                return NSLocalizedString("llm.test.band.fast", value: "fast", comment: comment)
+            case ..<2000:
+                return NSLocalizedString("llm.test.band.normal", value: "normal", comment: comment)
+            case ..<5000:
+                return NSLocalizedString("llm.test.band.slow", value: "slow", comment: comment)
+            default:
+                return NSLocalizedString("llm.test.band.very_slow", value: "very slow", comment: comment)
+            }
+        }
+        static var testNote: String {
+            NSLocalizedString("llm.test.note",
+                              value: "Sends one real chat request capped at 1 token, and times the round trip — the wait before the model starts answering. A pass means the key, the address and the model all work together; a failure names which one it was.",
+                              comment: "Explains what the probe does and what a result means")
+        }
+        static var testNeedKey: String {
+            NSLocalizedString("llm.test.need_key", value: "Add the API key first", comment: "")
+        }
+        static var testNeedModel: String {
+            NSLocalizedString("llm.test.need_model", value: "Pick a model first", comment: "")
+        }
+        static var testBadEndpoint: String {
+            NSLocalizedString("llm.test.bad_endpoint", value: "The address isn't a valid URL", comment: "")
+        }
+        static var testTimeout: String {
+            NSLocalizedString("llm.test.timeout",
+                              value: "No answer in time — the host is unreachable, or the model is too slow for summarising",
+                              comment: "")
+        }
+        static var testUnreachable: String {
+            NSLocalizedString("llm.test.unreachable",
+                              value: "Can't reach this host — check the address, or whether the phone is online",
+                              comment: "")
+        }
+        static var testUnexpectedBody: String {
+            NSLocalizedString("llm.test.unexpected_body",
+                              value: "The address answered, but not with a chat completion — it's probably not this provider's API",
+                              comment: "HTTP 2xx with a body that has no completion in it")
+        }
+        static func testHTTP(_ code: Int) -> String {
+            String(format: NSLocalizedString("llm.test.http", value: "The provider refused the request (HTTP %d)",
+                                             comment: ""), code)
+        }
+        static var latencyChip: String {
+            NSLocalizedString("llm.latency.chip", value: "measured", comment: "Suffix of the ms figure on a provider row")
         }
     }
 

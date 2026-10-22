@@ -101,10 +101,19 @@ struct LLMProviderSpec: Identifiable, Equatable {
 
     // MARK: - Catalogue
 
-    static let all: [LLMProviderSpec] = overseas + domestic
-    static let overseas: [LLMProviderSpec] = [chatgpt, claude, gemini, openRouter, ollama, custom]
-    /// Three, not four: 豆包 and 火山方舟 are the same host and the same key.
-    static let domestic: [LLMProviderSpec] = [qwen, deepseek, doubao]
+    /// One flat list. 2026-10-22:
+    /// > "不要分国内外，直接都按照模型加入进去"
+    ///
+    /// So the 主流服务商 / 国内大模型 split is gone. It never bought anything: the
+    /// sheet is the same three fields for all of them, and "which country is this
+    /// vendor in" is not a fact the app acts on. Order is by how likely someone is
+    /// to reach for it — the three big cloud APIs, the three Chinese ones, then the
+    /// aggregator, the local runtime, and finally the catch-all.
+    static let all: [LLMProviderSpec] = [
+        chatgpt, claude, gemini,
+        qwen, deepseek, doubao,
+        openRouter, ollama, custom,
+    ]
 
     static func find(_ id: String) -> LLMProviderSpec? { all.first { $0.id == id } }
 

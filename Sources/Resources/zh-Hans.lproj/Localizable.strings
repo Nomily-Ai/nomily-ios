@@ -1576,9 +1576,8 @@
 "find.sound_why_locked" = "为什么锁着：PLAUD 的 SDK 里根本没有响铃指令。它的完整设置表只有 20 项，与「找设备」有关的只有 FIND_MY（苹果「查找」的配对开关）；设备管理类里 537 个方法也没有任何 ring / buzz / vibrate。也就是说没有任何东西可以发给卡片，App 变不出这个声音——得先由固件加一条指令（任务 8.2）。在那之前，用上面的「最后见到」位置，以及卡片断开后的接近检测。";
 
 /* 服务商图标网格（2026-10-22 全量：国外 + 国内） */
-"llm.grid.overseas" = "主流服务商";
-"llm.grid.domestic" = "国内大模型";
-"llm.grid.footer" = "点图标进各自设置，地址已经填好——你只需要贴密钥、选模型。模型清单只列出能对话的模型，embedding / 语音 / 图像类会被过滤掉，选了会在摘要里才报错。";
+"llm.grid.title" = "模型服务商";
+"llm.grid.footer" = "点一个图标就进去配置，地址已经填好——你只需要贴密钥、选模型。清单里只留真正能写转写摘要的模型，embedding / 语音 / 图像类会被过滤掉，因为选了它们只会在摘要那一步才报错。";
 "llm.endpoint_fixed" = "这个地址由官方接口固定，不可修改。";
 "llm.model_search" = "筛选模型";
 "llm.chat_only_note" = "只显示可用于对话的模型——embedding、TTS、图像、审核类都隐藏了，因为它们只会在摘要阶段才失败。";
@@ -1586,3 +1585,20 @@
 "llm.use_curated_models" = "回到内置模型清单";
 "llm.not_configured" = "未设置";
 "llm.preset.needs_model" = "待选模型";
+"llm.test.section" = "连通与延迟";
+"llm.test.button" = "测试连接与延迟";
+"llm.test.running" = "测试中…";
+"llm.test.ok" = "连接正常 · %d ms";
+"llm.test.band.fast" = "很快";
+"llm.test.band.normal" = "正常";
+"llm.test.band.slow" = "偏慢";
+"llm.test.band.very_slow" = "很慢";
+"llm.test.note" = "真发一次对话请求、只让它输出 1 个 token，量的是「等多久开始出字」。通过说明密钥、地址、模型三者都对得上；失败会指出是哪一项。";
+"llm.test.need_key" = "先填 API 密钥";
+"llm.test.need_model" = "先选一个模型";
+"llm.test.bad_endpoint" = "地址不是合法的 URL";
+"llm.test.timeout" = "等不到回应——主机连不上，或者这个模型慢到没法用来做摘要";
+"llm.test.unreachable" = "连不上这个主机——检查地址，或者手机是不是没网";
+"llm.test.unexpected_body" = "地址有回应，但返回的不是对话结果——它多半不是这家的 API";
+"llm.test.http" = "服务商拒绝了请求（HTTP %d）";
+"llm.latency.chip" = "实测";
