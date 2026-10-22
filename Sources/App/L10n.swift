@@ -906,6 +906,14 @@ enum L10n {
         static var azure: String { NSLocalizedString("asr.azure", comment: "") }
         static var localServer: String { NSLocalizedString("asr.local_server_label", comment: "") }
         static var transcriptEmpty: String { NSLocalizedString("asr.transcript_empty", value: "No speech detected in this clip, so there's nothing to transcribe. Try a longer or clearer recording.", comment: "Friendly message when the ASR provider returns an empty transcript") }
+        /// ★ 2026-10-22 (后台任务里的「已放弃」): the old text was a raw English
+        /// sentence naming the config key — a user reading the task centre has no
+        /// idea what `min_transcribe_duration` is. Say the actual setting's name
+        /// and both ways out.
+        static func clipTooShort(_ duration: Double, _ minimum: Double) -> String {
+            String(format: NSLocalizedString("asr.clip_too_short", value: "This clip is only %.1f s — shorter than the %.0f s minimum for automatic transcription. Lower the minimum in Settings → Recording, or open the clip and tap Transcribe (manual runs ignore the minimum).", comment: "Auto path skipped a clip below minTranscribeDuration; first %f = clip seconds, second %f = configured minimum"),
+                   duration, minimum)
+        }
         static var transcribeAuto: String { NSLocalizedString("asr.transcribe_auto", comment: "") }
         static var specifyLanguages: String { NSLocalizedString("asr.specify_languages", comment: "") }
         static var languagesFooter: String { NSLocalizedString("asr.languages_footer", comment: "") }

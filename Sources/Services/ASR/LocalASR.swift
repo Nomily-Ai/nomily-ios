@@ -75,6 +75,19 @@ struct LocalASR {
         guard 200..<300 ~= status else {
             let snippet = String(data: respData.prefix(400), encoding: .utf8) ?? ""
             log.error("HTTP \(status, privacy: .public): \(snippet, privacy: .public)")
+            // ★ 2026-10-22 (后台任务里的 HTTP 422 "Field required"): the "local"
+            // slot is documented as our own octet-stream contract, but nothing
+            // stops a user from pointing it at a **generic FastAPI whisper
+            // server**, which answers a raw-body POST with
+            // `{"detail":[{"type":"missing","loc":["body","file"],…}]}`.
+            // That JSON is exactly "I wanted a multipart upload named file".
+            // Speak its language once before giving up — the retry is free and
+            // the alternative is a chain of abandoned jobs.
+            if status == 422, Self.serverWantsMultipartFile(snippet) {
+                log.info("local server wants multipart 'file' — retrying as multipart")
+                return try await transcribeMultipart(
+                    data: data, filename: filename, expectedDuration: expectedDuration)
+            }
             throw AsrError.http(status, snippet)
         }
 
@@ -90,6 +103,75 @@ struct LocalASR {
         }
         log.info("transcribe done segments=\(result.segments.count) chars=\(result.text.count)")
         return result
+    }
+
+    // MARK: - Multipart fallback
+
+    /// FastAPI's validation error for a missing `UploadFile` named `file`.
+    /// Matching the structured shape (`"loc":["body","file"]`) rather than the
+    /// word "file" keeps unrelated 422s (bad parameters, quota) from triggering
+    /// a pointless retry.
+    private static func serverWantsMultipartFile(_ body: String) -> Bool {
+        body.contains("\"body\",\"file\"")
+            || (body.contains("\"type\"") && body.contains("\"missing\"") && body.contains("file"))
+    }
+
+    /// The same endpoint, spoken as `multipart/form-data` with a `file` field —
+    /// the shape every FastAPI whisper server (and the whole OpenAI-compatible
+    /// family) expects. `model` is included because servers that validate it
+    /// would otherwise 422 a second time; anything that ignores extra fields is
+    /// unaffected.
+    private func transcribeMultipart(
+        data: Data, filename: String, expectedDuration: TimeInterval?
+    ) async throws -> AsrResult {
+        guard let endpoint = URL(string: "http://\(host):\(port + 1)/v1/transcribe") else {
+            throw AsrError.missingCredentials("Local server (invalid host)")
+        }
+        var form = CustomASR.MultipartForm()
+        form.addField(name: "model", value: "whisper-1")
+        form.addField(name: "response_format", value: "verbose_json")
+        form.addFile(name: "file", filename: filename,
+                     mimeType: Self.mimeType(for: filename), data: data)
+        var req = URLRequest(url: endpoint)
+        req.httpMethod = "POST"
+        req.timeoutInterval = Self.uploadTimeout(for: expectedDuration)
+        req.setValue("multipart/form-data; boundary=\(form.boundary)",
+                     forHTTPHeaderField: "Content-Type")
+        let (respData, response): (Data, URLResponse)
+        do {
+            (respData, response) = try await URLSession.shared.upload(for: req, from: form.body)
+        } catch {
+            throw AsrError.transport(error)
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard 200..<300 ~= status else {
+            let snippet = String(data: respData.prefix(400), encoding: .utf8) ?? ""
+            log.error("multipart fallback HTTP \(status, privacy: .public): \(snippet, privacy: .public)")
+            throw AsrError.http(status, snippet)
+        }
+        log.info("multipart fallback ok bytes=\(data.count)")
+        let result: AsrResult
+        do {
+            result = try parse(respData)
+        } catch let asrError as AsrError {
+            throw asrError
+        } catch {
+            throw AsrError.decoding(error)
+        }
+        return result
+    }
+
+    /// Best-effort MIME from the filename; the server that cares about this is
+    /// the same one that already told us it wants multipart, so a sensible
+    /// default covers the rest.
+    private static func mimeType(for filename: String) -> String {
+        switch (filename as NSString).pathExtension.lowercased() {
+        case "wav": return "audio/wav"
+        case "mp3": return "audio/mpeg"
+        case "m4a", "mp4": return "audio/mp4"
+        case "flac": return "audio/flac"
+        default: return "audio/ogg"
+        }
     }
 
     // MARK: - Timeout estimation

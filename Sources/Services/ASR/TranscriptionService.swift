@@ -418,6 +418,7 @@ final class TranscriptionService: ObservableObject {
         // the last error wins — which is "Local server not configured").
         let chain = providerChain()
         guard !chain.isEmpty else { throw AsrError.noProviderConfigured }
+        TicNoteDiagLog.log("ASR", "chain clip=\(key): \(chain.joined(separator: " → ")) minGate=\(enforceMinDuration)")
 
         fallbackWarnings[key] = []
 
@@ -490,6 +491,13 @@ final class TranscriptionService: ObservableObject {
                     // expects on the on-disk audio.
                     result = Self.remapTimestamps(result, ranges: vadRanges)
                 }
+                try Task.checkCancellation()
+                // ★ 2026-10-22: the diag file had no trace of *which* provider
+                // ran, which is how "ASR provider returned HTTP 422" survived a
+                // whole day without an answer. One line per attempt, success or
+                // failure — the ASR path is low-frequency, so this cannot flood
+                // the 512 KB ring.
+                TicNoteDiagLog.log("ASR", "ok clip=\(key) provider=\(name) chars=\(result.text.count) segments=\(result.segments.count)")
                 try writeArtefacts(result, audioName: key)
                 // ★ "Summarize right after transcribing" (2026-10-18). The hook lives here rather than in every
                 //   caller: manual, auto-after-download and the resumed queue all funnel through
@@ -504,6 +512,7 @@ final class TranscriptionService: ObservableObject {
                 // credits on a run the user already stopped.
                 if Task.isCancelled { throw CancellationError() }
                 log.warning("provider \(name, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                TicNoteDiagLog.log("ASR", "failed clip=\(key) provider=\(name): \(error.localizedDescription)")
                 lastError = error
                 // If there is a next provider, record this failure so the UI
                 // can surface it non-intrusively while the fallback runs.

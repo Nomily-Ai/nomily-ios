@@ -49,7 +49,7 @@ enum AsrError: LocalizedError {
         case .empty:
             return L10n.ASR.transcriptEmpty
         case .tooShort(let duration, let minimum):
-            return String(format: "Clip is %.1fs (under the %.0fs minimum). Adjust min_transcribe_duration in Settings to transcribe shorter clips.", duration, minimum)
+            return L10n.ASR.clipTooShort(duration, minimum)
         }
     }
 }

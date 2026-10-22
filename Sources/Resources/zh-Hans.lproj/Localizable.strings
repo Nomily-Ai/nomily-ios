@@ -593,6 +593,7 @@
 "devices.clear_summaries" = "清除摘要";
 "devices.clear_summaries_message" = "删除所有摘要及其翻译，音频与转录会保留。此操作不可撤销。";
 "asr.transcript_empty" = "这段音频未检测到语音，没有可转写的内容。请尝试更长或更清晰的录音。";
+"asr.clip_too_short" = "这段录音只有 %.1f 秒——低于自动转写的最短 %.0f 秒。可在「设置 → 录音与传输」调低最短时长，或打开该录音手动点「转写」（手动不受此限制）。";
 "privacy.cloud_title" = "数据将离开你的设备";
 "privacy.cloud_message" = "你配置了云端转写或 AI 服务（如 Azure、OpenAI）。你的音频和文本会被发送到该第三方服务进行处理。数据不经过 Nomily 服务器，但确实会离开你的设备。若要完全在设备本地处理，请使用本地 ASR 服务器 + 本地(Ollama)或不使用 AI 模型。";
 "privacy.cloud_agree" = "我已了解，继续";
