@@ -134,6 +134,16 @@ struct PlaudLiveScreen: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+            // A pause is a file boundary on the card, not a bookmark inside one
+            // file. Saying how many clips exist beats "why do I have two
+            // recordings?" tomorrow.
+            if direct.recordSegmentCount > 1 {
+                Text(L10n.Plaud.segmentHint(direct.recordSegmentCount))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
             if !isConnected {
                 Button {
                     direct.reconnect()

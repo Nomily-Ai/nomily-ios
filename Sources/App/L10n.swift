@@ -182,6 +182,12 @@ enum L10n {
         static var liveNoStream: String { NSLocalizedString("plaud.live_no_stream", value: "The card isn't sending live audio, so there's no real-time text. The recording itself is unaffected — it will be transcribed when you stop.", comment: "PCM never arrived; live subtitle unavailable") }
         static var pauseFailed: String { NSLocalizedString("plaud.pause_failed", value: "The card didn't pause. It may be busy transferring — try again in a moment.", comment: "Pause command went unanswered twice") }
         static var resumeFailed: String { NSLocalizedString("plaud.resume_failed", value: "The card didn't resume. Tap 继续 again — if it still refuses, stop the take and start a new one.", comment: "Resume command went unanswered twice") }
+        /// The card seals the file on pause and opens a new one on resume, so a
+        /// take with pauses is several clips. Say the count instead of letting the
+        /// user discover it later on the recordings list.
+        static func segmentHint(_ count: Int) -> String {
+            String(format: NSLocalizedString("plaud.segment_hint", value: "%d clips so far — pausing closes a clip and resuming opens a new one.", comment: "Take is split across several files because of pauses; %d = count"), count)
+        }
         static var navTitle: String { NSLocalizedString("plaud.nav_title", value: "PLAUD", comment: "Settings page title for PLAUD cloud sync") }
         static var signInHeader: String { NSLocalizedString("plaud.signin_header", value: "Sign in", comment: "PLAUD email+code sign-in section") }
         static var emailPlaceholder: String { NSLocalizedString("plaud.email", value: "PLAUD account email", comment: "") }

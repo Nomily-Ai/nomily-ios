@@ -199,6 +199,11 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// republish, so the card list could not show "already saved" after a pull.
     @Published private(set) var pulledSessions: Set<Int> = []
     @Published private(set) var isPaused = false
+    /// How many files this take is spread over. 1 until the user pauses: the card
+    /// seals the file on pause and opens a **new one** on resume, so a take with
+    /// one pause is two clips on the card — shown to the user, because otherwise
+    /// "why are there two recordings?" is a mystery.
+    @Published private(set) var recordSegmentCount = 1
     /// How many recordings sit ON the card right now (the SDK's `getFileList`
     /// answer). `nil` = never asked / card not connected — the UI shows a dash
     /// instead of a fake "0", because "0 recordings" and "don't know yet" are
@@ -255,6 +260,20 @@ final class PlaudDirectService: NSObject, ObservableObject {
     private var recordCommandWatchdog: Task<Void, Never>?
     /// When the take was paused, so its length can exclude the gap on resume.
     private var pausedAt: Date?
+    /// Seconds already on the clock when the current *segment* started.
+    ///
+    /// ★ 2026-10-22, from the Android RE (`Plaud-实时转录与打点机制.md` §3.1):
+    /// `pauseRecord` answers with **fileSize** — the card seals the file — and
+    /// `resumeRecord` answers with a **new sessionId**, i.e. resuming starts a
+    /// *second file*, not a continuation of the first. The card's own
+    /// `blePcmData.millsec` therefore restarts at 0 on every resume, which used to
+    /// freeze the displayed clock (it takes `max`, and the new segment's 0 s can
+    /// never beat the old segment's 90 s). This offset is what keeps one pause
+    /// looking like one recording.
+    private var elapsedBase: TimeInterval = 0
+    /// Every segment id of the current take, oldest first. A take is no longer
+    /// guaranteed to be one file on the card.
+    private var recordSegmentIDs: [Int] = []
     private var userToken: String?
     private var userTokenAt = Date.distantPast
     private var isInitialized = false
@@ -405,15 +424,22 @@ final class PlaudDirectService: NSObject, ObservableObject {
     ///   owns timestamps and a segment model, and this method mirrors those into
     ///   published state instead of a single joined string. The card's clock is
     ///   passed through with every block, so each line knows when it was said.
-    @MainActor private func startLiveTranscription(sessionID: Int? = nil) {
+    @MainActor private func startLiveTranscription(sessionID: Int? = nil, continued: Bool = false) {
         let sid = sessionID ?? recordSessionID
         // ★ 2026-10-22 ("the text disappears"): re-attaching to the **same** take
         // must not wipe what was already transcribed. `attachToRunningRecording`
         // and the state poll can call this again mid-take (a dropped link, a
         // re-read after the card slept), and resetting there threw the text away
         // exactly when the user was looking at it.
-        let continuingSameTake = (sid != nil && sid == liveTranscriptSessionID)
-            && (!liveSegments.isEmpty || !livePartial.isEmpty)
+        //
+        // ★ `continued` covers the case the session id can't: after a pause the
+        // card resumes into a **new session** (RE §3.1), so the id differs while
+        // the take is still the same one. Without this flag every resume would
+        // clear the transcript — the user pauses for ten seconds and loses the
+        // previous ten minutes of text.
+        let continuingSameTake = continued
+            || ((sid != nil && sid == liveTranscriptSessionID)
+                && (!liveSegments.isEmpty || !livePartial.isEmpty))
         liveTranscriber?.stop()
         liveTranscriber = nil
         if !continuingSameTake {
@@ -1982,6 +2008,9 @@ final class PlaudDirectService: NSObject, ObservableObject {
         recordBytes = 0
         liveLevel = 0
         pausedAt = nil
+        elapsedBase = 0
+        recordSegmentIDs = []
+        recordSegmentCount = 1
     }
 
     /// Session id of the recording that is running right now, from either source.
@@ -2379,6 +2408,10 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.recordMarks = []
             self.recordMarkCount = 0
             self.pausedAt = nil
+            // A brand-new take: one segment, no accumulated clock.
+            self.recordSegmentIDs = [sessionId]
+            self.elapsedBase = 0
+            self.recordSegmentCount = 1
             self.marksSessionID = sessionId
             self.markingProbeStrikes = 0
             self.marksAvailableLive = true
@@ -2507,20 +2540,22 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         DispatchQueue.main.async {
             self.isRecording = true
             self.isPaused = false
+            // ★ A resume is a **new segment**, not a continuation: CMD 140 answers
+            // with a fresh `sessionId` (see `recordSegmentIDs`). The take keeps its
+            // identity for the transcript and the clock, but from the card's point
+            // of view this is a second file starting at byte 0.
+            if !self.recordSegmentIDs.contains(sessionId) {
+                self.recordSegmentIDs.append(sessionId)
+                self.recordSegmentCount = self.recordSegmentIDs.count
+            }
             self.recordSessionID = sessionId
             self.recordBytes = start
-            // The clock must not count the pause. Wall-clock elapsed is
-            // `now - recordStartedAt`, so shift the anchor forward by exactly the
-            // time the take was paused — the displayed length then matches the
-            // audio that actually got recorded.
-            if let pausedAt = self.pausedAt, let started = self.recordStartedAt {
-                self.recordStartedAt = started.addingTimeInterval(Date().timeIntervalSince(pausedAt))
-            }
             self.pausedAt = nil
-            // Drop any PCM-derived clock: it was frozen at the pause, and letting
-            // it win would hold the displayed time still after resuming.
+            // Hand the clock over to `elapsedBase`: the new segment's own
+            // millisecond counter starts at 0, so anything derived from it alone
+            // would snap the display back to 00:00.
             self.deviceElapsed = nil
-            if self.recordStartedAt == nil { self.recordStartedAt = Date() }
+            self.recordStartedAt = Date().addingTimeInterval(-self.elapsedBase)
             self.recordNotice = nil
         }
         // ★ The card stopped pushing PCM when it paused; resuming the recording
@@ -2534,8 +2569,9 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             TicNoteDiagLog.log("PLAUD-PCM", "reopening live stream after resume sid=\(sessionId)")
             self.openLiveStream(sid: sessionId, start: 0)
             // Azure closes an idle socket, so a long pause leaves the engine gone.
-            // `startLiveTranscription` keeps the existing lines for the same take.
-            self.startLiveTranscription(sessionID: sessionId)
+            // `continued: true` keeps the lines transcribed before the pause —
+            // the session id changed, the take did not.
+            self.startLiveTranscription(sessionID: sessionId, continued: true)
         }
     }
 
@@ -2548,12 +2584,11 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.isPaused = true
             self.isRecording = false
             self.pausedAt = Date()
-            // Freeze the clock at the pause position so it doesn't keep counting
-            // during the pause (the anchor is shifted again on resume).
-            if let started = self.recordStartedAt {
-                self.deviceElapsed = max(self.deviceElapsed ?? 0,
-                                         Date().timeIntervalSince(started))
-            }
+            // The card just sealed this segment (`PauseRecordRsp(fileSize:)`), so
+            // freeze the clock here and let the next segment build on top.
+            let wall = self.recordStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+            self.elapsedBase = max(self.elapsedBase, self.deviceElapsed ?? wall)
+            self.deviceElapsed = self.elapsedBase
             self.recordBytes = fileSize > 0 ? fileSize : self.recordBytes
         }
     }
@@ -2614,7 +2649,9 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             // (seen on hardware); only a positive, non-decreasing report may
             // move `deviceElapsed`, otherwise the local anchor keeps ticking.
             if seconds > 0 {
-                self.deviceElapsed = max(self.deviceElapsed ?? 0, seconds)
+                // + `elapsedBase`: this block belongs to the *current* segment, and
+                // a segment after a pause restarts its own counter at 0.
+                self.deviceElapsed = max(self.deviceElapsed ?? 0, self.elapsedBase + seconds)
             }
             if self.recordStartedAt == nil {
                 self.recordStartedAt = Date().addingTimeInterval(-max(0, seconds))
