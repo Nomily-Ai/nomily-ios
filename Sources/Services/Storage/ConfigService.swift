@@ -167,6 +167,13 @@ final class ConfigService: ObservableObject {
     /// `llmArk` is deliberately **missing**: 豆包 and 火山方舟 became one card, and
     /// the old `ark` slot is only read once by `mergeArkIntoDoubao` — keeping it in
     /// this table would keep re-creating a row the page no longer shows.
+    /// Keychain account for one cloud-ASR credential: `asr.cloud.<vendor>.<field>`.
+    /// One function, both directions, so a save can never target a key the load
+    /// side doesn't ask for.
+    static func cloudSecretKey(_ id: String, _ field: String) -> String {
+        "asr.cloud.\(id).\(field)"
+    }
+
     static let presetSecretSlots: [(String, SecretStore.Slot)] = [
         ("qwen", .llmQwen), ("deepseek", .llmDeepSeek), ("doubao", .llmDoubao),
     ]
@@ -184,6 +191,13 @@ final class ConfigService: ObservableObject {
         SecretStore.save(config.llmProviders.custom?.apiKey, to: .llmCustom)
         for (id, slot) in Self.presetSecretSlots {
             SecretStore.save(config.llmProviders.preset(id)?.apiKey, to: slot)
+        }
+        for id in Array((stripped.asrProviders.cloud ?? [:]).keys) {
+            for field in ASRCloudSpec.find(id)?.fields ?? [] where field.kind == .secret {
+                SecretStore.save(stripped.asrProviders.cloud?[id]?.secrets?[field.id],
+                                 toKey: cloudSecretKey(id, field.id))
+                stripped.asrProviders.cloud?[id]?.secrets?[field.id] = nil
+            }
         }
         SecretStore.save(config.wifiAP?.psk, to: .wifiAPPassword)
 
@@ -235,6 +249,12 @@ final class ConfigService: ObservableObject {
         }
         for (id, slot) in Self.presetSecretSlots where config.llmProviders.preset(id) != nil {
             config.llmProviders.presets?[id]?.apiKey = SecretStore.load(slot)
+        }
+        for id in Array((config.asrProviders.cloud ?? [:]).keys) {
+            for field in ASRCloudSpec.find(id)?.fields ?? [] where field.kind == .secret {
+                config.asrProviders.cloud?[id]?.secrets?[field.id] =
+                    SecretStore.load(key: cloudSecretKey(id, field.id))
+            }
         }
         Self.mergeArkIntoDoubao(&config)
         if config.wifiAP != nil {
@@ -292,8 +312,10 @@ final class ConfigService: ObservableObject {
         // and one of these arriving in plaintext is exactly the case worth catching.
         let presetPlaintext = (config.llmProviders.presets ?? [:])
             .values.compactMap { $0.apiKey }.filter { !$0.isEmpty }
-        guard !plaintext.isEmpty || !presetPlaintext.isEmpty else { return false }
-        log.info("migrating \(plaintext.count + presetPlaintext.count, privacy: .public) plaintext secret(s) out of config.json")
+        let cloudPlaintext = (config.asrProviders.cloud ?? [:]).values
+            .flatMap { ($0.secrets ?? [:]).values }.filter { !$0.isEmpty }
+        guard !plaintext.isEmpty || !presetPlaintext.isEmpty || !cloudPlaintext.isEmpty else { return false }
+        log.info("migrating \(plaintext.count + presetPlaintext.count + cloudPlaintext.count, privacy: .public) plaintext secret(s) out of config.json")
         _ = extractSecrets(config)
         return true
     }

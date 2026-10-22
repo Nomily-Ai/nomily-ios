@@ -312,6 +312,34 @@ struct AppConfig: Codable, Equatable {
         /// only). The API key never touches disk — see `SecretStore.Slot.asrRemoteLiveKey`.
         var remoteLive: RemoteLive?
 
+        /// ★ 2026-10-22: catalogue-driven cloud vendors (Google / AWS / Deepgram /
+        /// AssemblyAI / Gladia / IBM Watson), keyed by `ASRCloudSpec.id`.
+        ///
+        /// A dictionary, not six named fields: the provider list is a catalogue
+        /// (`ASRCloudSpec.all`) and adding a seventh vendor must not touch the
+        /// Codable shape, the secret tables and the settings page all at once —
+        /// the same reason `llmProviders.presets` is a dictionary.
+        ///
+        /// Optional so `config.json` written by an older build still decodes.
+        var cloud: [String: CloudASR]?
+
+        struct CloudASR: Codable, Equatable {
+            /// Stored address. Empty means "derive from `values`" — Watson and AWS
+            /// build their host out of the region.
+            var endpoint: String = ""
+            /// Chosen model / recogniser type.
+            var model: String?
+            /// Non-secret fields (region, account id).
+            var values: [String: String]?
+            /// Secrets, in memory only. `ConfigService` moves them to the Keychain
+            /// at the persistence boundary, keyed `asr.cloud.<id>.<field>`.
+            var secrets: [String: String]?
+
+            enum CodingKeys: String, CodingKey {
+                case endpoint, model, values, secrets
+            }
+        }
+
         struct RemoteLive: Codable, Equatable {
             /// `wss://host[:port][/v1/listen]`. `wss` (or `https`, auto-upgraded) only —
             /// an explicit `ws://` is rejected. `RemoteLiveASR.listenURL` normalizes.
@@ -385,6 +413,7 @@ struct AppConfig: Codable, Equatable {
             case local
             case custom
             case remoteLive = "remote_live"
+            case cloud
         }
     }
 

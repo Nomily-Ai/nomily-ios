@@ -27,96 +27,111 @@ struct SettingsView: View {
         jobs.unfinishedCount + env.transcription.pending.count
     }
 
+    /// One settings row: a coloured glyph tile, the title, and an optional right-hand
+    /// detail (current value) or count (badge).
+    ///
+    /// 2026-10-22 ("按照苹果的简约风格来"): the rows used to be bare
+    /// `NavigationLink(title)`s, so ten items of six different kinds read as one
+    /// undifferentiated list. The tile gives each area a shape to recognise and
+    /// makes the groups scan vertically instead of requiring the labels to be read.
+    @ViewBuilder
+    private func settingsRow<D: View>(
+        _ title: String,
+        icon: String,
+        tint: Color,
+        detail: String? = nil,
+        count: Int? = nil,
+        @ViewBuilder destination: () -> D
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(tint.gradient)
+                    .frame(width: 28, height: 28)
+                    .overlay {
+                        Image(systemName: icon)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .accessibilityHidden(true)
+                Text(title)
+                Spacer(minLength: 8)
+                if let detail {
+                    Text(detail).foregroundStyle(.secondary)
+                }
+                if let count {
+                    Text("\(count)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+        }
+    }
+
     var body: some View {
         Form {
+            // ★ 2026-10-22 ("按照苹果的简约风格来"): one flat Section held ten
+            // rows in no particular order, so "where do I change the ASR vendor"
+            // was a full-page scan. Now four groups, each a place the user would
+            // look for that thing: what records, what generates text, the files
+            // themselves, and how the app behaves.
             Section {
-                NavigationLink(L10n.Settings.asrProviders) { ASRProvidersView() }
-                NavigationLink(L10n.Settings.llmProviders) { LLMProvidersView() }
-                NavigationLink(L10n.Settings.recordings) { RecordingsSettingsView() }
-                NavigationLink(L10n.Settings.summarizeTemplates) { SummarizeTemplatesView() }
-                NavigationLink(L10n.Settings.devicesAndLibrary) { DevicesLibraryView() }
-                // PLAUD moved out of Settings (2026-10-21): it is a device-scoped
-                // feature, not an app-wide setting. Entry now lives on the
-                // Recordings tab → Device segment, next to the other recorder cards.
-                // ⛔ **DingTalk A1 is deliberately NOT here** (removed 2026-10-18).
-                //
-                // User's words: "The A1 recorder card's key should not appear in the app's general settings —
-                // it is not a general setting, it belongs to one specific recording product."
-                //
-                // They are right, and the earlier placement had a real cost: a card-shaped secret
-                // sitting under "Settings" reads as an account-level / app-wide thing, so people
-                // either paste the wrong card's secret or assume one import covers every A1 they
-                // own. The credential now lives **only** on that card's own device-info page
-                // (`RecorderSheet.cardInfoContent` → `a1CredentialSection`), where "which card"
-                // is unambiguous because the card is the thing on screen.
-                //
-                // Trash sits right next to "Devices & Library": what it manages is exactly those library entries,
-                // so it lives in this section, before Language. It only shows a count when there's really something in it —
-                // a permanent "0" reads as "0 things are broken here".
-                NavigationLink {
+                settingsRow(L10n.Settings.recordings, icon: "waveform", tint: .blue) {
+                    RecordingsSettingsView()
+                }
+                settingsRow(L10n.Settings.asrProviders, icon: "text.bubble", tint: .indigo) {
+                    ASRProvidersView()
+                }
+            } header: {
+                Text(L10n.Settings.groupCapture)
+            }
+
+            Section {
+                settingsRow(L10n.Settings.llmProviders, icon: "sparkles", tint: .purple) {
+                    LLMProvidersView()
+                }
+                settingsRow(L10n.Settings.summarizeTemplates, icon: "doc.text", tint: .teal) {
+                    SummarizeTemplatesView()
+                }
+            } header: {
+                Text(L10n.Settings.groupGenerate)
+            }
+
+            Section {
+                settingsRow(L10n.Settings.devicesAndLibrary, icon: "externaldrive", tint: .orange) {
+                    DevicesLibraryView()
+                }
+                // ⛔ PLAUD lives on Recordings → Device, not here (2026-10-21): it is
+                // a device-scoped feature, not an app-wide setting. DingTalk A1 is
+                // likewise **not** here (2026-10-18): its credential belongs only on
+                // that card's own device-info page, because from Settings a
+                // card-shaped secret reads as account-level and people paste the
+                // wrong card's key.
+                settingsRow(L10n.Trash.settingsRow, icon: "trash", tint: .gray,
+                            count: trash.items.isEmpty ? nil : trash.items.count) {
                     TrashView()
-                } label: {
-                    HStack {
-                        Text(L10n.Trash.settingsRow)
-                        Spacer()
-                        if !trash.items.isEmpty {
-                            Text("\(trash.items.count)")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
                 }
-                // ★ 2026-10-16 revision twelve: the **overview** of the four kinds of long job.
-                //
-                // Placed in this section rather than crammed into "Recording Settings": of the four job kinds, transcription belongs to recording,
-                // summary and translation belong to LLM, format conversion belongs to the library — it belongs to none of
-                // those sections, and cramming it into one would force the user to guess which one to find it in.
-                //
-                // The badge on the right only appears when there are really unfinished jobs (same as the trash row above):
-                // a permanent "0" reads as "0 things are broken".
-                NavigationLink {
+                settingsRow(L10n.Jobs.openQueue, icon: "clock.arrow.circlepath", tint: .green,
+                            count: busyJobCount > 0 ? busyJobCount : nil) {
                     TaskCenterView()
-                } label: {
-                    HStack {
-                        Text(L10n.Jobs.openQueue)
-                        Spacer()
-                        if busyJobCount > 0 {
-                            Text("\(busyJobCount)")
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                    }
                 }
-                // Language sits last, right above About: it belongs to none of
-                // the four feature areas above, and slotting it among them
-                // would break their order. The row shows the current choice so
-                // you don't have to open it to see what's set.
-                NavigationLink {
+            } header: {
+                Text(L10n.Settings.groupLibrary)
+            }
+
+            Section {
+                settingsRow(L10n.Settings.language, icon: "globe", tint: .cyan,
+                            detail: currentLanguageLabel) {
                     LanguagePickerView()
-                } label: {
-                    HStack {
-                        Text(L10n.Settings.language)
-                        Spacer()
-                        Text(currentLanguageLabel)
-                            .foregroundStyle(.secondary)
-                    }
                 }
-                // Theme sits next to Language: both are "how the app looks and
-                // speaks", and neither belongs to a feature area. The leading dot
-                // is the theme's own accent, so the row answers "which one am I on"
-                // without being opened.
-                NavigationLink {
+                settingsRow(L10n.Settings.theme, icon: "circle.lefthalf.filled", tint: currentTheme.accent,
+                            detail: currentTheme.title) {
                     ThemePickerView()
-                } label: {
-                    HStack {
-                        Circle()
-                            .fill(currentTheme.accent)
-                            .frame(width: 12, height: 12)
-                        Text(L10n.Settings.theme)
-                        Spacer()
-                        Text(currentTheme.title)
-                            .foregroundStyle(.secondary)
-                    }
                 }
+            } header: {
+                Text(L10n.Settings.groupGeneral)
             }
 
             watchSection
@@ -415,6 +430,10 @@ struct ASRProvidersView: View {
         Form {
             transcriptionSection
             azureSection
+            // ★ 2026-10-22: the six cloud vendors sit between Azure and the
+            // self-hosted options — they are "someone else's cloud", like Azure,
+            // and above the LAN/WSS servers someone runs themselves.
+            ASRCloudSection()
             localSection
             customSection
             remoteLiveSection

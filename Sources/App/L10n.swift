@@ -447,6 +447,11 @@ enum L10n {
     enum Settings {
         static var asrProviders: String { NSLocalizedString("settings.asr_providers", comment: "") }
         static var llmProviders: String { NSLocalizedString("settings.llm_providers", comment: "") }
+        // MARK: Settings groups (★ 2026-10-22, Apple-style grouping)
+        static var groupCapture: String { NSLocalizedString("settings.group.capture", value: "Recording", comment: "Settings group: capture + transcription") }
+        static var groupGenerate: String { NSLocalizedString("settings.group.generate", value: "Text generation", comment: "Settings group: LLM + templates") }
+        static var groupLibrary: String { NSLocalizedString("settings.group.library", value: "Library and tasks", comment: "Settings group: devices, trash, job queue") }
+        static var groupGeneral: String { NSLocalizedString("settings.group.general", value: "General", comment: "Settings group: language, theme") }
         static var recordings: String { NSLocalizedString("settings.recordings", comment: "") }
         static var summarizeTemplates: String { NSLocalizedString("settings.summarize_templates", comment: "") }
         static var devicesAndLibrary: String { NSLocalizedString("settings.devices_library", comment: "") }
@@ -1374,6 +1379,83 @@ enum L10n {
         }
         static var latencyChip: String {
             NSLocalizedString("llm.latency.chip", value: "measured", comment: "Suffix of the ms figure on a provider row")
+        }
+    }
+
+    // MARK: - Cloud ASR vendors (★ 2026-10-22)
+
+    /// Settings copy for the six catalogue-driven ASR vendors.
+    enum ASRCloud {
+        static var title: String {
+            NSLocalizedString("asr.cloud.title", value: "Cloud services",
+                              comment: "Section header: Google / AWS / Deepgram / AssemblyAI / Gladia / IBM Watson")
+        }
+        static var footer: String {
+            NSLocalizedString("asr.cloud.footer",
+                              value: "Tap a vendor to add its credentials. The test button signs a real request to that vendor and measures the round trip — a pass means the credentials work on this network, and it costs no audio quota.",
+                              comment: "Explains what the cloud ASR rows do and what the probe proves")
+        }
+        static var testButton: String {
+            NSLocalizedString("asr.cloud.test", value: "Test credentials and latency", comment: "")
+        }
+        static var testRunning: String {
+            NSLocalizedString("asr.cloud.testing", value: "Testing…", comment: "")
+        }
+        static var testNote: String {
+            NSLocalizedString("asr.cloud.test_note",
+                              value: "One authenticated read-only request. Nothing is uploaded and no audio is transcribed.",
+                              comment: "")
+        }
+        static func ok(_ ms: Int) -> String {
+            String(format: NSLocalizedString("asr.cloud.ok", value: "Credentials work · %d ms",
+                                             comment: "Probe passed; %d is the round trip"), ms)
+        }
+        static func modelCount(_ count: Int) -> String {
+            String(format: NSLocalizedString("asr.cloud.model_count", value: "%d models", comment: ""), count)
+        }
+        static func http(_ code: Int) -> String {
+            String(format: NSLocalizedString("asr.cloud.http", value: "The vendor rejected the request (HTTP %d)", comment: ""), code)
+        }
+        static func missingField(_ name: String) -> String {
+            String(format: NSLocalizedString("asr.cloud.missing", value: "%@ is empty", comment: ""), name)
+        }
+        static var badEndpoint: String {
+            NSLocalizedString("asr.cloud.bad_endpoint", value: "The address isn't a valid URL", comment: "")
+        }
+        static var timeout: String {
+            NSLocalizedString("asr.cloud.timeout", value: "No answer in time — unreachable, or the region is wrong", comment: "")
+        }
+        static var unreachable: String {
+            NSLocalizedString("asr.cloud.unreachable", value: "Can't reach this host — check the address or the network", comment: "")
+        }
+        static var model: String {
+            NSLocalizedString("asr.cloud.model", value: "Model", comment: "")
+        }
+        static var fetchModels: String {
+            NSLocalizedString("asr.cloud.fetch_models", value: "Fetch this account's models", comment: "")
+        }
+        static var manualModel: String {
+            NSLocalizedString("asr.cloud.manual_model", value: "Type a model name", comment: "")
+        }
+        static var ready: String {
+            NSLocalizedString("asr.cloud.ready", value: "Ready", comment: "Credentials + model are set")
+        }
+        static var needsKey: String {
+            NSLocalizedString("asr.cloud.needs_key", value: "Add credentials", comment: "")
+        }
+        static var needsModel: String {
+            NSLocalizedString("asr.cloud.needs_model", value: "Pick a model", comment: "")
+        }
+        static var remove: String {
+            NSLocalizedString("asr.cloud.remove", value: "Remove this vendor", comment: "")
+        }
+        static var notWired: String {
+            NSLocalizedString("asr.cloud.not_wired",
+                              value: "Credentials are checked against the real API. Transcription through this vendor isn't wired into the engine yet — Azure and the local/remote servers still do the actual work.",
+                              comment: "Honest scope note: probe works, transcription routing does not")
+        }
+        static func field(_ id: String, fallback: String) -> String {
+            NSLocalizedString("asr.cloud.field.\(id)", value: fallback, comment: "Credential field label")
         }
     }
 

@@ -91,11 +91,56 @@ enum SecretStore {
         SecItemDelete(baseQuery(slot) as CFDictionary) == errSecSuccess
     }
 
+    // MARK: - Keyed accessors (catalogue-driven secrets)
+
+    /// For secrets whose *name* comes from a catalogue rather than this enum:
+    /// the cloud ASR vendors (`asr.cloud.<id>.<field>`), where the field list is
+    /// data (`ASRCloudSpec`) and a seventh vendor must not require a new enum case
+    /// plus a rebuild of the whole `Slot` table.
+    ///
+    /// The `Slot` enum stays the complete list of **fixed** secrets — nothing here
+    /// weakens that, because both directions read the same `ASRCloudSpec.fields`
+    /// table. A key that no spec declares can therefore never be read back, which
+    /// is the failure mode the enum comment warns about.
+    static func load(key: String) -> String? {
+        var query = baseQuery(account: key)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
+              let data = out as? Data,
+              let value = String(data: data, encoding: .utf8) else { return nil }
+        return value
+    }
+
+    static func save(_ value: String?, toKey key: String) {
+        guard let value, !value.isEmpty else {
+            SecItemDelete(baseQuery(account: key) as CFDictionary)
+            return
+        }
+        let query = baseQuery(account: key)
+        let update: [String: Any] = [kSecValueData as String: Data(value.utf8)]
+        var status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        if status == errSecItemNotFound {
+            var insert = query
+            insert[kSecValueData as String] = Data(value.utf8)
+            insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            status = SecItemAdd(insert as CFDictionary, nil)
+        }
+        if status != errSecSuccess {
+            log.error("keychain write \(key, privacy: .public) failed: \(status, privacy: .public)")
+        }
+    }
+
     private static func baseQuery(_ slot: Slot) -> [String: Any] {
+        baseQuery(account: slot.rawValue)
+    }
+
+    private static func baseQuery(account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: slot.rawValue,
+            kSecAttrAccount as String: account,
             kSecAttrSynchronizable as String: false,
         ]
     }
