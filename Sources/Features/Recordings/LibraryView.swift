@@ -1491,6 +1491,7 @@ private struct SourceBadge: View {
         case .watch: return "applewatch"
         case .phone: return "iphone"
         case .imported: return "square.and.arrow.down"
+        case .live: return "waveform.badge.mic"
         }
     }
 }
@@ -1515,6 +1516,8 @@ extension Library.ClipSource {
             return L10n.Library.sourcePhone
         case .imported:
             return L10n.Library.sourceImported
+        case .live:
+            return L10n.Library.sourceLive
         case .card:
             let alias = serial.flatMap {
                 RecorderAliasStore.shared.alias(identityHex: $0)

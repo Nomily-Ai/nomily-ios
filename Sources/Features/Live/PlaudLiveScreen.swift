@@ -196,11 +196,65 @@ struct PlaudLiveScreen: View {
         .background(Color(uiColor: .secondarySystemGroupedBackground))
     }
 
+    // MARK: - Saving into the library
+
+    /// "方便结束后保存到资料库": the transcript is written next to the clip the
+    /// card produces (that is the only place it can live — the clip page reads
+    /// `<name>.txt` / `<name>.asr.json`), so this footer tells the truth about
+    /// where that stands instead of offering a button that cannot work yet.
+    @ViewBuilder
+    private var saveFooter: some View {
+        HStack(spacing: 6) {
+            if let saved = direct.liveTranscriptSavedTo {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text(L10n.Plaud.liveSaved)
+                    .foregroundStyle(.secondary)
+                Text(saved)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(.tertiary)
+            } else if direct.isRecording {
+                Image(systemName: "bookmark")
+                    .foregroundStyle(.secondary)
+                Text(L10n.Plaud.liveSaveNeedsClip)
+                    .foregroundStyle(.secondary)
+            } else {
+                Image(systemName: direct.isSyncing ? "arrow.down.circle" : "tray.and.arrow.down")
+                    .foregroundStyle(.secondary)
+                Text(L10n.Plaud.liveSavePending)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 6)
+                if !direct.isSyncing {
+                    Button(L10n.Plaud.liveSaveAction) {
+                        direct.saveLiveTranscriptToLibrary()
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
+                }
+            }
+            if direct.liveTranscriptSavedTo == nil, direct.isRecording == false {
+                Spacer(minLength: 0)
+            }
+        }
+        .font(.caption2)
+        .lineLimit(1)
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .tertiarySystemGroupedBackground))
+    }
+
     @ViewBuilder
     private var transcriptBody: some View {
         if hasText {
-            PlaudLiveTranscriptList(segments: direct.liveSegments, partial: direct.livePartial)
-                .background(Color(uiColor: .secondarySystemGroupedBackground))
+            VStack(spacing: 0) {
+                PlaudLiveTranscriptList(segments: direct.liveSegments,
+                                        partial: direct.livePartial,
+                                        markers: direct.liveMarkers)
+                saveFooter
+            }
+            .background(Color(uiColor: .secondarySystemGroupedBackground))
         } else {
             VStack(spacing: 8) {
                 Spacer()

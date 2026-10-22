@@ -172,6 +172,14 @@ final class Library: ObservableObject {
             case phone
             /// A file imported by the user —— no record at all in the manifest.
             case imported
+            /// A clip whose text came from **live transcription** rather than the
+            /// post-recording pass (`Entry.source == "live"`).
+            ///
+            /// ★ 2026-10-22 on request: the library must be able to tell "this one
+            /// was transcribed while it was being recorded" from "a plain
+            /// recording that was transcribed later" — the row badge says
+            /// 实时转录 instead of the card's name.
+            case live
         }
 
         var kind: Kind
@@ -216,6 +224,12 @@ final class Library: ObservableObject {
     }
 
     private static func classify(_ entry: Entry) -> ClipSource {
+        // The live-transcript mark wins over the transport: the bytes still came
+        // down over BLE, but what makes this clip different is that its text was
+        // produced while recording.
+        if entry.source == "live" {
+            return ClipSource(kind: .live, serial: entry.deviceSerial, storedName: entry.deviceName)
+        }
         switch entry.transport {
         case "watch":
             return ClipSource(kind: .watch, serial: nil, storedName: entry.deviceName)

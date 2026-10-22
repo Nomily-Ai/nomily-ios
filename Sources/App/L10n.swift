@@ -208,6 +208,14 @@ enum L10n {
         static var liveNeedsPermission: String { NSLocalizedString("plaud.live_needs_permission", value: "Live transcription needs Speech Recognition permission — allow it in Settings → Nomily, or the card still records without text.", comment: "Live transcript unavailable: speech permission missing") }
         static var liveModelMissing: String { NSLocalizedString("plaud.live_model_missing", value: "The offline speech model for this language isn't installed on this iPhone, so live text is off. The recording itself is unaffected.", comment: "Live transcript unavailable: on-device model not installed") }
         static var liveNeedConnect: String { NSLocalizedString("plaud.live_need_connect", value: "Connect the card and the live transcript appears here.", comment: "Live tab, PLAUD card paired but not connected") }
+        /// A bookmark line inside the transcript / saved text. `%@` = mm:ss.
+        static func liveMarkLine(_ clock: String) -> String {
+            String(format: NSLocalizedString("plaud.live_mark_line", value: "Mark · %@", comment: "Bookmark marker inside the live transcript; %@ = mm:ss"), clock)
+        }
+        static var liveSaved: String { NSLocalizedString("plaud.live_saved", value: "Saved to the library", comment: "The live transcript has been written next to the pulled clip") }
+        static var liveSavePending: String { NSLocalizedString("plaud.live_save_pending", value: "The transcript is saved as soon as the card's file lands in the library.", comment: "Live transcript waits for the export to finish") }
+        static var liveSaveAction: String { NSLocalizedString("plaud.live_save_action", value: "Save to library", comment: "Button that pulls the card's file so the transcript can be attached") }
+        static var liveSaveNeedsClip: String { NSLocalizedString("plaud.live_save_needs_clip", value: "The transcript is kept with the recording — stop the take to save both.", comment: "Save to library pressed while still recording") }
         static var cardFiles: String { NSLocalizedString("plaud.card_files", value: "Recordings on the card", comment: "Home device segment: the card's own file list") }
         static var cardFilesEmpty: String { NSLocalizedString("plaud.card_files_empty", value: "No recordings on the card.", comment: "") }
         static var pauseRecord: String { NSLocalizedString("plaud.pause_record", value: "Pause", comment: "") }
@@ -1453,6 +1461,16 @@ enum L10n {
                 "library.source_imported",
                 value: "Imported",
                 comment: "Short chip label for an audio file the user imported"
+            )
+        }
+        /// A clip whose text was produced by **live transcription** while it was
+        /// being recorded — deliberately distinct from the card's own name, so
+        /// "transcribed live" and "just recorded" can be told apart in the list.
+        static var sourceLive: String {
+            NSLocalizedString(
+                "library.source_live",
+                value: "Live transcript",
+                comment: "Short chip label for a clip transcribed while recording"
             )
         }
         /// Accessibility label for the source identifier, e.g., "Source: TicNote-3N9H".

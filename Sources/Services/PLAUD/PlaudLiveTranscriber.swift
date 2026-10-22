@@ -24,6 +24,17 @@ struct PlaudLiveSegment: Identifiable, Equatable {
         self.text = text
         self.at = at
     }
+
+    /// `mm:ss`, or `h:mm:ss` past the hour — the shape every clock in the app
+    /// uses for a take. Lives here (not in the view) because the service also
+    /// needs it when it writes the transcript to disk.
+    static func clock(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        if total >= 3600 {
+            return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
+        }
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
 }
 
 // MARK: - PCM feeder (off the main thread)

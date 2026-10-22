@@ -611,6 +611,7 @@
 "library.source_watch" = "Apple Watch";
 "library.source_phone" = "本机";
 "library.source_imported" = "导入";
+"library.source_live" = "实时转录";
 "library.source_accessibility" = "来源：%@";
 "library.select" = "选择";
 "library.select_all" = "全选";
@@ -1492,3 +1493,8 @@
 "plaud.live_needs_permission" = "实时转写需要「语音识别」权限，请在 设置 → Nomily 中允许。录音本身不受影响，只是没有文字。";
 "plaud.live_model_missing" = "这台 iPhone 没有安装该语言的离线语音模型，实时文字已关闭。录音本身不受影响。";
 "plaud.live_need_connect" = "连接卡片后，实时转写会显示在这里。";
+"plaud.live_mark_line" = "打点 · %@";
+"plaud.live_saved" = "已保存到资料库";
+"plaud.live_save_pending" = "卡片上的录音传完后，转录会自动一起保存。";
+"plaud.live_save_action" = "保存到资料库";
+"plaud.live_save_needs_clip" = "转录会和录音一起保存，先停止本次录音。";

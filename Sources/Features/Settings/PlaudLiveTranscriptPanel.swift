@@ -16,20 +16,55 @@ import UIKit
 struct PlaudLiveTranscriptList: View {
     let segments: [PlaudLiveSegment]
     let partial: String
+    /// Bookmark positions (seconds on the card's clock). They are drawn **in
+    /// place** between the lines — "打点也要有标记" — and the same markers are
+    /// written into the saved transcript.
+    var markers: [TimeInterval] = []
     /// `nil` = fill the available height (the 实时 page); a number = that fixed
     /// height (anywhere the list has to share a screen with other content).
     var height: CGFloat? = nil
 
     private let bottomAnchor = "plaud-live-bottom"
 
+    /// Lines and marks in one time-ordered list.
+    private enum Row: Identifiable {
+        case line(PlaudLiveSegment)
+        case mark(TimeInterval)
+
+        var id: String {
+            switch self {
+            case .line(let segment): return segment.id.uuidString
+            case .mark(let at): return "mark-\(at)"
+            }
+        }
+
+        var at: TimeInterval {
+            switch self {
+            case .line(let segment): return segment.at
+            case .mark(let at): return at
+            }
+        }
+    }
+
+    private var rows: [Row] {
+        var items: [Row] = segments.map(Row.line)
+        items += markers.filter { $0 > 0 }.map(Row.mark)
+        return items.sorted { $0.at < $1.at }
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(segments) { segment in
-                        PlaudLiveLine(stamp: PlaudLiveLine.stamp(segment.at),
-                                      text: segment.text,
-                                      isPartial: false)
+                    ForEach(rows) { row in
+                        switch row {
+                        case .line(let segment):
+                            PlaudLiveLine(stamp: PlaudLiveLine.stamp(segment.at),
+                                          text: segment.text,
+                                          isPartial: false)
+                        case .mark(let at):
+                            PlaudMarkRow(stamp: PlaudLiveLine.stamp(at))
+                        }
                     }
                     if !partial.isEmpty {
                         // The in-flight hypothesis is tinted — these words are
@@ -59,6 +94,26 @@ struct PlaudLiveTranscriptList: View {
                 }
             }
         }
+    }
+}
+
+/// A bookmark pressed on the card, drawn between transcript lines.
+struct PlaudMarkRow: View {
+    let stamp: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "bookmark.fill")
+                .font(.caption2)
+            Text(L10n.Plaud.liveMarkLine(stamp))
+                .font(.caption2.weight(.medium))
+                .monospacedDigit()
+            Rectangle()
+                .fill(Color.orange.opacity(0.3))
+                .frame(height: 1)
+        }
+        .foregroundStyle(.orange)
+        .padding(.vertical, 1)
     }
 }
 
@@ -94,14 +149,10 @@ struct PlaudLiveLine: View {
         }
     }
 
-    /// `mm:ss`, or `h:mm:ss` past the hour — the same shape the recording clock
-    /// uses, so a line's stamp is comparable with the timer above it.
+    /// `mm:ss`, or `h:mm:ss` past the hour — delegated so the view and the saved
+    /// transcript can never disagree about a timestamp.
     static func stamp(_ seconds: TimeInterval) -> String {
-        let total = max(0, Int(seconds.rounded()))
-        if total >= 3600 {
-            return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
-        }
-        return String(format: "%02d:%02d", total / 60, total % 60)
+        PlaudLiveSegment.clock(seconds)
     }
 }
 
@@ -123,7 +174,8 @@ struct PlaudTranscriptSheet: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     PlaudLiveTranscriptList(segments: direct.liveSegments,
-                                            partial: direct.livePartial)
+                                            partial: direct.livePartial,
+                                            markers: direct.liveMarkers)
                 }
             }
             .navigationTitle(L10n.Plaud.liveTranscript)

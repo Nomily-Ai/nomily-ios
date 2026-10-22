@@ -163,23 +163,26 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// instead of an empty box, because "no text" and "no permission" look
     /// identical on screen and only one of them is the user's to fix.
     @Published private(set) var liveASRNotice: String?
+    /// Positions of the marks of the current/last take, on the card's clock.
+    ///
+    /// `getMarking` never answers on this firmware, so a mark is *detected* by
+    /// the `penCollect` poll (every ~6 s) and stamped with the clock at that
+    /// moment — accurate to the poll interval, which is why the transcript marks
+    /// it as a marker line rather than pretending to know the exact second.
+    @Published private(set) var liveMarkers: [TimeInterval] = []
+    /// Which take the live transcript belongs to. Used to (a) not wipe the text
+    /// when we re-attach to the same take, and (b) know which pulled clip the
+    /// transcript must be written next to.
+    @Published private(set) var liveTranscriptSessionID: Int?
+    /// Clip name the live transcript was already written next to (`nil` = not
+    /// saved into the library yet). The Live screen shows this as proof.
+    @Published private(set) var liveTranscriptSavedTo: String?
     /// Bookmarks pressed on the card during THIS recording ("打点"). The card
     /// pushes them via `bleMarking`; there is no "how many" query mid-recording,
     /// so this is "what we heard" — same contract as the A1's remark count.
     @Published private(set) var recordMarks: [UInt32] = []
-    /// The same marks as **seconds from the start of the take**, for the UI.
-    ///
-    /// `getMarking` reports mark offsets, and the firmware that answers at all
-    /// reports milliseconds — but a value that already looks like seconds is
-    /// left alone, so the UI can never print "7166:20" from a unit mistake
-    /// (exactly what `BleFile.duration()` did before it was fixed).
-    var markTimestamps: [TimeInterval] {
-        recordMarks.map { raw in
-            let value = Double(raw)
-            return value > 24 * 3600 ? value / 1000 : value
-        }
-        .sorted()
-    }
+    // `markTimestamps` (seconds) lives below, next to the mark accounting — it
+    // has to consider `liveMarkers` too.
     /// Mark count as the UI shows it. `max` of everything the card has told us,
     /// because two independent channels can report it (see the marks poll):
     ///   · `bleMarking(markList:)` — the answer to `getMarking(sessionId:)`,
@@ -386,12 +389,25 @@ final class PlaudDirectService: NSObject, ObservableObject {
     ///   owns timestamps and a segment model, and this method mirrors those into
     ///   published state instead of a single joined string. The card's clock is
     ///   passed through with every block, so each line knows when it was said.
-    @MainActor private func startLiveTranscription() {
+    @MainActor private func startLiveTranscription(sessionID: Int? = nil) {
+        let sid = sessionID ?? recordSessionID
+        // ★ 2026-10-22 ("the text disappears"): re-attaching to the **same** take
+        // must not wipe what was already transcribed. `attachToRunningRecording`
+        // and the state poll can call this again mid-take (a dropped link, a
+        // re-read after the card slept), and resetting there threw the text away
+        // exactly when the user was looking at it.
+        let continuingSameTake = (sid != nil && sid == liveTranscriptSessionID)
+            && (!liveSegments.isEmpty || !livePartial.isEmpty)
         liveTranscriber?.stop()
         liveTranscriber = nil
-        liveSegments = []
-        livePartial = ""
-        liveTranscript = ""
+        if !continuingSameTake {
+            liveSegments = []
+            livePartial = ""
+            liveTranscript = ""
+            liveMarkers = []
+            liveTranscriptSavedTo = nil
+        }
+        liveTranscriptSessionID = sid
         liveASRNotice = nil
 
         // Spoken language: the same preference the live page persists. Falling
@@ -429,6 +445,120 @@ final class PlaudDirectService: NSObject, ObservableObject {
         liveTranscriber?.stop()
         liveTranscriber = nil
         liveAudioSink = nil
+    }
+
+    // MARK: - Marks on the transcript
+
+    /// Bookmark positions as seconds — the card's own offsets when it reports
+    /// them, otherwise the clock at the moment the count moved.
+    var markTimestamps: [TimeInterval] {
+        if !liveMarkers.isEmpty { return liveMarkers.sorted() }
+        return recordMarks.map { Self.secondsFromMark($0) }.sorted()
+    }
+
+    /// `getMarking` reports offsets in milliseconds on the firmware that answers
+    /// at all; anything that already looks like seconds is left alone.
+    static func secondsFromMark(_ raw: UInt32) -> TimeInterval {
+        let value = Double(raw)
+        return value > 24 * 3600 ? value / 1000 : value
+    }
+
+    /// Record that this take has `count` marks.
+    ///
+    /// A mark must appear **in the transcript** ("打点也要有标记"), so each new one
+    /// gets stamped on the card's clock. On this firmware `getMarking` is
+    /// ignored, so the stamp is the moment the `penCollect` poll noticed the
+    /// change — accurate to the poll interval, never claimed to be exact.
+    func applyMarkCount(_ count: Int, explicitTimes: [UInt32] = []) {
+        guard count > recordMarkCount else { return }
+        let added = count - recordMarkCount
+        if explicitTimes.count >= count {
+            liveMarkers = explicitTimes.map(Self.secondsFromMark)
+        } else {
+            let at = deviceElapsed ?? 0
+            liveMarkers.append(contentsOf: Array(repeating: at, count: added))
+        }
+        recordMarkCount = count
+    }
+
+    // MARK: - Saving the live transcript into the library
+
+    /// The transcript exactly as displayed, plus a marker line per mark.
+    func liveTranscriptWithMarks() -> String {
+        var lines: [(at: TimeInterval, text: String)] = liveSegments.map { ($0.at, $0.text) }
+        lines += liveMarkers.map { ($0, L10n.Plaud.liveMarkLine(PlaudLiveSegment.clock($0))) }
+        return lines.sorted { $0.at < $1.at }.map(\.text).joined(separator: "\n")
+    }
+
+    /// Write the live transcript next to the clip the card just produced, and
+    /// tag that clip as **live transcript** in the library.
+    ///
+    /// ★ 2026-10-22 on request ("方便结束后保存到资料库 / 来源要区分"): until now the
+    ///   text only lived in memory and vanished with the next take. It is now
+    ///   persisted as the clip's own transcript (`.txt` + `.asr.json`, provider
+    ///   `live`), so the detail page shows it immediately, and the library entry
+    ///   carries `source = "live"` → its badge reads 实时转录 instead of the
+    ///   card's name.
+    ///
+    /// Call on the main thread (it reads `configService.config` and registers in
+    /// the library, both main-actor bound).
+    @MainActor func saveLiveTranscript(sessionID: Int, clipName: String, size: Int) {
+        guard sessionID == liveTranscriptSessionID, liveTranscriptSavedTo == nil else { return }
+        let text = liveTranscriptWithMarks().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        // Timestamps: each line ends at its own card clock, the previous line's
+        // clock is its start (the same shape `LiveModel.buildAsrSegments` uses).
+        let merged: [(at: TimeInterval, text: String)] = {
+            var items: [(at: TimeInterval, text: String)] = liveSegments.map { ($0.at, $0.text) }
+            items += liveMarkers.map { ($0, L10n.Plaud.liveMarkLine(PlaudLiveSegment.clock($0))) }
+            return items.sorted { $0.at < $1.at }
+        }()
+        let segments: [AsrSegment] = merged.enumerated().map { index, item in
+            let start = index > 0 ? merged[index - 1].at : 0
+            let end = max(item.at, start)
+            return AsrSegment(speaker: nil, text: item.text,
+                              start: (start * 10).rounded() / 10,
+                              end: (end * 10).rounded() / 10,
+                              duration: ((end - start) * 10).rounded() / 10)
+        }
+
+        let url = StorageLocations.transcriptURLs(for: clipName)
+        let locale = configService?.config.lastSourceLang ?? Locale.current.identifier
+        do {
+            try text.data(using: .utf8)?.write(to: url.txt, options: .atomic)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let result = AsrResult(text: text, segments: segments, provider: "live", locale: locale)
+            try encoder.encode(result).write(to: url.json, options: .atomic)
+        } catch {
+            log.error("plaud live transcript write failed: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        liveTranscriptSavedTo = clipName
+        library?.recordDownload(
+            name: clipName,
+            size: size,
+            transport: "ble",
+            deviceSerial: "plaud-\(pairedSN ?? "")",
+            deviceName: "PLAUD",
+            localName: clipName,
+            // The bytes came over BLE, the **text** came from live transcription.
+            // This is what the library badge keys off.
+            source: "live"
+        )
+        log.info("plaud live transcript saved next to \(clipName, privacy: .public)")
+    }
+
+    /// Manual "save to library" from the Live screen: the transcript can only be
+    /// written next to a real clip, so this re-asks the card for its recordings
+    /// (the export completion then attaches the text).
+    func saveLiveTranscriptToLibrary() {
+        guard liveTranscriptSavedTo == nil else { return }
+        guard !liveSegments.isEmpty || !livePartial.isEmpty else { return }
+        if isSyncing { return }
+        log.info("plaud live transcript: manual save — re-reading the card list")
+        autoPullNewRecordings()
     }
 
     /// Injected by `AppEnvironment` (main actor). On a successful handshake the
@@ -1422,7 +1552,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
                 }
             }
             PlaudDeviceAgent.shared.syncFile(sessionId: newest.sessionID, start: newest.size, end: 0)
-            Task { @MainActor in self.startLiveTranscription() }
+            Task { @MainActor in self.startLiveTranscription(sessionID: newest.sessionID) }
         }
         DispatchQueue.main.async {
             self.cardFileCount = mapped.count
@@ -1436,7 +1566,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
             if let sid = self.marksSessionID,
                let entry = mapped.first(where: { $0.sessionID == sid }),
                entry.marks > 0 {
-                self.recordMarkCount = max(self.recordMarkCount, entry.marks)
+                self.applyMarkCount(entry.marks)
                 self.marksAvailableLive = false
             }
         }
@@ -1563,6 +1693,12 @@ final class PlaudDirectService: NSObject, ObservableObject {
                     deviceName: "PLAUD",
                     localName: name
                 )
+                // ★ 2026-10-22: the clip for the take we just transcribed live is
+                // in the library — write the transcript next to it now (and tag
+                // the entry as 实时转录), so the text stops living only in memory.
+                Task { @MainActor in
+                    self.saveLiveTranscript(sessionID: sessionId, clipName: name, size: size)
+                }
             }
             NotificationCenter.default.post(name: .libraryDidChange, object: nil)
         } catch {
@@ -1985,7 +2121,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.fileProbeForMarks = false
             log.warning("plaud attach: file probe timed out — opening sync at 0")
             PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: 0, end: 0)
-            Task { @MainActor in self.startLiveTranscription() }
+            Task { @MainActor in self.startLiveTranscription(sessionID: sid) }
         }
     }
 
@@ -2052,7 +2188,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
                 self.liveStreaming = true
                 self.livePCMBytes = 0
             }
-            Task { @MainActor in self.startLiveTranscription() }
+            Task { @MainActor in self.startLiveTranscription(sessionID: sessionId) }
         }
     }
 
@@ -2149,7 +2285,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.markingProbeStrikes = 0
             self.marksAvailableLive = true
             self.recordMarks = markList
-            self.recordMarkCount = max(self.recordMarkCount, markList.count)
+            self.applyMarkCount(markList.count, explicitTimes: markList)
             self.marksSessionID = sessionId
         }
     }
@@ -2250,7 +2386,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
                 log.info("plaud file probe sid=\(sid) penCollect=\(collect) size=\(size) duration=\(Int(seconds))s stamp=\(stamp)")
                 let attaching = pendingAttachSessionID == sid
                 DispatchQueue.main.async {
-                    self.recordMarkCount = max(self.recordMarkCount, collect)
+                    self.applyMarkCount(collect)
                     // The card's own duration beats every local guess — this is
                     // what a relaunch during a take needs to land on the right
                     // second instead of starting from 0:00.
@@ -2272,7 +2408,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
                     // timed from zero while the card was already minutes in.
                     log.info("plaud attach: opening sync at current end (\(size) bytes)")
                     PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: size, end: 0)
-                    Task { @MainActor in self.startLiveTranscription() }
+                    Task { @MainActor in self.startLiveTranscription(sessionID: sid) }
                 }
                 return
             }
