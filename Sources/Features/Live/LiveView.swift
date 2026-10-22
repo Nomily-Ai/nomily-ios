@@ -15,6 +15,11 @@ struct LiveView: View {
     @ObservedObject private var plaud = PlaudDirectService.shared
     @State private var clipItem: LibraryItem?
     @State private var clipMissing = false
+    /// ★ 2026-10-22 (任务一): the「实时」tab now also offers **phone-microphone**
+    /// recording with live captions, as a sibling of the device paths. The
+    /// PLAUD card keeps owning the whole tab when it is the device in play
+    /// (build 99 decision) — the picker appears only on the non-PLAUD paths.
+    @State private var phoneMode = false
 
     /// Which device this live session should capture audio from.
     ///
@@ -73,25 +78,31 @@ struct LiveView: View {
             // it.
             if showsPlaudLive {
                 PlaudLiveScreen()
-            } else if let source = liveSource {
-                LiveContent(model: model, source: source, config: env.config, library: env.library) { item in
-                    // nil = The recording is no longer in the database; provide a prompt instead of silently swallowing it
-                    if let item { clipItem = item } else { clipMissing = true }
-                }
-            } else if model.linkRecovering || model.isRunning {
-                // Session alive, link down — see `LiveModel.recoverStream`. Without this branch
-                // the screen jumped straight to "no device" and the session looked finished.
-                reconnectingState
-            } else if !model.finalSegments.isEmpty || model.savedClipName != nil {
-                disconnectedResults
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(uiColor: .systemGroupedBackground))
+            } else if phoneMode {
+                // ★ 任务一 (2026-10-22): phone-mic recording + live captions.
+                PhoneRecordScreen()
             } else {
-                EmptyStateView(
-                    L10n.Live.noDeviceConnected,
-                    systemImage: "dot.radiowaves.left.and.right",
-                    message: L10n.Live.noDeviceMessage
-                )
+                sourcePicker
+                if let source = liveSource {
+                    LiveContent(model: model, source: source, config: env.config, library: env.library) { item in
+                        // nil = The recording is no longer in the database; provide a prompt instead of silently swallowing it
+                        if let item { clipItem = item } else { clipMissing = true }
+                    }
+                } else if model.linkRecovering || model.isRunning {
+                    // Session alive, link down — see `LiveModel.recoverStream`. Without this branch
+                    // the screen jumped straight to "no device" and the session looked finished.
+                    reconnectingState
+                } else if !model.finalSegments.isEmpty || model.savedClipName != nil {
+                    disconnectedResults
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(uiColor: .systemGroupedBackground))
+                } else {
+                    EmptyStateView(
+                        L10n.Live.noDeviceConnected,
+                        systemImage: "dot.radiowaves.left.and.right",
+                        message: L10n.Live.noDeviceMessage
+                    )
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -134,6 +145,18 @@ struct LiveView: View {
             env.isStreaming = running
             UIApplication.shared.isIdleTimerDisabled = running
         }
+    }
+
+    /// 「设备 | 手机」segment picker (任务一). Phone mode needs no device at all,
+    /// so it stays reachable even with nothing connected.
+    private var sourcePicker: some View {
+        Picker("", selection: $phoneMode) {
+            Text(L10n.Phone.modeDevice).tag(false)
+            Text(L10n.Phone.modePhone).tag(true)
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal)
+        .padding(.top, 8)
     }
 
     /// The session is still alive but the card is out of reach.

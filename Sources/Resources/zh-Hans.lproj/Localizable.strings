@@ -1502,3 +1502,36 @@
 "plaud.live_engine_ondevice" = "本机识别";
 "plaud.live_azure_failed" = "Azure 实时识别中断：%@";
 "plaud.live_azure_fell_back" = "Azure 连接中断，已切换到本机识别，文字会继续。";
+
+/* Phone recording (任务一) */
+"phone.mode_device" = "设备";
+"phone.mode_phone" = "手机";
+"phone.record" = "录音";
+"phone.stop" = "停止";
+"phone.idle" = "就绪";
+"phone.listening" = "正在聆听…识别到语音后字幕会出现在这里。";
+"phone.idle_caption" = "点击麦克风开始录音，说话时实时字幕会同步显示。";
+"phone.mic_denied" = "未授权麦克风，请到系统设置中开启后重试。";
+"phone.no_input" = "当前设备没有可用的麦克风。";
+"phone.conversion_unavailable" = "当前设备无法创建音频转换器。";
+"phone.caption_unavailable" = "未配置语音服务，实时字幕已关闭；录音本身不受影响。";
+"phone.saved" = "已存入资料库";
+
+/* Document export + email (任务二) */
+"clip_detail.export_document" = "导出文档";
+"clip_detail.export_as_txt" = "导出为 TXT";
+"clip_detail.export_as_md" = "导出为 Markdown";
+"clip_detail.export_as_pdf" = "导出为 PDF";
+"clip_detail.export_pdf_failed" = "PDF 生成失败。";
+"clip_detail.email_title" = "邮件发送";
+"clip_detail.email_attach_summary" = "附件：AI 纪要";
+"clip_detail.email_attach_transcript" = "附件：原文转写";
+"clip_detail.email_attach_mindmap" = "附件：思维导图（图片）";
+"clip_detail.email_attach_footer" = "附件由本条录音已生成的内容打包；置灰的选项表示还没有对应产物。";
+"clip_detail.email_compose" = "撰写邮件";
+"clip_detail.email_unavailable" = "本机未配置邮件账户，请先在「设置 → 邮件」中添加。";
+"clip_detail.email_subject" = "Nomily — %@";
+"clip_detail.email_body" = "附件由 Nomily 导出。";
+
+/* AiTask (任务三) */
+"jobs.ai_task_interrupted" = "已中断——应用在上一步完成前被关闭。";

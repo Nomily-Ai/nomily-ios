@@ -2699,6 +2699,21 @@ enum L10n {
         static var exportAudio: String { NSLocalizedString("clip_detail.export_audio", value: "Export Audio", comment: "Menu row that opens the audio format choices") }
         static var exportAsM4A: String { NSLocalizedString("clip_detail.export_as_m4a", comment: "") }
         static var exportAsWAV: String { NSLocalizedString("clip_detail.export_as_wav", value: "Export as WAV (PCM)", comment: "WAV export option — uncompressed audio") }
+        // ★ 2026-10-22 (任务二): document export + email attachments.
+        static var exportDocument: String { NSLocalizedString("clip_detail.export_document", value: "Export Document", comment: "Menu row opening the txt/md/pdf choices") }
+        static var exportAsTXT: String { NSLocalizedString("clip_detail.export_as_txt", value: "Export as TXT", comment: "Plain-text transcript export") }
+        static var exportAsMarkdown: String { NSLocalizedString("clip_detail.export_as_md", value: "Export as Markdown", comment: "Markdown export (summary + transcript)") }
+        static var exportAsPDF: String { NSLocalizedString("clip_detail.export_as_pdf", value: "Export as PDF", comment: "Paginated PDF export") }
+        static var exportPDFRenderFailed: String { NSLocalizedString("clip_detail.export_pdf_failed", value: "PDF rendering failed.", comment: "PDF export could not be generated") }
+        static var emailTitle: String { NSLocalizedString("clip_detail.email_title", value: "Send by Email", comment: "Mail export entry + sheet title") }
+        static var emailAttachSummary: String { NSLocalizedString("clip_detail.email_attach_summary", value: "Attach the summary", comment: "Mail attachment toggle") }
+        static var emailAttachTranscript: String { NSLocalizedString("clip_detail.email_attach_transcript", value: "Attach the transcript", comment: "Mail attachment toggle") }
+        static var emailAttachMindMap: String { NSLocalizedString("clip_detail.email_attach_mindmap", value: "Attach the mind map (image)", comment: "Mail attachment toggle") }
+        static var emailAttachFooter: String { NSLocalizedString("clip_detail.email_attach_footer", value: "Attachments are generated from this recording's saved artefacts. Greyed-out options have nothing to attach yet.", comment: "Mail attachment picker footer") }
+        static var emailCompose: String { NSLocalizedString("clip_detail.email_compose", value: "Compose Email", comment: "Opens the system mail composer") }
+        static var emailUnavailable: String { NSLocalizedString("clip_detail.email_unavailable", value: "No mail account is configured on this device. Set one up in Settings → Mail.", comment: "Mail composer cannot be opened") }
+        static var emailSubjectFormat: String { NSLocalizedString("clip_detail.email_subject", value: "Nomily — %@", comment: "Mail subject; parameter is the recording name") }
+        static var emailBody: String { NSLocalizedString("clip_detail.email_body", value: "Attachments exported from Nomily.", comment: "Default mail body") }
         static var exportFormatFooter: String { NSLocalizedString("clip_detail.export_format_footer", value: "M4A is compressed and plays anywhere. WAV is uncompressed — larger, but it's the format transcription and editing tools expect.", comment: "Footer explaining the two audio export formats") }
         static var exporting: String { NSLocalizedString("clip_detail.exporting", comment: "") }
         /// ★ Sixth revision, 2026-10-15: the previous export is ready; tap this row to share it.
@@ -3571,6 +3586,12 @@ enum L10n {
             NSLocalizedString("jobs.open_queue", value: "Background tasks",
                               comment: "Settings row: opens the task center")
         }
+        /// ★ 2026-10-22 (任务三): AiTask recovery verdict at launch.
+        static var interrupted: String {
+            NSLocalizedString("jobs.ai_task_interrupted",
+                              value: "Interrupted — the app was closed before this step finished.",
+                              comment: "AiTask row: pipeline died with the process")
+        }
         static var openQueueFooter: String {
             NSLocalizedString("jobs.open_queue_footer",
                               value: "Summaries, translations and audio conversions carry on after you leave the app.",
@@ -3582,6 +3603,54 @@ enum L10n {
                                              value: "%@ added to background tasks.",
                                              comment: "Toast shown right after a task is queued"),
                    kind)
+        }
+    }
+    // MARK: - Phone recording (任务一, 2026-10-22)
+
+    /// Strings for the phone-microphone recording screen + live captions.
+    enum Phone {
+        static var modeDevice: String {
+            NSLocalizedString("phone.mode_device", value: "Device", comment: "Live tab segment: record from a connected recorder")
+        }
+        static var modePhone: String {
+            NSLocalizedString("phone.mode_phone", value: "Phone", comment: "Live tab segment: record with the phone microphone")
+        }
+        static var record: String {
+            NSLocalizedString("phone.record", value: "Record", comment: "Phone record button")
+        }
+        static var stop: String {
+            NSLocalizedString("phone.stop", value: "Stop", comment: "Phone stop button")
+        }
+        static var idle: String {
+            NSLocalizedString("phone.idle", value: "Ready", comment: "Status pill when the phone recording is not running")
+        }
+        static var listening: String {
+            NSLocalizedString("phone.listening", value: "Listening… captions will appear as speech is recognised.",
+                              comment: "Caption placeholder while recording and no text yet")
+        }
+        static var idleCaption: String {
+            NSLocalizedString("phone.idle_caption", value: "Tap the microphone to record. Live captions appear while you speak.",
+                              comment: "Caption placeholder before any recording")
+        }
+        static var micDenied: String {
+            NSLocalizedString("phone.mic_denied", value: "Microphone access is denied. Enable it in Settings to record.",
+                              comment: "Phone recording blocked by TCC")
+        }
+        static var noInput: String {
+            NSLocalizedString("phone.no_input", value: "No microphone is available on this device.",
+                              comment: "Phone recording: audio input missing")
+        }
+        static var conversionUnavailable: String {
+            NSLocalizedString("phone.conversion_unavailable", value: "Audio conversion is unavailable on this device.",
+                              comment: "Phone recording: PCM converter could not be built")
+        }
+        static var captionUnavailable: String {
+            NSLocalizedString("phone.caption_unavailable",
+                              value: "No speech service is configured, so captions are off. The recording itself is unaffected.",
+                              comment: "Live captions could not start; recording continues")
+        }
+        static var savedToLibrary: String {
+            NSLocalizedString("phone.saved", value: "Saved to Library", comment: "Toast after the phone recording is stored")
         }
     }
 }

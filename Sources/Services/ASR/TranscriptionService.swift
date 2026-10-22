@@ -199,6 +199,13 @@ final class TranscriptionService: ObservableObject {
         startDrainIfNeeded()
     }
 
+    /// Whether this clip is still queued for transcription (or mid-run).
+    /// ★ (2026-10-22) `AiTaskCenter`'s launch recovery reads this to tell
+    /// "the queue replay will finish it" from "it died with the process".
+    func hasPending(clipName: String) -> Bool {
+        pending.contains { $0.name == clipName } || inFlight.contains(clipName)
+    }
+
     /// The queue's serial pump. Synchronous assignment on `@MainActor` ⇒ the `drainTask?.value`
     /// right after is guaranteed to see it, with no "task hasn't started" race.
     private func startDrainIfNeeded() {

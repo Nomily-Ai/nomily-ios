@@ -119,6 +119,10 @@ final class AppEnvironment: ObservableObject {
         autoSummaryTemplate = SummarizeTemplateStore.defaults.first
         transcription.onTranscribed = { clip in
             Task { @MainActor in
+                // ★ 2026-10-22 (任务三): the unified AiTask ledger advances with
+                // the real queues. Runs before auto-summary so the pipeline can
+                // observe whether a summarize job was actually enqueued.
+                AiTaskCenter.shared.transcribeDidFinish(clipName: clip)
                 AppEnvironment.shared?.maybeAutoSummarize(clipName: clip)
                 // ★ 2026-10-20: the top banner telling the user the transcript has landed.
                 // Same hook as auto-summary — manual, auto-after-download and the resumed
@@ -155,6 +159,10 @@ final class AppEnvironment: ObservableObject {
         //    (the moment the user reopens the app). The "process isn't dead, just switching back" path relies on
         //    `RootView`'s scenePhase — both are needed; see the comment there.
         jobs.resume()
+        // ★ 2026-10-22 (任务三): reconcile the AiTask ledger against what the
+        // two queues actually replayed — interrupted pipelines get their honest
+        // verdict instead of sitting in "transcribing" forever.
+        AiTaskCenter.shared.recoverAtLaunch()
         let done = Date()
         log.notice("""
             environment ready in \(Self.ms(startedAt, done)) ms \
@@ -186,6 +194,9 @@ final class AppEnvironment: ObservableObject {
     @MainActor
     func autoTranscribeAfterImport(fileURL: URL) async {
         guard config.config.autoTranscribeAfterDownload else { return }
+        // ★ 2026-10-22 (任务三): open a ledger row so the pipeline is one
+        // observable unit (queued → transcribing → summarizing → done).
+        AiTaskCenter.shared.transcribeQueued(clipName: fileURL.lastPathComponent)
         await transcription.enqueueAndWait(fileURL: fileURL, enforceMinDuration: true)
         NotificationCenter.default.post(name: .libraryDidChange, object: nil)
     }

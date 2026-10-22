@@ -48,6 +48,18 @@ extension Job {
             exportFormat: format.rawValue
         )
     }
+
+    /// ★ 2026-10-22 (任务二): document export (`txt` / `md` / `pdf`). Same job id
+    /// as the audio export — the two share one slot per recording on purpose.
+    static func export(clip: String, format: String) -> Job {
+        Job(
+            id: "export:\(clip)",
+            kind: .export,
+            clipName: clip,
+            enqueuedAt: Date(),
+            exportFormat: format
+        )
+    }
 }
 
 // MARK: - The three runners
@@ -171,10 +183,11 @@ enum JobRunners {
     }
 
     /// Format conversion / export. Used to be in `ClipDetailView.runExport`.
+    /// ★ 2026-10-22 (任务二): also handles the document formats `txt` / `md` /
+    /// `pdf` (and `png` = mind-map image) alongside the two audio formats.
     @MainActor
     static func export(_ job: Job, config: AppConfig) async throws {
-        guard let raw = job.exportFormat,
-              let format = AudioExportFormat(rawValue: raw) else {
+        guard let raw = job.exportFormat else {
             throw JobSourceMissing(what: L10n.Jobs.sourceFormat)
         }
         // ⚠️ The audio is looked up by **filename** in `decryptedDir`, and the absolute path isn't stored in the job —
@@ -192,18 +205,32 @@ enum JobRunners {
         //   cleared by iOS at any time, and "export, switch away, come back and share" is exactly the scenario this path exists to support.
         let dir = try ExportCenter.shared.beginNewStaging()
         let stem = (job.clipName as NSString).deletingPathExtension
-        let url = try await AudioExporter.export(
-            format, source: source, suggestedName: stem, directory: dir
-        )
-        try Task.checkCancellation()
-        ExportCenter.shared.publish(
-            id: dir.lastPathComponent,
-            title: stem,
-            itemCount: 1,
-            bytes: fileSize(url),
-            origin: job.clipName
-        )
-        log.info("exported \(job.clipName, privacy: .public) as \(raw, privacy: .public)")
+        do {
+            let url: URL
+            if raw == "txt" || raw == "md" || raw == "pdf" || raw == "png" {
+                url = try DocumentExporter.export(raw, clipName: job.clipName, into: dir)
+            } else {
+                guard let format = AudioExportFormat(rawValue: raw) else {
+                    throw JobSourceMissing(what: L10n.Jobs.sourceFormat)
+                }
+                url = try await AudioExporter.export(
+                    format, source: source, suggestedName: stem, directory: dir
+                )
+            }
+            try Task.checkCancellation()
+            ExportCenter.shared.publish(
+                id: dir.lastPathComponent,
+                title: stem,
+                itemCount: 1,
+                bytes: fileSize(url),
+                origin: job.clipName
+            )
+            log.info("exported \(job.clipName, privacy: .public) as \(raw, privacy: .public)")
+            Telemetry.success("export_share_\(raw)", ["bytes": String(fileSize(url))])
+        } catch {
+            Telemetry.failed("export_share_\(raw)", reason: error.localizedDescription)
+            throw error
+        }
     }
 
     // MARK: - Source file

@@ -53,6 +53,8 @@ struct ClipDetailView: View {
     @State private var showVADPreview = false
     @State private var showMindMap = false
     @State private var showExportChoice = false
+    /// ★ 任务二 (2026-10-22): email-with-attachments sheet.
+    @State private var showMailExport = false
     /// "Marks" pushed by a recorder card while it was recording.
     ///
     /// ★ Read once on appear from `<base>.marks.json` and never re-read: a sidecar only ever appears
@@ -157,6 +159,24 @@ struct ClipDetailView: View {
                             Label(L10n.ClipDetail.exportAudio, systemImage: "square.and.arrow.up.on.square")
                         }
                         .disabled(activeJob(.export) != nil)
+                    }
+                    // ★ 2026-10-22 (任务二): document export — txt / md / pdf,
+                    // plus the mail-with-attachments entry Plaud's
+                    // `Workflow_send_email_attachments_*` proves out.
+                    if transcript != nil || summary != nil {
+                        Menu {
+                            Button(L10n.ClipDetail.exportAsTXT) { enqueueDocumentExport("txt") }
+                            Button(L10n.ClipDetail.exportAsMarkdown) { enqueueDocumentExport("md") }
+                            Button(L10n.ClipDetail.exportAsPDF) { enqueueDocumentExport("pdf") }
+                        } label: {
+                            Label(L10n.ClipDetail.exportDocument, systemImage: "doc.badge.arrow.up")
+                        }
+                        .disabled(activeJob(.export) != nil)
+                        Button {
+                            showMailExport = true
+                        } label: {
+                            Label(L10n.ClipDetail.emailTitle, systemImage: "envelope")
+                        }
                     }
                     if activeJob(.export) == nil, let staged = ExportCenter.shared.ready(forOrigin: item.name) {
                         Button {
@@ -275,6 +295,9 @@ struct ClipDetailView: View {
             Button(L10n.ClipDetail.exportAsM4A) { enqueueExport(.m4a) }
             Button(L10n.ClipDetail.exportAsWAV) { enqueueExport(.wav) }
             Button(L10n.Common.cancel, role: .cancel) {}
+        }
+        .sheet(isPresented: $showMailExport) {
+            MailExportSheet(clipName: item.name)
         }
         .confirmationDialog(L10n.ClipDetail.retranscribe, isPresented: $showRetranscribeChoice, titleVisibility: .hidden) {
             Button(L10n.ASR.transcribeAuto) { runTranscribe(locales: nil) }
@@ -1169,6 +1192,14 @@ struct ClipDetailView: View {
     /// `ExportCenter.publish` also moved into `JobRunners.export` — writing the output to disk and registering it in the ledger
     /// must be the same stretch of code, otherwise an app kill leaves "file converted but absent from the ledger".
     private func enqueueExport(_ format: AudioExportFormat) {
+        pendingExportShare = true
+        jobs.enqueue(Job.export(clip: item.name, format: format))
+    }
+
+    /// ★ 任务二 (2026-10-22): document formats ride the same export job id
+    /// ("export:<clip>") — only the last-picked format is kept, matching the
+    /// audio behaviour and the single-slot staging directory.
+    private func enqueueDocumentExport(_ format: String) {
         pendingExportShare = true
         jobs.enqueue(Job.export(clip: item.name, format: format))
     }
