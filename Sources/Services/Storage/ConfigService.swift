@@ -161,6 +161,13 @@ final class ConfigService: ObservableObject {
     /// `config.json`. These two helpers are the whole boundary: everything
     /// above them sees a normal `AppConfig` with the values present.
 
+    /// Preset id → Keychain slot. One table, read by both directions, so a new
+    /// preset can never end up "saved but never loaded back".
+    static let presetSecretSlots: [(String, SecretStore.Slot)] = [
+        ("qwen", .llmQwen), ("deepseek", .llmDeepSeek),
+        ("doubao", .llmDoubao), ("ark", .llmArk),
+    ]
+
     private static func extractSecrets(_ config: AppConfig) -> AppConfig {
         var stripped = config
         SecretStore.save(config.asrProviders.azure?.key, to: .azureASRKey)
@@ -172,6 +179,9 @@ final class ConfigService: ObservableObject {
         SecretStore.save(config.llmProviders.openRouter?.apiKey, to: .llmOpenRouter)
         SecretStore.save(config.llmProviders.ollama?.apiKey, to: .llmOllama)
         SecretStore.save(config.llmProviders.custom?.apiKey, to: .llmCustom)
+        for (id, slot) in Self.presetSecretSlots {
+            SecretStore.save(config.llmProviders.preset(id)?.apiKey, to: slot)
+        }
         SecretStore.save(config.wifiAP?.psk, to: .wifiAPPassword)
 
         stripped.asrProviders.azure?.key = ""
@@ -183,6 +193,11 @@ final class ConfigService: ObservableObject {
         stripped.llmProviders.openRouter?.apiKey = nil
         stripped.llmProviders.ollama?.apiKey = nil
         stripped.llmProviders.custom?.apiKey = nil
+        // Presets: strip every key, keep the endpoint/model so the page still
+        // shows "configured, key missing" instead of silently forgetting the card.
+        if let ids = stripped.llmProviders.presets.map({ Array($0.keys) }) {
+            for id in ids { stripped.llmProviders.presets?[id]?.apiKey = nil }
+        }
         stripped.wifiAP?.psk = ""
         return stripped
     }
@@ -215,6 +230,9 @@ final class ConfigService: ObservableObject {
         if config.llmProviders.custom != nil {
             config.llmProviders.custom?.apiKey = SecretStore.load(.llmCustom)
         }
+        for (id, slot) in Self.presetSecretSlots where config.llmProviders.preset(id) != nil {
+            config.llmProviders.presets?[id]?.apiKey = SecretStore.load(slot)
+        }
         if config.wifiAP != nil {
             config.wifiAP?.psk = SecretStore.load(.wifiAPPassword) ?? ""
         }
@@ -235,8 +253,12 @@ final class ConfigService: ObservableObject {
             config.llmProviders.custom?.apiKey,
             config.wifiAP?.psk,
         ].compactMap { $0 }.filter { !$0.isEmpty }
-        guard !plaintext.isEmpty else { return false }
-        log.info("migrating \(plaintext.count, privacy: .public) plaintext secret(s) out of config.json")
+        // Preset keys are a dictionary, so they can't join the literal above —
+        // and one of these arriving in plaintext is exactly the case worth catching.
+        let presetPlaintext = (config.llmProviders.presets ?? [:])
+            .values.compactMap { $0.apiKey }.filter { !$0.isEmpty }
+        guard !plaintext.isEmpty || !presetPlaintext.isEmpty else { return false }
+        log.info("migrating \(plaintext.count + presetPlaintext.count, privacy: .public) plaintext secret(s) out of config.json")
         _ = extractSecrets(config)
         return true
     }

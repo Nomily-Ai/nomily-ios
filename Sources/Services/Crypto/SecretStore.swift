@@ -38,6 +38,14 @@ enum SecretStore {
         case llmOpenRouter   = "llm.open_router.api_key"
         case llmOllama       = "llm.ollama.api_key"
         case llmCustom       = "llm.custom.api_key"
+        /// ★ 2026-10-22: the one-tap Chinese provider presets (`LLMPreset`). Four
+        /// fixed slots rather than a dynamic `llm.preset.<id>` key: this enum is
+        /// documented as the complete list of secrets, and a computed raw value
+        /// would let a typo create a new slot that nothing ever reads back.
+        case llmQwen         = "llm.qwen.api_key"
+        case llmDeepSeek     = "llm.deepseek.api_key"
+        case llmDoubao       = "llm.doubao.api_key"
+        case llmArk          = "llm.ark.api_key"
         case wifiAPPassword  = "wifi_ap.psk"
         /// DingTalk A1 credentials (a JSON **array** of `DingTalkA1Credential`, see
         /// `DingTalkA1CredentialStore`). One slot for all A1 cards: the `Slot` enum is meant to be

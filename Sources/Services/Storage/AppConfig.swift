@@ -396,17 +396,27 @@ struct AppConfig: Codable, Equatable {
         var gemini: KeyedProvider?
         var ollama: EndpointProvider?
         var custom: EndpointProvider?
+        /// ★ 2026-10-22: one-tap presets (Qwen / DeepSeek / Doubao / Ark) keyed by
+        /// `LLMPreset.id`. A dictionary instead of four named fields so adding a
+        /// provider later doesn't touch the Codable shape, the secret-splitting
+        /// table, `configGap`, `complete` and the picker all at once.
+        ///
+        /// Optional on purpose: `config.json` written by an older build has no
+        /// such key, and a missing optional decodes to `nil`.
+        var presets: [String: EndpointProvider]?
 
         init(
             primary: String? = nil,
             openai: KeyedProvider? = nil, openRouter: EndpointProvider? = nil,
             claude: KeyedProvider? = nil, gemini: KeyedProvider? = nil,
-            ollama: EndpointProvider? = nil, custom: EndpointProvider? = nil
+            ollama: EndpointProvider? = nil, custom: EndpointProvider? = nil,
+            presets: [String: EndpointProvider]? = nil
         ) {
             self.primary = primary
             self.openai = openai; self.openRouter = openRouter
             self.claude = claude; self.gemini = gemini
             self.ollama = ollama; self.custom = custom
+            self.presets = presets
         }
 
         struct KeyedProvider: Codable, Equatable {
@@ -436,6 +446,22 @@ struct AppConfig: Codable, Equatable {
             case gemini
             case ollama
             case custom
+            case presets
+        }
+
+        /// Read / write one preset slot. Creating a slot requires an endpoint, so
+        /// the page can fill it from `LLMPreset` the moment the user taps an icon.
+        func preset(_ id: String) -> EndpointProvider? { presets?[id] }
+
+        mutating func setPreset(_ id: String, _ value: EndpointProvider?) {
+            if let value {
+                var map = presets ?? [:]
+                map[id] = value
+                presets = map
+            } else if presets != nil {
+                presets?.removeValue(forKey: id)
+                if presets?.isEmpty == true { presets = nil }
+            }
         }
 
         var configuredProviders: [(key: String, label: String)] {
@@ -446,6 +472,13 @@ struct AppConfig: Codable, Equatable {
             if let p = gemini, !p.apiKey.isEmpty { result.append(("gemini", "Gemini")) }
             if let p = ollama, !p.endpoint.isEmpty { result.append(("ollama", "Ollama")) }
             if let p = custom, !p.endpoint.isEmpty { result.append(("custom", "Custom")) }
+            // Presets, in catalogue order so the picker doesn't reshuffle itself
+            // every time the dictionary is re-encoded.
+            for preset in LLMPreset.all {
+                guard let p = presets?[preset.id], !p.endpoint.isEmpty,
+                      (p.apiKey ?? "").isEmpty == false else { continue }
+                result.append((preset.id, preset.name))
+            }
             return result
         }
 

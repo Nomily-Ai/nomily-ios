@@ -163,6 +163,11 @@ enum L10n {
             NSLocalizedString("find.sound_unavailable", value: "Needs a firmware command the card does not have yet (task 8.2).",
                               comment: "Why the beep row is greyed out")
         }
+        static var soundWhyLocked: String {
+            NSLocalizedString("find.sound_why_locked",
+                              value: "Why it's locked: the PLAUD SDK has no buzzer command at all. Its full settings table (20 entries) contains only FIND_MY — the Apple Find My pairing — and the device-manager class exposes 537 methods, none of which ring, buzz or vibrate. There is literally nothing to send to the card, so the App can't invent the sound; the card's firmware would have to grow a command first (task 8.2). Until then, use the last-seen place above, and the proximity meter once the card is disconnected.",
+                              comment: "Alert body explaining why the beep row is locked; must stay factual and quote the evidence")
+        }
     }
 
     enum Plaud {
@@ -1199,6 +1204,54 @@ enum L10n {
         static var apiKeyOptional: String { NSLocalizedString("llm.api_key_optional", comment: "") }
         static var noProvider: String { NSLocalizedString("llm.no_provider", comment: "") }
         static var noProviderMessage: String { NSLocalizedString("llm.no_provider_message", comment: "") }
+
+        // MARK: One-tap presets (★ 2026-10-22)
+        //
+        // The whole point of this section is "tap an icon, the address is already
+        // right". Every string below has to keep that promise: an empty address,
+        // or a field the user has to go look up, defeats it.
+        static var presetHeader: String {
+            NSLocalizedString("llm.preset.header", value: "One-tap providers",
+                              comment: "Section header: Qwen / DeepSeek / Doubao / Ark icon grid")
+        }
+        static var presetFooter: String {
+            NSLocalizedString("llm.preset.footer",
+                              value: "Tap an icon — the endpoint is filled in for you. All you add is the API key and a model. Doubao and Volcengine Ark are the same host: Ark serves the Doubao models.",
+                              comment: "Explains why the endpoint field is pre-filled")
+        }
+        static var presetReady: String {
+            NSLocalizedString("llm.preset.ready", value: "Ready",
+                              comment: "Preset row status: key and model both set")
+        }
+        static var presetNeedsKey: String {
+            NSLocalizedString("llm.preset.needs_key", value: "Add API key",
+                              comment: "Preset row status: endpoint set, key still missing")
+        }
+        static var presetConsole: String {
+            NSLocalizedString("llm.preset.console", value: "Get a key at",
+                              comment: "Label before the console URL where the API key comes from")
+        }
+        static var presetEndpointFilled: String {
+            NSLocalizedString("llm.preset.endpoint_filled", value: "Endpoint (already filled in)",
+                              comment: "Endpoint field label on the preset sheet")
+        }
+        static var presetFetchModels: String {
+            NSLocalizedString("llm.preset.fetch_models", value: "Fetch available models",
+                              comment: "Button that asks the provider for its model list")
+        }
+        static var presetBuiltinHint: String {
+            NSLocalizedString("llm.preset.builtin_hint",
+                              value: "This provider has no model-list endpoint — these are the built-in common models.",
+                              comment: "Shown when the model list came from LLMPreset instead of the network")
+        }
+        static var presetManualModel: String {
+            NSLocalizedString("llm.preset.manual_model", value: "Type a model name",
+                              comment: "Switch the model row to a free-text field (Ark endpoint ids)")
+        }
+        static var presetRemove: String {
+            NSLocalizedString("llm.preset.remove", value: "Remove this provider",
+                              comment: "Deletes the preset's endpoint, key and model")
+        }
     }
 
     // MARK: - Azure Setup Guide

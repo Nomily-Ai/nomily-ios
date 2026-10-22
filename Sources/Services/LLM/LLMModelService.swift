@@ -147,6 +147,36 @@ struct LLMModelService {
                            detail: ollamaDetail(count: r.models.count, ms: ms, version: nil))
     }
 
+    // MARK: - Preset providers (Qwen / DeepSeek / Doubao / Ark)
+
+    /// Model list for a one-tap preset: `GET {base}/models`.
+    ///
+    /// Distinct from `fetchOpenAICompatible`, which appends `/v1/models` — a
+    /// preset's base already ends in `/v1`, `/compatible-mode/v1` or `/api/v3`,
+    /// and appending another `/v1` produces a 404 on every one of them.
+    ///
+    /// Not every preset host implements `/models` (Ark in particular lists
+    /// endpoints in its console instead). A failure here is **not** an error the
+    /// user has to act on: the page falls back to the curated list in
+    /// `LLMPreset.models`, which is why this returns a plain `FetchResult` and
+    /// the caller decides what to say.
+    static func fetchPresetModels(base: String, apiKey: String) async -> FetchResult {
+        let trimmed = base.hasSuffix("/") ? String(base.dropLast()) : base
+        guard let url = URL(string: "\(trimmed)/models") else {
+            return FetchResult(ok: false, models: [], error: "Bad URL")
+        }
+        var req = URLRequest(url: url)
+        if !apiKey.isEmpty {
+            req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        let started = Date()
+        let r = await perform(req, parse: parseOpenAIModels)
+        guard r.ok else { return r }
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
+        return FetchResult(ok: true, models: r.models, error: nil,
+                           detail: ollamaDetail(count: r.models.count, ms: ms, version: nil))
+    }
+
     // MARK: - Azure Speech verify
 
     static func verifyAzure(key: String, region: String) async -> FetchResult {

@@ -1263,6 +1263,7 @@ struct PlaudDeviceDetailView: View {
 struct FindCardSection: View {
     @ObservedObject var direct: PlaudDirectService
     @ObservedObject private var finder = PlaudCardFinder.shared
+    @State private var showSoundInfo = false
 
     private var connected: Bool { direct.phase.isConnected }
 
@@ -1278,13 +1279,27 @@ struct FindCardSection: View {
             Toggle(isOn: $finder.notifyOnDisconnect) {
                 Label(L10n.Find.notifyToggle, systemImage: "bell.badge")
             }
-            HStack {
-                Label(L10n.Find.soundRow, systemImage: "speaker.wave.2")
-                Spacer()
-                Image(systemName: "lock")
+            // ★ 2026-10-22 ("为啥是锁着的"): a dead grey row with a lock told the
+            // user nothing. Tapping it now explains *why* — the card's SDK has no
+            // buzzer command at all, so there is nothing to send — and what does
+            // work today. Still not enabled: a button that appears to do something
+            // and silently doesn't is worse than an honest lock.
+            Button {
+                showSoundInfo = true
+            } label: {
+                HStack {
+                    Label(L10n.Find.soundRow, systemImage: "speaker.wave.2")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Image(systemName: "lock")
+                        .foregroundStyle(.tertiary)
+                }
             }
-            .foregroundStyle(.secondary)
-            .disabled(true)
+            .alert(L10n.Find.soundRow, isPresented: $showSoundInfo) {
+                Button(L10n.Common.done, role: .cancel) {}
+            } message: {
+                Text(L10n.Find.soundWhyLocked)
+            }
         } header: {
             Text(L10n.Find.header)
         } footer: {

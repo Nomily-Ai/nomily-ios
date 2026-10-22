@@ -127,6 +127,8 @@ struct LLMCompletionService {
     /// A channel's display name. **One copy only** — the settings page, error messages and fallback notices all read it here,
     /// and three separate copies would sooner or later produce "the settings page calls it Open Router, the error calls it openRouter".
     static func providerLabel(_ key: String) -> String {
+        // Presets first: their ids ("qwen", "ark") must never reach the UI raw.
+        if let preset = LLMPreset.find(key) { return preset.name }
         switch key {
         case "openai":     return "OpenAI"
         case "claude":     return "Claude"
@@ -162,6 +164,12 @@ struct LLMCompletionService {
         for key in fallbackOrder where configured.contains(key) && !chain.contains(key) {
             chain.append(key)
         }
+        // Presets go after the built-ins: a local Ollama still wins a tie (no
+        // quota, no data leaving the phone), but a configured Qwen/DeepSeek is a
+        // far better last resort than "no provider at all".
+        for preset in LLMPreset.all where configured.contains(preset.id) && !chain.contains(preset.id) {
+            chain.append(preset.id)
+        }
         return chain
     }
 
@@ -173,6 +181,15 @@ struct LLMCompletionService {
     /// and the UI shows only "No API key configured", with no hint of where to go to fix it.
     static func configGap(_ key: String, _ config: AppConfig) -> String? {
         let p = config.llmProviders
+        // Presets (Qwen / DeepSeek / Doubao / Ark) share one shape, so one branch
+        // covers all of them — and a new preset needs no change here at all.
+        if LLMPreset.find(key) != nil {
+            guard let c = p.preset(key) else { return L10n.LLM.errorNoProvider }
+            if c.endpoint.isEmpty { return L10n.LLM.errorNoEndpoint(providerLabel(key)) }
+            if (c.apiKey ?? "").isEmpty { return L10n.LLM.errorNoAPIKey(providerLabel(key)) }
+            if (c.model ?? "").isEmpty { return L10n.LLM.errorNoModel(providerLabel(key)) }
+            return nil
+        }
         switch key {
         case "openai":
             guard let c = p.openai else { return L10n.LLM.errorNoProvider }
@@ -676,6 +693,21 @@ struct LLMCompletionService {
             )
 
         default:
+            // A preset: same OpenAI-compatible wire format as `custom`, but over
+            // the cloud session (their hosts are remote, so the short local
+            // timeout and the small output cap would both be wrong).
+            if let p = providers.preset(providerKey) {
+                guard !p.endpoint.isEmpty else { throw LLMCompletionError.noEndpoint(providerLabel(providerKey)) }
+                guard let key = p.apiKey, !key.isEmpty else { throw LLMCompletionError.noAPIKey(providerLabel(providerKey)) }
+                guard let model = p.model, !model.isEmpty else { throw LLMCompletionError.noModel(providerLabel(providerKey)) }
+                let base = p.endpoint.hasSuffix("/") ? String(p.endpoint.dropLast()) : p.endpoint
+                return try await openAICompatible(
+                    endpoint: "\(base)/chat/completions",
+                    apiKey: key, model: model,
+                    systemPrompt: systemPrompt, userContent: userContent,
+                    session: cloudSession, maxTokens: maxOutputTokens
+                )
+            }
             throw LLMCompletionError.noProvider
         }
     }

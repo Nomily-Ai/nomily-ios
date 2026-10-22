@@ -1312,6 +1312,7 @@ struct LLMProvidersView: View {
                 }
             }
 
+            PresetProvidersSection()
             OpenRouterSection()
             KeyedProviderSection(
                 title: "OpenAI", placeholder: "gpt-4.1",
@@ -1331,6 +1332,328 @@ struct LLMProvidersView: View {
         .navigationTitle(L10n.Settings.llmProviders)
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear { configService.saveNow() }
+    }
+}
+
+// MARK: - One-tap presets (Qwen / DeepSeek / Doubao / Ark)
+
+/// The icon grid from the 2026-10-22 request:
+/// > "把 qwen 跟 deepseek 还有豆包跟火山引擎的，按照语音模型图标进行设置，点击图标默认填写好对应网址，
+/// >  只需要输入 API 密钥跟选择对应模型即可"
+///
+/// So: an icon per provider, and the endpoint is already correct before the sheet
+/// finishes presenting. The status chip exists because "configured but the key
+/// never got pasted" is the one state that produces a silent failure later — a
+/// summary would fall back (or fail) with no visible reason.
+private struct PresetProvidersSection: View {
+    @EnvironmentObject private var configService: ConfigService
+    @State private var editing: LLMPreset?
+
+    var body: some View {
+        Section {
+            ForEach(LLMPreset.all) { preset in
+                Button {
+                    editing = preset
+                } label: {
+                    row(preset)
+                }
+                .tint(.primary)
+            }
+        } header: {
+            Text(L10n.LLM.presetHeader)
+        } footer: {
+            Text(L10n.LLM.presetFooter)
+        }
+        .sheet(item: $editing) { preset in
+            PresetProviderSheet(preset: preset)
+                .environmentObject(configService)
+        }
+    }
+
+    private func row(_ preset: LLMPreset) -> some View {
+        let configured = configService.config.llmProviders.preset(preset.id)
+        let host = URL(string: configured?.endpoint ?? preset.endpoint)?.host ?? preset.endpoint
+        return HStack(spacing: 12) {
+            PresetMark(preset: preset)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(preset.name)
+                    .foregroundStyle(.primary)
+                Text(host)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+            if let configured {
+                if (configured.apiKey ?? "").isEmpty {
+                    Text(L10n.LLM.presetNeedsKey)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                } else {
+                    Text(L10n.LLM.presetReady)
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                }
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+}
+
+/// Brand tile. A letter mark instead of an SF Symbol on purpose: there is no
+/// glyph for 豆包 or 方舟, and a generic "cloud" for all four would make the grid
+/// useless — recognising which icon is which is the entire interaction.
+private struct PresetMark: View {
+    let preset: LLMPreset
+
+    private var color: Color {
+        switch preset.id {
+        case "qwen":     return Color(red: 0.42, green: 0.36, blue: 1.00)
+        case "deepseek": return Color(red: 0.28, green: 0.42, blue: 0.98)
+        case "doubao":   return Color(red: 0.16, green: 0.44, blue: 0.84)
+        default:         return Color(red: 0.98, green: 0.36, blue: 0.20)   // 火山方舟
+        }
+    }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(
+                LinearGradient(colors: [color, color.opacity(0.72)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+            .frame(width: 32, height: 32)
+            .overlay(
+                Text(preset.mark)
+                    .font(.system(size: preset.mark.count > 1 ? 12 : 15, weight: .bold))
+                    .foregroundStyle(.white)
+            )
+            .accessibilityHidden(true)
+    }
+}
+
+/// Key + model for one preset. **Creates the slot on appear** with the endpoint
+/// already filled — that is the promise ("点击图标默认填写好对应网址"), and it also
+/// means the row shows a host instead of "not configured" the moment you come back.
+private struct PresetProviderSheet: View {
+    let preset: LLMPreset
+
+    @EnvironmentObject private var configService: ConfigService
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var verify: VerifyState = .idle
+    @State private var models: [String] = []
+    /// Ark can only be called by inference-endpoint id on some accounts, and those
+    /// ids are not model names — so the free-text form has to stay reachable.
+    @State private var manualModel = false
+    @State private var fetchHint: String?
+
+    private var provider: AppConfig.LlmProviders.EndpointProvider? {
+        configService.config.llmProviders.preset(preset.id)
+    }
+
+    private var endpoint: String { provider?.endpoint ?? preset.endpoint }
+    private var model: String { provider?.model ?? "" }
+    private var apiKey: String { provider?.apiKey ?? "" }
+
+    /// Always offer the saved value, even when it isn't in the list (a renamed or
+    /// retired model would otherwise render as a blank picker row).
+    private var options: [String] {
+        var list = models
+        if !model.isEmpty, !list.contains(model) { list.insert(model, at: 0) }
+        return list
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 12) {
+                        PresetMark(preset: preset)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(preset.name).font(.headline)
+                            Text(URL(string: endpoint)?.host ?? preset.endpoint)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    SecureField(L10n.LLM.apiKey, text: keyBinding)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.body.monospaced())
+                    // Pre-filled but **not** locked: a proxy or a regional host is
+                    // a legitimate reason to change it, and a read-only row would
+                    // leave those users with no path at all.
+                    TextField(L10n.LLM.presetEndpointFilled, text: endpointBinding)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.caption.monospaced())
+                } footer: {
+                    Text("\(L10n.LLM.presetConsole): \(preset.console)")
+                }
+
+                Section {
+                    if manualModel || options.isEmpty {
+                        TextField(L10n.LLM.modelPlaceholder(preset.models.first ?? "ep-…"), text: modelBinding)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.body.monospaced())
+                    } else {
+                        Picker(L10n.LLM.model, selection: modelBinding) {
+                            Text(L10n.LLM.selectModel).tag("")
+                            ForEach(options, id: \.self) { Text($0).tag($0) }
+                        }
+                    }
+
+                    Button {
+                        Task { await fetchModels() }
+                    } label: {
+                        HStack {
+                            Text(L10n.LLM.presetFetchModels)
+                            Spacer()
+                            if verify == .verifying {
+                                ProgressView().controlSize(.small)
+                            } else if !options.isEmpty, !manualModel {
+                                Text("\(options.count)").foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .disabled(verify == .verifying || apiKey.isEmpty)
+
+                    if !options.isEmpty, !manualModel {
+                        Button(L10n.LLM.presetManualModel) { manualModel = true }
+                            .font(.footnote)
+                    } else if !preset.models.isEmpty {
+                        Button(L10n.LLM.model) { manualModel = false }
+                            .font(.footnote)
+                    }
+                } header: {
+                    Text(L10n.LLM.model)
+                } footer: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let note = preset.note { Text(note) }
+                        if let fetchHint { Text(fetchHint) }
+                        if case .failed(let reason) = verify { Text(reason).foregroundStyle(.red) }
+                    }
+                    .font(.footnote)
+                }
+
+                if provider != nil {
+                    Section {
+                        Button(role: .destructive) {
+                            configService.config.llmProviders.setPreset(preset.id, nil)
+                            if configService.config.llmProviders.primary == preset.id {
+                                configService.config.llmProviders.primary = nil
+                            }
+                            configService.scheduleSave()
+                            dismiss()
+                        } label: {
+                            Text(L10n.LLM.presetRemove)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(preset.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(L10n.Common.done) {
+                        configService.saveNow()
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .onAppear(perform: prime)
+    }
+
+    // MARK: - Behaviour
+
+    /// Fill the endpoint in before the user sees the form. Done here rather than
+    /// in the row's tap handler so a cold sheet (deep link, state restoration)
+    /// lands in the same place.
+    private func prime() {
+        models = preset.models
+        manualModel = preset.models.isEmpty
+        if provider == nil {
+            configService.config.llmProviders.setPreset(
+                preset.id,
+                .init(apiKey: nil, endpoint: preset.endpoint, model: preset.models.first)
+            )
+            configService.scheduleSave()
+        }
+    }
+
+    /// Ask the provider for its real model list. Failure is **not** fatal: the
+    /// curated list stays usable, and the footer says where the list came from —
+    /// that distinction matters, because "0 models" would otherwise read as "the
+    /// key is wrong".
+    private func fetchModels() async {
+        guard !apiKey.isEmpty else {
+            verify = .failed(L10n.LLM.errorNoAPIKey(preset.name))
+            return
+        }
+        verify = .verifying
+        fetchHint = nil
+        let result = await LLMModelService.fetchPresetModels(base: endpoint, apiKey: apiKey)
+        if Task.isCancelled { return }
+        if result.ok, !result.models.isEmpty {
+            models = result.models
+            verify = .success
+            manualModel = false
+            fetchHint = result.detail
+        } else {
+            verify = .failed(result.error ?? L10n.LLM.noModelsOnServer)
+            models = preset.models
+            fetchHint = L10n.LLM.presetBuiltinHint
+        }
+    }
+
+    // MARK: - Bindings
+
+    private var keyBinding: Binding<String> {
+        Binding(
+            get: { apiKey },
+            set: { new in
+                var p = provider ?? .init(apiKey: nil, endpoint: preset.endpoint, model: nil)
+                p.apiKey = new.isEmpty ? nil : new
+                if p.endpoint.isEmpty { p.endpoint = preset.endpoint }
+                configService.config.llmProviders.setPreset(preset.id, p)
+                configService.config.llmProviders.autoSelectPrimaryIfFirst()
+                verify = .idle
+                configService.scheduleSave()
+            }
+        )
+    }
+
+    private var endpointBinding: Binding<String> {
+        Binding(
+            get: { endpoint },
+            set: { new in
+                var p = provider ?? .init(apiKey: nil, endpoint: preset.endpoint, model: nil)
+                p.endpoint = new.trimmingCharacters(in: .whitespacesAndNewlines)
+                configService.config.llmProviders.setPreset(preset.id, p)
+                verify = .idle
+                configService.scheduleSave()
+            }
+        )
+    }
+
+    private var modelBinding: Binding<String> {
+        Binding(
+            get: { model },
+            set: { new in
+                var p = provider ?? .init(apiKey: nil, endpoint: preset.endpoint, model: nil)
+                p.model = new.isEmpty ? nil : new
+                if p.endpoint.isEmpty { p.endpoint = preset.endpoint }
+                configService.config.llmProviders.setPreset(preset.id, p)
+                configService.scheduleSave()
+            }
+        )
     }
 }
 

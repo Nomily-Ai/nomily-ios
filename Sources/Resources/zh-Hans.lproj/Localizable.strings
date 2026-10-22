@@ -1561,3 +1561,16 @@
 "find.notify_toggle" = "卡片断开时提醒我";
 "find.sound_row" = "让卡片响铃";
 "find.sound_unavailable" = "需要卡片固件提供响铃指令，当前固件没有（任务 8.2）。";
+
+/* 一键国内大模型预设（2026-10-22） */
+"llm.preset.header" = "国内大模型（点图标自动填地址）";
+"llm.preset.footer" = "点一个图标，接口地址已经填好了——你只需要贴 API 密钥、选一个模型。豆包和火山方舟是同一个入口：方舟提供豆包模型。";
+"llm.preset.ready" = "已就绪";
+"llm.preset.needs_key" = "待填密钥";
+"llm.preset.console" = "密钥申请地址";
+"llm.preset.endpoint_filled" = "接口地址（已自动填好）";
+"llm.preset.fetch_models" = "拉取可用模型";
+"llm.preset.builtin_hint" = "这家不提供模型清单接口，下面是内置的常用模型，可直接选用。";
+"llm.preset.manual_model" = "手动填写模型名";
+"llm.preset.remove" = "移除这个渠道";
+"find.sound_why_locked" = "为什么锁着：PLAUD 的 SDK 里根本没有响铃指令。它的完整设置表只有 20 项，与「找设备」有关的只有 FIND_MY（苹果「查找」的配对开关）；设备管理类里 537 个方法也没有任何 ring / buzz / vibrate。也就是说没有任何东西可以发给卡片，App 变不出这个声音——得先由固件加一条指令（任务 8.2）。在那之前，用上面的「最后见到」位置，以及卡片断开后的接近检测。";
