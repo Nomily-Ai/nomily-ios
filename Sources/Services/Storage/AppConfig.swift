@@ -464,22 +464,22 @@ struct AppConfig: Codable, Equatable {
             }
         }
 
+        /// Everything the user can pick as the primary channel.
+        ///
+        /// Derived from `LLMProviderSpec.all` rather than a hand-written list, so
+        /// the dropdown and the icon grid can never disagree about which providers
+        /// exist or what they are called (they did: "OpenAI" in the dropdown,
+        /// "ChatGPT" on the row above it).
         var configuredProviders: [(key: String, label: String)] {
-            var result: [(String, String)] = []
-            if let p = openRouter, p.apiKey != nil, !p.apiKey!.isEmpty { result.append(("openRouter", "Open Router")) }
-            if let p = openai, !p.apiKey.isEmpty { result.append(("openai", "OpenAI")) }
-            if let p = claude, !p.apiKey.isEmpty { result.append(("claude", "Claude")) }
-            if let p = gemini, !p.apiKey.isEmpty { result.append(("gemini", "Gemini")) }
-            if let p = ollama, !p.endpoint.isEmpty { result.append(("ollama", "Ollama")) }
-            if let p = custom, !p.endpoint.isEmpty { result.append(("custom", "Custom")) }
-            // Presets, in catalogue order so the picker doesn't reshuffle itself
-            // every time the dictionary is re-encoded.
-            for preset in LLMPreset.all {
-                guard let p = presets?[preset.id], !p.endpoint.isEmpty,
-                      (p.apiKey ?? "").isEmpty == false else { continue }
-                result.append((preset.id, preset.name))
+            LLMProviderSpec.all.compactMap { spec -> (String, String)? in
+                let hasKey = !(apiKeyValue(for: spec.storage) ?? "").isEmpty
+                if spec.keyRequired {
+                    return hasKey ? (spec.id, spec.name) : nil
+                }
+                // Ollama / Custom: a reachable address *is* the configuration.
+                let hasEndpoint = !(endpointValue(for: spec.storage) ?? "").isEmpty
+                return hasEndpoint ? (spec.id, spec.name) : nil
             }
-            return result
         }
 
         mutating func autoSelectPrimaryIfFirst() {
@@ -544,5 +544,155 @@ struct AppConfig: Codable, Equatable {
 
         /// Convenience criterion: nil-safe. Recorder-card reconnect/display all go through this one entry point.
         var isRecorderDevice: Bool { isRecorder ?? false }
+    }
+}
+
+// MARK: - One uniform view over the three storage shapes
+
+/// The settings page drives ten providers through one sheet; these six accessors
+/// are what makes that possible without ten copies of the same form.
+///
+/// ⚠️ `KeyedProvider.apiKey` is a non-optional `String` while every other shape
+/// uses `String?`. The asymmetry is absorbed here and nowhere else — a caller
+/// clearing the field sees `nil` either way.
+extension AppConfig.LlmProviders {
+
+    func endpointValue(for storage: LLMProviderStorage) -> String? {
+        switch storage {
+        case .keyed(let id):
+            return LLMProviderSpec.find(id)?.defaultEndpoint
+        case .endpoint(let id):
+            return endpointSlot(id)?.endpoint
+        case .preset(let id):
+            return presets?[id]?.endpoint
+        }
+    }
+
+    func apiKeyValue(for storage: LLMProviderStorage) -> String? {
+        switch storage {
+        case .keyed(let id):
+            return keyedSlot(id)?.apiKey
+        case .endpoint(let id):
+            return endpointSlot(id)?.apiKey
+        case .preset(let id):
+            return presets?[id]?.apiKey
+        }
+    }
+
+    func modelValue(for storage: LLMProviderStorage) -> String? {
+        switch storage {
+        case .keyed(let id):
+            return keyedSlot(id)?.model
+        case .endpoint(let id):
+            return endpointSlot(id)?.model
+        case .preset(let id):
+            return presets?[id]?.model
+        }
+    }
+
+    mutating func setAPIKey(_ value: String?, for storage: LLMProviderStorage) {
+        let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        switch storage {
+        case .keyed(let id):
+            var slot = keyedSlot(id) ?? .init(apiKey: "")
+            slot.apiKey = trimmed
+            // Empty key **and** no model means the user never configured this
+            // provider — keep the entry out of `configuredProviders` entirely
+            // instead of leaving a "configured, unusable" row behind.
+            setKeyedSlot(id, (trimmed.isEmpty && (slot.model ?? "").isEmpty) ? nil : slot)
+        case .endpoint(let id):
+            var slot = endpointSlot(id) ?? .init(apiKey: nil, endpoint: LLMProviderSpec.find(id)?.defaultEndpoint ?? "")
+            slot.apiKey = trimmed.isEmpty ? nil : trimmed
+            if slot.endpoint.isEmpty { slot.endpoint = LLMProviderSpec.find(id)?.defaultEndpoint ?? "" }
+            setEndpointSlot(id, slot)
+        case .preset(let id):
+            var slot = presets?[id] ?? .init(apiKey: nil, endpoint: LLMProviderSpec.find(id)?.defaultEndpoint ?? "", model: nil)
+            slot.apiKey = trimmed.isEmpty ? nil : trimmed
+            setPreset(id, slot)
+        }
+    }
+
+    mutating func setModel(_ value: String?, for storage: LLMProviderStorage) {
+        let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        switch storage {
+        case .keyed(let id):
+            var slot = keyedSlot(id) ?? .init(apiKey: "")
+            slot.model = trimmed.isEmpty ? nil : trimmed
+            setKeyedSlot(id, (slot.apiKey.isEmpty && trimmed.isEmpty) ? nil : slot)
+        case .endpoint(let id):
+            var slot = endpointSlot(id) ?? .init(apiKey: nil, endpoint: LLMProviderSpec.find(id)?.defaultEndpoint ?? "")
+            slot.model = trimmed.isEmpty ? nil : trimmed
+            if slot.endpoint.isEmpty { slot.endpoint = LLMProviderSpec.find(id)?.defaultEndpoint ?? "" }
+            setEndpointSlot(id, slot)
+        case .preset(let id):
+            var slot = presets?[id] ?? .init(apiKey: nil, endpoint: LLMProviderSpec.find(id)?.defaultEndpoint ?? "", model: nil)
+            slot.model = trimmed.isEmpty ? nil : trimmed
+            setPreset(id, slot)
+        }
+    }
+
+    mutating func setEndpointURL(_ value: String, for storage: LLMProviderStorage) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch storage {
+        case .keyed:
+            // Fixed by the API; nothing to store.
+            return
+        case .endpoint(let id):
+            var slot = endpointSlot(id) ?? .init(apiKey: nil, endpoint: "")
+            slot.endpoint = trimmed
+            setEndpointSlot(id, slot)
+        case .preset(let id):
+            var slot = presets?[id] ?? .init(apiKey: nil, endpoint: "", model: nil)
+            slot.endpoint = trimmed
+            setPreset(id, slot)
+        }
+    }
+
+    mutating func removeProvider(for storage: LLMProviderStorage) {
+        switch storage {
+        case .keyed(let id):    setKeyedSlot(id, nil)
+        case .endpoint(let id): setEndpointSlot(id, nil)
+        case .preset(let id):   setPreset(id, nil)
+        }
+        if let primary, LLMProviderSpec.find(primary)?.storage == storage { self.primary = nil }
+    }
+
+    // Private plumbing: one place per shape, so the six accessors above stay
+    // symmetrical and a new shape only touches this block.
+
+    private func keyedSlot(_ id: String) -> KeyedProvider? {
+        switch id {
+        case "openai": return openai
+        case "claude": return claude
+        case "gemini": return gemini
+        default:       return nil
+        }
+    }
+
+    private mutating func setKeyedSlot(_ id: String, _ value: KeyedProvider?) {
+        switch id {
+        case "openai": openai = value
+        case "claude": claude = value
+        case "gemini": gemini = value
+        default:       break
+        }
+    }
+
+    private func endpointSlot(_ id: String) -> EndpointProvider? {
+        switch id {
+        case "openRouter": return openRouter
+        case "ollama":     return ollama
+        case "custom":     return custom
+        default:           return nil
+        }
+    }
+
+    private mutating func setEndpointSlot(_ id: String, _ value: EndpointProvider?) {
+        switch id {
+        case "openRouter": openRouter = value
+        case "ollama":     ollama = value
+        case "custom":     custom = value
+        default:           break
+        }
     }
 }

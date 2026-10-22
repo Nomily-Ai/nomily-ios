@@ -127,15 +127,10 @@ struct LLMCompletionService {
     /// A channel's display name. **One copy only** — the settings page, error messages and fallback notices all read it here,
     /// and three separate copies would sooner or later produce "the settings page calls it Open Router, the error calls it openRouter".
     static func providerLabel(_ key: String) -> String {
-        // Presets first: their ids ("qwen", "ark") must never reach the UI raw.
-        if let preset = LLMPreset.find(key) { return preset.name }
+        // The catalogue is the single source of names — the icon grid, the primary
+        // dropdown and every error message read it, so they can't drift apart.
+        if !key.isEmpty, let spec = LLMProviderSpec.find(key) { return spec.name }
         switch key {
-        case "openai":     return "OpenAI"
-        case "claude":     return "Claude"
-        case "gemini":     return "Gemini"
-        case "openRouter": return "Open Router"
-        case "ollama":     return "Ollama"
-        case "custom":     return "Custom"
         case "":           return L10n.LLM.errorNoProvider
         default:           return key
         }

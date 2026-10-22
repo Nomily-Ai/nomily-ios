@@ -1252,6 +1252,51 @@ enum L10n {
             NSLocalizedString("llm.preset.remove", value: "Remove this provider",
                               comment: "Deletes the preset's endpoint, key and model")
         }
+        static var presetNeedsModel: String {
+            NSLocalizedString("llm.preset.needs_model", value: "Pick a model",
+                              comment: "Provider row status: key is fine, no model chosen yet")
+        }
+        static var notConfigured: String {
+            NSLocalizedString("llm.not_configured", value: "Not set up",
+                              comment: "Provider row: no endpoint and no model yet")
+        }
+
+        // MARK: Provider grid (★ 2026-10-22, every provider in one grid)
+        static var gridOverseas: String {
+            NSLocalizedString("llm.grid.overseas", value: "Mainstream providers",
+                              comment: "Section header: ChatGPT / Claude / Gemini / OpenRouter / Ollama / Custom")
+        }
+        static var gridDomestic: String {
+            NSLocalizedString("llm.grid.domestic", value: "Chinese providers",
+                              comment: "Section header: Qwen / DeepSeek / Doubao / Volcengine Ark")
+        }
+        static var gridFooter: String {
+            NSLocalizedString("llm.grid.footer",
+                              value: "Each icon opens its own settings with the address already filled in — you add a key and pick a model. The list only offers models that can hold a conversation; embedding, speech and image models are filtered out.",
+                              comment: "Explains the icon grid and the chat-only model filter")
+        }
+        static var endpointFixedByAPI: String {
+            NSLocalizedString("llm.endpoint_fixed", value: "This address is fixed by the vendor's API.",
+                              comment: "Shown when the endpoint field is read-only")
+        }
+        static var modelSearch: String {
+            NSLocalizedString("llm.model_search", value: "Filter models",
+                              comment: "Search field above a long model list (OpenRouter lists hundreds)")
+        }
+        static var chatOnlyNote: String {
+            NSLocalizedString("llm.chat_only_note",
+                              value: "Only chat-capable models are listed — embedding, TTS, image and moderation models are hidden, because choosing one only fails later inside a summary.",
+                              comment: "Why the fetched model list is shorter than the vendor's own list")
+        }
+        static var noChatModels: String {
+            NSLocalizedString("llm.no_chat_models",
+                              value: "This provider returned no chat-capable models.",
+                              comment: "Fetch succeeded but every model was filtered out")
+        }
+        static var useCuratedModels: String {
+            NSLocalizedString("llm.use_curated_models", value: "Back to the built-in list",
+                              comment: "Switch the model row back from free text to the curated picker")
+        }
     }
 
     // MARK: - Azure Setup Guide

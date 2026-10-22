@@ -1574,3 +1574,15 @@
 "llm.preset.manual_model" = "手动填写模型名";
 "llm.preset.remove" = "移除这个渠道";
 "find.sound_why_locked" = "为什么锁着：PLAUD 的 SDK 里根本没有响铃指令。它的完整设置表只有 20 项，与「找设备」有关的只有 FIND_MY（苹果「查找」的配对开关）；设备管理类里 537 个方法也没有任何 ring / buzz / vibrate。也就是说没有任何东西可以发给卡片，App 变不出这个声音——得先由固件加一条指令（任务 8.2）。在那之前，用上面的「最后见到」位置，以及卡片断开后的接近检测。";
+
+/* 服务商图标网格（2026-10-22 全量：国外 + 国内） */
+"llm.grid.overseas" = "主流服务商";
+"llm.grid.domestic" = "国内大模型";
+"llm.grid.footer" = "点图标进各自设置，地址已经填好——你只需要贴密钥、选模型。模型清单只列出能对话的模型，embedding / 语音 / 图像类会被过滤掉，选了会在摘要里才报错。";
+"llm.endpoint_fixed" = "这个地址由官方接口固定，不可修改。";
+"llm.model_search" = "筛选模型";
+"llm.chat_only_note" = "只显示可用于对话的模型——embedding、TTS、图像、审核类都隐藏了，因为它们只会在摘要阶段才失败。";
+"llm.no_chat_models" = "这家没有返回可用于对话的模型。";
+"llm.use_curated_models" = "回到内置模型清单";
+"llm.not_configured" = "未设置";
+"llm.preset.needs_model" = "待选模型";

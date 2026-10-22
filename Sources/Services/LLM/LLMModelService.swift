@@ -177,6 +177,79 @@ struct LLMModelService {
                            detail: ollamaDetail(count: r.models.count, ms: ms, version: nil))
     }
 
+    // MARK: - Chat-capability filter
+
+    /// Tokens that mean "this model cannot answer a chat completion".
+    ///
+    /// Vendor `/models` endpoints list **everything the account can reach**:
+    /// OpenAI returns `whisper-1`, `tts-1`, `text-embedding-3-large`, `dall-e-3`,
+    /// `omni-moderation-latest` alongside the chat models, and Gemini returns
+    /// embedding/AQA models. Picking one of those doesn't fail at selection time —
+    /// it fails minutes later inside a summary, as "HTTP 400: this model does not
+    /// support chat", which reads like our bug.
+    ///
+    /// 2026-10-22 request, verbatim:
+    /// > "他们的模型要兼容 — 能够根据我们支持的模型才可以在里面进行选择"
+    ///
+    /// Blacklist rather than whitelist on purpose: vendors keep shipping new chat
+    /// models, and a whitelist would silently hide every one of them until we
+    /// shipped a build.
+    private static let nonChatTokens = [
+        "embed", "whisper", "tts", "dall-e", "gpt-image", "moderation", "rerank",
+        "realtime", "audio", "transcribe", "speech", "ocr", "aqa", "bge", "gte-",
+        "text-similarity", "text-search", "image-",
+        // ⚠️ Do **not** add "vision" or "-preview" here: `gpt-4-vision-preview`
+        // and friends are chat models, and filtering them would hide working
+        // choices — the exact failure this filter is meant to prevent, inverted.
+    ]
+
+    static func isChatCapable(_ id: String) -> Bool {
+        let lower = id.lowercased()
+        return !nonChatTokens.contains { lower.contains($0) }
+    }
+
+    static func chatCapableModels(_ ids: [String]) -> [String] {
+        ids.filter(isChatCapable)
+    }
+
+    // MARK: - One entry point for the provider grid
+
+    /// Fetch a provider's model list and reduce it to what this app can call.
+    ///
+    /// The grid's sheet doesn't know that OpenAI, Anthropic and Gemini have three
+    /// different response shapes and that Ollama needs `/api/tags` — that knowledge
+    /// stays here, keyed by `LLMProviderSpec.id`.
+    static func fetchModels(
+        for spec: LLMProviderSpec, endpoint: String, apiKey: String
+    ) async -> FetchResult {
+        let raw: FetchResult
+        switch spec.id {
+        case "openai":
+            raw = await fetchOpenAI(apiKey: apiKey)
+        case "claude":
+            raw = await fetchClaude(apiKey: apiKey)
+        case "gemini":
+            raw = await fetchGemini(apiKey: apiKey)
+        case "openRouter":
+            raw = await fetchBearer(
+                url: "\((endpoint.isEmpty ? spec.defaultEndpoint : endpoint))/models",
+                apiKey: apiKey,
+                parse: parseOpenAIModels
+            )
+        case "ollama":
+            raw = await fetchOllama(endpoint: endpoint.isEmpty ? spec.defaultEndpoint : endpoint)
+        case "custom":
+            raw = await fetchOpenAICompatible(endpoint: endpoint, apiKey: apiKey.isEmpty ? nil : apiKey)
+        default:
+            raw = await fetchPresetModels(base: endpoint.isEmpty ? spec.defaultEndpoint : endpoint, apiKey: apiKey)
+        }
+        guard raw.ok else { return raw }
+        // Note: an empty result after filtering is a legitimate outcome (a Custom
+        // endpoint pointing at an embeddings-only server) — the page shows "no
+        // usable chat model" rather than pretending the fetch failed.
+        return FetchResult(ok: true, models: chatCapableModels(raw.models), error: nil, detail: raw.detail)
+    }
+
     // MARK: - Azure Speech verify
 
     static func verifyAzure(key: String, region: String) async -> FetchResult {
@@ -273,7 +346,16 @@ struct LLMModelService {
 
     private static func parseGeminiModels(_ json: [String: Any]) -> [String] {
         guard let models = json["models"] as? [[String: Any]] else { return [] }
-        return models.compactMap { ($0["name"] as? String)?.replacingOccurrences(of: "models/", with: "") }.sorted()
+        return models.compactMap { model -> String? in
+            // Gemini states the capability explicitly; use it rather than guessing
+            // from the name. `embedContent` models (text-embedding-004, aqa) are
+            // listed here too and are useless for a summary.
+            if let methods = model["supportedGenerationMethods"] as? [String],
+               !methods.contains("generateContent") {
+                return nil
+            }
+            return (model["name"] as? String)?.replacingOccurrences(of: "models/", with: "")
+        }.sorted()
     }
 
     private static func parseOllamaModels(_ json: [String: Any]) -> [String] {

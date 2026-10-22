@@ -1312,22 +1312,16 @@ struct LLMProvidersView: View {
                 }
             }
 
-            PresetProvidersSection()
-            OpenRouterSection()
-            KeyedProviderSection(
-                title: "OpenAI", placeholder: "gpt-4.1",
-                keyPath: \.openai, fetch: { await LLMModelService.fetchOpenAI(apiKey: $0) }
+            ProviderGridSection(
+                title: L10n.LLM.gridOverseas,
+                footer: L10n.LLM.gridFooter,
+                specs: LLMProviderSpec.overseas
             )
-            KeyedProviderSection(
-                title: "Claude", placeholder: "claude-opus-4-0-20250514",
-                keyPath: \.claude, fetch: { await LLMModelService.fetchClaude(apiKey: $0) }
+            ProviderGridSection(
+                title: L10n.LLM.gridDomestic,
+                footer: nil,
+                specs: LLMProviderSpec.domestic
             )
-            KeyedProviderSection(
-                title: "Gemini", placeholder: "gemini-2.5-pro",
-                keyPath: \.gemini, fetch: { await LLMModelService.fetchGemini(apiKey: $0) }
-            )
-            OllamaSection()
-            CustomEndpointSection()
         }
         .navigationTitle(L10n.Settings.llmProviders)
         .navigationBarTitleDisplayMode(.inline)
@@ -1335,88 +1329,121 @@ struct LLMProvidersView: View {
     }
 }
 
-// MARK: - One-tap presets (Qwen / DeepSeek / Doubao / Ark)
+// MARK: - Provider grid (every provider, one sheet)
 
-/// The icon grid from the 2026-10-22 request:
-/// > "把 qwen 跟 deepseek 还有豆包跟火山引擎的，按照语音模型图标进行设置，点击图标默认填写好对应网址，
-/// >  只需要输入 API 密钥跟选择对应模型即可"
+/// 2026-10-22 request:
+/// > "下面的 openrouter 也要要国外的主流模型，Claude / chatgpt / gemini，ollama 跟用户自定义的模型
+/// >  也要加入进去，然后给这些模型配置对应的图标，然后他们的模型要兼容 —
+/// >  能够根据我们支持的模型才可以在里面进行选择"
 ///
-/// So: an icon per provider, and the endpoint is already correct before the sheet
-/// finishes presenting. The status chip exists because "configured but the key
-/// never got pasted" is the one state that produces a silent failure later — a
-/// summary would fall back (or fail) with no visible reason.
-private struct PresetProvidersSection: View {
+/// So the grid covers all ten providers and every one of them opens the **same**
+/// sheet. Before this, each provider had its own hand-written section, which is
+/// why OpenRouter had a provider-prefix field, Ollama had a debounce probe and
+/// Custom had a different model row — three behaviours to learn for one task.
+private struct ProviderGridSection: View {
+    let title: String
+    let footer: String?
+    let specs: [LLMProviderSpec]
+
     @EnvironmentObject private var configService: ConfigService
-    @State private var editing: LLMPreset?
+    @State private var editing: LLMProviderSpec?
 
     var body: some View {
         Section {
-            ForEach(LLMPreset.all) { preset in
+            ForEach(specs) { spec in
                 Button {
-                    editing = preset
+                    editing = spec
                 } label: {
-                    row(preset)
+                    ProviderRow(spec: spec)
                 }
                 .tint(.primary)
             }
         } header: {
-            Text(L10n.LLM.presetHeader)
+            Text(title)
         } footer: {
-            Text(L10n.LLM.presetFooter)
+            if let footer { Text(footer) }
         }
-        .sheet(item: $editing) { preset in
-            PresetProviderSheet(preset: preset)
+        .sheet(item: $editing) { spec in
+            ProviderConfigSheet(spec: spec)
                 .environmentObject(configService)
         }
     }
+}
 
-    private func row(_ preset: LLMPreset) -> some View {
-        let configured = configService.config.llmProviders.preset(preset.id)
-        let host = URL(string: configured?.endpoint ?? preset.endpoint)?.host ?? preset.endpoint
-        return HStack(spacing: 12) {
-            PresetMark(preset: preset)
+private struct ProviderRow: View {
+    let spec: LLMProviderSpec
+    @EnvironmentObject private var configService: ConfigService
+
+    private var key: String { configService.config.llmProviders.apiKeyValue(for: spec.storage) ?? "" }
+    private var model: String { configService.config.llmProviders.modelValue(for: spec.storage) ?? "" }
+    private var endpoint: String {
+        let stored = configService.config.llmProviders.endpointValue(for: spec.storage) ?? ""
+        return stored.isEmpty ? spec.defaultEndpoint : stored
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ProviderMark(spec: spec)
             VStack(alignment: .leading, spacing: 2) {
-                Text(preset.name)
-                    .foregroundStyle(.primary)
-                Text(host)
-                    .font(.caption2.monospaced())
+                Text(spec.name).foregroundStyle(.primary)
+                Text(detailLine)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
             Spacer(minLength: 8)
-            if let configured {
-                if (configured.apiKey ?? "").isEmpty {
-                    Text(L10n.LLM.presetNeedsKey)
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                } else {
-                    Text(L10n.LLM.presetReady)
-                        .font(.caption2)
-                        .foregroundStyle(.green)
-                }
-            } else {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
+            status
         }
+    }
+
+    /// Second line: what you'd recognise the provider by — the model when one is
+    /// chosen, otherwise the address. Showing the model matters more than the host
+    /// once it's set ("which model am I actually on?" is the recurring question).
+    private var detailLine: String {
+        if !model.isEmpty { return model }
+        if !endpoint.isEmpty, let host = URL(string: endpoint)?.host { return host + pathSuffix }
+        return L10n.LLM.notConfigured
+    }
+
+    private var pathSuffix: String {
+        guard let url = URL(string: endpoint), url.path.count > 1 else { return "" }
+        return url.path
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        if hasAnyConfig {
+            if model.isEmpty {
+                Text(L10n.LLM.presetNeedsModel).font(.caption2).foregroundStyle(.orange)
+            } else if spec.keyRequired, key.isEmpty {
+                Text(L10n.LLM.presetNeedsKey).font(.caption2).foregroundStyle(.orange)
+            } else {
+                Text(L10n.LLM.presetReady).font(.caption2).foregroundStyle(.green)
+            }
+        } else {
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+        }
+    }
+
+    /// "Is there anything stored for this provider" — deliberately not
+    /// `endpointValue`, which returns the **default** address for the three
+    /// fixed-endpoint providers and would make every row look configured.
+    private var hasAnyConfig: Bool {
+        let p = configService.config.llmProviders
+        return p.apiKeyValue(for: spec.storage) != nil || p.modelValue(for: spec.storage) != nil
     }
 }
 
-/// Brand tile. A letter mark instead of an SF Symbol on purpose: there is no
-/// glyph for 豆包 or 方舟, and a generic "cloud" for all four would make the grid
-/// useless — recognising which icon is which is the entire interaction.
-private struct PresetMark: View {
-    let preset: LLMPreset
+/// Brand tile. A letter mark rather than an SF Symbol: there is no glyph for
+/// 豆包 or 方舟, and giving all ten a generic "cloud" would defeat the point —
+/// recognising which icon is which *is* the interaction.
+private struct ProviderMark: View {
+    let spec: LLMProviderSpec
 
     private var color: Color {
-        switch preset.id {
-        case "qwen":     return Color(red: 0.42, green: 0.36, blue: 1.00)
-        case "deepseek": return Color(red: 0.28, green: 0.42, blue: 0.98)
-        case "doubao":   return Color(red: 0.16, green: 0.44, blue: 0.84)
-        default:         return Color(red: 0.98, green: 0.36, blue: 0.20)   // 火山方舟
-        }
+        let t = spec.tint
+        return Color(red: t.r, green: t.g, blue: t.b)
     }
 
     var body: some View {
@@ -1427,43 +1454,55 @@ private struct PresetMark: View {
             )
             .frame(width: 32, height: 32)
             .overlay(
-                Text(preset.mark)
-                    .font(.system(size: preset.mark.count > 1 ? 12 : 15, weight: .bold))
+                Text(spec.mark)
+                    .font(.system(size: spec.mark.count > 1 ? 11 : 15, weight: .bold))
                     .foregroundStyle(.white)
             )
             .accessibilityHidden(true)
     }
 }
 
-/// Key + model for one preset. **Creates the slot on appear** with the endpoint
-/// already filled — that is the promise ("点击图标默认填写好对应网址"), and it also
-/// means the row shows a host instead of "not configured" the moment you come back.
-private struct PresetProviderSheet: View {
-    let preset: LLMPreset
+/// Key + address + model for one provider, in the same order every time.
+///
+/// Endpoints are pre-filled from `LLMProviderSpec`, which is the whole request:
+/// tap the icon, and the address is already right. Where the API fixes the
+/// address (OpenAI / Claude / Gemini) the row is shown but locked — a free-text
+/// field there could only produce a 404.
+private struct ProviderConfigSheet: View {
+    let spec: LLMProviderSpec
 
     @EnvironmentObject private var configService: ConfigService
     @Environment(\.dismiss) private var dismiss
 
     @State private var verify: VerifyState = .idle
     @State private var models: [String] = []
-    /// Ark can only be called by inference-endpoint id on some accounts, and those
-    /// ids are not model names — so the free-text form has to stay reachable.
     @State private var manualModel = false
     @State private var fetchHint: String?
+    @State private var modelQuery = ""
 
-    private var provider: AppConfig.LlmProviders.EndpointProvider? {
-        configService.config.llmProviders.preset(preset.id)
+    private var key: String { configService.config.llmProviders.apiKeyValue(for: spec.storage) ?? "" }
+    private var model: String { configService.config.llmProviders.modelValue(for: spec.storage) ?? "" }
+    private var endpoint: String {
+        let stored = configService.config.llmProviders.endpointValue(for: spec.storage) ?? ""
+        return stored.isEmpty ? spec.defaultEndpoint : stored
+    }
+    private var isConfigured: Bool {
+        let p = configService.config.llmProviders
+        // Same rule as the row's badge: a *stored* value, not the default address
+        // that `endpointValue` synthesises for fixed-endpoint providers.
+        return p.apiKeyValue(for: spec.storage) != nil || p.modelValue(for: spec.storage) != nil
     }
 
-    private var endpoint: String { provider?.endpoint ?? preset.endpoint }
-    private var model: String { provider?.model ?? "" }
-    private var apiKey: String { provider?.apiKey ?? "" }
-
-    /// Always offer the saved value, even when it isn't in the list (a renamed or
-    /// retired model would otherwise render as a blank picker row).
+    /// Always offer the saved value: a model that was renamed upstream, or an
+    /// `ep-…` access point typed by hand, is not in any fetched list — and a
+    /// Picker whose selection matches no tag renders blank.
     private var options: [String] {
-        var list = models
+        var list = models.isEmpty ? spec.curatedModels : models
         if !model.isEmpty, !list.contains(model) { list.insert(model, at: 0) }
+        if !modelQuery.isEmpty {
+            let q = modelQuery.lowercased()
+            list = list.filter { $0.lowercased().contains(q) }
+        }
         return list
     }
 
@@ -1472,33 +1511,57 @@ private struct PresetProviderSheet: View {
             Form {
                 Section {
                     HStack(spacing: 12) {
-                        PresetMark(preset: preset)
+                        ProviderMark(spec: spec)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(preset.name).font(.headline)
-                            Text(URL(string: endpoint)?.host ?? preset.endpoint)
+                            Text(spec.name).font(.headline)
+                            Text(endpoint.isEmpty ? L10n.LLM.notConfigured : (URL(string: endpoint)?.host ?? endpoint))
                                 .font(.caption2.monospaced())
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    SecureField(L10n.LLM.apiKey, text: keyBinding)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.body.monospaced())
-                    // Pre-filled but **not** locked: a proxy or a regional host is
-                    // a legitimate reason to change it, and a read-only row would
-                    // leave those users with no path at all.
-                    TextField(L10n.LLM.presetEndpointFilled, text: endpointBinding)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.caption.monospaced())
+
+                    if spec.keyRequired {
+                        SecureField(L10n.LLM.apiKey, text: keyBinding)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.body.monospaced())
+                    } else {
+                        SecureField(L10n.LLM.apiKeyOptional, text: keyBinding)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.body.monospaced())
+                    }
+
+                    if spec.endpointEditable {
+                        TextField(L10n.LLM.presetEndpointFilled, text: endpointBinding)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.caption.monospaced())
+                    } else {
+                        LabeledContent(L10n.LLM.endpointURL) {
+                            Text(endpoint)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
                 } footer: {
-                    Text("\(L10n.LLM.presetConsole): \(preset.console)")
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let console = spec.console, spec.keyRequired {
+                            Text("\(L10n.LLM.presetConsole): \(console)")
+                        }
+                        if !spec.endpointEditable {
+                            Text(L10n.LLM.endpointFixedByAPI)
+                        }
+                    }
+                    .font(.footnote)
                 }
 
                 Section {
                     if manualModel || options.isEmpty {
-                        TextField(L10n.LLM.modelPlaceholder(preset.models.first ?? "ep-…"), text: modelBinding)
+                        TextField(L10n.LLM.modelPlaceholder(spec.curatedModels.first ?? "model-name"), text: modelBinding)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .font(.body.monospaced())
@@ -1509,8 +1572,20 @@ private struct PresetProviderSheet: View {
                         }
                     }
 
+                    // OpenRouter alone lists several hundred models; scrolling them
+                    // in a Picker is unusable, so filter first.
+                    if !manualModel, models.count > 15 {
+                        HStack {
+                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                            TextField(L10n.LLM.modelSearch, text: $modelQuery)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .font(.footnote.monospaced())
+                        }
+                    }
+
                     Button {
-                        Task { await fetchModels() }
+                        Task { await loadModels() }
                     } label: {
                         HStack {
                             Text(L10n.LLM.presetFetchModels)
@@ -1518,37 +1593,42 @@ private struct PresetProviderSheet: View {
                             if verify == .verifying {
                                 ProgressView().controlSize(.small)
                             } else if !options.isEmpty, !manualModel {
-                                Text("\(options.count)").foregroundStyle(.secondary)
+                                Text("\(models.isEmpty ? spec.curatedModels.count : models.count)")
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
-                    .disabled(verify == .verifying || apiKey.isEmpty)
+                    .disabled(verify == .verifying || (spec.keyRequired && key.isEmpty))
 
                     if !options.isEmpty, !manualModel {
                         Button(L10n.LLM.presetManualModel) { manualModel = true }
                             .font(.footnote)
-                    } else if !preset.models.isEmpty {
-                        Button(L10n.LLM.model) { manualModel = false }
+                    } else if !spec.curatedModels.isEmpty {
+                        Button(L10n.LLM.useCuratedModels) { manualModel = false }
                             .font(.footnote)
                     }
                 } header: {
                     Text(L10n.LLM.model)
                 } footer: {
                     VStack(alignment: .leading, spacing: 6) {
-                        if let note = preset.note { Text(note) }
+                        if let note = spec.note { Text(note) }
+                        Text(L10n.LLM.chatOnlyNote)
                         if let fetchHint { Text(fetchHint) }
-                        if case .failed(let reason) = verify { Text(reason).foregroundStyle(.red) }
+                        if case .failed(let reason) = verify {
+                            Text(reason).foregroundStyle(.red)
+                        }
                     }
                     .font(.footnote)
                 }
 
-                if provider != nil {
+                if spec.id == "ollama" {
+                    Section { SetupAssistantRow() }
+                }
+
+                if isConfigured {
                     Section {
                         Button(role: .destructive) {
-                            configService.config.llmProviders.setPreset(preset.id, nil)
-                            if configService.config.llmProviders.primary == preset.id {
-                                configService.config.llmProviders.primary = nil
-                            }
+                            configService.config.llmProviders.removeProvider(for: spec.storage)
                             configService.scheduleSave()
                             dismiss()
                         } label: {
@@ -1557,7 +1637,7 @@ private struct PresetProviderSheet: View {
                     }
                 }
             }
-            .navigationTitle(preset.name)
+            .navigationTitle(spec.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -1573,42 +1653,50 @@ private struct PresetProviderSheet: View {
 
     // MARK: - Behaviour
 
-    /// Fill the endpoint in before the user sees the form. Done here rather than
-    /// in the row's tap handler so a cold sheet (deep link, state restoration)
-    /// lands in the same place.
+    /// Fill in what the user shouldn't have to type. Endpoint first (that is the
+    /// promise), then a sensible default model, so the key field is the only empty
+    /// thing on screen.
+    ///
+    /// Never overwrites an existing choice — coming back to change the key must not
+    /// silently swap the model.
     private func prime() {
-        models = preset.models
-        manualModel = preset.models.isEmpty
-        if provider == nil {
-            configService.config.llmProviders.setPreset(
-                preset.id,
-                .init(apiKey: nil, endpoint: preset.endpoint, model: preset.models.first)
-            )
+        models = spec.curatedModels
+        manualModel = spec.curatedModels.isEmpty
+        let stored = configService.config.llmProviders
+        if spec.endpointEditable,
+           (stored.endpointValue(for: spec.storage) ?? "").isEmpty,
+           !spec.defaultEndpoint.isEmpty {
+            configService.config.llmProviders.setEndpointURL(spec.defaultEndpoint, for: spec.storage)
+            configService.scheduleSave()
+        }
+        if (stored.modelValue(for: spec.storage) ?? "").isEmpty,
+           let first = spec.curatedModels.first,
+           spec.kind != .local {
+            configService.config.llmProviders.setModel(first, for: spec.storage)
             configService.scheduleSave()
         }
     }
 
-    /// Ask the provider for its real model list. Failure is **not** fatal: the
-    /// curated list stays usable, and the footer says where the list came from —
-    /// that distinction matters, because "0 models" would otherwise read as "the
-    /// key is wrong".
-    private func fetchModels() async {
-        guard !apiKey.isEmpty else {
-            verify = .failed(L10n.LLM.errorNoAPIKey(preset.name))
-            return
-        }
+    private func loadModels() async {
         verify = .verifying
         fetchHint = nil
-        let result = await LLMModelService.fetchPresetModels(base: endpoint, apiKey: apiKey)
+        modelQuery = ""
+        let result = await LLMModelService.fetchModels(for: spec, endpoint: endpoint, apiKey: key)
         if Task.isCancelled { return }
         if result.ok, !result.models.isEmpty {
             models = result.models
             verify = .success
             manualModel = false
             fetchHint = result.detail
+        } else if result.ok {
+            // Reachable, but nothing callable — say exactly that instead of a red
+            // "failed", because the key was fine.
+            models = []
+            verify = .failed(L10n.LLM.noChatModels)
+            fetchHint = spec.curatedModels.isEmpty ? L10n.LLM.presetBuiltinHint : nil
         } else {
-            verify = .failed(result.error ?? L10n.LLM.noModelsOnServer)
-            models = preset.models
+            verify = .failed((result.error ?? L10n.LLM.noModelsOnServer) + "\n" + L10n.LLM.fetchFailedHint)
+            models = spec.curatedModels
             fetchHint = L10n.LLM.presetBuiltinHint
         }
     }
@@ -1617,12 +1705,9 @@ private struct PresetProviderSheet: View {
 
     private var keyBinding: Binding<String> {
         Binding(
-            get: { apiKey },
+            get: { key },
             set: { new in
-                var p = provider ?? .init(apiKey: nil, endpoint: preset.endpoint, model: nil)
-                p.apiKey = new.isEmpty ? nil : new
-                if p.endpoint.isEmpty { p.endpoint = preset.endpoint }
-                configService.config.llmProviders.setPreset(preset.id, p)
+                configService.config.llmProviders.setAPIKey(new, for: spec.storage)
                 configService.config.llmProviders.autoSelectPrimaryIfFirst()
                 verify = .idle
                 configService.scheduleSave()
@@ -1634,9 +1719,7 @@ private struct PresetProviderSheet: View {
         Binding(
             get: { endpoint },
             set: { new in
-                var p = provider ?? .init(apiKey: nil, endpoint: preset.endpoint, model: nil)
-                p.endpoint = new.trimmingCharacters(in: .whitespacesAndNewlines)
-                configService.config.llmProviders.setPreset(preset.id, p)
+                configService.config.llmProviders.setEndpointURL(new, for: spec.storage)
                 verify = .idle
                 configService.scheduleSave()
             }
@@ -1647,612 +1730,7 @@ private struct PresetProviderSheet: View {
         Binding(
             get: { model },
             set: { new in
-                var p = provider ?? .init(apiKey: nil, endpoint: preset.endpoint, model: nil)
-                p.model = new.isEmpty ? nil : new
-                if p.endpoint.isEmpty { p.endpoint = preset.endpoint }
-                configService.config.llmProviders.setPreset(preset.id, p)
-                configService.scheduleSave()
-            }
-        )
-    }
-}
-
-// MARK: - Keyed provider (OpenAI / Claude / Gemini)
-
-private struct KeyedProviderSection: View {
-    let title: String
-    let placeholder: String
-    let keyPath: WritableKeyPath<AppConfig.LlmProviders, AppConfig.LlmProviders.KeyedProvider?>
-    let fetch: (String) async -> LLMModelService.FetchResult
-
-    @EnvironmentObject private var configService: ConfigService
-    @State private var verify: VerifyState = .idle
-    @State private var models: [String] = []
-
-    private var provider: AppConfig.LlmProviders.KeyedProvider? {
-        configService.config.llmProviders[keyPath: keyPath]
-    }
-
-    var body: some View {
-        Section(title) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    SecureField(L10n.LLM.apiKey, text: apiKeyBinding)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.body.monospaced())
-                    keyHint(provider?.apiKey)
-                }
-                verifyButton(verify) {
-                    guard let key = provider?.apiKey, !key.isEmpty else {
-                        verify = .failed("No key"); return
-                    }
-                    verify = .verifying
-                    let r = await fetch(key)
-                    if r.ok {
-                        verify = .success
-                        models = r.models
-                    } else {
-                        verify = .failed(r.error ?? "Failed")
-                    }
-                }
-            }
-
-            if models.isEmpty {
-                TextField(L10n.LLM.modelPlaceholder(placeholder), text: modelBinding)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-            } else {
-                Picker(L10n.LLM.model, selection: modelPickerBinding) {
-                    Text(L10n.LLM.selectModel).tag("")
-                    ForEach(models, id: \.self) { Text($0).tag($0) }
-                }
-            }
-        }
-    }
-
-    private var apiKeyBinding: Binding<String> {
-        Binding(
-            get: { provider?.apiKey ?? "" },
-            set: { new in
-                if new.isEmpty {
-                    configService.config.llmProviders[keyPath: keyPath] = nil
-                } else {
-                    var p = provider ?? .init(apiKey: new)
-                    p.apiKey = new
-                    configService.config.llmProviders[keyPath: keyPath] = p
-                }
-                configService.config.llmProviders.autoSelectPrimaryIfFirst()
-                verify = .idle; models = []
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var modelBinding: Binding<String> {
-        Binding(
-            get: { provider?.model ?? "" },
-            set: { new in
-                var p = provider ?? .init(apiKey: "")
-                p.model = new.isEmpty ? nil : new
-                configService.config.llmProviders[keyPath: keyPath] = p
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var modelPickerBinding: Binding<String> {
-        Binding(
-            get: { provider?.model ?? "" },
-            set: { new in
-                var p = provider ?? .init(apiKey: "")
-                p.model = new.isEmpty ? nil : new
-                configService.config.llmProviders[keyPath: keyPath] = p
-                configService.scheduleSave()
-            }
-        )
-    }
-}
-
-// MARK: - Open Router
-
-private struct OpenRouterSection: View {
-    @EnvironmentObject private var configService: ConfigService
-    @State private var verify: VerifyState = .idle
-    @State private var models: [String] = []
-    @State private var providerFilter = ""
-
-    private let defaultEndpoint = "https://openrouter.ai/api/v1"
-
-    private var config: AppConfig.LlmProviders.EndpointProvider? {
-        configService.config.llmProviders.openRouter
-    }
-
-    var body: some View {
-        Section("Open Router") {
-            VStack(alignment: .leading, spacing: 2) {
-                SecureField(L10n.LLM.apiKey, text: apiKeyBinding)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                keyHint(config?.apiKey)
-            }
-
-            HStack {
-                TextField(L10n.LLM.providerPlaceholder("anthropic"), text: $providerFilter)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                    .onChange(of: providerFilter) { _ in models = [] }
-                verifyButton(verify) {
-                    guard let key = config?.apiKey, !key.isEmpty else {
-                        verify = .failed("No key"); return
-                    }
-                    guard !providerFilter.isEmpty else {
-                        verify = .failed("Enter provider first"); return
-                    }
-                    verify = .verifying
-                    let r = await LLMModelService.fetchOpenRouter(apiKey: key, providerPrefix: providerFilter)
-                    if r.ok {
-                        verify = .success
-                        models = r.models
-                    } else {
-                        verify = .failed(r.error ?? "Failed")
-                    }
-                }
-            }
-
-            if models.isEmpty {
-                TextField(L10n.LLM.modelPlaceholder("anthropic/claude-opus-4-0"), text: modelBinding)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-            } else {
-                Picker(L10n.LLM.model, selection: modelPickerBinding) {
-                    Text(L10n.LLM.selectModel).tag("")
-                    ForEach(models, id: \.self) { Text($0).tag($0) }
-                }
-            }
-        }
-        .onAppear {
-            if let model = config?.model, let slash = model.firstIndex(of: "/") {
-                providerFilter = String(model[model.startIndex..<slash])
-            }
-        }
-    }
-
-    private var apiKeyBinding: Binding<String> {
-        Binding(
-            get: { config?.apiKey ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: defaultEndpoint)
-                p.apiKey = new.isEmpty ? nil : new
-                if p.endpoint.isEmpty { p.endpoint = defaultEndpoint }
-                configService.config.llmProviders.openRouter = p
-                configService.config.llmProviders.autoSelectPrimaryIfFirst()
-                verify = .idle; models = []
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var modelBinding: Binding<String> {
-        Binding(
-            get: { config?.model ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: defaultEndpoint)
-                p.model = new.isEmpty ? nil : new
-                if p.endpoint.isEmpty { p.endpoint = defaultEndpoint }
-                configService.config.llmProviders.openRouter = p
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var modelPickerBinding: Binding<String> {
-        Binding(
-            get: { config?.model ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: defaultEndpoint)
-                p.model = new.isEmpty ? nil : new
-                if p.endpoint.isEmpty { p.endpoint = defaultEndpoint }
-                configService.config.llmProviders.openRouter = p
-                configService.scheduleSave()
-            }
-        )
-    }
-}
-
-// MARK: - Model selection row (shared by Ollama / Custom)
-
-/// Three forms of the "model" row. **By default it is always a tappable list entry, not a text field.**
-///
-/// User quote (2026-10-14):
-/// > "When entering the port, you need to click once to automatically pop up the model list for selection instead of manually typing the model name"
-///
-/// | Form | When it appears | Why it looks like this |
-/// |---|---|---|
-/// | `Picker` | List already obtained | Tap to present selectable list (`Form` + `NavigationStack` push) |
-/// | **Full‑row tappable button** | Not fetched yet, and not failed | This is the “tap once to auto‑pop up” the user wants, without first tapping the adjacent verification icon |
-/// | `TextField` + retry button | Fetch **failed** | When the list cannot be fetched, you shouldn't block the user; manual entry is **fallback**, not default |
-///
-/// Extract a shared view instead of writing it separately in Ollama / Custom: the only difference between the two is
-/// "which fetch function to use", the interaction must be identical — duplicating it will eventually require a single change.
-private struct ModelListField: View {
-    let models: [String]
-    let verify: VerifyState
-    let model: Binding<String>
-    let placeholder: String
-    let load: () async -> Void
-
-    /// Success or failure can only be read from `verify` — it also holds the failure reason.
-    private var isFailed: Bool {
-        if case .failed = verify { return true }
-        return false
-    }
-
-    private var isLoading: Bool { verify == .verifying }
-
-    /// Options for the `Picker`.
-    ///
-    /// ★ Must also include the **currently saved value**: after switching machines or the server deletes that model,
-    /// `config.model` will point to a name not present in the list. And the `Picker`'s `selection`
-    /// when not in any `tag` renders as blank and triggers a runtime warning — the user will think
-    /// "model not set". Adding it ensures the "currently selected" model is always visible.
-    private var options: [String] {
-        let current = model.wrappedValue
-        guard !current.isEmpty, !models.contains(current) else { return models }
-        return [current] + models
-    }
-
-    var body: some View {
-        if !models.isEmpty {
-            // List obtained: this is the only "normal" form.
-            Picker(L10n.LLM.model, selection: model) {
-                Text(L10n.LLM.selectModel).tag("")
-                ForEach(options, id: \.self) { Text($0).tag($0) }
-            }
-        } else if !isFailed {
-            // ★ Not fetched yet → whole row tappable. Tapping it initiates fetch; after fetching, the row becomes a Picker.
-            Button {
-                Task { await load() }
-            } label: {
-                HStack {
-                    Text(L10n.LLM.model).foregroundStyle(.primary)
-                    Spacer(minLength: 8)
-                    if isLoading {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text(L10n.LLM.tapToLoadModels).foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-            .disabled(isLoading)
-        } else {
-            // If fetching fails → allow manual entry, and keep a "retry" icon to bring the user back to the list.
-            HStack {
-                TextField(L10n.LLM.modelPlaceholder(placeholder), text: model)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                Button {
-                    Task { await load() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.borderless)
-                .disabled(isLoading)
-                .accessibilityLabel(L10n.LLM.loadModelList)
-            }
-        }
-    }
-}
-
-/// "Model" section footer. **Both states share a single place** — to avoid writing half of the failure text and half of the success text, which could become inconsistent when only one side is changed.
-/// writing them separately could lead to mismatched updates.
-///
-/// * Failure → show the sentence from `verify` (empty address / incomplete address / server has no model / network unreachable).
-/// * Success → show `detail`: model count · round‑trip latency · server version.
-///
-/// Why we need to write something on success: providing only a checkmark leaves the user unable to distinguish "connected" from "this is the machine I want"
-/// — the ASR probe already does this (`localProbeReachable`),
-/// 2026-10-14 user explicitly requested alignment on the Ollama side:
-/// > "Ollama test shows the model list on click, and clicking should also perform a connectivity test"
-///
-/// ⚠️ In `case .success` you must **also** check whether `detail` is empty: when successful but no details are available
-/// nothing should be displayed, rather than leaving an empty line that occupies space.
-@ViewBuilder
-private func modelFetchFooter(_ verify: VerifyState, detail: String?) -> some View {
-    switch verify {
-    case .failed(let message):
-        Text(message)
-    case .success:
-        if let detail, !detail.isEmpty {
-            Text(L10n.LLM.probeReachable(detail))
-        }
-    case .idle, .verifying:
-        EmptyView()
-    }
-}
-
-/// Replace the **system original** sentence returned by `LLMModelService` with a user‑actionable message.
-///
-/// Returning only the original text is insufficient: when the local endpoint fails it is usually
-/// `The Internet connection appears to be offline.` — but the real reasons are typically just two
-/// (phone and computer not on the same Wi‑Fi, or local network permission not granted), and the system message mentions none of these.
-private func fetchFailureMessage(_ raw: String?) -> String {
-    let reason = (raw.flatMap { $0.isEmpty ? nil : $0 }) ?? "Failed"
-    return reason + "\n" + L10n.LLM.fetchFailedHint
-}
-
-// MARK: - Ollama
-
-private struct OllamaSection: View {
-    @EnvironmentObject private var configService: ConfigService
-    @State private var verify: VerifyState = .idle
-    @State private var models: [String] = []
-    /// Connectivity detail: `1 model · 23 ms · v0.12.6`. Filled by `loadModels()`.
-    ///
-    /// Store a separate `@State` instead of embedding it in `VerifyState.success` — that case is
-    /// shared by three providers, and adding a payload here would affect Azure / OpenAI as well.
-    @State private var probeDetail: String?
-
-    private let defaultEndpoint = "http://localhost:11434"
-
-    private var config: AppConfig.LlmProviders.EndpointProvider? {
-        configService.config.llmProviders.ollama
-    }
-
-    /// Endpoint snapshot for `.task(id:)`.
-    private var endpointText: String { config?.endpoint ?? "" }
-
-    var body: some View {
-        Section {
-            HStack {
-                TextField(L10n.LLM.endpointURL, text: endpointBinding)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                // "Verification" and "fetch model list" are **the same operation**, so they share a single entry point.
-                verifyButton(verify) { await loadModels() }
-            }
-            // ★ Once the endpoint stabilizes, **automatically** fetch the model list (debounce 0.7 s) —
-            //   the user doesn't need to tap the adjacent verification icon; the list appears on its own.
-            //
-            // ⚠️ Attach to **this row** instead of the `Section`: wrapping `Section` with another modifier adds an extra layer,
-            //    while `Form` determines header/footer based on the type of its direct child nodes.
-            //    Attaching to the row avoids this concern entirely (a row is just a regular view).
-            //    Side benefit: `List` is lazily loaded, so this section only sends a request when scrolled into view.
-            //
-            // ⚠️ Pitfall: `try?` swallows the `CancellationError` thrown by `Task.sleep` **as well**.
-            //    `.task(id:)` cancels the previous task each time the id changes; without the following line
-            //    `Task.isCancelled` check, the user would trigger an HTTP request for every keystroke.
-            .task(id: endpointText) {
-                guard !endpointText.isEmpty else { return }
-                try? await Task.sleep(nanoseconds: 700_000_000)
-                guard !Task.isCancelled else { return }
-                await loadModels()
-            }
-
-            ModelListField(models: models,
-                           verify: verify,
-                           model: modelBinding,
-                           placeholder: "qwen2.5:3b",
-                           load: { await loadModels() })
-
-            // ★ 2026-10-20: same escape hatch as the local-ASR section — one prompt for
-            // ChatGPT / Claude Code installs Ollama (LAN-exposed) and picks a model.
-            SetupAssistantRow()
-        } header: {
-            Text("Ollama")
-        } footer: {
-            modelFetchFooter(verify, detail: probeDetail)
-        }
-    }
-
-    /// Fetch the model list. **The sole** entry point for retrieval (debounced automatically, clicking the icon, or tapping the model row all use it),
-    /// which also serves as the "connectivity test" — obtaining the list itself proves connectivity, and additionally
-    /// displays model count / latency / server version.
-    private func loadModels() async {
-        let ep = endpointText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !ep.isEmpty else {
-            invalidateProbe()
-            verify = .failed(L10n.LLM.noEndpoint)
-            return
-        }
-        // Hostname is required: if `http://` is omitted, `URL(string:)` still "succeeds"
-        // (treating the whole string as a path), and the request will return an incomprehensible error.
-        guard let url = URL(string: ep), url.host != nil else {
-            invalidateProbe()
-            verify = .failed(L10n.LLM.badEndpoint)
-            return
-        }
-        invalidateProbe()
-        verify = .verifying
-        let r = await LLMModelService.fetchOllama(endpoint: ep)
-        // If cancelled (user changed the endpoint), do not set state, otherwise it would overwrite the new endpoint's result.
-        if Task.isCancelled { return }
-        if r.ok {
-            models = r.models
-            // ★ "Connected but no models" **is not** a fetch failure. State it separately,
-            //   otherwise the user will repeatedly check the network while the issue is actually on the server.
-            if r.models.isEmpty {
-                verify = .failed(L10n.LLM.noModelsOnServer)
-            } else {
-                verify = .success
-                probeDetail = r.detail
-            }
-        } else {
-            verify = .failed(fetchFailureMessage(r.error))
-        }
-    }
-
-    /// Clear the previous result. When changing the endpoint, re‑testing, or on failure, invoke it —
-    /// otherwise a "previous machine 23 ms" illusion pointing to the now‑replaced old server will remain.
-    private func invalidateProbe() {
-        probeDetail = nil
-    }
-
-    private var endpointBinding: Binding<String> {
-        Binding(
-            get: { config?.endpoint ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: defaultEndpoint)
-                p.endpoint = new
-                configService.config.llmProviders.ollama = p
-                configService.config.llmProviders.autoSelectPrimaryIfFirst()
-                // When the host changes, the old list becomes invalid. Here we clear it; re‑fetching is handled by the debounce of `.task(id:)`
-                // — sending requests while typing is pointless.
-                // `probeDetail` is also cleared: keeping the previous machine's latency would mislead users.
-                verify = .idle; models = []; probeDetail = nil
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var modelBinding: Binding<String> {
-        Binding(
-            get: { config?.model ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: defaultEndpoint)
-                p.model = new.isEmpty ? nil : new
-                configService.config.llmProviders.ollama = p
-                configService.scheduleSave()
-            }
-        )
-    }
-}
-
-// MARK: - Custom endpoint
-
-private struct CustomEndpointSection: View {
-    @EnvironmentObject private var configService: ConfigService
-    @State private var verify: VerifyState = .idle
-    @State private var models: [String] = []
-    /// Same as the Ollama section: `2 models · 31 ms`. This part **does not query version** —
-    /// the OpenAI compatibility layer lacks a unified version endpoint (reason documented in `LLMModelService`).
-    @State private var probeDetail: String?
-
-    private var config: AppConfig.LlmProviders.EndpointProvider? {
-        configService.config.llmProviders.custom
-    }
-
-    /// Endpoint snapshot for `.task(id:)`.
-    private var endpointText: String { config?.endpoint ?? "" }
-
-    var body: some View {
-        Section {
-            HStack {
-                TextField(L10n.LLM.endpointURL, text: endpointBinding)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                verifyButton(verify) { await loadModels() }
-            }
-            // Same debounce as Ollama: automatically fetch once 0.7 s after the endpoint stabilizes.
-            // Attach to the row rather than the Section, and after sleep you must check `Task.isCancelled`
-            // — both reasons are documented in `OllamaSection`; not repeated here.
-            .task(id: endpointText) {
-                guard !endpointText.isEmpty else { return }
-                try? await Task.sleep(nanoseconds: 700_000_000)
-                guard !Task.isCancelled else { return }
-                await loadModels()
-            }
-
-            // ★ Same interaction as the Ollama section: tap to show the list, manual entry appears only when fetching fails.
-            //   User (2026-10-14) wants "no manual model name entry", and this part
-            //   previously **didn't even have a Picker**, which is a step behind the Ollama section.
-            ModelListField(models: models,
-                           verify: verify,
-                           model: modelBinding,
-                           placeholder: "gpt-4o-mini",
-                           load: { await loadModels() })
-
-            VStack(alignment: .leading, spacing: 2) {
-                SecureField(L10n.LLM.apiKeyOptional, text: apiKeyBinding)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                keyHint(config?.apiKey)
-            }
-        } header: {
-            Text("Custom")
-        } footer: {
-            modelFetchFooter(verify, detail: probeDetail)
-        }
-    }
-
-    /// Fetch model list + connectivity test. Uses the OpenAI‑compatible `GET {base}/v1/models`, key optional.
-    private func loadModels() async {
-        let ep = endpointText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !ep.isEmpty else {
-            probeDetail = nil
-            verify = .failed(L10n.LLM.noEndpoint)
-            return
-        }
-        guard let url = URL(string: ep), url.host != nil else {
-            probeDetail = nil
-            verify = .failed(L10n.LLM.badEndpoint)
-            return
-        }
-        probeDetail = nil
-        verify = .verifying
-        let r = await LLMModelService.fetchOpenAICompatible(endpoint: ep, apiKey: config?.apiKey)
-        if Task.isCancelled { return }
-        if r.ok {
-            models = r.models
-            if r.models.isEmpty {
-                verify = .failed(L10n.LLM.noModelsOnServer)
-            } else {
-                verify = .success
-                probeDetail = r.detail
-            }
-        } else {
-            verify = .failed(fetchFailureMessage(r.error))
-        }
-    }
-
-    private var endpointBinding: Binding<String> {
-        Binding(
-            get: { config?.endpoint ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: "")
-                p.endpoint = new
-                configService.config.llmProviders.custom = p
-                configService.config.llmProviders.autoSelectPrimaryIfFirst()
-                // Change host → old list and old latency values are invalidated (re‑fetch handled by `.task(id:)` debounce).
-                verify = .idle; models = []; probeDetail = nil
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var modelBinding: Binding<String> {
-        Binding(
-            get: { config?.model ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: "")
-                p.model = new.isEmpty ? nil : new
-                configService.config.llmProviders.custom = p
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var apiKeyBinding: Binding<String> {
-        Binding(
-            get: { config?.apiKey ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: "")
-                p.apiKey = new.isEmpty ? nil : new
-                configService.config.llmProviders.custom = p
+                configService.config.llmProviders.setModel(new, for: spec.storage)
                 configService.scheduleSave()
             }
         )
