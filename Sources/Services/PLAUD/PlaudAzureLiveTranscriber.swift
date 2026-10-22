@@ -35,7 +35,9 @@ final class PlaudAzureLiveTranscriber: PlaudLiveASR {
     private let key: String
     private let region: String
     private let lang: String
-    private let requestId = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+    /// ★ Rotated on every `turn.end`: the service scopes one utterance to one
+    /// request id, and audio sent under a finished turn's id is ignored.
+    private var requestId = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     private let session: URLSession
     private var task: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
@@ -52,6 +54,8 @@ final class PlaudAzureLiveTranscriber: PlaudLiveASR {
     /// Card clock at the first block — Azure's `Offset` is measured from the
     /// start of the stream, so this is what turns it into a take timestamp.
     private var clockOrigin: TimeInterval?
+    private var blocksSeen = 0
+    private var batchesSent = 0
 
     private static let flushBytes = 3_200        // ≈100 ms of 16 kHz/16-bit mono
     private static let sampleRate: UInt32 = 16_000
@@ -75,6 +79,7 @@ final class PlaudAzureLiveTranscriber: PlaudLiveASR {
         guard !key.isEmpty, !region.isEmpty else {
             unavailable = .azureMissing
             log.info("plaud azure live: missing key/region")
+            TicNoteDiagLog.log("PLAUD-AZ", "start refused: key/region empty")
             return
         }
         let urlString = "wss://\(region).stt.speech.microsoft.com"
@@ -85,7 +90,10 @@ final class PlaudAzureLiveTranscriber: PlaudLiveASR {
             return
         }
         closed = false
+        batchesSent = 0
+        blocksSeen = 0
         log.info("plaud azure live connecting \(url.absoluteString, privacy: .public)")
+        TicNoteDiagLog.log("PLAUD-AZ", "connecting region=\(region) lang=\(lang)")
         var request = URLRequest(url: url)
         request.setValue(key, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
         let socket = session.webSocketTask(with: request)
@@ -109,13 +117,23 @@ final class PlaudAzureLiveTranscriber: PlaudLiveASR {
     func stop() {
         lock.lock()
         let alreadyClosed = closed
+        let socket = task
         lock.unlock()
         guard !alreadyClosed else { return }
         flush(force: true)
-        // Wait briefly before closing: Azure answers the trailing phrase a few
-        // hundred milliseconds after the last audio, and cutting the socket now
-        // drops exactly the sentence the user just finished saying.
-        let socket = task
+        // ★ Tell Azure the audio is over: a zero-length audio frame finalizes the
+        // current turn and makes the service emit the pending phrase. Cutting the
+        // socket here instead drops exactly the sentence the user just finished
+        // saying.
+        if let socket {
+            socket.send(.data(audioMessage(Data()))) { [weak self] error in
+                if let error {
+                    log.warning("plaud azure live: end-audio send failed \(error.localizedDescription, privacy: .public)")
+                    TicNoteDiagLog.log("PLAUD-AZ", "end-audio send failed: \(error.localizedDescription)")
+                }
+            }
+        }
+        // Give the trailing phrase time to come back before tearing down.
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.drainSeconds) { [weak self] in
             guard let self else { return }
             self.lock.lock()
@@ -128,6 +146,7 @@ final class PlaudAzureLiveTranscriber: PlaudLiveASR {
             self.receiveTask?.cancel()
             self.receiveTask = nil
             self.session.invalidateAndCancel()
+            TicNoteDiagLog.log("PLAUD-AZ", "closed (drained \(Int(Self.drainSeconds * 1000))ms)")
             log.info("plaud azure live closed")
         }
     }
@@ -147,6 +166,12 @@ final class PlaudAzureLiveTranscriber: PlaudLiveASR {
         guard !closed, !pcm.isEmpty else { lock.unlock(); return }
         if clockOrigin == nil { clockOrigin = elapsed }
         pending.append(pcm)
+        blocksSeen += 1
+        // One line every ~2 s of audio: enough to prove "the card is pushing and
+        // we are sending" without flooding the 512 KB diag file.
+        if blocksSeen % 100 == 0 {
+            TicNoteDiagLog.log("PLAUD-AZ", "pcm blocks=\(blocksSeen) pending=\(pending.count)B elapsed=\(Int(elapsed))s batches=\(batchesSent)")
+        }
         let shouldFlush = pending.count >= Self.flushBytes
         lock.unlock()
         if shouldFlush { flush(force: false) }
@@ -166,11 +191,14 @@ final class PlaudAzureLiveTranscriber: PlaudLiveASR {
             // fields stay 0xFFFFFFFF because the take has no known end yet.
             payload = Self.wavHeader() + chunk
             sentHeader = true
+            TicNoteDiagLog.log("PLAUD-AZ", "first audio frame: \(payload.count)B (44B wav header + pcm)")
         }
+        batchesSent += 1
         lock.unlock()
         socket.send(.data(audioMessage(payload))) { error in
             if let error {
                 log.warning("plaud azure live: audio send failed \(error.localizedDescription, privacy: .public)")
+                TicNoteDiagLog.log("PLAUD-AZ", "send FAILED: \(error.localizedDescription)")
             }
         }
     }
@@ -186,6 +214,7 @@ final class PlaudAzureLiveTranscriber: PlaudLiveASR {
                 } catch {
                     if !self.closed {
                         log.info("plaud azure live recv ended: \(error.localizedDescription, privacy: .public)")
+                        TicNoteDiagLog.log("PLAUD-AZ", "recv ended: \(error.localizedDescription)")
                         self.unavailable = .azureFailed(error.localizedDescription)
                         self.onFailure?(.azureFailed(error.localizedDescription))
                     }
@@ -206,6 +235,7 @@ final class PlaudAzureLiveTranscriber: PlaudLiveASR {
 
         if headers.contains("speech.hypothesis") {
             if let text = json["Text"] as? String, !text.isEmpty {
+                TicNoteDiagLog.log("PLAUD-AZ", "partial: \(text)")
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.partial != text else { return }
                     self.partial = text
@@ -213,7 +243,9 @@ final class PlaudAzureLiveTranscriber: PlaudLiveASR {
                 }
             }
         } else if headers.contains("speech.phrase") {
-            guard (json["RecognitionStatus"] as? String) == "Success" else {
+            let status = json["RecognitionStatus"] as? String ?? "?"
+            guard status == "Success" else {
+                TicNoteDiagLog.log("PLAUD-AZ", "phrase status=\(status)")
                 DispatchQueue.main.async { [weak self] in
                     guard let self, !self.partial.isEmpty else { return }
                     self.partial = ""
@@ -233,12 +265,27 @@ final class PlaudAzureLiveTranscriber: PlaudLiveASR {
             lock.unlock()
             let at = (origin ?? 0) + offsetTicks / 10_000_000
             let line = PlaudLiveSegment(text: text, at: at)
+            TicNoteDiagLog.log("PLAUD-AZ", "final at=\(Int(at))s: \(text)")
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 if self.segments.last?.text != text { self.segments.append(line) }
                 self.partial = ""
                 self.publish()
             }
+        } else if headers.contains("turn.end") {
+            // ★ The service recognises one utterance per **turn**. When a turn
+            // ends, audio sent with the same X-RequestId is ignored until a new
+            // turn is opened — which means: fresh request id, and the WAV header
+            // goes out again on the next audio frame (exactly what the official
+            // SDK and every working hand-rolled client do for continuous
+            // recognition). Skipping this was why the transcript went silent
+            // after the first utterance.
+            lock.lock()
+            requestId = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            sentHeader = false
+            lock.unlock()
+            TicNoteDiagLog.log("PLAUD-AZ", "turn.end → new turn (requestId rotated, wav header re-armed)")
+            log.info("plaud azure live: turn.end, new turn")
         }
     }
 

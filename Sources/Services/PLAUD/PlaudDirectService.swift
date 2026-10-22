@@ -313,6 +313,8 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Throttle for the live level meter (see `blePcmData`) — a published change
     /// per PCM block rebuilt the whole device list dozens of times a second.
     private var lastLevelPublish = Date.distantPast
+    /// PCM blocks seen this session (diag only, see `blePcmData`).
+    private var pcmBlockCount = 0
     /// SN we are trying to re-bind automatically (`reconnect()`). Cleared as
     /// soon as the card is seen or the attempt is abandoned.
     private var reconnectTarget: String?
@@ -424,6 +426,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
         guard let engine = makeLiveASREngine() else {
             liveASRNotice = L10n.Plaud.liveNeedsPermission
             liveASRProvider = ""
+            TicNoteDiagLog.log("PLAUD-ASR", "no engine: chain=\(String(describing: configService?.config.defaults.asr)) azure=\(String(describing: configService?.config.asrProviders.azure != nil)) onDeviceEnabled=\(String(describing: configService?.config.onDeviceASREnabled))")
             log.info("plaud live transcript unavailable (no engine)")
             return
         }
@@ -488,6 +491,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
         }
         liveASRProvider = engine.providerName
         liveTranscriber = engine
+        TicNoteDiagLog.log("PLAUD-ASR", "engine=\(engine.providerName) sid=\(liveTranscriptSessionID.map(String.init) ?? "-") notice=\(liveASRNotice ?? "none")")
         // Called straight from the SDK's BLE queue; each engine does its own
         // threading from here (the on-device one has its own PCM queue, Azure
         // batches into ~100 ms WebSocket frames).
@@ -509,6 +513,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
         onDevice.seed(segments: liveSegments)
         attachLiveEngine(onDevice)
         liveASRNotice = L10n.Plaud.liveAzureFellBack
+        TicNoteDiagLog.log("PLAUD-ASR", "fallback to ondevice, seeded \(liveSegments.count) lines")
     }
 
     /// Segments + in-flight hypothesis, joined the way the panel renders them.
@@ -2353,6 +2358,13 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         //   competition with SwiftUI while the live transcript is on screen.
         let level = Self.peakLevel(of: pcmData)
         let bytes = pcmData.count
+        // ★ Diag proof of "is the card pushing audio at all": one line every
+        // ~200 blocks, so a dead live transcript can be told apart from a dead
+        // stream without a syslog session.
+        pcmBlockCount += 1
+        if pcmBlockCount % 200 == 0 {
+            TicNoteDiagLog.log("PLAUD-PCM", "blocks=\(pcmBlockCount) bytes=\(bytes) elapsed=\(Int(seconds))s")
+        }
         // The level meter cannot show more than ~20 steps a second anyway; every
         // extra publish rebuilds the device list.
         let publishLevel = Date().timeIntervalSince(lastLevelPublish) > 0.05
