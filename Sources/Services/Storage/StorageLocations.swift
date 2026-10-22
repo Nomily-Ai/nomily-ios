@@ -44,6 +44,18 @@ enum StorageLocations {
         )
     }
 
+    /// Renamed speakers for one clip (`<base>.speakers.json`).
+    ///
+    /// ★ 2026-10-22 ("还要支持修改说话人的名称"): the diarization ids ("1", "2", …)
+    /// are the ASR vendor's labels, not anything the user should have to read.
+    /// Their chosen names live **next to the transcript**, not in the transcript:
+    /// re-running the transcription replaces `.asr.json`, and a name the user typed
+    /// must survive that — it describes the person, not the run.
+    static func speakerNamesURL(for audioName: String) -> URL {
+        let base = (audioName as NSString).deletingPathExtension
+        return decryptedDir.appendingPathComponent("\(base).speakers.json")
+    }
+
     static func translationURLs(for audioName: String) -> (txt: URL, json: URL) {
         let base = (audioName as NSString).deletingPathExtension
         return (

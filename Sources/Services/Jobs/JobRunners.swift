@@ -272,7 +272,9 @@ enum JobRunners {
         // Prefer `.asr.json`: it has the segments and speakers, which `summarizableText` needs.
         if let data = try? Data(contentsOf: urls.json),
            let result = try? JSONDecoder().decode(AsrResult.self, from: data) {
-            return summarizableText(text: result.text, segments: result.segments)
+            return summarizableText(text: result.text,
+                                    segments: result.segments,
+                                    speakerNames: SpeakerNameStore.namesOnDisk(for: clipName))
         }
         // The case where only `.txt` is left (an old item's json was cleared): that's all the information there is.
         return try read(urls.txt, what: L10n.Jobs.sourceTranscript)
@@ -284,10 +286,16 @@ enum JobRunners {
     ///   here too. It used to have its own copy, and after revision twelve summary gained a second entry point (the queue),
     ///   so the two copies would eventually drift apart — and the symptom would be "the same button produces summaries with a different
     ///   structure a day apart", which is very hard to trace.
-    static func summarizableText(text: String, segments: [AsrSegment]) -> String {
+    /// `speakerNames` is the user's rename map (`SpeakerNameStore`). The queue has no
+    /// UI, so it reads the sidecar off disk by itself; the detail page passes the map
+    /// it already has. Either way the text handed to the model says "张伟", not
+    /// "Speaker 1" — ★ 2026-10-22 ("还要支持修改说话人的名称").
+    static func summarizableText(text: String,
+                                 segments: [AsrSegment],
+                                 speakerNames: [String: String] = [:]) -> String {
         if segments.isEmpty { return text }
         if segments.contains(where: { !($0.speaker ?? "").isEmpty }) {
-            return segments.map { $0.formatted() }.joined(separator: "\n")
+            return segments.map { $0.formatted(speakerNames: speakerNames) }.joined(separator: "\n")
         }
         return segments.map(\.text).joined(separator: "\n")
     }

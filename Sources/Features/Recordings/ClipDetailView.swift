@@ -83,6 +83,11 @@ struct ClipDetailView: View {
     @State private var detailTab: DetailTab = .transcript
     @State private var transcriptQuery = ""
     @State private var speakerFilter: String?
+    /// ★ 2026-10-22 ("还要支持修改说话人的名称"): the user's names for this clip's
+    /// diarized speakers. Observed (not read once) so a rename in the sheet
+    /// repaints every row and chip behind it.
+    @ObservedObject private var speakerStore = SpeakerNameStore.shared
+    @State private var showSpeakerEditor = false
     /// Q&A state lives in the page, not in the section: the input bar is pinned to the bottom
     /// while the answers stay in the scrolling list.
     @StateObject private var aiChat = AIChatModel()
@@ -228,6 +233,11 @@ struct ClipDetailView: View {
         .sheet(isPresented: $showVADPreview) {
             VADPreviewView(item: item)
         }
+        // ★ 2026-10-22 ("还要支持修改说话人的名称").
+        .sheet(isPresented: $showSpeakerEditor) {
+            SpeakerRenameSheet(clip: item.name,
+                               speakers: speakerRoster(transcript?.segments ?? []))
+        }
         .fullScreenCover(isPresented: $showMindMap) {
             // Re-read from state rather than capture: the summary can be
             // regenerated while the sheet is closed.
@@ -237,6 +247,8 @@ struct ClipDetailView: View {
             if let url = item.url { player.load(url) }
             languages.fetchTargetLanguagesIfNeeded()
             transcript = TranscriptDocument.load(for: item.name)
+            // Speaker names are a sidecar of this clip; load once per visit.
+            speakerStore.load(clip: item.name)
             marks = A1MarkStore.sidecar(forClipBase: item.base)
             loadTranslation()
             loadSummary()
@@ -244,6 +256,11 @@ struct ClipDetailView: View {
             aiChat.context = aiContext ?? ""
         }
         .onDisappear { player.stop() }
+        // A rename must reach the Q&A context as well, or answers keep using the
+        // old labels until the page is reopened (2026-10-22).
+        .onChange(of: speakerStore.maps) { _ in
+            aiChat.context = aiContext ?? ""
+        }
         .onChange(of: transcription.inFlight.contains(item.name)) { isRunning in
             // Auto-transcribe landing: the service flips `inFlight` off as
             // soon as the write completes, so this is where the newly-
@@ -255,7 +272,7 @@ struct ClipDetailView: View {
         .sheet(isPresented: $showSummarize) {
             if let doc = transcript {
                 SummarizeSheet(
-                    transcriptText: Self.textForSummarization(doc),
+                    transcriptText: Self.textForSummarization(doc, speakerNames: speakerMap),
                     audioName: item.name
                 ) { text in
                     summary = text
@@ -523,7 +540,7 @@ struct ClipDetailView: View {
                 }
 
                 NavigationLink(L10n.ClipDetail.viewFullTranscript) {
-                    TranscriptFullView(document: doc, player: player)
+                    TranscriptFullView(document: doc, player: player, speakerNames: speakerMap)
                 }
             } else if item.hasAudio, !isTranscribing {
                 Button {
@@ -611,6 +628,23 @@ struct ClipDetailView: View {
                         ForEach(distinctSpeakers(doc.segments), id: \.self) { speaker in
                             speakerChip(speaker, nil)
                         }
+                        // ★ 2026-10-22 ("还要支持修改说话人的名称"): the chips are the
+                        // only place speakers are named, so the rename entry belongs
+                        // at the end of them — right where the user notices "说话人 2"
+                        // is not a person's name.
+                        Button {
+                            showSpeakerEditor = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "pencil").font(.caption2)
+                                Text(L10n.ClipDetail.editSpeakerNames).font(.caption)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.appAccent.opacity(0.12)))
+                            .foregroundStyle(Color.appAccent)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -636,7 +670,8 @@ struct ClipDetailView: View {
                     TranscriptSegmentRow(
                         segment: seg,
                         isActive: activeSegmentIndex(doc.segments).map { doc.segments[$0].start == seg.start } ?? false,
-                        highlight: transcriptQuery.isEmpty ? nil : transcriptQuery
+                        highlight: transcriptQuery.isEmpty ? nil : transcriptQuery,
+                        speakerNames: speakerMap
                     ) {
                         player.seek(to: max(0, seg.start - 0.3))
                         if !player.isPlaying { player.play() }
@@ -654,7 +689,8 @@ struct ClipDetailView: View {
             ForEach(inlineSegmentWindow(doc.segments), id: \.start) { seg in
                 TranscriptSegmentRow(
                     segment: seg,
-                    isActive: activeSegmentIndex(doc.segments).map { doc.segments[$0].start == seg.start } ?? false
+                    isActive: activeSegmentIndex(doc.segments).map { doc.segments[$0].start == seg.start } ?? false,
+                    speakerNames: speakerMap
                 ) {
                     player.seek(to: max(0, seg.start - 0.3))
                     if !player.isPlaying { player.play() }
@@ -674,10 +710,14 @@ struct ClipDetailView: View {
 
     private func speakerChip(_ value: String?, _ label: String?) -> some View {
         let selected = speakerFilter == value
+        // Renamed speakers keep their **id** as the filter key (the segment field
+        // never changes) and only the visible text is the user's name.
+        let resolved = label
+            ?? value.map { speakerStore.display($0, clip: item.name) }
         return Button {
             speakerFilter = value
         } label: {
-            Text(label ?? L10n.ClipDetail.speaker(value ?? ""))
+            Text(resolved ?? L10n.ClipDetail.speakerAll)
                 .font(.caption)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
@@ -687,6 +727,25 @@ struct ClipDetailView: View {
                 .foregroundStyle(selected ? Color.appAccent : Color.secondary)
         }
         .buttonStyle(.plain)
+    }
+
+    /// Distinct speaker ids in first-appearance order, with their line counts —
+    /// the rename sheet shows the counts because "which one is speaker 2?" is the
+    /// actual question when four people were in the room.
+    private func speakerRoster(_ segments: [AsrSegment]) -> [(id: String, lines: Int)] {
+        var order: [String] = []
+        var counts: [String: Int] = [:]
+        for segment in segments {
+            guard let speaker = segment.speaker, !speaker.isEmpty else { continue }
+            if counts[speaker] == nil { order.append(speaker) }
+            counts[speaker, default: 0] += 1
+        }
+        return order.map { (id: $0, lines: counts[$0] ?? 0) }
+    }
+
+    /// Raw id → display name, for the rows / export / AI context.
+    private var speakerMap: [String: String] {
+        speakerStore.names(for: item.name)
     }
 
     /// Everything the in-page AI Q&A may read: the summary plus the timestamped transcript.
@@ -703,7 +762,16 @@ struct ClipDetailView: View {
                 body = transcript.text
             } else {
                 body = transcript.segments
-                    .map { "[\(ClockLabel.mmss($0.start))] " + ($0.speaker.map { "\($0): " } ?? "") + $0.text }
+                    .map { seg in
+                        // Renamed speakers go into the AI context too — otherwise the
+                        // answers keep saying "说话人 1" right after the user fixed it.
+                        let who = seg.speaker.flatMap { id -> String? in
+                            guard !id.isEmpty else { return nil }
+                            let named = speakerMap[id].flatMap { $0.isEmpty ? nil : $0 } ?? id
+                            return "\(named): "
+                        }
+                        return "[\(ClockLabel.mmss(seg.start))] " + (who ?? "") + seg.text
+                    }
                     .joined(separator: "\n")
             }
             parts.append("TRANSCRIPT\n" + String(body.prefix(12_000)))
@@ -749,8 +817,11 @@ struct ClipDetailView: View {
     /// After the twelfth revision summarizing gained a second entry point (the `JobQueue` runner, which reads the transcript from disk),
     /// and that path must be fed the exact same text. Written separately in two places they will eventually drift, manifesting as
     /// "the same template producing summaries with different structures a day apart" — a problem no one can debug.
-    private static func textForSummarization(_ doc: TranscriptDocument) -> String {
-        JobRunners.summarizableText(text: doc.text, segments: doc.segments)
+    private static func textForSummarization(_ doc: TranscriptDocument,
+                                             speakerNames: [String: String] = [:]) -> String {
+        JobRunners.summarizableText(text: doc.text,
+                                    segments: doc.segments,
+                                    speakerNames: speakerNames)
     }
 
     private func transcriptPreview(_ doc: TranscriptDocument) -> String {
@@ -1438,6 +1509,9 @@ struct TranscriptFullView: View {
     /// The detail page's controller — shared so a tap here keeps one playback session
     /// (★ 2026-10-19: this page used to be a dead wall of text).
     @ObservedObject var player: AudioPlaybackController
+    /// ★ 2026-10-22: the user's speaker names (see `SpeakerNameStore`), so the
+    /// full-screen page and the text it shares say the same names as the rows behind it.
+    var speakerNames: [String: String] = [:]
     @State private var showShareSheet = false
 
     private var plainText: String {
@@ -1445,7 +1519,9 @@ struct TranscriptFullView: View {
         return document.segments.map { seg in
             var line = ""
             if let speaker = seg.speaker, !speaker.isEmpty {
-                line += "[\(speaker)] "
+                let name = speakerNames[speaker].flatMap { $0.isEmpty ? nil : $0 }
+                    ?? L10n.ClipDetail.speaker(speaker)
+                line += "[\(name)] "
             }
             let s = Int(seg.start)
             let e = Int(seg.end)
@@ -1467,7 +1543,9 @@ struct TranscriptFullView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 6) {
                             ForEach(Array(document.segments.enumerated()), id: \.offset) { index, seg in
-                                TranscriptSegmentRow(segment: seg, isActive: activeIndex == index) {
+                                TranscriptSegmentRow(segment: seg,
+                                                     isActive: activeIndex == index,
+                                                     speakerNames: speakerNames) {
                                     player.seek(to: max(0, seg.start - 0.3))
                                     if !player.isPlaying { player.play() }
                                 }

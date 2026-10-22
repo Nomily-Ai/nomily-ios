@@ -56,11 +56,21 @@ enum AsrError: LocalizedError {
 
 /// Speaker labels are short codes from the provider (Azure = "1","2",…).
 extension AsrSegment {
-    func formatted() -> String {
+    /// `speakerNames` lets the caller substitute the user's own names
+    /// (`SpeakerNameStore`). ★ 2026-10-22 ("还要支持修改说话人的名称"): a summary written
+    /// after renaming must say "张伟", not "Speaker 1" — this is the one place the
+    /// speaker is written into text handed to the model, so the map goes in here
+    /// rather than being patched into every caller.
+    func formatted(speakerNames: [String: String] = [:]) -> String {
         let stamp = String(format: "[%7.1fs - %7.1fs]", start, end)
         if let speaker = speaker, !speaker.isEmpty {
-            return "\(stamp) Speaker \(speaker): \(text)"
+            let name = speakerNames[speaker].flatMap { $0.isEmpty ? nil : $0 } ?? speaker
+            return "\(stamp) \(name): \(text)"
         }
         return "\(stamp) \(text)"
+    }
+
+    func formatted() -> String {
+        formatted(speakerNames: [:])
     }
 }

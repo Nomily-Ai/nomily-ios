@@ -272,6 +272,12 @@
 "clip_detail.mind_map_expand_all" = "展开全部";
 "clip_detail.mind_map_collapse_all" = "收起全部";
 "clip_detail.speaker" = "说话人 %@";
+"clip_detail.edit_speaker_names" = "修改说话人";
+"clip_detail.rename_speakers" = "说话人名称";
+"clip_detail.speaker_line_count" = "%d 句";
+"clip_detail.reset_speaker_name" = "改回原来的编号";
+"clip_detail.reset_speaker_names" = "全部恢复默认名称";
+"clip_detail.speaker_edit_hint" = "名称只对这条录音生效——字幕、导出和 AI 回答都会用新名字；清空某一行就改回原来的编号。";
 
 /* 设备面板 */
 "device.couldnt_update" = "无法更新";

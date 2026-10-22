@@ -141,6 +141,12 @@ struct TranscriptSegmentRow: View {
     /// When searching, this needle is highlighted inside the line (DingTalk's search
     /// highlights matches in place). `nil`/empty = render plain text.
     var highlight: String? = nil
+    /// User-renamed speakers (`SpeakerNameStore`), raw id → name.
+    ///
+    /// ★ 2026-10-22 ("还要支持修改说话人的名称"): passed in rather than read from the
+    /// singleton so this row stays a pure function of its inputs — it is also used
+    /// by the full-screen transcript, which gets the map from the same page.
+    var speakerNames: [String: String] = [:]
     var onTap: () -> Void
 
     var body: some View {
@@ -157,7 +163,8 @@ struct TranscriptSegmentRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     if let speaker = segment.speaker, !speaker.isEmpty {
-                        Text(L10n.ClipDetail.speaker(speaker))
+                        Text(speakerNames[speaker].flatMap { $0.isEmpty ? nil : $0 }
+                             ?? L10n.ClipDetail.speaker(speaker))
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
                     }

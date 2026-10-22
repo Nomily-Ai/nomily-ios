@@ -3110,6 +3110,39 @@ enum L10n {
         static var todosNeedSummary: String { NSLocalizedString("clip_detail.todos_need_summary", value: "Generate a summary to collect action items here.", comment: "To-dos tab when no summary exists yet") }
         static var searchTranscript: String { NSLocalizedString("clip_detail.search_transcript", value: "Search transcript", comment: "Transcript search field placeholder") }
         static var speakerAll: String { NSLocalizedString("clip_detail.speaker_all", value: "All speakers", comment: "Speaker filter chip — clear the filter") }
+        // ★ 2026-10-22 ("还要支持修改说话人的名称"): diarization ids are the vendor's
+        // labels; the user was in the room and knows who they were.
+        static var editSpeakerNames: String {
+            NSLocalizedString("clip_detail.edit_speaker_names",
+                              value: "Rename speakers",
+                              comment: "Button/menu entry opening the speaker rename sheet")
+        }
+        static var renameSpeakers: String {
+            NSLocalizedString("clip_detail.rename_speakers",
+                              value: "Speaker names",
+                              comment: "Title of the speaker rename sheet")
+        }
+        static func speakerLineCount(_ count: Int) -> String {
+            String(format: NSLocalizedString("clip_detail.speaker_line_count",
+                                             value: "%d lines",
+                                             comment: "How many transcript lines this speaker has; helps identify who is who"),
+                   count)
+        }
+        static var resetSpeakerName: String {
+            NSLocalizedString("clip_detail.reset_speaker_name",
+                              value: "Use the original label",
+                              comment: "Per-speaker reset button in the rename sheet")
+        }
+        static var resetSpeakerNames: String {
+            NSLocalizedString("clip_detail.reset_speaker_names",
+                              value: "Reset all speaker names",
+                              comment: "Destructive row in the rename sheet")
+        }
+        static var speakerEditHint: String {
+            NSLocalizedString("clip_detail.speaker_edit_hint",
+                              value: "Names apply to this recording only — transcript, export and AI answers all use them. Clearing a field restores the original label.",
+                              comment: "Footer of the speaker rename sheet")
+        }
         static var noTranscriptMatch: String { NSLocalizedString("clip_detail.no_transcript_match", value: "No lines match.", comment: "Transcript search/filter found nothing") }
         static var translation: String { NSLocalizedString("clip_detail.translation", comment: "") }
         static var viewFullTranslation: String { NSLocalizedString("clip_detail.view_full_translation", comment: "") }

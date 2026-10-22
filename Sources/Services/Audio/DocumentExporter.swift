@@ -38,7 +38,11 @@ enum DocumentExporter {
         let urls = StorageLocations.transcriptURLs(for: clipName)
         if let data = try? Data(contentsOf: urls.json),
            let result = try? JSONDecoder().decode(AsrResult.self, from: data) {
-            return JobRunners.summarizableText(text: result.text, segments: result.segments)
+            return JobRunners.summarizableText(text: result.text,
+                                               segments: result.segments,
+                                               // Exported docs carry the user's speaker
+                                               // names too (2026-10-22).
+                                               speakerNames: SpeakerNameStore.namesOnDisk(for: clipName))
         }
         guard let text = try? String(contentsOf: urls.txt, encoding: .utf8) else {
             throw ExportError.missing(L10n.Jobs.sourceTranscript)
