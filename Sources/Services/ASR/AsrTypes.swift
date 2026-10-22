@@ -29,6 +29,13 @@ enum AsrError: LocalizedError {
     case decoding(Error)
     case empty
     case tooShort(duration: Double, minimum: Double)
+    /// Async cloud tasks (Aliyun file transcription) that are still running past
+    /// our wait cap. **Not retriable**: resubmitting would bill the same audio
+    /// twice — the server-side task keeps going, a later manual retry is right.
+    case stillRunning(minutes: Int)
+    /// The async cloud task itself failed server-side (e.g. the project's model
+    /// doesn't match the audio's language/sample rate). Not retriable.
+    case taskFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -50,6 +57,10 @@ enum AsrError: LocalizedError {
             return L10n.ASR.transcriptEmpty
         case .tooShort(let duration, let minimum):
             return L10n.ASR.clipTooShort(duration, minimum)
+        case .stillRunning(let minutes):
+            return L10n.ASR.stillRunning(minutes)
+        case .taskFailed(let detail):
+            return L10n.ASR.taskFailed(detail)
         }
     }
 }

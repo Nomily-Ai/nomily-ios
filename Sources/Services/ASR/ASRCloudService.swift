@@ -215,7 +215,9 @@ enum ASRCloudService {
 
     /// RFC3986 encode with the two Aliyun quirks: `+` → `%20`, `*` → `%2A`,
     /// and `%7E` back to `~`.
-    private static func aliyunEncode(_ s: String) -> String {
+    /// Internal (not private): `AliyunFileASR` signs its OSS presigned-URL query
+    /// with the exact same rules.
+    static func aliyunEncode(_ s: String) -> String {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-_.~")
         let encoded = s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s

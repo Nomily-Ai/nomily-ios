@@ -485,6 +485,17 @@ struct ASRProvidersView: View {
             result.append(("ondevice", L10n.ASR.onDevice))
         }
         // Only list services that are fully filled **and** whose credentials have not been rejected by verification: partially filled configs and those that failed verification would produce no transcription, and showing them as candidates would mislead users into thinking they are set up.
+        // ★ 2026-10-22: Aliyun is wired into file transcription (`AliyunFileASR`),
+        // so it joins the picker once the AK pair + Appkey + OSS bucket are all
+        // in — the primary market for this app transcribes Chinese, so it leads
+        // the cloud entries.
+        if let c = configService.config.asrProviders.cloud?["aliyun"],
+           !(c.secrets?["accessKeyId"] ?? "").isEmpty,
+           !(c.secrets?["accessKeySecret"] ?? "").isEmpty,
+           !(c.values?["appKey"] ?? "").isEmpty,
+           !(c.values?["ossBucket"] ?? "").isEmpty {
+            result.append(("aliyun", L10n.ASR.aliyun))
+        }
         if let a = configService.config.asrProviders.azure,
            !a.key.isEmpty, !a.region.isEmpty, a.verification != false {
             result.append(("azure", L10n.ASR.azure))

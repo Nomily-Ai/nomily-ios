@@ -15,10 +15,10 @@ import Foundation
 ///
 /// ⚠️ Scope note, deliberately explicit: these entries make the vendor
 /// *configurable and provable* — credentials are validated against the real API
-/// and the round trip is measured. They are **not** yet routed into the
-/// transcription engine (`TranscriptionService` still speaks Azure / local /
-/// remote-WSS). Wiring a vendor means writing its audio upload + result parsing,
-/// which is a separate change per vendor.
+/// and the round trip is measured. **Wired into the transcription engine** so
+/// far: Azure, and (2026-10-22) Aliyun file transcription. The rest are not yet
+/// routed through `TranscriptionService`; wiring a vendor means writing its
+/// audio upload + result parsing, which is a separate change per vendor.
 struct ASRCloudSpec: Identifiable, Equatable {
 
     /// One credential field. `region` is stored in the config, everything else in
@@ -84,6 +84,9 @@ struct ASRCloudSpec: Identifiable, Equatable {
 
     // MARK: - Catalogue
 
+    // ★ 2026-10-22: Aliyun is wired into the transcription engine
+    // (`AliyunFileASR` — OSS upload → presigned link → SubmitTask → poll), so its
+    // sheet shows a "wired" note instead of the not-wired scope warning.
     static let aliyun = ASRCloudSpec(
         id: "aliyun",
         name: "阿里云智能语音",
@@ -94,12 +97,21 @@ struct ASRCloudSpec: Identifiable, Equatable {
                   placeholder: "LTAI…"),
             Field(id: "accessKeySecret", kind: .secret, label: "AccessKey Secret",
                   placeholder: "••••••••"),
+            // Not part of the token probe (which only checks the AK pair), but
+            // file transcription cannot run without them — re-validated when the
+            // engine actually runs.
+            Field(id: "appKey", kind: .plain, label: "项目 Appkey",
+                  placeholder: "nls-portal 项目列表里的 Appkey", required: false),
+            Field(id: "ossBucket", kind: .plain, label: "OSS Bucket",
+                  placeholder: "与区域一致的 bucket 名", required: false),
+            Field(id: "region", kind: .plain, label: "Region",
+                  placeholder: "cn-shanghai", required: false),
         ],
         defaultEndpoint: "https://nls-meta.cn-shanghai.aliyuncs.com",
         endpointEditable: false,
         models: ["录音文件识别（Paraformer）", "一句话识别", "实时语音识别"],
-        console: "ram.console.aliyun.com → 用户 → 创建 AccessKey（需开通「智能语音交互」）",
-        note: "探测用 AccessKey 签名调 nls-meta 的 CreateToken——拿到的 token 就是它家转写真正用的凭据，所以这个探测是真鉴权，不是空跑。"
+        console: "① nls-portal.console.aliyun.com → 项目列表 拿 Appkey；② ram.console.aliyun.com 创建 AccessKey（需同时授权 OSS 读写）；③ 与区域一致建一个 OSS Bucket",
+        note: "转写流程：音频先上传到你的 OSS Bucket（私有），生成 2 小时有效的预签名链接交给阿里云识别（file_link 必须公网可下载，这是它的接口要求），识别完取回结果。区域默认 cn-shanghai。"
     )
 
     static let baidu = ASRCloudSpec(

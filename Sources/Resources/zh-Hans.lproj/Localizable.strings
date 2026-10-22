@@ -1660,6 +1660,12 @@
 "asr.cloud.field.apiSecret" = "API Secret";
 "asr.cloud.field.secretId" = "SecretId";
 "asr.cloud.field.tencentSecretKey" = "SecretKey";
+"asr.cloud.field.appKey" = "项目 Appkey";
+"asr.cloud.field.ossBucket" = "OSS Bucket";
+"asr.cloud.aliyun_wired" = "已接入转写引擎：转写时音频先上传到你自己的 OSS Bucket（私有），生成 2 小时有效的预签名链接交给阿里云识别，取回结果即结束，不做保留。";
+"asr.aliyun" = "阿里云智能语音";
+"asr.still_running" = "阿里云任务仍在云端处理（已等待 %d 分钟）。为避免同一份音频重复计费，这次没有重新提交——请稍后在任务列表里重试。";
+"asr.task_failed" = "阿里云识别任务失败：%@";
 "find.notify_denied" = "这个 App 的通知权限是关的，断开提醒响不了。到系统设置里打开。";
 "find.open_settings" = "打开系统设置";
 "find.test_alert" = "发一条测试通知";

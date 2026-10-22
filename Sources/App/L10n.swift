@@ -845,6 +845,22 @@ enum L10n {
         static func missingCredentials(_ provider: String) -> String {
             String(format: NSLocalizedString("asr.missing_credentials", comment: ""), provider)
         }
+        // ★ 2026-10-22: Aliyun wired into file transcription — picker label plus
+        // the two async-task outcomes that need their own words.
+        static var aliyun: String {
+            NSLocalizedString("asr.aliyun", value: "Aliyun Speech",
+                              comment: "ASR provider picker: Aliyun file transcription")
+        }
+        static func stillRunning(_ minutes: Int) -> String {
+            String(format: NSLocalizedString("asr.still_running",
+                    value: "The cloud task is still processing after %d minutes. It was NOT resubmitted (that would bill the audio twice) — retry later from the job list.",
+                    comment: "Aliyun async task past the wait cap; %d is the minutes waited"), minutes)
+        }
+        static func taskFailed(_ detail: String) -> String {
+            String(format: NSLocalizedString("asr.task_failed",
+                    value: "The vendor's recognition task failed: %@",
+                    comment: "Aliyun SubmitTask/GetTaskResult reported a task failure; %@ carries the server's reason"), detail)
+        }
         static var activeProvider: String { NSLocalizedString("asr.active_provider", comment: "") }
         static var autoTranscribeAfterDownload: String { NSLocalizedString("asr.auto_transcribe_after_download", comment: "") }
         static func autoTranscribeMin(_ duration: Int) -> String {
@@ -1552,6 +1568,13 @@ enum L10n {
             NSLocalizedString("asr.cloud.not_wired",
                               value: "Credentials are checked against the real API. Transcription through this vendor isn't wired into the engine yet — Azure and the local/remote servers still do the actual work.",
                               comment: "Honest scope note: probe works, transcription routing does not")
+        }
+        /// ★ 2026-10-22: Aliyun joins Azure as a wired vendor — the sheet says so
+        /// instead of the not-wired note above.
+        static var aliyunWired: String {
+            NSLocalizedString("asr.cloud.aliyun_wired",
+                              value: "Wired into transcription: audio is staged in your own OSS bucket (private), a 2-hour presigned link is handed to Aliyun, and the result is fetched back. Nothing is kept afterwards.",
+                              comment: "Scope note on the Aliyun sheet: what transcription through this vendor actually does")
         }
         static func field(_ id: String, fallback: String) -> String {
             NSLocalizedString("asr.cloud.field.\(id)", value: fallback, comment: "Credential field label")

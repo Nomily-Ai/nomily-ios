@@ -135,7 +135,7 @@ final class TranscriptionService: ObservableObject {
         guard let asr = error as? AsrError else { return true }
         switch asr {
         case .missingCredentials, .noProviderConfigured, .tooShort,
-             .azureRequiredForTranslation:
+             .azureRequiredForTranslation, .stillRunning, .taskFailed:
             return false
         case .allProvidersUnreachable, .http, .transport, .decoding, .empty:
             return true
@@ -594,6 +594,15 @@ final class TranscriptionService: ObservableObject {
         case "custom":
             guard let c = config.config.asrProviders.custom else { return false }
             return !c.endpoint.isEmpty
+        case "aliyun":
+            // ★ 2026-10-22: wired file transcription. Needs the AK pair (probe
+            // covers it) plus the two things the probe can't check: the NLS
+            // project Appkey and an OSS bucket to stage the audio in.
+            guard let c = config.config.asrProviders.cloud?["aliyun"] else { return false }
+            return !(c.secrets?["accessKeyId"] ?? "").isEmpty
+                && !(c.secrets?["accessKeySecret"] ?? "").isEmpty
+                && !(c.values?["appKey"] ?? "").isEmpty
+                && !(c.values?["ossBucket"] ?? "").isEmpty
         default:
             return false
         }
@@ -642,6 +651,21 @@ final class TranscriptionService: ObservableObject {
                 model: custom.model ?? "",
                 language: custom.language ?? ""
             )
+            return try await client.transcribe(fileURL: fileURL, locales: locales)
+        case "aliyun":
+            guard let c = config.config.asrProviders.cloud?["aliyun"],
+                  let id = c.secrets?["accessKeyId"], !id.isEmpty,
+                  let secret = c.secrets?["accessKeySecret"], !secret.isEmpty,
+                  let appKey = c.values?["appKey"], !appKey.isEmpty,
+                  let bucket = c.values?["ossBucket"], !bucket.isEmpty else {
+                throw AsrError.missingCredentials(L10n.ASR.aliyun)
+            }
+            let client = AliyunFileASR(
+                accessKeyId: id,
+                accessKeySecret: secret,
+                appKey: appKey,
+                ossBucket: bucket,
+                region: (c.values?["region"].flatMap { $0.isEmpty ? nil : $0 }) ?? "cn-shanghai")
             return try await client.transcribe(fileURL: fileURL, locales: locales)
         default:
             throw AsrError.missingCredentials(name)

@@ -246,7 +246,13 @@ private struct ASRCloudSheet: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("\(L10n.LLM.presetConsole): \(spec.console)")
                         if let note = spec.note { Text(note) }
-                        Text(L10n.ASRCloud.notWired)
+                        // ★ 2026-10-22: Aliyun is wired now; the honest-scope note
+                        // only applies to the vendors that still aren't.
+                        if spec.id == "aliyun" {
+                            Text(L10n.ASRCloud.aliyunWired)
+                        } else {
+                            Text(L10n.ASRCloud.notWired)
+                        }
                     }
                     .font(.footnote)
                 }
