@@ -119,6 +119,22 @@ enum L10n {
         // the way back in when the partner account changes.
         static var changeKeys: String { NSLocalizedString("plaud.change_keys", value: "Change keys (Client ID / Secret)", comment: "Re-open the credential form after the first setup") }
         static var keysStoredHint: String { NSLocalizedString("plaud.keys_stored_hint", value: "Keys are saved on this phone — connecting never asks for them again. Use “Change keys” only when switching to a different PLAUD developer app.", comment: "") }
+        // ★ Recording mode (official-app parity, 2026-10-22): the 电池电量 page's
+        // three modes, mapped to the card's BatteryMode common setting.
+        static var batteryModeHeader: String { NSLocalizedString("plaud.bm_header", value: "Recording mode", comment: "High performance / adaptive / long battery life picker") }
+        static var batteryMode: String { NSLocalizedString("plaud.bm_label", value: "Mode", comment: "") }
+        static var bmHigh: String { NSLocalizedString("plaud.bm_high", value: "High performance mode", comment: "") }
+        static var bmAdaptive: String { NSLocalizedString("plaud.bm_adaptive", value: "Adaptive mode", comment: "") }
+        static var bmEndurance: String { NSLocalizedString("plaud.bm_endurance", value: "Long battery life mode", comment: "") }
+        static var bmHighDesc: String { NSLocalizedString("plaud.bm_high_desc", value: "On-device AI beamforming picks up voices clearly within 5 m and focuses on speech.", comment: "Official app copy") }
+        static var bmAdaptiveDesc: String { NSLocalizedString("plaud.bm_adaptive_desc", value: "Switches between high performance and long battery life automatically. Below 20% battery it falls back to long battery life to extend recording.", comment: "Official app copy") }
+        static var bmEnduranceDesc: String { NSLocalizedString("plaud.bm_endurance_desc", value: "Optimised processing still picks up speech clearly within 3 m while lowering power draw.", comment: "Official app copy") }
+        static func bmEstimate(_ pct: Int, _ hours: Double) -> String {
+            String(format: NSLocalizedString("plaud.bm_estimate", value: "Battery %d%% — about %.1f hours of recording left (high performance).", comment: "%d = battery %%, %.1f = hours"), pct, hours)
+        }
+        static var bmUnread: String { NSLocalizedString("plaud.bm_unread", value: "Mode not read yet — connect the card to read it.", comment: "") }
+        static var bmNeedConnect: String { NSLocalizedString("plaud.bm_need_connect", value: "Connect the card to switch modes.", comment: "") }
+        static var batteryModeUnsupported: String { NSLocalizedString("plaud.bm_unsupported", value: "This card's firmware does not support recording modes.", comment: "") }
         static var directActivate: String { NSLocalizedString("plaud.direct_activate", value: "Activate direct connect", comment: "") }
         static var directActivated: String { NSLocalizedString("plaud.direct_activated", value: "Direct connect active", comment: "") }
         static var scan: String { NSLocalizedString("plaud.scan", value: "Scan for device", comment: "") }

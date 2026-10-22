@@ -253,6 +253,21 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Set once the card ever answers `getMarking`. When false the UI says the
     /// count arrives after the recording instead of showing a permanent "—".
     @Published private(set) var marksAvailableLive = true
+    // ★ Recording mode (2026-10-22, user: "把官方 App 的几个模式搬过来"): the
+    // official app's 电池电量 page — 高性能 / 自适应 / 长续航 — is the card's
+    // `BatteryMode` common setting, read/written on the LOW-level BleAgent
+    // (`readBatteryMode` / `setBatteryMode(value:)`); the high-level agent
+    // exposes nothing for it. Value semantics (inferred, cross-check pending):
+    // 0 = high performance, 1 = adaptive, 2 = long endurance — the official
+    // page ships with high performance selected and lists them in that order.
+    @Published private(set) var batteryMode: Int?
+    @Published private(set) var batteryModeUnsupported = false
+    /// ★ Read-back is unavailable: the high-level agent handles the BatteryMode
+    /// response internally and `PlaudDeviceAgentProtocol` has no `bleBatteryMode`
+    /// (verified on hardware 2026-10-22 — a read produced no callback). So the
+    /// last value WE set (or the agent echoed, if forwarding ever appears) is
+    /// persisted locally, otherwise the picker forgets the mode on relaunch.
+    private static let batteryModeKey = "plaud.battery_mode"
     private var currentExportSession: Int?
     /// Session ids already pulled into the library (persisted) — the card
     /// keeps files until deleted, so dedup is what makes re-syncs cheap.
@@ -430,6 +445,9 @@ final class PlaudDirectService: NSObject, ObservableObject {
         deleteAfterSync = d.bool(forKey: "plaud.delete_after_sync")
         syncedSessions = Set(d.array(forKey: "plaud.synced_sessions") as? [Int] ?? [])
         pulledSessions = syncedSessions
+        if d.object(forKey: Self.batteryModeKey) != nil {
+            batteryMode = d.integer(forKey: Self.batteryModeKey)
+        }
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 30
         session = URLSession(configuration: cfg)
@@ -849,6 +867,27 @@ final class PlaudDirectService: NSObject, ObservableObject {
         PlaudDeviceAgent.shared.getChargingState()
         PlaudDeviceAgent.shared.getState()
         PlaudDeviceAgent.shared.getStorage()
+        refreshBatteryMode()
+    }
+
+    /// Ask the card for its recording mode (BatteryMode). The answer arrives
+    /// as `bleBatteryMode` — either forwarded by the agent to this delegate or
+    /// silently swallowed; if it never arrives the UI keeps "not read yet".
+    func refreshBatteryMode() {
+        guard phase.isConnected, !batteryModeUnsupported, !isSyncing else { return }
+        PlaudDeviceAgent.shared.bleAgent?.readBatteryMode()
+    }
+
+    /// Switch the recording mode. Optimistically publishes the new value and
+    /// persists it (the read-back path is unavailable — see the key comment).
+    func setBatteryMode(_ mode: Int) {
+        guard phase.isConnected, !batteryModeUnsupported else { return }
+        log.info("plaud set battery mode \(mode)")
+        PlaudDeviceAgent.shared.bleAgent?.setBatteryMode(value: mode)
+        DispatchQueue.main.async {
+            self.batteryMode = mode
+            UserDefaults.standard.set(mode, forKey: Self.batteryModeKey)
+        }
     }
 
     /// Download ONE recording off the card. Queued through the same serial queue
@@ -2016,6 +2055,31 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.isCharging = charging
             if level > 0 { self.battery = level }
         }
+    }
+
+    /// Recording mode answer (BatteryMode common setting, CMD-8 family).
+    /// ★ On hardware (2026-10-22) this never fired — the agent consumes the
+    /// response internally. Kept wired anyway: if a firmware/SDK update starts
+    /// forwarding it, the UI heals and the persisted value gets confirmed.
+    /// `0xFFFFFFFF` = the firmware does not implement it — grey the UI out,
+    /// never render the sentinel as a mode (nil ≠ 0 rule).
+    func bleBatteryMode(_ value: Int) {
+        log.info("plaud battery mode \(value)")
+        DispatchQueue.main.async {
+            if value < 0 || value > 0xFFFFFFF {
+                self.batteryModeUnsupported = true
+            } else {
+                self.batteryMode = value
+                UserDefaults.standard.set(value, forKey: Self.batteryModeKey)
+            }
+        }
+    }
+
+    /// Generic settings echo — kept as a probe: when the agent forwards a
+    /// setting response it names the setting here even when it does not carry
+    /// the value, which still proves the read reached the card.
+    func bleCommonSetting(setting: Int) {
+        log.info("plaud common setting echo \(setting)")
     }
 
     func bleFileList(bleFiles: [BleFile]) {

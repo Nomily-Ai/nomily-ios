@@ -86,9 +86,63 @@ struct DirectConnectSection: View {
             }
         mainSection
         if direct.isConfigured {
+            batteryModeSection
             transferPrefsSection
             handoverSection
         }
+    }
+
+    /// ★ Recording mode (2026-10-22: "官方 App 的几个模式搬过来") — the card's
+    /// `BatteryMode` common setting: 高性能 / 自适应 / 长续航. Values and copy
+    /// mirror the official app's 电池电量 page; the hour estimates are the
+    /// official figures for high performance (linear 0.3 h per battery %).
+    private var batteryModeSection: some View {
+        Section {
+            if direct.batteryModeUnsupported {
+                Label(L10n.Plaud.batteryModeUnsupported, systemImage: "xmark.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                Picker(L10n.Plaud.batteryMode, selection: Binding(
+                    get: { direct.batteryMode },
+                    set: { if let mode = $0 { direct.setBatteryMode(mode) } }
+                )) {
+                    Text(L10n.Plaud.bmHigh).tag(0 as Int?)
+                    Text(L10n.Plaud.bmAdaptive).tag(1 as Int?)
+                    Text(L10n.Plaud.bmEndurance).tag(2 as Int?)
+                }
+                .disabled(!direct.phase.isConnected)
+                batteryModeFooter
+            }
+        } header: {
+            Text(L10n.Plaud.batteryModeHeader)
+        }
+    }
+
+    @ViewBuilder
+    private var batteryModeFooter: some View {
+        let desc: String = {
+            switch direct.batteryMode {
+            case 1: return L10n.Plaud.bmAdaptiveDesc
+            case 2: return L10n.Plaud.bmEnduranceDesc
+            default: return L10n.Plaud.bmHighDesc
+            }
+        }()
+        VStack(alignment: .leading, spacing: 4) {
+            if !direct.phase.isConnected {
+                Text(L10n.Plaud.bmNeedConnect)
+            }
+            if direct.batteryMode == nil {
+                Text(L10n.Plaud.bmUnread)
+            }
+            Text(desc)
+            if direct.phase.isConnected, let pct = direct.battery, direct.batteryMode == 0 {
+                // Official table: 100%→30 h, 80%→24 h … 5%→1.5 h (0.3 h/%).
+                Text(L10n.Plaud.bmEstimate(pct, Double(pct) * 0.3))
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
     }
 
     private var mainSection: some View {
