@@ -1535,3 +1535,29 @@
 
 /* AiTask (任务三) */
 "jobs.ai_task_interrupted" = "已中断——应用在上一步完成前被关闭。";
+
+/* PLAUD 暂停 / 抢占传输（2026-10-22） */
+"plaud.paused_hint" = "已暂停——本次录音仍保持在卡上开启，继续后接着录。";
+"plaud.sync_preempted" = "为了让实时音频开流，传输已暂停——停止录音后会自动继续。";
+
+/* 任务八 · 8.1 寻找卡片（BLE 纯 App 兜底） */
+"find.header" = "寻找卡片";
+"find.title" = "卡片不在身边";
+"find.drop_body" = "%@ 已断开连接。它最后就在这里。";
+"find.this_card" = "你的 PLAUD 卡片";
+"find.last_seen_header" = "最后见到";
+"find.last_seen_never" = "还没有记录——卡片第一次断开时会自动填上。";
+"find.place_unknown" = "未记录位置";
+"find.place_denied" = "允许「定位」权限后，才能记住卡片最后一次在哪。";
+"find.radar_header" = "位置";
+"find.start" = "开始寻找";
+"find.stop" = "停止";
+"find.scanning" = "正在扫描……拿着手机慢慢走动。";
+"find.tier_very_near" = "非常近——翻一下口袋和包。";
+"find.tier_near" = "越来越近了，继续走。";
+"find.tier_far" = "信号很弱——还比较远。";
+"find.tier_unknown" = "暂时没有卡片信号。";
+"find.hint" = "蓝牙在室内大约 10–30 米。这能帮你找到掉在沙发缝或包里的卡片，但它不是全城定位，卡片也绝不会向陌生人广播。";
+"find.notify_toggle" = "卡片断开时提醒我";
+"find.sound_row" = "让卡片响铃";
+"find.sound_unavailable" = "需要卡片固件提供响铃指令，当前固件没有（任务 8.2）。";

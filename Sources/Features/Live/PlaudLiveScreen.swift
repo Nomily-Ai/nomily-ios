@@ -88,23 +88,52 @@ struct PlaudLiveScreen: View {
             }
             HStack(spacing: 10) {
                 Button {
-                    if direct.isRecording {
+                    // A paused take is still alive on the card — "record" would
+                    // start a SECOND file behind the user's back.
+                    if direct.isRecording || direct.isPaused {
                         direct.stopRecording()
                     } else {
                         direct.startRecordingWhenReady()
                     }
                 } label: {
-                    Label(direct.isRecording ? L10n.Plaud.stopRecord : L10n.Plaud.startRecord,
-                          systemImage: direct.isRecording ? "stop.circle.fill" : "record.circle")
+                    Label(direct.isRecording || direct.isPaused ? L10n.Plaud.stopRecord : L10n.Plaud.startRecord,
+                          systemImage: direct.isRecording || direct.isPaused ? "stop.circle.fill" : "record.circle")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(direct.isRecording ? .red : .accentColor)
+                .tint(direct.isRecording || direct.isPaused ? .red : .accentColor)
                 .disabled(direct.phase.isBusy)
+
+                // ★ 2026-10-22 (user: "不能只有录音开始跟结束，还要有暂停"):
+                // the card's SDK has pause/resume and the firmware reports
+                // `bleRecordPause`, so the live page offers it too. Pause keeps
+                // the take (and its transcript) alive — this is not "stop then
+                // start a second file".
+                if direct.isRecording || direct.isPaused {
+                    Button {
+                        if direct.isPaused {
+                            direct.resumeRecording()
+                        } else {
+                            direct.pauseRecording()
+                        }
+                    } label: {
+                        Label(direct.isPaused ? L10n.Plaud.resumeRecord : L10n.Plaud.pauseRecord,
+                              systemImage: direct.isPaused ? "play.circle.fill" : "pause.circle.fill")
+                            .font(.headline)
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 14)
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
             .padding(.horizontal)
+            if direct.isPaused {
+                Text(L10n.Plaud.pausedHint)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             if !isConnected {
                 Button {
                     direct.reconnect()

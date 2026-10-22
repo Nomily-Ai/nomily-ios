@@ -1,3 +1,4 @@
+import MapKit
 import SwiftUI
 import UIKit
 
@@ -1208,6 +1209,11 @@ struct PlaudDeviceDetailView: View {
     var body: some View {
         Form {
             DirectConnectSection(direct: direct)
+            // 任务八 · 8.1 — "find my card", the part that works with no
+            // firmware help. Lives on the device page (and therefore in the
+            // top-left info sheet) because "where did I leave it" is a property
+            // of this card, not of a recording.
+            FindCardSection(direct: direct)
             // Same second mode as the add-device sheet: reachable from device
             // info too, so the cloud path is never hidden behind "add device".
             CloudSyncSection(plaud: plaud)
@@ -1230,6 +1236,159 @@ struct PlaudDeviceDetailView: View {
             direct.refreshVitals()
             direct.refreshCardRecordings()
         }
+        // The scan costs radio time; a page that has been popped must not keep
+        // listening.
+        .onDisappear { PlaudCardFinder.shared.setScanning(false) }
+    }
+}
+
+// MARK: - Find card (任务八 · 8.1)
+
+/// Pure-App "find my card": last-seen time/place, three-tier RSSI proximity,
+/// and an optional drop notification.
+///
+/// ## What it deliberately does NOT do
+/// No buzzer. PLAUD's SDK has no beep command at all — grep over the whole
+/// string table finds only `getFindMyState` / `sendFindMyToken` / `resetFindmy`
+/// (Apple Find My), so 任务 8.2 physically cannot ship before the firmware
+/// grows a `CMD_FIND_DEVICE`. The row is still on screen, greyed, with the
+/// reason inline: hiding it would only produce the "why is there no beep"
+/// question later.
+///
+/// ## Why proximity only works while disconnected
+/// A BLE peripheral that is connected stops advertising, and the tier comes
+/// from advertisement RSSI. That is not a limitation to work around — a card
+/// that is connected is by definition within range, so the section shows that
+/// instead of a fake reading.
+struct FindCardSection: View {
+    @ObservedObject var direct: PlaudDirectService
+    @ObservedObject private var finder = PlaudCardFinder.shared
+
+    private var connected: Bool { direct.phase.isConnected }
+
+    var body: some View {
+        Section {
+            lastSeenRows
+            if finder.locationDenied {
+                Label(L10n.Find.placeDenied, systemImage: "location.slash")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            proximityRows
+            Toggle(isOn: $finder.notifyOnDisconnect) {
+                Label(L10n.Find.notifyToggle, systemImage: "bell.badge")
+            }
+            HStack {
+                Label(L10n.Find.soundRow, systemImage: "speaker.wave.2")
+                Spacer()
+                Image(systemName: "lock")
+            }
+            .foregroundStyle(.secondary)
+            .disabled(true)
+        } header: {
+            Text(L10n.Find.header)
+        } footer: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.Find.hint)
+                Text(L10n.Find.soundUnavailable)
+            }
+            .font(.footnote)
+        }
+    }
+
+    // MARK: Last seen
+
+    @ViewBuilder
+    private var lastSeenRows: some View {
+        if let at = finder.lastSeenAt {
+            LabeledContent {
+                Text(at.formatted(date: .abbreviated, time: .shortened))
+            } label: {
+                Label(L10n.Find.lastSeenHeader, systemImage: "clock.arrow.circlepath")
+            }
+            LabeledContent {
+                Text(finder.lastSeenPlace ?? L10n.Find.placeUnknown)
+                    .multilineTextAlignment(.trailing)
+            } label: {
+                Label(L10n.Find.radarHeader, systemImage: "mappin.and.ellipse")
+            }
+            if #available(iOS 17.0, *), let coordinate = finder.lastSeenCoordinate {
+                lastSeenMap(coordinate)
+            }
+        } else {
+            Text(L10n.Find.lastSeenNever)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// A still thumbnail, not a live map: `allowsHitTesting(false)` keeps it from
+    /// hijacking the sheet's scroll, and tapping the row above opens Maps via the
+    /// system anyway. The point is "roughly here", at a glance.
+    @available(iOS 17.0, *)
+    private func lastSeenMap(_ coordinate: CLLocationCoordinate2D) -> some View {
+        Map(initialPosition: .region(MKCoordinateRegion(
+            center: coordinate,
+            span: MKCoordinateSpan(latitudeDelta: 0.004, longitudeDelta: 0.004)
+        ))) {
+            Marker(L10n.Find.header, coordinate: coordinate).tint(.red)
+        }
+        .frame(height: 130)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    // MARK: Proximity
+
+    @ViewBuilder
+    private var proximityRows: some View {
+        if connected {
+            Label(L10n.Plaud.stateConnected, systemImage: "checkmark.circle")
+                .font(.footnote)
+                .foregroundStyle(Color.appAccent)
+        } else {
+            HStack(spacing: 12) {
+                proximityMeter
+                Text(L10n.Find.tier(finder.proximity.rawValue))
+                    .font(.footnote)
+                    .foregroundStyle(finder.proximity == .unknown ? .secondary : .primary)
+                Spacer()
+                if let rssi = finder.rssi {
+                    Text("\(rssi) dBm")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if finder.isScanning, finder.proximity == .unknown {
+                Text(L10n.Find.scanning)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Button {
+                finder.setScanning(!finder.isScanning)
+            } label: {
+                Label(finder.isScanning ? L10n.Find.stop : L10n.Find.start,
+                      systemImage: finder.isScanning ? "stop.circle.fill" : "dot.radiowaves.left.and.right")
+            }
+            .foregroundStyle(finder.isScanning ? Color.red : Color.appAccent)
+        }
+    }
+
+    /// Three bars that fill as you get warmer. Deliberately not a numeric
+    /// gauge: RSSI is noisy and a number invites "why is it 71 then 68".
+    private var proximityMeter: some View {
+        HStack(alignment: .bottom, spacing: 3) {
+            ForEach(1...3, id: \.self) { level in
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(level <= finder.proximity.rawValue ? Color.appAccent : Color.secondary.opacity(0.25))
+                    .frame(width: 5, height: CGFloat(6 + level * 5))
+            }
+        }
+        .frame(height: 21, alignment: .bottom)
+        .animation(.easeOut(duration: 0.25), value: finder.proximity)
+        .accessibilityLabel(L10n.Find.tier(finder.proximity.rawValue))
     }
 }
 

@@ -71,7 +71,7 @@ targets:
         # Must track `nomily_watch`'s build number — watchOS refuses to install
         # a companion whose version doesn't match its host, and an embedded
         # watch app one build ahead is enough to trip it. Bump both or neither.
-        CFBundleVersion: "104"
+        CFBundleVersion: "106"
         # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
         # appropriate when the app's crypto use is exempt from US export
         # documentation requirements:
@@ -109,6 +109,12 @@ targets:
         # plist is silently reverted before the next build. The on-device recogniser runs
         # Apple's offline model; audio is not uploaded on this path.
         NSSpeechRecognitionUsageDescription: Nomily AI turns your recordings into text on this iPhone, using Apple's on-device speech recogniser. On that path the audio never leaves the device.
+        # 任务八 · 8.1 — "find my card". When a connected PLAUD card drops out of range the app
+        # records a **coarse** position (hundred-metre accuracy, one fix, only on that event) so
+        # "where did I last have it" has an answer. No continuous tracking, no background
+        # location, nothing uploaded. ⛔ `CLLocationManager.requestLocation()` without this key
+        # is a hard crash on iOS — same class of failure as the speech-recognition one above.
+        NSLocationWhenInUseUsageDescription: Nomily AI records a rough location when your PLAUD card disconnects, so it can tell you where you last had it. It asks for the position once, only at that moment, and never tracks you.
         # `nomily-a1://import/<base64url>` — the deep link behind that QR code, and behind any
         # tapped link. Handled in `NomilyApp.LocalizedRoot.onOpenURL`.
         CFBundleURLTypes:
@@ -211,7 +217,7 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         # Must track the iPhone app's build number — watchOS refuses to install
         # a companion whose version doesn't match its host.
-        CFBundleVersion: "104"
+        CFBundleVersion: "106"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.nomily.app
         NSMicrophoneUsageDescription: Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.
@@ -312,7 +318,7 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         # Must match the parent App — when an embedded binary's version numbers differ from the host's, watchOS
         # refuses to install the whole App.
-        CFBundleVersion: "104"
+        CFBundleVersion: "106"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

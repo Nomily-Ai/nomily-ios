@@ -71,7 +71,106 @@ enum L10n {
     // MARK: - Settings
 
     /// PLAUD cloud sync (2026-10-21 dual-mode support).
+    /// 任务八 · 8.1 — "find my card", the pure-App half that needs no firmware.
+    ///
+    /// Copy rules baked into these strings:
+    /// · never promise a city-wide locator — BLE is 10–30 m, say so where the
+    ///   button is, not in a footnote;
+    /// · "beep" is offered but visibly disabled, with the reason in the row
+    ///   (the card has no buzzer command in its SDK at all — 8.2 waits on
+    ///   firmware, and a greyed row that explains itself beats a hidden one).
+    enum Find {
+        static var header: String {
+            NSLocalizedString("find.header", value: "Find card",
+                              comment: "Section header on the PLAUD device page: BLE find-my-card")
+        }
+        /// Notification title when a connected card drops out of range.
+        static var title: String {
+            NSLocalizedString("find.title", value: "Card left behind",
+                              comment: "Local notification title when the card disconnects unexpectedly")
+        }
+        static func dropBody(_ card: String) -> String {
+            String(format: NSLocalizedString("find.drop_body", value: "%@ went out of range. That is where you last had it.",
+                                             comment: "Local notification body; %@ = card name"),
+                   card)
+        }
+        static var thisCard: String {
+            NSLocalizedString("find.this_card", value: "your PLAUD card",
+                              comment: "Fallback card name in the drop notification")
+        }
+        static var lastSeenHeader: String {
+            NSLocalizedString("find.last_seen_header", value: "Last seen",
+                              comment: "Sub-header: when/where the card was last connected")
+        }
+        static var lastSeenNever: String {
+            NSLocalizedString("find.last_seen_never", value: "No record yet — it fills in the first time the card disconnects.",
+                              comment: "Shown before the first disconnect was ever recorded")
+        }
+        static var placeUnknown: String {
+            NSLocalizedString("find.place_unknown", value: "Location not recorded",
+                              comment: "No coarse location for the last disconnect (permission denied or no fix)")
+        }
+        static var placeDenied: String {
+            NSLocalizedString("find.place_denied", value: "Allow location access to remember where the card was left.",
+                              comment: "Location permission missing for the find-my-card feature")
+        }
+        static var radarHeader: String {
+            NSLocalizedString("find.radar_header", value: "Proximity",
+                              comment: "Sub-header: live RSSI signal-strength meter")
+        }
+        static var start: String {
+            NSLocalizedString("find.start", value: "Start looking",
+                              comment: "Button that starts the BLE proximity scan")
+        }
+        static var stop: String {
+            NSLocalizedString("find.stop", value: "Stop",
+                              comment: "Button that stops the BLE proximity scan")
+        }
+        static var scanning: String {
+            NSLocalizedString("find.scanning", value: "Scanning… walk around slowly.",
+                              comment: "Shown while the RSSI scan is running but no advertisement landed yet")
+        }
+        /// 0 = unknown, 1 = far, 2 = near, 3 = very near (see `PlaudCardFinder.Proximity`).
+        static func tier(_ level: Int) -> String {
+            switch level {
+            case 3:
+                return NSLocalizedString("find.tier_very_near", value: "Very close — check pockets and bags.",
+                                         comment: "RSSI tier: about arm's length")
+            case 2:
+                return NSLocalizedString("find.tier_near", value: "Getting warmer — keep going.",
+                                         comment: "RSSI tier: same room")
+            case 1:
+                return NSLocalizedString("find.tier_far", value: "Weak signal — still far.",
+                                         comment: "RSSI tier: same floor at best")
+            default:
+                return NSLocalizedString("find.tier_unknown", value: "No signal from the card.",
+                                         comment: "RSSI tier: nothing heard in the last 3 s")
+            }
+        }
+        static var hint: String {
+            NSLocalizedString("find.hint", value: "Bluetooth reaches roughly 10–30 m indoors. This finds a card under a cushion or in a bag — it is not a city-wide locator, and the card never beacons to strangers.",
+                              comment: "Honest limits of the BLE find feature; deliberately in the UI, not a footnote")
+        }
+        static var notifyToggle: String {
+            NSLocalizedString("find.notify_toggle", value: "Notify me when the card drops",
+                              comment: "Toggle: local notification on unexpected disconnect")
+        }
+        static var soundRow: String {
+            NSLocalizedString("find.sound_row", value: "Make the card beep",
+                              comment: "Would-be row for a buzzer command; disabled, see the reason")
+        }
+        static var soundUnavailable: String {
+            NSLocalizedString("find.sound_unavailable", value: "Needs a firmware command the card does not have yet (task 8.2).",
+                              comment: "Why the beep row is greyed out")
+        }
+    }
+
     enum Plaud {
+        // ★ 2026-10-22: pause/resume on the live page + "recording preempted a transfer".
+        static var pauseRecord: String { NSLocalizedString("plaud.pause_record", value: "Pause", comment: "Pause the take that is running on the card") }
+        static var resumeRecord: String { NSLocalizedString("plaud.resume_record", value: "Resume", comment: "Resume a paused take") }
+        static var pausedHint: String { NSLocalizedString("plaud.paused_hint", value: "Paused — the take is still open on the card.", comment: "Shown under the controls while paused") }
+        static var syncPreemptedByRecord: String { NSLocalizedString("plaud.sync_preempted", value: "Transfer paused for the recording — it resumes after you stop.", comment: "A running transfer was stopped so the live audio stream could open") }
         static var navTitle: String { NSLocalizedString("plaud.nav_title", value: "PLAUD", comment: "Settings page title for PLAUD cloud sync") }
         static var signInHeader: String { NSLocalizedString("plaud.signin_header", value: "Sign in", comment: "PLAUD email+code sign-in section") }
         static var emailPlaceholder: String { NSLocalizedString("plaud.email", value: "PLAUD account email", comment: "") }
@@ -233,8 +332,6 @@ enum L10n {
         static var liveAzureFellBack: String { NSLocalizedString("plaud.live_azure_fell_back", value: "Azure dropped out — continuing with on-device recognition.", comment: "Automatic fallback after Azure failed mid-take") }
         static var cardFiles: String { NSLocalizedString("plaud.card_files", value: "Recordings on the card", comment: "Home device segment: the card's own file list") }
         static var cardFilesEmpty: String { NSLocalizedString("plaud.card_files_empty", value: "No recordings on the card.", comment: "") }
-        static var pauseRecord: String { NSLocalizedString("plaud.pause_record", value: "Pause", comment: "") }
-        static var resumeRecord: String { NSLocalizedString("plaud.resume_record", value: "Resume", comment: "") }
         static var recordingPaused: String { NSLocalizedString("plaud.recording_paused", value: "Paused", comment: "") }
         static var pullThisFile: String { NSLocalizedString("plaud.pull_this_file", value: "Pull", comment: "Download one recording from the card") }
         static func recordingElapsed(_ text: String) -> String {

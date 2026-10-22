@@ -30,7 +30,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>104</string>
+	<string>106</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>
@@ -44,6 +44,8 @@
 	<string>Nomily AI scans the QR code that carries a DingTalk A1 credential, so it never has to go through the clipboard.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Nomily AI opens a direct TCP connection to your D·NOTE over its Wi-Fi access point during Fast Transfer.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Nomily AI records a rough location when your PLAUD card disconnects, so it can tell you where you last had it. It asks for the position once, only at that moment, and never tracks you.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Live transcription monitors microphone state to coordinate with the device's stream.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

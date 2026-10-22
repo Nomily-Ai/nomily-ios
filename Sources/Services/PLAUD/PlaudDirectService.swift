@@ -247,6 +247,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
     // MARK: SDK session state
 
     private var cachedBleDevices: [String: BleDevice] = [:]
+    /// Three-second "did any PCM actually arrive" timer behind `armLiveWatchdog`.
+    /// Lives on the class body, not the extension that owns the method — Swift
+    /// does not allow stored properties in extensions.
+    private var liveWatchdog: Task<Void, Never>?
     private var userToken: String?
     private var userTokenAt = Date.distantPast
     private var isInitialized = false
@@ -1047,6 +1051,13 @@ final class PlaudDirectService: NSObject, ObservableObject {
         }
         firmware = nil
         setPhase(.connecting(name: card.name))
+        // 8.1: capture the advertised name here — `connect` is the one place
+        // the `BleDevice` is guaranteed to be in hand, and the proximity scan
+        // needs it to pick the card out of the surrounding BLE noise.
+        let advName = ble.name
+        Task { @MainActor in
+            if !advName.isEmpty { PlaudCardFinder.shared.targetName = advName }
+        }
         PlaudDeviceAgent.shared.stopScan()
         PlaudDeviceAgent.shared.connectBleDevice(bleDevice: ble, deviceToken: userId)
     }
@@ -1079,6 +1090,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
         stalledSessions.removeAll()
         liveStreaming = false
         livePCMBytes = 0
+        DispatchQueue.main.async {
+            self.liveWatchdog?.cancel()
+            self.liveWatchdog = nil
+        }
         clearRecordClock()
         recordMarks = []
         recordMarkCount = 0
@@ -1092,6 +1107,12 @@ final class PlaudDirectService: NSObject, ObservableObject {
         firmware = nil
         setRecordNotice(nil)
         setPhase(.idle)
+        // 8.1: the user pressed disconnect on purpose — still record "last
+        // seen", but never fire the drop alert for it.
+        let name = pairedSN.map { Self.storedName(for: $0) }
+        Task { @MainActor in
+            PlaudCardFinder.shared.noteDisconnected(unexpected: false, cardName: name)
+        }
     }
 
     // MARK: - Card controls (official-app parity)
@@ -1662,7 +1683,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
                     self.deviceElapsed = max(0, Date().timeIntervalSince(recordedAt))
                 }
             }
-            PlaudDeviceAgent.shared.syncFile(sessionId: newest.sessionID, start: newest.size, end: 0)
+            openLiveStream(sid: newest.sessionID, start: newest.size)
             Task { @MainActor in self.startLiveTranscription(sessionID: newest.sessionID) }
         }
         DispatchQueue.main.async {
@@ -2089,6 +2110,19 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         }
         DispatchQueue.main.async { self.selectedCard = nil }
         setPhase(.connected(sn: sn))
+        // 任务八 · 8.1: the link is up, so "when did I last have it" is now.
+        // The advertised name is what the proximity scan has to match, and it
+        // only exists in the scan cache — capture it while it is still there.
+        let advName = cachedBleDevices[sn]?.name
+        let shownName = Self.storedName(for: sn)
+        Task { @MainActor in
+            let finder = PlaudCardFinder.shared
+            if let advName, !advName.isEmpty { finder.targetName = advName }
+            finder.noteConnected()
+            // Remember the name too, so a crash-and-relaunch still labels the
+            // drop notification correctly.
+            UserDefaults.standard.set(shownName, forKey: "plaud.card_name")
+        }
         startStatePolling()
         // Pull vitals right away, then auto-pull the file list like the
         // official template does.
@@ -2231,7 +2265,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.pendingAttachSessionID = nil
             self.fileProbeForMarks = false
             log.warning("plaud attach: file probe timed out — opening sync at 0")
-            PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: 0, end: 0)
+            self.openLiveStream(sid: sid, start: 0)
             Task { @MainActor in self.startLiveTranscription(sessionID: sid) }
         }
     }
@@ -2293,13 +2327,67 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         // ★ Open the sync-file channel: that is what makes the SDK push
         // `blePcmData` (real-time duration + audio for live transcription).
         // Without this call a recording is silent to the app until it stops.
-        if !isSyncing {
-            PlaudDeviceAgent.shared.syncFile(sessionId: sessionId, start: start, end: 0)
-            DispatchQueue.main.async {
-                self.liveStreaming = true
-                self.livePCMBytes = 0
-            }
-            Task { @MainActor in self.startLiveTranscription(sessionID: sessionId) }
+        //
+        // ★★ 2026-10-22 ("实时转录还是没字" 根因): this used to be gated on
+        //   `!isSyncing`. Connect triggers `autoPullNewRecordings` 1.5 s later and
+        //   a queue of six recordings takes minutes over BLE — so nearly every
+        //   take started while a transfer was draining skipped the live stream
+        //   and produced **zero PCM** (diag: `PLAUD-PCM` had not one line across
+        //   every session). Recording now wins: the transfer is preempted (the
+        //   file stays on the card and re-queues after the take ends).
+        openLiveStream(sid: sessionId, start: start)
+        Task { @MainActor in self.startLiveTranscription(sessionID: sessionId) }
+    }
+
+    /// Open the live PCM stream, preempting a running transfer.
+    ///
+    /// The card has **one** sync-file pipe; transfers and live audio share it.
+    /// Everything that starts a take goes through here so "recording wins"
+    /// holds on every path (app-start, card-key start, relaunch attach).
+    private func openLiveStream(sid: Int, start: Int) {
+        if isSyncing {
+            TicNoteDiagLog.log("PLAUD-PCM", "record start preempts transfer — opening live stream sid=\(sid) start=\(start)")
+            PlaudDeviceAgent.shared.stopDownloadFile()
+            // Drop the in-flight/pending queue only; nothing is lost — those
+            // files are still on the card and `bleRecordStop` re-lists and
+            // re-pulls everything that is not in `syncedSessions`.
+            hardResetSync(keepCardFiles: true)
+            setSyncMessage(L10n.Plaud.syncPreemptedByRecord)
+        }
+        TicNoteDiagLog.log("PLAUD-PCM", "open live stream sid=\(sid) start=\(start)")
+        PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: start, end: 0)
+        DispatchQueue.main.async {
+            self.liveStreaming = true
+            self.livePCMBytes = 0
+        }
+        armLiveWatchdog(sid: sid, start: start)
+    }
+
+    /// "Nothing is arriving" self-heal, and the reason it exists:
+    ///
+    /// After a preemption the SDK is still unwinding the export it was told to
+    /// abort, and a `syncFile` issued in that same tick can be swallowed by the
+    /// export queue — the exact silent failure that produced "no text at all"
+    /// for two builds. Guessing a sleep duration would just trade one silent
+    /// failure for another, so instead: if **not one PCM block** lands within
+    /// three seconds of opening the stream, close it and open it again once.
+    /// Either way the diag log says which happened.
+    private func armLiveWatchdog(sid: Int, start: Int) {
+        liveWatchdog?.cancel()
+        liveWatchdog = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let baseline = self.livePCMBytes
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            guard self.liveStreaming, self.recordSessionID == sid else { return }
+            guard self.livePCMBytes <= baseline else { return }
+            TicNoteDiagLog.log("PLAUD-PCM", "watchdog: no PCM 3s after open — re-issuing syncFile sid=\(sid) start=\(start)")
+            PlaudDeviceAgent.shared.stopSyncFile()
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled, self.liveStreaming, self.recordSessionID == sid else { return }
+            PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: start, end: 0)
+            // One retry only. A second failure is not a timing problem, and a
+            // loop here would hammer the card for the whole take.
         }
     }
 
@@ -2331,6 +2419,8 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         PlaudDeviceAgent.shared.stopSyncFile()
         Task { @MainActor in self.stopLiveTranscription() }
         DispatchQueue.main.async {
+            self.liveWatchdog?.cancel()
+            self.liveWatchdog = nil
             self.clearRecordClock()
             self.isRecording = false
             self.isPaused = false
@@ -2410,7 +2500,11 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
 
     func bleSyncFileStop() {
         log.info("plaud sync-file stopped")
-        DispatchQueue.main.async { self.liveStreaming = false }
+        DispatchQueue.main.async {
+            self.liveWatchdog?.cancel()
+            self.liveWatchdog = nil
+            self.liveStreaming = false
+        }
     }
 
     func bleDecodeFail(start: Int) {
@@ -2439,7 +2533,16 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         log.warning("plaud device dropped")
         stopStatePolling()
         DispatchQueue.main.async { self.cardFileCount = nil }
+        let wasConnected = phase.isConnected
         if case .connected = phase { setPhase(.idle) }
+        // 任务八 · 8.1: an unrequested drop is exactly the moment worth
+        // remembering — "when/where did I last have it" plus, if the user
+        // asked for it, a local alert.
+        guard wasConnected else { return }
+        let name = pairedSN.map { Self.storedName(for: $0) }
+        Task { @MainActor in
+            PlaudCardFinder.shared.noteDisconnected(unexpected: true, cardName: name)
+        }
     }
 
     func bleStorage(total: Int, free: Int, duration: Int) {
@@ -2525,7 +2628,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
                     // card replay the whole file, so the app heard a backlog
                     // timed from zero while the card was already minutes in.
                     log.info("plaud attach: opening sync at current end (\(size) bytes)")
-                    PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: size, end: 0)
+                    self.openLiveStream(sid: sid, start: size)
                     Task { @MainActor in self.startLiveTranscription(sessionID: sid) }
                 }
                 return

@@ -92,12 +92,27 @@ enum JobRunners {
         BackgroundKeeper.shared.acquire(.summary)
         defer { BackgroundKeeper.shared.release(.summary) }
 
-        let outcome = try await LLMCompletionService.completeResilient(
-            systemPrompt: prompt,
-            userContent: source,
-            config: config,
-            onChunk: { done, total in reporter.progress(done, total) }
-        )
+        // ★ 2026-10-22 ("有转写但摘要生不出来"): the LLM error used to exist only
+        // as the job's `lastError`, which nobody sees unless the task center is
+        // open. Log the provider chain + the concrete gap into the diag file so
+        // "Open Router is set up but it won't run" can be answered from one pull.
+        let gap = config.llmProviders.primary.map {
+            LLMCompletionService.configGap($0, config) ?? "none"
+        } ?? "no-primary"
+        TicNoteDiagLog.log("LLM", "summarize start clip=\(job.clipName) primary=\(config.llmProviders.primary ?? "-") gap=\(gap) chars=\(source.count)")
+        let outcome: LLMCompletionService.Outcome
+        do {
+            outcome = try await LLMCompletionService.completeResilient(
+                systemPrompt: prompt,
+                userContent: source,
+                config: config,
+                onChunk: { done, total in reporter.progress(done, total) }
+            )
+        } catch {
+            TicNoteDiagLog.log("LLM", "summarize FAILED clip=\(job.clipName) primary=\(config.llmProviders.primary ?? "-") gap=\(gap) error=\(error.localizedDescription)")
+            throw error
+        }
+        TicNoteDiagLog.log("LLM", "summarize ok clip=\(job.clipName) provider=\(outcome.providerKey) chars=\(outcome.completion.text.count)")
         try Task.checkCancellation()
 
         // ⚠️ The summary and the title are **persisted together**, without waiting for the user to tap save.
