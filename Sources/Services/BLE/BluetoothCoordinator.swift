@@ -1057,6 +1057,14 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
             recorder.handleDisconnect(error: RecorderLinkError.notConnected)
             recorderLink = nil
             recorderDeviceInfo = nil
+            // ★ 2026-10-22 ("卡片断开时候通知我，包含手机蓝牙直接关闭"): a radio that
+            // was switched off never delivers `didDisconnectPeripheral`, so the
+            // recorder branch there — the only place that alerted — stayed
+            // silent. This is the same event, just noticed from the other side.
+            let name = recorder.displayName
+            Task { @MainActor in
+                PlaudCardFinder.shared.noteBluetoothOff(cardName: name)
+            }
         }
 
         guard let active = client else { return }
@@ -1064,9 +1072,14 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
         // Fails every in-flight command and transfer, so a download that was
         // running stops waiting instead of hanging until its own timeout.
         active.handleDisconnect(error: DnoteError.notConnected)
+        let clientName = active.displayName
         client = nil
         connectedDeviceSID = nil
         pendingPairing = nil
+        // Same reasoning as the recorder branch above (D·NOTE cards).
+        Task { @MainActor in
+            PlaudCardFinder.shared.noteBluetoothOff(cardName: clientName)
+        }
         // Deliberately *not* counted as an unexpected drop: reconnecting is
         // impossible while the adapter is off. The adapter-state observer in
         // RootView picks it up when Bluetooth comes back, and that path now

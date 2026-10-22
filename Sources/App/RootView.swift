@@ -90,12 +90,15 @@ struct RootView: View {
     /// is the honest answer to "which device did I use before" — that is exactly
     /// the user's "顶部设备显示应该是上一次链接过的设备名称".
     private var plaudPill: PlaudPillState? {
-        guard bluetooth.client == nil, bluetooth.recorderLink == nil else { return nil }
         guard let sn = plaudDirect.pairedSN else { return nil }
         let ledgerID = "plaud-\(sn)"
-        // A card whose ledger row was removed stays silent in the pill — unless it
-        // is actually connected, where pretending otherwise would be a lie.
+        // A live PLAUD link **is** the current card — it wins even if a recorder
+        // handle is still winding down, otherwise the pill keeps the old name
+        // right after a successful switch ("切换了但没有同步过去" again).
         if !plaudDirect.phase.isConnected {
+            guard bluetooth.client == nil, bluetooth.recorderLink == nil else { return nil }
+            // A card whose ledger row was removed stays silent in the pill — unless it
+            // is actually connected, where pretending otherwise would be a lie.
             guard configService.config.devices[ledgerID] != nil else { return nil }
             // …and only when it really is the **last** device used. Otherwise a
             // remembered PLAUD would hijack the label from the TicNote the user
@@ -197,6 +200,18 @@ struct RootView: View {
         .onChange(of: bluetooth.adapter) { newState in
             if newState == .poweredOn && bluetooth.client == nil && !isReconnecting {
                 Task { await autoReconnect() }
+            }
+            // ★ 2026-10-22 ("卡片断开时候通知我，包含手机蓝牙直接关闭"): the PLAUD
+            // SDK owns its own central, so `BluetoothCoordinator`'s teardown — the
+            // place that now alerts for the other cards — cannot see it. Turning
+            // the radio off kills that link without a disconnect callback, so the
+            // state has to be settled (and the user told) from here.
+            //
+            // `.poweredOff` only: `.resetting` is a transient restart during which
+            // the link usually comes straight back, and alerting on it would train
+            // the user to ignore the one alert that matters.
+            if newState == .poweredOff {
+                plaudDirect.handleAdapterOff()
             }
         }
         .onChange(of: bluetooth.unexpectedDisconnects) { _ in
@@ -405,6 +420,14 @@ struct RootView: View {
     }
 
     private func handlePillTap() {
+        // ★ 2026-10-22: PLAUD is checked **first**. It has no `DnoteClient` and no
+        // `RecorderLink`, so the branches below can't recognise it, and while any
+        // other card's handle lingered the tap opened *that* card's sheet while
+        // the pill label already said PLAUD — one tap, two answers.
+        if plaudDirect.phase.isConnected {
+            showPlaudInfo = true
+            return
+        }
         if bluetooth.client != nil {
             showDevice = true
         } else if bluetooth.recorderLink?.isConnected == true,
@@ -441,14 +464,34 @@ struct RootView: View {
     ///
     /// Kept in one place because three entries hit the same path: the pill, the
     /// pill's device picker, and (defensively) `connectToDevice`.
+    ///
+    /// ★ 2026-10-22 ("切换卡片的时候选择 PLAUD 无法切换，但是选择其他的卡片可以"):
+    /// switching **to** a PLAUD card never went through `connectToDevice` — the
+    /// only path that tears the previous card down — so the TicNote/A1/D·NOTE
+    /// link stayed live, kept owning the pill (see `plaudPill`), and the switch
+    /// looked like it never happened even when the card did bind. The other
+    /// direction worked precisely because it *did* go through `connectToDevice`.
+    /// One card at a time, both ways.
     private func openPlaud(ledgerID: String) {
         let sn = String(ledgerID.dropFirst("plaud-".count))
         guard !sn.isEmpty else { return }
-        if !plaudDirect.phase.isConnected {
-            plaudDirect.connectKnown(sn: sn)
-        }
+        releaseOtherCardsForPlaud()
+        // `switchCard` is the single entry now: it handles "connected to another
+        // PLAUD card", "idle", and "stuck mid-scan" the same way (`connectKnown`
+        // used to return silently in two of those three cases).
+        plaudDirect.switchCard(to: sn)
         selectedTab = .recordings
         showPlaudInfo = true
+    }
+
+    /// Drop whatever card is holding the BLE link so a PLAUD card can take it.
+    ///
+    /// `userInitiated` semantics matter: this is a deliberate card change, so the
+    /// old link must not be reconnected by the recorder watchdog, and it must not
+    /// fire a "card left behind" alert either.
+    private func releaseOtherCardsForPlaud() {
+        guard bluetooth.client != nil || bluetooth.recorderLink != nil else { return }
+        bluetooth.disconnect()
     }
 
     private func handleSelectDevice(_ id: String) {
@@ -505,6 +548,13 @@ struct RootView: View {
         if id.hasPrefix("plaud-") {
             openPlaud(ledgerID: id)
             return
+        }
+        // ★ 2026-10-22: the same "one card at a time" rule in reverse. Switching
+        // from a PLAUD card to a TicNote/A1/D·NOTE used to leave the PLAUD link
+        // up (it is not a `RecorderLink`, so `bluetooth.disconnect()` cannot see
+        // it), and the two then competed for the same radio.
+        if plaudDirect.phase.isConnected || plaudDirect.phase.isBusy {
+            plaudDirect.disconnect()
         }
         // Spinner from the first await: the recording-state check below
         // waits on the command lock, and that wait is the user's only

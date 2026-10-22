@@ -1388,12 +1388,35 @@ struct FindCardSection: View {
             }
             if #available(iOS 17.0, *), let coordinate = finder.lastSeenCoordinate {
                 lastSeenMap(coordinate)
+                Button {
+                    openInMaps(coordinate)
+                } label: {
+                    Label(L10n.Find.openInMaps, systemImage: "map")
+                        .font(.footnote)
+                }
             }
         } else {
             Text(L10n.Find.lastSeenNever)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// Hand the coordinate to **Apple Maps**.
+    ///
+    /// ★ 2026-10-22 ("地图使用默认的苹果地图而不是高德，因为需要国内国外都统一"):
+    /// `MKMapItem.openInMaps` is the Apple Maps app on every device, everywhere —
+    /// no AMap SDK, no `amap://` URL probing, no region-dependent behaviour. The
+    /// thumbnail above is already MapKit (SwiftUI `Map`), so both the inline view
+    /// and the hand-off use the same map data.
+    private func openInMaps(_ coordinate: CLLocationCoordinate2D) {
+        let placemark = MKPlacemark(coordinate: coordinate)
+        let item = MKMapItem(placemark: placemark)
+        item.name = finder.displayName ?? L10n.Find.header
+        item.openInMaps(launchOptions: [
+            MKLaunchOptionsMapSpanKey: NSValue(mkCoordinateSpan:
+                MKCoordinateSpan(latitudeDelta: 0.004, longitudeDelta: 0.004))
+        ])
     }
 
     /// A still thumbnail, not a live map: `allowsHitTesting(false)` keeps it from

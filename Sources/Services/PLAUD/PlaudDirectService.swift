@@ -1039,14 +1039,15 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// be empty (first launch after an unbind, or data restored from a backup)
     /// while the ledger row is still there — and then tapping that row used to
     /// fall into the recorder-card scan, which can never find a PLAUD card.
+    ///
+    /// ★ 2026-10-22 (later): this used to be its own code path with
+    /// `guard !phase.isBusy, !phase.isConnected else { return }` — and that
+    /// guard is exactly why "选其他卡片可以，选 PLAUD 不行": with a second PLAUD
+    /// card remembered, `phase.isConnected` was true (card A), the tap returned
+    /// silently, and card B was never switched to. Everything now goes through
+    /// `switchCard(to:)`, which is the only place that knows how to move a link.
     func connectKnown(sn: String) {
-        guard !phase.isBusy, !phase.isConnected else { return }
-        if pairedSN != sn {
-            pairedSN = sn
-            UserDefaults.standard.set(sn, forKey: "plaud.paired_sn")
-            rememberInLedger(sn: sn)
-        }
-        reconnect()
+        switchCard(to: sn)
     }
 
     func stopScan() {        PlaudDeviceAgent.shared.stopScan()
@@ -1116,6 +1117,8 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// (`switchNote`), tear the old link down, then let `reconnect()` do the
     /// scan-and-bind it already knows how to do.
     func switchCard(to sn: String) {
+        guard !sn.isEmpty else { return }
+        // Already on the target with a live link: there is nothing to move.
         guard !(sn == pairedSN && phase.isConnected) else { return }
         guard isConfigured else {
             setPhase(.failed(PlaudCloudService.PlaudError
@@ -1124,7 +1127,24 @@ final class PlaudDirectService: NSObject, ObservableObject {
         }
         let targetName = Self.storedName(for: sn)
         let wasConnected = phase.isConnected
-        TicNoteDiagLog.log("PLAUD", "switch \(pairedSN ?? "-") -> \(sn) connected=\(wasConnected)")
+        TicNoteDiagLog.log("PLAUD",
+            "switch \(pairedSN ?? "-") -> \(sn) connected=\(wasConnected) busy=\(phase.isBusy)")
+        // ⓪ A previous attempt still in flight must be **cancelled**, not obeyed.
+        //    Two scans race and clear each other's state, and the old
+        //    `!phase.isBusy` guard meant one stuck `.scanning` swallowed every
+        //    later tap forever ("点击了没有任何反应").
+        if phase.isBusy {
+            PlaudDeviceAgent.shared.stopScan()
+            reconnectTarget = nil
+            recoveryMode = false
+            setPhase(.idle)
+        }
+        // A live channel belongs to the *old* card — close it before moving.
+        if liveStreaming {
+            PlaudDeviceAgent.shared.stopSyncFile()
+            liveStreaming = false
+            livePCMBytes = 0
+        }
         // ① Remember the target before anything else — see defect 2 above.
         pairedSN = sn
         UserDefaults.standard.set(sn, forKey: "plaud.paired_sn")
@@ -1136,8 +1156,66 @@ final class PlaudDirectService: NSObject, ObservableObject {
         // ③ Drop the old link. The SDK needs a beat to actually release the
         //    connection; scanning immediately after would race it and find nothing.
         if wasConnected { disconnect() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (wasConnected ? 0.9 : 0.1)) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (wasConnected ? 0.9 : 0.25)) {
             self.reconnect()
+        }
+        // ④ A sleeping card does not advertise, so one scan can easily run out
+        //    before it wakes. Nudge it a second time instead of leaving the
+        //    switch half-done behind a spinner.
+        wakeRetry(sn: sn)
+    }
+
+    /// Second wake+scan for a switch that has not landed yet.
+    ///
+    /// The card's power-saving advertising interval was measured at up to 152 s,
+    /// so "scan once, give up" is not a fair test — `setDeviceActive` is what
+    /// actually wakes it (`reconnect()` sends it too, this is the retry for
+    /// when that first nudge was missed because the radio was still releasing
+    /// the previous card).
+    private func wakeRetry(sn: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            guard let self, self.pairedSN == sn, !self.phase.isConnected else { return }
+            TicNoteDiagLog.log("PLAUD", "switch to \(sn): retry wake+scan")
+            PlaudDeviceAgent.shared.setDeviceActive(status: 1)
+            PlaudDeviceAgent.shared.startScan()
+        }
+    }
+
+    /// The phone's own radio went away (Bluetooth switched off in Control
+    /// Centre, airplane mode, adapter reset).
+    ///
+    /// ★ 2026-10-22 ("卡片断开时候通知我，包含手机蓝牙直接关闭"): in that case the
+    /// SDK's `bleDeviceDisconnectErr` is **not** guaranteed to arrive — the
+    /// central manager itself is gone — so nothing recorded "last seen" and
+    /// nothing rang. The adapter observer in `RootView` calls this instead.
+    ///
+    /// The card is not at fault here, so the text says "turn Bluetooth back on"
+    /// rather than "it went out of range": a user hunting for a card that is
+    /// sitting on the desk is a worse outcome than no alert at all.
+    func handleAdapterOff() {
+        let wasConnected = phase.isConnected
+        let storedName = pairedSN.map { Self.storedName(for: $0) }
+        log.info("plaud: adapter off while connected=\(wasConnected)")
+        PlaudDeviceAgent.shared.stopScan()
+        reconnectTarget = nil
+        recoveryMode = false
+        if liveStreaming {
+            PlaudDeviceAgent.shared.stopSyncFile()
+            liveStreaming = false
+            livePCMBytes = 0
+        }
+        stopStatePolling()
+        Task { @MainActor in self.stopLiveTranscription() }
+        switchWatchdog?.cancel()
+        switchWatchdog = nil
+        setSwitchNote(nil)
+        if wasConnected { setPhase(.failed(L10n.Plaud.bluetoothOff)) }
+        guard wasConnected else { return }
+        Task { @MainActor in
+            // The registered label is the better name when the card has an alias
+            // and `pairedSN` was somehow already cleared.
+            let name = storedName ?? PlaudCardFinder.shared.displayName
+            PlaudCardFinder.shared.noteBluetoothOff(cardName: name)
         }
     }
 

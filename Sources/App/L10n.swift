@@ -102,6 +102,20 @@ enum L10n {
                                              comment: "Local notification body; %@ = card name"),
                    card)
         }
+        /// Same alert, different cause: the phone stopped listening, not the card
+        /// walked away (2026-10-22 "通知我，包含手机蓝牙直接关闭").
+        static func bluetoothOffBody(_ card: String) -> String {
+            String(format: NSLocalizedString("find.bluetooth_off_body",
+                                             value: "%@ was disconnected because Bluetooth is off on this iPhone. That is where you last had it.",
+                                             comment: "Local notification body when the iPhone's Bluetooth was switched off; %@ = card name"),
+                   card)
+        }
+        /// Row action under the map thumbnail. Apple Maps on purpose — one map
+        /// everywhere, no regional third-party app to fall back to.
+        static var openInMaps: String {
+            NSLocalizedString("find.open_in_maps", value: "Open in Maps",
+                              comment: "Opens the last-seen coordinate in Apple Maps")
+        }
         static var thisCard: String {
             // Was "your PLAUD card". The finder now serves every recorder, so a
             // TicNote user must not be told their DingTalk A1 is a PLAUD card.
@@ -347,6 +361,13 @@ enum L10n {
         }
         static func switchFailed(_ card: String) -> String {
             String(format: NSLocalizedString("plaud.switch_failed", value: "Couldn't reach %@ — wake the card and try again.", comment: "Card switch gave up after 15 s; %@ = card name"), card)
+        }
+        /// ★ 2026-10-22: the phone's own radio went off, so the card is fine and
+        /// the link is not. Saying "out of range" here would send the user off to
+        /// search for a card that is sitting on the desk.
+        static var bluetoothOff: String {
+            NSLocalizedString("plaud.bluetooth_off", value: "Bluetooth is off — turn it back on to reach the card.",
+                              comment: "Shown when the iPhone's Bluetooth was switched off while a card was connected")
         }
         static var recordingNow: String { NSLocalizedString("plaud.recording_now", value: "Card is recording", comment: "") }
         static var stopRecord: String { NSLocalizedString("plaud.stop_record", value: "Stop recording", comment: "") }

@@ -60,6 +60,10 @@ struct ConnectionPill: View {
     }
 
     private var activeName: String {
+        // ★ 2026-10-22: a live PLAUD link outranks a recorder handle that is
+        // still winding down after a card switch — otherwise the pill announces
+        // the card the user just left.
+        if let plaud, plaud.isConnected { return plaud.name }
         if let client { return client.displayName }
         if let recorderLink { return recorderLink.displayName }
         // After disconnection, `recorderLink` is already nil, so the name only comes from these sources — the reconnection

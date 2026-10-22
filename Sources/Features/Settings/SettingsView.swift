@@ -139,7 +139,12 @@ struct SettingsView: View {
 
             aboutSection
         }
-        .padding(.top, -20)
+        // ★ 2026-10-22 ("设置里面顶部的录音与转写被顶部遮挡住了"): this Form carried
+        // `.padding(.top, -20)` — a leftover from when the page had no navigation
+        // title (it pulled the empty nav-bar strip away). The bar now shows a
+        // principal title, so the same -20 slid the first section header *under*
+        // it and the group header was clipped. The nav bar reserves its own space;
+        // no compensation needed.
         .navigationTitle("")
         .navigationDestination(isPresented: $env.navigateToASRProviders) {
             ASRProvidersView()
@@ -2162,6 +2167,9 @@ struct DevicesLibraryView: View {
     /// history count) is what the PLAUD row adds on top of the plain ledger
     /// fields the other devices show.
     @ObservedObject private var plaudDirect = PlaudDirectService.shared
+    /// Needed for the "switch to this card" row: a PLAUD card is not a
+    /// `RecorderLink`, so nothing else releases the previous card's link.
+    @EnvironmentObject private var bluetooth: BluetoothCoordinator
     // Scan the on-disk library so the stats match what the Library tab
     // shows. The manifest (`library.entries`) only tracks device downloads,
     // so imported clips were missing from the total (showed 0).
@@ -2380,6 +2388,14 @@ struct DevicesLibraryView: View {
                             }
                         } else {
                             Button {
+                                // ★ 2026-10-22: one card at a time. Switching
+                                // *to* PLAUD used to skip the teardown that
+                                // `connectToDevice` does for the other cards,
+                                // so the old link stayed live and kept owning
+                                // the pill — "选 PLAUD 切换不过去，其他卡片可以".
+                                if bluetooth.client != nil || bluetooth.recorderLink != nil {
+                                    bluetooth.disconnect()
+                                }
                                 plaudDirect.switchCard(to: sn)
                             } label: {
                                 HStack(spacing: 8) {

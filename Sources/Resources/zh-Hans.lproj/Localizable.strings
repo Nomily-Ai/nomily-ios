@@ -1426,6 +1426,7 @@
 "plaud.card_gone" = "所选卡片不在附近——请重新扫描。";
 "plaud.switching" = "正在切换到 %@…";
 "plaud.switch_failed" = "找不到 %@——请唤醒卡片后重试。";
+"plaud.bluetooth_off" = "手机蓝牙已关闭——打开蓝牙才能连接卡片。";
 "plaud.recording_now" = "卡片正在录音";
 "plaud.stop_record" = "停止录音";
 "plaud.start_record" = "开始录音";
@@ -1553,6 +1554,8 @@
 "find.header_for" = "寻找 %@";
 "find.title" = "卡片不在身边";
 "find.drop_body" = "%@ 已断开连接。它最后就在这里。";
+"find.bluetooth_off_body" = "%@ 已断开——因为这台 iPhone 的蓝牙被关闭了。它最后就在这里。";
+"find.open_in_maps" = "在地图中打开";
 "find.this_card" = "你的卡片";
 "find.last_seen_header" = "最后见到";
 "find.last_seen_never" = "还没有记录——卡片第一次断开时会自动填上。";

@@ -193,7 +193,30 @@ final class PlaudCardFinder: NSObject, ObservableObject {
         guard Date().timeIntervalSince(lastDropAlertAt) > 5 else { return }
         lastDropAlertAt = Date()
         deliver(title: L10n.Find.title,
-                body: L10n.Find.dropBody(cardName ?? L10n.Find.thisCard))
+                body: L10n.Find.dropBody(cardName ?? targetLabel ?? L10n.Find.thisCard))
+    }
+
+    /// The phone stopped listening rather than the card walking away.
+    ///
+    /// ★ 2026-10-22 ("卡片断开时候通知我，包含手机蓝牙直接关闭"): switching
+    /// Bluetooth off in Control Centre doesn't produce the SDK's disconnect
+    /// callback — the central manager itself is gone — so the "out of range"
+    /// path never ran and the phone stayed silent. The watchdog that notices the
+    /// adapter leaving `.poweredOn` calls this instead.
+    ///
+    /// Still records the point: "where was the card when I lost the link" is a
+    /// property of the disconnect, not of its cause.
+    func noteBluetoothOff(cardName: String?) {
+        let now = Date()
+        lastSeenAt = now
+        UserDefaults.standard.set(now, forKey: Self.lastSeenKey)
+        recordSeen(at: now, place: lastSeenPlace, coordinate: lastSeenCoordinate)
+        capturePlace()
+        guard notifyOnDisconnect else { return }
+        guard now.timeIntervalSince(lastDropAlertAt) > 5 else { return }
+        lastDropAlertAt = now
+        let name = cardName ?? targetLabel ?? L10n.Find.thisCard
+        deliver(title: L10n.Find.title, body: L10n.Find.bluetoothOffBody(name))
     }
 
     /// Register the card the app just connected to, so the radar looks for the
