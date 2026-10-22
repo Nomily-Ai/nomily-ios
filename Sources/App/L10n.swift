@@ -216,6 +216,21 @@ enum L10n {
         static var liveSavePending: String { NSLocalizedString("plaud.live_save_pending", value: "The transcript is saved as soon as the card's file lands in the library.", comment: "Live transcript waits for the export to finish") }
         static var liveSaveAction: String { NSLocalizedString("plaud.live_save_action", value: "Save to library", comment: "Button that pulls the card's file so the transcript can be attached") }
         static var liveSaveNeedsClip: String { NSLocalizedString("plaud.live_save_needs_clip", value: "The transcript is kept with the recording — stop the take to save both.", comment: "Save to library pressed while still recording") }
+        /// Which engine is producing the text, shown next to the panel title.
+        static func liveEngine(_ name: String) -> String {
+            switch name {
+            case "azure":
+                return NSLocalizedString("plaud.live_engine_azure", value: "Azure", comment: "Live transcript engine: Azure Speech")
+            case "ondevice":
+                return NSLocalizedString("plaud.live_engine_ondevice", value: "On-device", comment: "Live transcript engine: Apple's offline recogniser")
+            default:
+                return name
+            }
+        }
+        static func liveAzureFailed(_ message: String) -> String {
+            String(format: NSLocalizedString("plaud.live_azure_failed", value: "Azure live transcription stopped: %@", comment: "Live transcript error from Azure; %@ = reason"), message)
+        }
+        static var liveAzureFellBack: String { NSLocalizedString("plaud.live_azure_fell_back", value: "Azure dropped out — continuing with on-device recognition.", comment: "Automatic fallback after Azure failed mid-take") }
         static var cardFiles: String { NSLocalizedString("plaud.card_files", value: "Recordings on the card", comment: "Home device segment: the card's own file list") }
         static var cardFilesEmpty: String { NSLocalizedString("plaud.card_files_empty", value: "No recordings on the card.", comment: "") }
         static var pauseRecord: String { NSLocalizedString("plaud.pause_record", value: "Pause", comment: "") }

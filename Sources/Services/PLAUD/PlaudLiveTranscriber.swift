@@ -29,11 +29,7 @@ struct PlaudLiveSegment: Identifiable, Equatable {
     /// uses for a take. Lives here (not in the view) because the service also
     /// needs it when it writes the transcript to disk.
     static func clock(_ seconds: TimeInterval) -> String {
-        let total = max(0, Int(seconds.rounded()))
-        if total >= 3600 {
-            return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
-        }
-        return String(format: "%02d:%02d", total / 60, total % 60)
+        PlaudClock.text(seconds)
     }
 }
 
@@ -226,15 +222,18 @@ final class PlaudPCMFeeder: @unchecked Sendable {
 /// Not `@MainActor`: `append(_:elapsed:)` is called straight from the SDK's BLE
 /// queue, and every published mutation is hopped to the main queue explicitly.
 /// Callers observe `onTextChange` (always on main).
-final class PlaudLiveTranscriber: NSObject, ObservableObject, SFSpeechRecognizerDelegate {
+final class PlaudLiveTranscriber: NSObject, ObservableObject, SFSpeechRecognizerDelegate, PlaudLiveASR {
 
-    enum Unavailable: Equatable {
-        case notAuthorized
-        case noRecognizer
-        /// The offline model for the chosen language is not installed, so
-        /// `requiresOnDeviceRecognition` would fail on the first result.
-        case modelMissing
-    }
+    /// Kept as an alias so existing call sites keep reading naturally; the cases
+    /// themselves live in the shared `PlaudLiveASRUnavailable` now that a second
+    /// engine (Azure) exists.
+    typealias Unavailable = PlaudLiveASRUnavailable
+
+    let providerName = "ondevice"
+
+    /// Never called by this engine — the on-device recogniser recovers on its own
+    /// (watchdog + rebuild). Declared so it satisfies `PlaudLiveASR`.
+    var onFailure: ((PlaudLiveASRUnavailable) -> Void)?
 
     @Published private(set) var segments: [PlaudLiveSegment] = []
     @Published private(set) var partial = ""
@@ -333,6 +332,14 @@ final class PlaudLiveTranscriber: NSObject, ObservableObject, SFSpeechRecognizer
         restartCount = 0
         droppedFinals = 0
         feeder?.reset()
+        publish()
+    }
+
+    /// Carry text over when the owner switches engines mid-take (Azure dropped →
+    /// on-device takes over). Without this the user would watch their transcript
+    /// restart from nothing at the worst possible moment.
+    func seed(segments: [PlaudLiveSegment]) {
+        self.segments = segments
         publish()
     }
 

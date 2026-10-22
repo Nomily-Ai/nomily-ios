@@ -1498,3 +1498,7 @@
 "plaud.live_save_pending" = "卡片上的录音传完后，转录会自动一起保存。";
 "plaud.live_save_action" = "保存到资料库";
 "plaud.live_save_needs_clip" = "转录会和录音一起保存，先停止本次录音。";
+"plaud.live_engine_azure" = "Azure";
+"plaud.live_engine_ondevice" = "本机识别";
+"plaud.live_azure_failed" = "Azure 实时识别中断：%@";
+"plaud.live_azure_fell_back" = "Azure 连接中断，已切换到本机识别，文字会继续。";

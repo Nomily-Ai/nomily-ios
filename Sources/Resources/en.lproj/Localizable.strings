@@ -1396,3 +1396,7 @@
 "plaud.live_save_pending" = "The transcript is saved as soon as the card's file lands in the library.";
 "plaud.live_save_action" = "Save to library";
 "plaud.live_save_needs_clip" = "The transcript is kept with the recording — stop the take to save both.";
+"plaud.live_engine_azure" = "Azure";
+"plaud.live_engine_ondevice" = "On-device";
+"plaud.live_azure_failed" = "Azure live transcription stopped: %@";
+"plaud.live_azure_fell_back" = "Azure dropped out — continuing with on-device recognition.";

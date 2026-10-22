@@ -169,6 +169,16 @@ struct PlaudLiveScreen: View {
                 .foregroundStyle(Color.appAccent)
             Text(L10n.Plaud.liveTranscript)
                 .font(.caption.weight(.semibold))
+            // Which engine is producing this text — "使用的 Azure 的" must have a
+            // visible answer instead of a guess.
+            if !direct.liveASRProvider.isEmpty {
+                Text(L10n.Plaud.liveEngine(direct.liveASRProvider))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.secondary.opacity(0.12)))
+            }
             if direct.isRecording {
                 HStack(spacing: 3) {
                     Circle().fill(Color.red).frame(width: 5, height: 5)

@@ -163,6 +163,9 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// instead of an empty box, because "no text" and "no permission" look
     /// identical on screen and only one of them is the user's to fix.
     @Published private(set) var liveASRNotice: String?
+    /// Which engine is producing the live text ("azure" / "ondevice") — shown in
+    /// the panel header so "is it using my Azure key?" has a visible answer.
+    @Published private(set) var liveASRProvider = ""
     /// Positions of the marks of the current/last take, on the card's clock.
     ///
     /// `getMarking` never answers on this firmware, so a mark is *detected* by
@@ -380,7 +383,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
 
     /// On-device live transcription for the current recording (see
     /// `PlaudLiveTranscriber`). Lives only while a recording is live.
-    private var liveTranscriber: PlaudLiveTranscriber?
+    /// The live engine for the current take — Azure (PCM over WebSocket) or the
+    /// on-device recogniser, whichever the ASR chain names (see
+    /// `makeLiveASREngine`).
+    private var liveTranscriber: (any PlaudLiveASR)?
 
     /// Begin transcribing the live PCM stream (no-op when speech is not
     /// authorized — recording itself never depends on ASR).
@@ -410,31 +416,131 @@ final class PlaudDirectService: NSObject, ObservableObject {
         liveTranscriptSessionID = sid
         liveASRNotice = nil
 
-        // Spoken language: the same preference the live page persists. Falling
-        // back to the device locale is the old behaviour and stays the default.
-        let preferred = configService?.config.lastSourceLang
-        guard let transcriber = PlaudLiveTranscriber.makeIfPermitted(localeID: preferred) else {
+        // ★ 2026-10-22 ("实时转录没文字 … 使用的是 Azure"): the engine now follows
+        //   the same provider chain as the rest of the app instead of being
+        //   hard-wired to Apple's offline model. Azure takes the card's PCM
+        //   directly (`PlaudAzureLiveTranscriber`); the on-device recogniser is
+        //   the last resort, exactly like `LiveModel` treats it.
+        guard let engine = makeLiveASREngine() else {
             liveASRNotice = L10n.Plaud.liveNeedsPermission
-            log.info("plaud live transcript unavailable (no permission)")
+            liveASRProvider = ""
+            log.info("plaud live transcript unavailable (no engine)")
             return
         }
-        transcriber.onTextChange = { [weak self, weak transcriber] in
-            guard let self, let transcriber else { return }
-            self.liveSegments = transcriber.segments
-            self.livePartial = transcriber.partial
-            self.liveTranscript = transcriber.fullText
+        attachLiveEngine(engine)
+    }
+
+    /// Pick the best available engine for the card's PCM.
+    ///
+    /// Order: the user's `defaults.asr` chain (primary, then fallbacks), then
+    /// on-device. Providers that need Opus (`local`, `remote`) are skipped — they
+    /// cannot take PCM from this card, and silently sending PCM to an Opus
+    /// endpoint would produce noise instead of an error.
+    @MainActor private func makeLiveASREngine() -> (any PlaudLiveASR)? {
+        let cfg = configService?.config
+        let localeID = Self.bcp47Language(cfg?.lastSourceLang)
+        var chain: [String] = []
+        if let defaults = cfg?.defaults.asr {
+            chain = [defaults.primary] + defaults.fallbacks
         }
-        transcriber.start()
-        switch transcriber.unavailable {
+        chain.append("ondevice")
+        for name in chain.map({ $0.lowercased() }) where !name.isEmpty {
+            switch name {
+            case "azure":
+                if let azure = cfg?.asrProviders.azure,
+                   !azure.key.isEmpty, !azure.region.isEmpty {
+                    log.info("plaud live asr engine=azure lang=\(localeID, privacy: .public)")
+                    return PlaudAzureLiveTranscriber(key: azure.key, region: azure.region, lang: localeID)
+                }
+            case "ondevice":
+                guard cfg?.onDeviceASREnabled != false else { continue }
+                if let engine = PlaudLiveTranscriber.makeIfPermitted(localeID: cfg?.lastSourceLang) {
+                    log.info("plaud live asr engine=ondevice")
+                    return engine
+                }
+            default:
+                // local / remote / custom: Opus-only, cannot consume raw PCM.
+                continue
+            }
+        }
+        return nil
+    }
+
+    /// Wire an engine's output into the published state and start feeding it.
+    @MainActor private func attachLiveEngine(_ engine: any PlaudLiveASR) {
+        liveTranscriber?.stop()
+        engine.onTextChange = { [weak self, weak engine] in
+            guard let self, let engine else { return }
+            self.liveSegments = engine.segments
+            self.livePartial = engine.partial
+            self.liveTranscript = Self.joinedTranscript(engine.segments, partial: engine.partial)
+        }
+        engine.onFailure = { [weak self] reason in
+            Task { @MainActor in self?.fallbackLiveEngine(reason: reason) }
+        }
+        engine.start()
+        switch engine.unavailable {
         case .modelMissing: liveASRNotice = L10n.Plaud.liveModelMissing
         case .noRecognizer, .notAuthorized: liveASRNotice = L10n.Plaud.liveNeedsPermission
+        case .azureMissing: liveASRNotice = L10n.Plaud.liveNeedsPermission
+        case .azureFailed(let message): liveASRNotice = L10n.Plaud.liveAzureFailed(message)
         case .none: liveASRNotice = nil
         }
-        liveTranscriber = transcriber
-        // Called straight from the SDK's BLE queue: the transcriber hands the
-        // block to its own serial queue, so nothing here touches the main actor.
-        liveAudioSink = { [weak transcriber] pcm, elapsed in
-            transcriber?.append(pcm, elapsed: elapsed)
+        liveASRProvider = engine.providerName
+        liveTranscriber = engine
+        // Called straight from the SDK's BLE queue; each engine does its own
+        // threading from here (the on-device one has its own PCM queue, Azure
+        // batches into ~100 ms WebSocket frames).
+        liveAudioSink = { [weak engine] pcm, elapsed in
+            engine?.append(pcm, elapsed: elapsed)
+        }
+    }
+
+    /// Azure died mid-take (quota / expired key / network): keep the text that is
+    /// already on screen and continue with the on-device recogniser rather than
+    /// leaving the user with a frozen transcript.
+    @MainActor private func fallbackLiveEngine(reason: PlaudLiveASRUnavailable) {
+        guard liveTranscriber?.providerName == "azure" else { return }
+        log.warning("plaud live asr: azure failed (\(String(describing: reason), privacy: .public)) — falling back to on-device")
+        guard let onDevice = PlaudLiveTranscriber.makeIfPermitted(localeID: configService?.config.lastSourceLang) else {
+            liveASRNotice = L10n.Plaud.liveNeedsPermission
+            return
+        }
+        onDevice.seed(segments: liveSegments)
+        attachLiveEngine(onDevice)
+        liveASRNotice = L10n.Plaud.liveAzureFellBack
+    }
+
+    /// Segments + in-flight hypothesis, joined the way the panel renders them.
+    static func joinedTranscript(_ segments: [PlaudLiveSegment], partial: String) -> String {
+        var parts = segments.map(\.text)
+        let tail = partial.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tail.isEmpty { parts.append(tail) }
+        return parts.joined(separator: "\n")
+    }
+
+    /// "zh" → "zh-CN", "en" → "en-US", full ids pass through. Azure needs a
+    /// concrete BCP-47 tag; the app's config stores bare language codes.
+    static func bcp47Language(_ raw: String?) -> String {
+        let id = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else {
+            return Locale.current.identifier.replacingOccurrences(of: "_", with: "-")
+        }
+        if id.contains("-") { return id }
+        if id.contains("_") { return id.replacingOccurrences(of: "_", with: "-") }
+        switch id.lowercased() {
+        case "zh": return "zh-CN"
+        case "en": return "en-US"
+        case "ja": return "ja-JP"
+        case "ko": return "ko-KR"
+        case "de": return "de-DE"
+        case "fr": return "fr-FR"
+        case "es": return "es-ES"
+        case "pt": return "pt-BR"
+        case "ru": return "ru-RU"
+        case "ar": return "ar-SA"
+        case "it": return "it-IT"
+        default: return id
         }
     }
 
