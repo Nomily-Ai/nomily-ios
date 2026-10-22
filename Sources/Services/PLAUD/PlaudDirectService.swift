@@ -1092,6 +1092,38 @@ final class PlaudDirectService: NSObject, ObservableObject {
         PlaudDeviceAgent.shared.connectBleDevice(bleDevice: ble, deviceToken: userId)
     }
 
+    /// Switch to a **different** remembered card.
+    ///
+    /// 2026-10-22 ("我点击下来选项卡片的时候无法正确切换到对应卡片"): the ledger in
+    /// Settings → Devices listed several cards, but every PLAUD row opened the
+    /// same page — the one for `pairedSN` — so tapping card B showed card A and
+    /// nothing switched. The row now calls this instead.
+    ///
+    /// It reuses `reconnect()`'s scan-and-match path rather than the SDK's
+    /// `connectBySN`: that path is the one that also goes through `ensureInitialized`
+    /// (token) and the bind callbacks that write `pairedSN`, so a switch ends in
+    /// the same state a normal connect does.
+    func switchCard(to sn: String) {
+        guard !(sn == pairedSN && phase.isConnected) else { return }
+        guard isConfigured else {
+            setPhase(.failed(PlaudCloudService.PlaudError
+                .badResponse("Direct connect is not activated yet.").localizedDescription))
+            return
+        }
+        if phase.isConnected { disconnect() }
+        Task {
+            try? await ensureInitialized()
+            // A sleeping card stops advertising; wake it before scanning, same as
+            // `reconnect()` — otherwise the scan finishes before it appears.
+            PlaudDeviceAgent.shared.setDeviceActive(status: 1)
+            setPhase(.connecting(name: Self.modelName(for: sn)))
+            clearScanned()
+            reconnectTarget = sn
+            PlaudDeviceAgent.shared.startScan()
+            TicNoteDiagLog.log("PLAUD", "switching card to \(sn)")
+        }
+    }
+
     func disconnect() {
         // Close the live channel first: leaving it open makes the card keep
         // pushing PCM that nobody reads, which is exactly the "disconnect looks

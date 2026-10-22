@@ -2450,10 +2450,29 @@ struct DevicesLibraryView: View {
                     // get a richer row + their own page, because they carry live
                     // BLE state the plain record can't hold.
                     if let sn = row.plaudSN {
-                        NavigationLink {
-                            PlaudDeviceDetailView()
-                        } label: {
-                            PlaudLedgerRow(sn: sn, record: row.record)
+                        // ★ 2026-10-22: every PLAUD row used to push the SAME
+                        // page — the one bound to `pairedSN` — so tapping card B
+                        // showed card A's details and nothing switched. Only the
+                        // active card opens the page now; the others switch first.
+                        if sn == plaudDirect.pairedSN {
+                            NavigationLink {
+                                PlaudDeviceDetailView()
+                            } label: {
+                                PlaudLedgerRow(sn: sn, record: row.record)
+                            }
+                        } else {
+                            Button {
+                                plaudDirect.switchCard(to: sn)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    PlaudLedgerRow(sn: sn, record: row.record)
+                                    Spacer(minLength: 4)
+                                    Text(L10n.DevicesLibrary.switchToThis)
+                                        .font(.caption2)
+                                        .foregroundStyle(Color.appAccent)
+                                }
+                            }
+                            .tint(.primary)
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 2) {

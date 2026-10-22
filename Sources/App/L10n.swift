@@ -84,6 +84,14 @@ enum L10n {
             NSLocalizedString("find.header", value: "Find card",
                               comment: "Section header on the PLAUD device page: BLE find-my-card")
         }
+        /// Header once a card is registered ("Find PLAUD NotePin"). Kept separate
+        /// from `header` because the section is now shared by every recorder and
+        /// the fallback must not promise a card name we don't have.
+        static func headerFor(_ card: String) -> String {
+            String(format: NSLocalizedString("find.header_for", value: "Find %@",
+                                             comment: "Section header; %@ = the card's name or alias"),
+                   card)
+        }
         /// Notification title when a connected card drops out of range.
         static var title: String {
             NSLocalizedString("find.title", value: "Card left behind",
@@ -95,7 +103,9 @@ enum L10n {
                    card)
         }
         static var thisCard: String {
-            NSLocalizedString("find.this_card", value: "your PLAUD card",
+            // Was "your PLAUD card". The finder now serves every recorder, so a
+            // TicNote user must not be told their DingTalk A1 is a PLAUD card.
+            NSLocalizedString("find.this_card", value: "your card",
                               comment: "Fallback card name in the drop notification")
         }
         static var lastSeenHeader: String {
@@ -151,10 +161,43 @@ enum L10n {
             NSLocalizedString("find.hint", value: "Bluetooth reaches roughly 10–30 m indoors. This finds a card under a cushion or in a bag — it is not a city-wide locator, and the card never beacons to strangers.",
                               comment: "Honest limits of the BLE find feature; deliberately in the UI, not a footnote")
         }
+        // MARK: Notification honesty (★ 2026-10-22)
+        static var notifyDenied: String {
+            NSLocalizedString("find.notify_denied",
+                              value: "Notifications are off for this app, so the drop alert can't sound. Turn them on in Settings.",
+                              comment: "Shown when the user has denied notification permission")
+        }
+        static var openSystemSettings: String {
+            NSLocalizedString("find.open_settings", value: "Open Settings", comment: "")
+        }
+        static var sendTestAlert: String {
+            NSLocalizedString("find.test_alert", value: "Send a test alert", comment: "Button: prove the notification channel works")
+        }
+        static var testAlertBody: String {
+            NSLocalizedString("find.test_alert_body",
+                              value: "If you can hear this, the drop alert will work too.",
+                              comment: "Body of the test notification")
+        }
+
+        // MARK: History (★ 2026-10-22)
+        static func historyHeader(_ count: Int) -> String {
+            String(format: NSLocalizedString("find.history_header", value: "Where it was before (%d)", comment: "Disclosure label; %d = number of records"), count)
+        }
+        static func historyMore(_ count: Int) -> String {
+            String(format: NSLocalizedString("find.history_more", value: "and %d older", comment: ""), count)
+        }
+        static var clearHistory: String {
+            NSLocalizedString("find.clear_history", value: "Clear this history", comment: "")
+        }
+
         static var notifyToggle: String {
             NSLocalizedString("find.notify_toggle", value: "Notify me when the card drops",
                               comment: "Toggle: local notification on unexpected disconnect")
         }
+        // ⛔ Legacy (2026-10-22): the "make the card beep" row was **deleted** from
+        //    the page ("如果让卡片响铃无法达到就把这个删除"). These three strings are
+        //    kept only so a rollback of that decision doesn't need re-translation —
+        //    nothing references them.
         static var soundRow: String {
             NSLocalizedString("find.sound_row", value: "Make the card beep",
                               comment: "Would-be row for a buzzer command; disabled, see the reason")
@@ -1515,6 +1558,9 @@ enum L10n {
         static var connection: String { NSLocalizedString("devices.connection", value: "Connection", comment: "Section header for connection behaviour settings") }
         static var autoReconnect: String { NSLocalizedString("devices.auto_reconnect", value: "Auto-Reconnect", comment: "Toggle: reconnect automatically after an unexpected disconnect") }
         static var autoReconnectFooter: String { NSLocalizedString("devices.auto_reconnect_footer", value: "When on, the app reconnects to your most recent device by itself after an unexpected disconnect — for example after the device is powered off and on again. When off, tap the connection pill at the top to reconnect manually.", comment: "Footer explaining both states of the auto-reconnect toggle") }
+        static var switchToThis: String {
+            NSLocalizedString("devices.switch_to_this", value: "Switch", comment: "Row action: connect to this card instead of the current one")
+        }
         static var knownDevices: String { NSLocalizedString("devices.known_devices", comment: "") }
         static var noDevicesYet: String { NSLocalizedString("devices.no_devices_yet", comment: "") }
         static func lastSeen(_ date: String) -> String {

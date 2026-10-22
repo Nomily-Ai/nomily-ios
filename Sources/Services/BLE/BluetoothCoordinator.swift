@@ -570,6 +570,16 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
         recorderLink = link
         recorderDeviceInfo = nil
         if let matched { matchedRecorder = matched }
+        // ★ 2026-10-22 ("其他的几款卡片也要加入一下当前寻找卡片的板块"):
+        // the "find card" page is protocol-agnostic now (last-seen time/place +
+        // RSSI radar + drop alert), so whichever card just came up has to be
+        // registered with the finder. This is the **one funnel** every connect
+        // path goes through — manual tap, Wi-Fi fast transfer, auto-reconnect —
+        // so doing it here means no future protocol can forget it.
+        //   · `name` is what the radio advertises → used for RSSI matching;
+        //   · `displayName` is the alias the user gave the card → used in the header.
+        PlaudCardFinder.shared.register(cardName: matched?.name ?? link.displayName,
+                                        label: matched?.displayName ?? link.displayName)
         // ⚠️ Identity must be "update if present, keep otherwise". When `matched == nil` the advertised identity is unavailable,
         //    and if we wrote a record with `identityHex = ""` anyway, it would wipe the SN recorded last time ——
         //    and the SN is the only source of Wi-Fi fast-transfer credentials, so the result is "the fast-transfer button suddenly doesn't light up after reconnecting".
@@ -1242,6 +1252,18 @@ extension BluetoothCoordinator: CBCentralManagerDelegate {
                 // trap the user in a "spinning" state. **Not counted in `unexpectedDisconnects`** ——
                 // That counter triggers automatic reconnection for D·NOTE.
                 let recordID = recorder.peripheral.identifier.uuidString
+                // ★ 2026-10-22: record the drop for the shared find page before
+                // the link state is torn down — this is the only place that sees
+                // **any** recorder card disappear, whatever the protocol is.
+                // `unexpected` mirrors the reconnect condition a few lines below:
+                // a Wi-Fi hand-off or a self-initiated teardown is not a loss, so
+                // it must not ring; a real drop must.
+                let lostUnexpectedly = self.recorderReconnectTask == nil
+                    && self.recorderWifiTransferCount == 0
+                PlaudCardFinder.shared.noteDisconnected(
+                    unexpected: lostUnexpectedly,
+                    cardName: self.matchedRecorder?.displayName ?? recorder.displayName
+                )
                 recorder.handleDisconnect(error: error)
                 self.recorderLink = nil
                 self.recorderDeviceInfo = nil

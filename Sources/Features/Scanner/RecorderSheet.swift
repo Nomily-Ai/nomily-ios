@@ -343,6 +343,10 @@ struct RecorderDeviceView: View {
     var body: some View {
         content
             .task { await enterPage() }
+            // The find-card scan costs radio time and is only meaningful while
+            // its section is on screen — a page that has been left must not keep
+            // listening (same contract as `PlaudDeviceDetailView`).
+            .onDisappear { PlaudCardFinder.shared.setScanning(false) }
             // ★ Card status **is only read when the card info is opened** (user's original words: "Don't read the device every time it's tapped").
             //   Previously `connectAndList` unconditionally did one read at the end —— on-device stats counted `readDeviceInfo`
             //   being called 29 times, while the flows that actually need it (start recording / download) were only 20.
@@ -1034,6 +1038,17 @@ struct RecorderDeviceView: View {
         if let ticNote = connectedLink as? TicNoteLink {
             CardMicGainSection(link: ticNote, cardScopeKey: cardScopeKey)
         }
+
+        // ④b ★ Find my card — 2026-10-22 ("其他的几款卡片也要加入一下当前寻找卡片的板块
+        //    ... 也是在添加完成后卡片信息里面找到").
+        //
+        // Placed with the **physical-card** facts (after battery/gain, before the
+        // App-side transfer preferences): "where did I leave it" describes the
+        // object in hand, not a preference. This is the same `FindCardSection`
+        // the PLAUD device page uses — it is protocol-agnostic, and the only
+        // per-card input is whether the link is up, because a connected
+        // peripheral stops advertising and the radar has nothing to measure.
+        FindCardSection(connected: connectedLink?.isConnected ?? false)
 
         // ⑤
         CardTransferPrefsSection()

@@ -1247,13 +1247,21 @@ struct PlaudDeviceDetailView: View {
 /// Pure-App "find my card": last-seen time/place, three-tier RSSI proximity,
 /// and an optional drop notification.
 ///
+/// ★ 2026-10-22 ("其他的几款卡片也要加入一下当前寻找卡片的板块"): this section is
+/// **card-agnostic** now. Nothing in it is PLAUD-specific — the drop timestamp,
+/// the coarse location, the RSSI radar and the local notification all come from
+/// CoreBluetooth/CoreLocation, so TicNote and DingTalk A1 get exactly the same
+/// page (it is mounted from `RecorderSheet.cardInfoContent`, i.e. "card info
+/// after the card was added", which is where the user looked for it). The only
+/// per-card input is `connected`, hence the value-typed property below instead
+/// of a `PlaudDirectService` reference.
+///
 /// ## What it deliberately does NOT do
 /// No buzzer. PLAUD's SDK has no beep command at all — grep over the whole
 /// string table finds only `getFindMyState` / `sendFindMyToken` / `resetFindmy`
 /// (Apple Find My), so 任务 8.2 physically cannot ship before the firmware
-/// grows a `CMD_FIND_DEVICE`. The row is still on screen, greyed, with the
-/// reason inline: hiding it would only produce the "why is there no beep"
-/// question later.
+/// grows a `CMD_FIND_DEVICE`. The row was **removed** (2026-10-22) rather than
+/// kept as a greyed apology — see the note inside `body`.
 ///
 /// ## Why proximity only works while disconnected
 /// A BLE peripheral that is connected stops advertising, and the tier comes
@@ -1261,15 +1269,26 @@ struct PlaudDeviceDetailView: View {
 /// that is connected is by definition within range, so the section shows that
 /// instead of a fake reading.
 struct FindCardSection: View {
-    @ObservedObject var direct: PlaudDirectService
+    /// Is the card this page belongs to linked right now? When true the radar
+    /// row is replaced by "connected", because a connected peripheral stops
+    /// advertising and there is nothing to measure.
+    var connected: Bool
     @ObservedObject private var finder = PlaudCardFinder.shared
-    @State private var showSoundInfo = false
 
-    private var connected: Bool { direct.phase.isConnected }
+    /// The Settings → Devices page has the service in hand and no link object.
+    init(direct: PlaudDirectService) {
+        self.connected = direct.phase.isConnected
+    }
+
+    /// Any other recorder: the page already knows whether its link is up.
+    init(connected: Bool) {
+        self.connected = connected
+    }
 
     var body: some View {
         Section {
             lastSeenRows
+            historyGroup
             if finder.locationDenied {
                 Label(L10n.Find.placeDenied, systemImage: "location.slash")
                     .font(.footnote)
@@ -1279,35 +1298,75 @@ struct FindCardSection: View {
             Toggle(isOn: $finder.notifyOnDisconnect) {
                 Label(L10n.Find.notifyToggle, systemImage: "bell.badge")
             }
-            // ★ 2026-10-22 ("为啥是锁着的"): a dead grey row with a lock told the
-            // user nothing. Tapping it now explains *why* — the card's SDK has no
-            // buzzer command at all, so there is nothing to send — and what does
-            // work today. Still not enabled: a button that appears to do something
-            // and silently doesn't is worse than an honest lock.
-            Button {
-                showSoundInfo = true
-            } label: {
-                HStack {
-                    Label(L10n.Find.soundRow, systemImage: "speaker.wave.2")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Image(systemName: "lock")
-                        .foregroundStyle(.tertiary)
+            // ★ 2026-10-22 ("卡片断开提醒手机没任何响铃"): the permission is now asked
+            // for when the switch is turned on, and when it is off the page says so
+            // instead of letting the alert fail silently. The test button exists
+            // because "does this phone actually make a sound" should be answerable
+            // without waiting to lose a card.
+            if finder.notificationsDenied {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.Find.notifyDenied)
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                    Link(L10n.Find.openSystemSettings,
+                         destination: URL(string: UIApplication.openSettingsURLString)!)
+                        .font(.footnote)
+                }
+            } else if finder.notifyOnDisconnect {
+                Button {
+                    finder.sendTestAlert()
+                } label: {
+                    Label(L10n.Find.sendTestAlert, systemImage: "bell.and.waves.left.and.right")
                 }
             }
-            .alert(L10n.Find.soundRow, isPresented: $showSoundInfo) {
-                Button(L10n.Common.done, role: .cancel) {}
-            } message: {
-                Text(L10n.Find.soundWhyLocked)
-            }
+            // ★ Removed 2026-10-22: the "make the card ring" row. The card's SDK
+            // has no buzzer command (only `getFindMyState`), so the row could only
+            // ever explain why it does nothing — a permanent apology in the middle
+            // of a working feature. "如果让卡片响铃无法达到就把这个删除" — done.
         } header: {
-            Text(L10n.Find.header)
-        } footer: {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(L10n.Find.hint)
-                Text(L10n.Find.soundUnavailable)
+            // Name the card when one is registered, so "find card" is
+            // unambiguous once several are paired.
+            if let label = finder.targetLabel {
+                Text(L10n.Find.headerFor(label))
+            } else {
+                Text(L10n.Find.header)
             }
-            .font(.footnote)
+        } footer: {
+            Text(L10n.Find.hint).font(.footnote)
+        }
+    }
+
+    // MARK: History
+
+    /// Past "last seen" points. Disclosure rather than a pushed page: this lives
+    /// inside a device sheet, and a second navigation level for a list of twenty
+    /// timestamps would be heavier than the content.
+    @ViewBuilder
+    private var historyGroup: some View {
+        if !finder.history.isEmpty {
+            DisclosureGroup {
+                ForEach(finder.history.prefix(10)) { seen in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(seen.at.formatted(date: .abbreviated, time: .shortened))
+                            .font(.footnote)
+                        Text(seen.place ?? L10n.Find.placeUnknown)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if finder.history.count > 10 {
+                    Text(L10n.Find.historyMore(finder.history.count - 10))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Button(role: .destructive) {
+                    finder.clearHistory()
+                } label: {
+                    Text(L10n.Find.clearHistory).font(.footnote)
+                }
+            } label: {
+                Label(L10n.Find.historyHeader(finder.history.count), systemImage: "clock.badge.checkmark")
+            }
         }
     }
 

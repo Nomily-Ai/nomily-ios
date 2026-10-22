@@ -52,20 +52,59 @@ final class PlaudCardFinder: NSObject, ObservableObject {
     /// True when there is no location permission at all — the page shows an
     /// explanation instead of a silently empty row.
     @Published private(set) var locationDenied = false
+    /// Notification permission is off. 2026-10-22 ("卡片断开提醒手机没任何响铃"):
+    /// the old code asked for permission *at the moment of the drop* and silently
+    /// dropped the alert when the answer was no, so "nothing happened" was the
+    /// normal outcome. The page now says so up front and offers a test.
+    @Published private(set) var notificationsDenied = false
+    /// Where this card was last seen, newest first, so "it was here an hour ago,
+    /// then there" is answerable at all.
+    @Published private(set) var history: [Seen] = []
     @Published var notifyOnDisconnect: Bool {
-        didSet { UserDefaults.standard.set(notifyOnDisconnect, forKey: Self.notifyKey) }
+        didSet {
+            UserDefaults.standard.set(notifyOnDisconnect, forKey: Self.notifyKey)
+            // Ask while the user is *looking at the switch they just turned on*,
+            // not three days later at the moment a card is lost.
+            if notifyOnDisconnect { requestNotificationPermission() }
+        }
+    }
+
+    /// One "last seen" record. Coordinates are optional because location may be
+    /// denied, and a record with a time but no place is still useful.
+    struct Seen: Codable, Identifiable, Equatable {
+        var at: Date
+        var place: String?
+        var latitude: Double?
+        var longitude: Double?
+        var id: Date { at }
+        var coordinate: CLLocationCoordinate2D? {
+            guard let latitude, let longitude else { return nil }
+            return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        }
     }
 
     /// The advertisement name to look for (e.g. the card's BLE name), as read
     /// from the scan result. Matching is deliberately fuzzy — see `matches(_:)`.
     var targetName: String?
+    /// What the find page calls the card ("PLAUD NotePin", or the alias the
+    /// user gave it). Display only — never used for matching.
+    @Published private(set) var targetLabel: String?
 
     /// Names PLAUD cards actually advertise under, used when `targetName` is
     /// empty (the card was re-bound from a cold launch and the scan result is
     /// gone). Scanning runs with `withServices: nil` so it sees every nearby
     /// peripheral — AirPods, a keyboard — hence the list stays PLAUD-specific
     /// rather than matching "note" and pinging on a neighbour's laptop.
-    private static let nameHints = ["plaud", "notepin", "note pin", "notepro", "note pro", "notecard"]
+    ///
+    /// ★ 2026-10-22 ("其他的几款卡片也要加入一下"): the finder is no longer
+    /// PLAUD-only. Every recorder the app can pair advertises under one of these
+    /// families — PLAUD's Note/NotePin, TicNote, DingTalk A1 — so the same
+    /// proximity radar works for whichever card is in hand. Names stay specific
+    /// enough not to latch onto a neighbour's headphones.
+    private static let nameHints = [
+        "plaud", "notepin", "note pin", "notepro", "note pro", "notecard",
+        "ticnote", "tic note", "dingtalk a1", "dingtalk",
+    ]
 
     private var central: CBCentralManager?
     private let location = CLLocationManager()
@@ -75,6 +114,10 @@ final class PlaudCardFinder: NSObject, ObservableObject {
     private static let lastSeenPlaceKey = "plaud.last_seen_place"
     private static let lastSeenLatKey = "plaud.last_seen_lat"
     private static let lastSeenLonKey = "plaud.last_seen_lon"
+    private static let historyKey = "plaud.last_seen_history"
+    /// A card is not a tracker: 20 entries is enough to answer "where did I leave
+    /// it today" without keeping a movement log on the device.
+    private static let historyLimit = 20
 
     private override init() {
         notifyOnDisconnect = UserDefaults.standard.object(forKey: Self.notifyKey) as? Bool ?? true
@@ -89,7 +132,16 @@ final class PlaudCardFinder: NSObject, ObservableObject {
                 lastSeenCoordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
             }
         }
+        if let data = UserDefaults.standard.data(forKey: Self.historyKey),
+           let saved = try? JSONDecoder().decode([Seen].self, from: data) {
+            history = saved
+        }
         super.init()
+        // Foreground delivery: without a delegate, iOS suppresses a notification
+        // that fires while the app is open — which is exactly when a BLE drop is
+        // noticed, so the alert looked broken by design.
+        UNUserNotificationCenter.current().delegate = self
+        refreshNotificationStatus()
         location.delegate = self
         location.desiredAccuracy = kCLLocationAccuracyHundredMeters
     }
@@ -106,6 +158,21 @@ final class PlaudCardFinder: NSObject, ObservableObject {
         }
         locationDenied = location.authorizationStatus == .denied
             || location.authorizationStatus == .restricted
+        // ★ 2026-10-22: same reasoning for notifications. The toggle ships ON,
+        // so a fresh install would never ask and every drop alert would then be
+        // suppressed — the reported "no sound at all". Asking at connect time
+        // ("the card is with you now") is the natural moment, and it is gated on
+        // `notDetermined`, so it happens at most once.
+        if notifyOnDisconnect { requestNotificationPermissionIfNeeded() }
+    }
+
+    /// Ask only when iOS has never been asked, so the system prompt cannot
+    /// reappear on every connect.
+    private func requestNotificationPermissionIfNeeded() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .notDetermined else { return }
+            Task { @MainActor in self.requestNotificationPermission() }
+        }
     }
 
     /// The link dropped. `unexpected` drives the notification: a user who
@@ -115,14 +182,69 @@ final class PlaudCardFinder: NSObject, ObservableObject {
     /// the SDK's `bleDeviceDisconnectErr` fires right after, so without it the
     /// user gets two notifications for one disconnect.
     func noteDisconnected(unexpected: Bool, cardName: String?) {
-        lastSeenAt = Date()
-        UserDefaults.standard.set(lastSeenAt, forKey: Self.lastSeenKey)
+        let now = Date()
+        lastSeenAt = now
+        UserDefaults.standard.set(now, forKey: Self.lastSeenKey)
+        // Record first, then geocode: the time is known immediately, the place
+        // arrives a second later and patches the same entry.
+        recordSeen(at: now, place: lastSeenPlace, coordinate: lastSeenCoordinate)
         capturePlace()
         guard unexpected, notifyOnDisconnect else { return }
         guard Date().timeIntervalSince(lastDropAlertAt) > 5 else { return }
         lastDropAlertAt = Date()
-        notify(title: L10n.Find.title,
-               body: L10n.Find.dropBody(cardName ?? L10n.Find.thisCard))
+        deliver(title: L10n.Find.title,
+                body: L10n.Find.dropBody(cardName ?? L10n.Find.thisCard))
+    }
+
+    /// Register the card the app just connected to, so the radar looks for the
+    /// right name. Called by every recorder, not only PLAUD.
+    ///
+    /// `cardName` is the **advertised** BLE name (`DiscoveredRecorder.name`) —
+    /// that is what `CBAdvertisementDataLocalNameKey` carries. `label` is what
+    /// the page shows in its header (`recorder.displayName`, i.e. the user's
+    /// alias when there is one); it never takes part in matching, because an
+    /// alias is app-side text the radio never sees.
+    func register(cardName: String?, label: String? = nil) {
+        if let cardName, !cardName.isEmpty { targetName = cardName }
+        if let label, !label.isEmpty { targetLabel = label }
+        noteConnected()
+    }
+
+    /// The name for the section header ("Find PLAUD NotePin"), so the page is
+    /// explicit about *which* card it is looking for once several are paired.
+    var displayName: String? { targetLabel }
+
+    // MARK: - History
+
+    private func recordSeen(at date: Date, place: String?, coordinate: CLLocationCoordinate2D?) {
+        history.insert(Seen(at: date, place: place,
+                            latitude: coordinate?.latitude, longitude: coordinate?.longitude),
+                       at: 0)
+        if history.count > Self.historyLimit {
+            history = Array(history.prefix(Self.historyLimit))
+        }
+        persistHistory()
+    }
+
+    /// The geocoder answers after the record exists — fill in that entry rather
+    /// than appending a second one for the same disconnect.
+    private func patchNewestSeen(place: String?, coordinate: CLLocationCoordinate2D?) {
+        guard !history.isEmpty else { return }
+        history[0].place = place
+        history[0].latitude = coordinate?.latitude
+        history[0].longitude = coordinate?.longitude
+        persistHistory()
+    }
+
+    func clearHistory() {
+        history = []
+        persistHistory()
+    }
+
+    private func persistHistory() {
+        if let data = try? JSONEncoder().encode(history) {
+            UserDefaults.standard.set(data, forKey: Self.historyKey)
+        }
     }
 
     private var lastDropAlertAt = Date.distantPast
@@ -215,18 +337,76 @@ final class PlaudCardFinder: NSObject, ObservableObject {
 
     // MARK: - Notification
 
-    private func notify(title: String, body: String) {
+    /// ★ 2026-10-22 ("卡片断开提醒手机没任何响铃"). Three separate reasons the old
+    /// version was silent, all fixed here:
+    ///
+    /// 1. it asked for permission **at delivery time** and gave up on `granted ==
+    ///    false` — a first-time user, i.e. almost everyone, got nothing;
+    /// 2. with no `UNUserNotificationCenterDelegate`, iOS suppresses a
+    ///    notification posted while the app is in the foreground, which is exactly
+    ///    when a BLE drop is witnessed;
+    /// 3. nothing was logged, so "did we even try?" was unanswerable.
+    func deliver(title: String, body: String) {
         let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            guard granted else { return }
+        func enqueue() {
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
             content.sound = .default
-            let request = UNNotificationRequest(identifier: "plaud.card.drop.\(UUID().uuidString)",
+            // Time sensitive so a Focus mode doesn't swallow "your card is gone".
+            content.interruptionLevel = .timeSensitive
+            let request = UNNotificationRequest(identifier: "card.finder.\(UUID().uuidString)",
                                                 content: content, trigger: nil)
-            center.add(request)
+            center.add(request) { error in
+                TicNoteDiagLog.log("FIND", "alert queued err=\(error?.localizedDescription ?? "none")")
+            }
         }
+        center.getNotificationSettings { settings in
+            let status = settings.authorizationStatus
+            switch status {
+            case .authorized, .provisional, .ephemeral:
+                enqueue()
+            case .notDetermined:
+                // ★ The first drop of a fresh install lands here: the toggle
+                // ships ON, so nobody ever flipped it and the permission was
+                // never asked — the old code simply gave up, which is exactly
+                // "卡片断开提醒手机没任何响铃". Ask now and deliver if granted.
+                TicNoteDiagLog.log("FIND", "alert: permission never asked — asking now")
+                center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+                    if granted {
+                        enqueue()
+                    } else {
+                        Task { @MainActor in self.notificationsDenied = true }
+                    }
+                    TicNoteDiagLog.log("FIND", "alert permission granted=\(granted) err=\(error?.localizedDescription ?? "none")")
+                }
+            default:
+                Task { @MainActor in self.notificationsDenied = true }
+                TicNoteDiagLog.log("FIND", "alert suppressed: authorization=\(status.rawValue)")
+            }
+        }
+    }
+
+    /// Ask once, at a moment that makes sense (the toggle, or a first connect).
+    func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            Task { @MainActor in
+                self.notificationsDenied = !granted
+                TicNoteDiagLog.log("FIND", "notify permission granted=\(granted) err=\(error?.localizedDescription ?? "none")")
+            }
+        }
+    }
+
+    func refreshNotificationStatus() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let denied = settings.authorizationStatus == .denied
+            Task { @MainActor in self.notificationsDenied = denied }
+        }
+    }
+
+    /// Lets the user prove the channel works without waiting to lose a card.
+    func sendTestAlert() {
+        deliver(title: L10n.Find.title, body: L10n.Find.testAlertBody)
     }
 }
 
@@ -294,6 +474,7 @@ extension PlaudCardFinder: CLLocationManagerDelegate {
                 UserDefaults.standard.set(self.lastSeenPlace, forKey: Self.lastSeenPlaceKey)
                 UserDefaults.standard.set(coordinate.latitude, forKey: Self.lastSeenLatKey)
                 UserDefaults.standard.set(coordinate.longitude, forKey: Self.lastSeenLonKey)
+                self.patchNewestSeen(place: self.lastSeenPlace, coordinate: coordinate)
             }
         }
     }
@@ -304,5 +485,20 @@ extension PlaudCardFinder: CLLocationManagerDelegate {
 
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         log.info("card finder location failed: \(error.localizedDescription, privacy: .public)")
+    }
+}
+
+// MARK: - UNUserNotificationCenterDelegate
+
+extension PlaudCardFinder: UNUserNotificationCenterDelegate {
+
+    /// Without this the alert is dropped in the foreground — the app is open
+    /// exactly when someone watches the card disconnect.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list, .sound])
     }
 }

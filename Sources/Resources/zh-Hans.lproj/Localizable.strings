@@ -1542,9 +1542,10 @@
 
 /* 任务八 · 8.1 寻找卡片（BLE 纯 App 兜底） */
 "find.header" = "寻找卡片";
+"find.header_for" = "寻找 %@";
 "find.title" = "卡片不在身边";
 "find.drop_body" = "%@ 已断开连接。它最后就在这里。";
-"find.this_card" = "你的 PLAUD 卡片";
+"find.this_card" = "你的卡片";
 "find.last_seen_header" = "最后见到";
 "find.last_seen_never" = "还没有记录——卡片第一次断开时会自动填上。";
 "find.place_unknown" = "未记录位置";
@@ -1634,3 +1635,11 @@
 "asr.cloud.field.accessKey" = "Access key ID";
 "asr.cloud.field.secretKey" = "Secret access key";
 "asr.cloud.field.region" = "区域";
+"find.notify_denied" = "这个 App 的通知权限是关的，断开提醒响不了。到系统设置里打开。";
+"find.open_settings" = "打开系统设置";
+"find.test_alert" = "发一条测试通知";
+"find.test_alert_body" = "能听到这条，断开提醒就能响。";
+"find.history_header" = "之前的最后位置（%d 条）";
+"find.history_more" = "另有 %d 条更早的";
+"find.clear_history" = "清除这些记录";
+"devices.switch_to_this" = "切换";
