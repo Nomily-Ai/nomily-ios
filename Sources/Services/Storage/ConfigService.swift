@@ -163,9 +163,12 @@ final class ConfigService: ObservableObject {
 
     /// Preset id → Keychain slot. One table, read by both directions, so a new
     /// preset can never end up "saved but never loaded back".
+    ///
+    /// `llmArk` is deliberately **missing**: 豆包 and 火山方舟 became one card, and
+    /// the old `ark` slot is only read once by `mergeArkIntoDoubao` — keeping it in
+    /// this table would keep re-creating a row the page no longer shows.
     static let presetSecretSlots: [(String, SecretStore.Slot)] = [
-        ("qwen", .llmQwen), ("deepseek", .llmDeepSeek),
-        ("doubao", .llmDoubao), ("ark", .llmArk),
+        ("qwen", .llmQwen), ("deepseek", .llmDeepSeek), ("doubao", .llmDoubao),
     ]
 
     private static func extractSecrets(_ config: AppConfig) -> AppConfig {
@@ -233,9 +236,41 @@ final class ConfigService: ObservableObject {
         for (id, slot) in Self.presetSecretSlots where config.llmProviders.preset(id) != nil {
             config.llmProviders.presets?[id]?.apiKey = SecretStore.load(slot)
         }
+        Self.mergeArkIntoDoubao(&config)
         if config.wifiAP != nil {
             config.wifiAP?.psk = SecretStore.load(.wifiAPPassword) ?? ""
         }
+    }
+
+    /// One-time merge for the 豆包 / 火山方舟 de-duplication (2026-10-22).
+    ///
+    /// Both cards pointed at `ark.cn-beijing.volces.com/api/v3` and used the same
+    /// key, so they are one row now. A config written by an older build can still
+    /// hold `presets["ark"]`, and dropping it silently would look like "my 火山方舟
+    /// key disappeared". So the entry is folded into `doubao`, **field by field,
+    /// only where `doubao` is empty** — an existing 豆包 setup is never overwritten.
+    ///
+    /// The key lives in the Keychain under `llm.ark.api_key`, which is still a valid
+    /// `SecretStore.Slot`; it just no longer appears in `presetSecretSlots`. Once
+    /// merged, the next save writes it into the `llm.doubao` slot.
+    ///
+    /// Runs in memory only. There is nothing to persist here: `config.json` keeps
+    /// whatever the user actually saved until the next ordinary save, and the merge
+    /// is idempotent (no `ark` entry left ⇒ no-op).
+    private static func mergeArkIntoDoubao(_ config: inout AppConfig) {
+        guard var presets = config.llmProviders.presets,
+              let ark = presets.removeValue(forKey: "ark") else { return }
+
+        var target = presets["doubao"] ?? ark
+        if (target.apiKey ?? "").isEmpty {
+            target.apiKey = (ark.apiKey?.isEmpty == false ? ark.apiKey : SecretStore.load(.llmArk))
+        }
+        if target.endpoint.isEmpty { target.endpoint = ark.endpoint }
+        if (target.model ?? "").isEmpty { target.model = ark.model }
+        presets["doubao"] = target
+        config.llmProviders.presets = presets
+        if config.llmProviders.primary == "ark" { config.llmProviders.primary = "doubao" }
+        log.info("merged the retired ark preset into doubao (same host, same key)")
     }
 
     /// Returns true when the file on disk still carried plaintext secrets,

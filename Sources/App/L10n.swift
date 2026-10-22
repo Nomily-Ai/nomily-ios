@@ -1212,7 +1212,7 @@ enum L10n {
         // or a field the user has to go look up, defeats it.
         static var presetHeader: String {
             NSLocalizedString("llm.preset.header", value: "One-tap providers",
-                              comment: "Section header: Qwen / DeepSeek / Doubao / Ark icon grid")
+                              comment: "Section header: Qwen / DeepSeek / Doubao icon grid")
         }
         static var presetFooter: String {
             NSLocalizedString("llm.preset.footer",

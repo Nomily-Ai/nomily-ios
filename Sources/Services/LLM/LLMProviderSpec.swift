@@ -11,12 +11,12 @@ enum LLMProviderStorage: Equatable {
     case keyed(String)
     /// `openRouter` / `ollama` / `custom` — the address is part of the config.
     case endpoint(String)
-    /// `qwen` / `deepseek` / `doubao` / `ark` — stored in the `presets` dictionary.
+    /// `qwen` / `deepseek` / `doubao` — stored in the `presets` dictionary.
     case preset(String)
 }
 
 /// One row in the provider grid: ChatGPT, Claude, Gemini, OpenRouter, Ollama,
-/// Custom, plus the four domestic ones.
+/// Custom, plus the three domestic ones.
 ///
 /// 2026-10-22 request:
 /// > "下面的 openrouter 也要要国外的主流模型，Claude / chatgpt / gemini，ollama 跟用户自定义的
@@ -24,7 +24,7 @@ enum LLMProviderStorage: Equatable {
 /// >  能够根据我们支持的模型才可以在里面进行选择"
 ///
 /// Three things fall out of that sentence, and this type is where the first one lives:
-/// 1. the grid covers **every** provider, not just the domestic four;
+/// 1. the grid covers **every** provider, not just the domestic ones;
 /// 2. each has its own mark, because recognising the icon *is* the interaction;
 /// 3. the model list is filtered to what this app can actually call — see
 ///    `LLMModelService.chatCapableModels`.
@@ -43,7 +43,8 @@ struct LLMProviderSpec: Identifiable, Equatable {
 
     let id: String
     let name: String
-    /// 1–2 glyphs drawn inside the icon tile. Never translated — it is a logo.
+    /// 1–2 glyphs drawn inside the icon tile when there is no brand artwork.
+    /// Never translated — it is a logo.
     let mark: String
     let kind: Kind
     let storage: LLMProviderStorage
@@ -72,8 +73,29 @@ struct LLMProviderSpec: Identifiable, Equatable {
         case "custom":     return (0.45, 0.47, 0.52)
         case "qwen":       return (0.42, 0.36, 1.00)
         case "deepseek":   return (0.28, 0.42, 0.98)
-        case "doubao":     return (0.16, 0.44, 0.84)
-        default:           return (0.98, 0.36, 0.20)   // 火山方舟
+        default:           return (0.16, 0.44, 0.84)   // 豆包 / 火山方舟
+        }
+    }
+
+    /// Asset-catalog name of the vendor's real logo, or `nil` where there is no
+    /// logo to show. 2026-10-22:
+    /// > "不要文字字幕做图标，需要按照当前他们模型 Logo 做图标"
+    ///
+    /// The SVGs are single-path monochrome marks (`@lobehub/icons-static-svg`),
+    /// imported as **template** images, so the tile only supplies a colour and one
+    /// file works in light and dark mode. Custom has no vendor, hence the fallback
+    /// to `mark`.
+    var brandAsset: String? {
+        switch id {
+        case "openai":     return "BrandOpenAI"
+        case "claude":     return "BrandClaude"
+        case "gemini":     return "BrandGemini"
+        case "openRouter": return "BrandOpenRouter"
+        case "ollama":     return "BrandOllama"
+        case "qwen":       return "BrandQwen"
+        case "deepseek":   return "BrandDeepSeek"
+        case "doubao":     return "BrandDoubao"
+        default:           return nil
         }
     }
 
@@ -81,7 +103,8 @@ struct LLMProviderSpec: Identifiable, Equatable {
 
     static let all: [LLMProviderSpec] = overseas + domestic
     static let overseas: [LLMProviderSpec] = [chatgpt, claude, gemini, openRouter, ollama, custom]
-    static let domestic: [LLMProviderSpec] = [qwen, deepseek, doubao, ark]
+    /// Three, not four: 豆包 and 火山方舟 are the same host and the same key.
+    static let domestic: [LLMProviderSpec] = [qwen, deepseek, doubao]
 
     static func find(_ id: String) -> LLMProviderSpec? { all.first { $0.id == id } }
 
@@ -175,12 +198,11 @@ struct LLMProviderSpec: Identifiable, Equatable {
         note: "任何 OpenAI 兼容的 /v1 地址（中转、自建 vLLM、LM Studio 都算）。密钥可以留空。"
     )
 
-    // Domestic four, derived from `LLMPreset` so the endpoint/model lists are
+    // Domestic three, derived from `LLMPreset` so the endpoint/model lists are
     // written down exactly once.
     static let qwen = from(LLMPreset.qwen)
     static let deepseek = from(LLMPreset.deepseek)
     static let doubao = from(LLMPreset.doubao)
-    static let ark = from(LLMPreset.ark)
 
     private static func from(_ preset: LLMPreset) -> LLMProviderSpec {
         LLMProviderSpec(

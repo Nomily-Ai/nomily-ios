@@ -1435,9 +1435,15 @@ private struct ProviderRow: View {
     }
 }
 
-/// Brand tile. A letter mark rather than an SF Symbol: there is no glyph for
-/// 豆包 or 方舟, and giving all ten a generic "cloud" would defeat the point —
-/// recognising which icon is which *is* the interaction.
+/// Brand tile — the vendor's own logo on its brand-coloured square.
+///
+/// 2026-10-22:
+/// > "不要文字字幕做图标，需要按照当前他们模型 Logo 做图标"
+///
+/// so the letter marks ("通" / "DS" / "豆" / "火") are gone. The logos are
+/// monochrome template images; the tile supplies the colour, which means the same
+/// asset works in light and dark mode and never looks like a mismatched sticker.
+/// `custom` has no vendor, so it keeps a symbol rather than a fake logo.
 private struct ProviderMark: View {
     let spec: LLMProviderSpec
 
@@ -1453,12 +1459,28 @@ private struct ProviderMark: View {
                                startPoint: .topLeading, endPoint: .bottomTrailing)
             )
             .frame(width: 32, height: 32)
-            .overlay(
-                Text(spec.mark)
-                    .font(.system(size: spec.mark.count > 1 ? 11 : 15, weight: .bold))
-                    .foregroundStyle(.white)
-            )
+            .overlay { glyph }
             .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var glyph: some View {
+        if let asset = spec.brandAsset {
+            Image(asset)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(.white)
+                .padding(7)
+        } else if spec.id == "custom" {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+        } else {
+            Text(spec.mark)
+                .font(.system(size: spec.mark.count > 1 ? 11 : 15, weight: .bold))
+                .foregroundStyle(.white)
+        }
     }
 }
 

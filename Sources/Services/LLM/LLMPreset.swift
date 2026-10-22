@@ -16,10 +16,14 @@ import Foundation
 /// fallback) instead of being four more bespoke clients. That is also why they can
 /// live in one dictionary on `LlmProviders` rather than four top-level fields.
 ///
-/// ⚠️ Doubao and Volcengine Ark are the **same host** on purpose: 豆包 models are
-/// served by 火山方舟. The two cards differ only in what you paste into "model" —
-/// a model name (`doubao-seed-1-6-…`) versus an inference endpoint id (`ep-…`),
-/// which is the only option on accounts that can't call models by name.
+/// ⚠️ 豆包 and 火山方舟 used to be two cards and were **one row too many**: 豆包
+/// models are served by 火山方舟, so both cards had the identical endpoint
+/// `ark.cn-beijing.volces.com/api/v3` and the identical key. 2026-10-22:
+/// > "火山引擎的跟豆包好像是同一家去重一下"
+/// One card now, and the *model* field takes either form — a model name
+/// (`doubao-seed-1-6-…`) or an inference endpoint id (`ep-…`), which is the only
+/// option on accounts that can't call models by name. Old `ark` configs are folded
+/// into this one on launch, see `ConfigService.mergeArkIntoDoubao`.
 struct LLMPreset: Identifiable, Equatable {
 
     let id: String
@@ -40,7 +44,7 @@ struct LLMPreset: Identifiable, Equatable {
     /// Caveat specific to this provider (nil = nothing to warn about).
     let note: String?
 
-    static let all: [LLMPreset] = [qwen, deepseek, doubao, ark]
+    static let all: [LLMPreset] = [qwen, deepseek, doubao]
 
     static func find(_ id: String) -> LLMPreset? { all.first { $0.id == id } }
 
@@ -66,23 +70,16 @@ struct LLMPreset: Identifiable, Equatable {
         note: nil
     )
 
+    /// 豆包 = 火山方舟. One card, because they are one service — the only thing
+    /// that differed was what you paste into "model".
     static let doubao = LLMPreset(
         id: "doubao",
-        name: "豆包",
+        name: "豆包 · 火山方舟",
         mark: "豆",
         endpoint: "https://ark.cn-beijing.volces.com/api/v3",
-        models: ["doubao-seed-1-6-250615", "doubao-pro-32k-241215", "doubao-lite-128k-240428"],
+        models: ["doubao-seed-1-6-250615", "doubao-1-5-pro-32k-250115",
+                 "doubao-pro-32k-241215", "doubao-lite-128k-240428"],
         console: "console.volcengine.com/ark → API Key",
-        note: "豆包由火山引擎方舟提供，两个卡片是同一个入口；这里填模型名（doubao-…）即可。"
-    )
-
-    static let ark = LLMPreset(
-        id: "ark",
-        name: "火山方舟",
-        mark: "火",
-        endpoint: "https://ark.cn-beijing.volces.com/api/v3",
-        models: [],
-        console: "console.volcengine.com/ark → 在线推理 → 接入点",
-        note: "方舟也可以只按接入点调用：模型一栏填 ep- 开头的接入点 ID（形如 ep-2024xxxx-xxxxx）。"
+        note: "豆包由火山引擎方舟提供。模型一栏可以填模型名（doubao-…），也可以填推理接入点 ID（ep-… 开头，账号不能按名调用时用这种）。"
     )
 }
