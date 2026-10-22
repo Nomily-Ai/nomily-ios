@@ -710,48 +710,45 @@ struct PlaudCardFilesView: View {
                 LevelMeter(level: direct.liveLevel)
                     .frame(height: 6)
             }
-            // ★ 打点 (bookmarks pressed on the card while recording). Polled
-            // every 3 s via `bleAgent.getMarking(sessionId:)` — `bleMarking` is
-            // an answer, not a push, so without the poll the count only appeared
-            // after the recording ended.
-            if direct.isRecording || direct.recordMarkCount > 0 {
-                HStack {
-                    Label(L10n.Plaud.marksLive, systemImage: "bookmark")
-                    Spacer()
-                    // Two honest states (2026-10-21, 7th round):
-                    //  · the card answers `getMarking` → live count;
-                    //  · it does not (Note Pro V1.7 ignores cmd 0x23 — verified in
-                    //    the SDK's own command log) → say the number lands after
-                    //    the take, and fill it from the finished file's
-                    //    `penCollect` instead of leaving a dead "—".
-                    Group {
-                        if direct.recordMarkCount > 0 {
-                            Text(L10n.Plaud.marksCount(direct.recordMarkCount))
-                                .foregroundStyle(Color.appAccent)
-                        } else if direct.marksAvailableLive {
-                            Text(L10n.Plaud.marksWaiting)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text(L10n.Plaud.marksAfterStop)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .font(.body)
-                }
+            // ★ 打点 (bookmarks pressed on the card). ★ 2026-10-22 on request:
+            //   nothing at all is shown until there IS a count — a row that says
+            //   "the card reports marks when the take ends" for the whole
+            //   recording is noise. When the card does report them, its times are
+            //   what matters, so they are shown as chips next to the count (that
+            //   is also where the old "本次打点" row was pointing).
+            if direct.recordMarkCount > 0 {
+                marksRow
             }
             if let notice = direct.recordNotice {
                 Text(notice).font(.footnote).foregroundStyle(.orange)
             }
-            // ★ 2026-10-22 ("the live transcript cannot keep up"): this used to be
-            // a `Text(...).lineLimit(6)` footnote. `lineLimit` keeps the FIRST six
-            // lines, so after six sentences the screen never changed again even
-            // though recognition kept producing text — it looked like the text
-            // lagged behind the speaker. The panel renders timestamped segments
-            // and auto-scrolls to the newest line instead, and it stays visible
-            // after stopping so the take you just finished can still be read.
-            if direct.isRecording || !direct.liveSegments.isEmpty || direct.liveASRNotice != nil {
-                PlaudLiveTranscriptPanel(direct: direct)
+            // The live transcript itself lives on the 实时 tab (`PlaudLiveScreen`) —
+            // it is not a footnote under the recording controls any more.
+        }
+    }
+
+    private var marksRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "bookmark.fill")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+            Text(L10n.Plaud.marksCount(direct.recordMarkCount))
+                .font(.caption)
+                .foregroundStyle(.orange)
+            ForEach(Array(direct.markTimestamps.prefix(4).enumerated()), id: \.offset) { _, time in
+                Text(PlaudLiveLine.stamp(time))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.orange.opacity(0.14)))
             }
+            if direct.markTimestamps.count > 4 {
+                Text("+\(direct.markTimestamps.count - 4)")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+            Spacer(minLength: 0)
         }
     }
 

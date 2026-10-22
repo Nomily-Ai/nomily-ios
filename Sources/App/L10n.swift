@@ -207,6 +207,7 @@ enum L10n {
         static var liveCopied: String { NSLocalizedString("plaud.live_copied", value: "Copied", comment: "Confirmation after copying the live transcript") }
         static var liveNeedsPermission: String { NSLocalizedString("plaud.live_needs_permission", value: "Live transcription needs Speech Recognition permission — allow it in Settings → Nomily, or the card still records without text.", comment: "Live transcript unavailable: speech permission missing") }
         static var liveModelMissing: String { NSLocalizedString("plaud.live_model_missing", value: "The offline speech model for this language isn't installed on this iPhone, so live text is off. The recording itself is unaffected.", comment: "Live transcript unavailable: on-device model not installed") }
+        static var liveNeedConnect: String { NSLocalizedString("plaud.live_need_connect", value: "Connect the card and the live transcript appears here.", comment: "Live tab, PLAUD card paired but not connected") }
         static var cardFiles: String { NSLocalizedString("plaud.card_files", value: "Recordings on the card", comment: "Home device segment: the card's own file list") }
         static var cardFilesEmpty: String { NSLocalizedString("plaud.card_files_empty", value: "No recordings on the card.", comment: "") }
         static var pauseRecord: String { NSLocalizedString("plaud.pause_record", value: "Pause", comment: "") }

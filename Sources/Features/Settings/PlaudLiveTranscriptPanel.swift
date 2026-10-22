@@ -1,125 +1,41 @@
 import SwiftUI
 import UIKit
 
-/// Live transcript panel for the PLAUD card.
+// MARK: - The transcript itself (shared by the live page and the sheet)
+
+/// Auto-scrolling list of timestamped live lines.
 ///
-/// ## Why this is a view of its own (2026-10-22, "it cannot keep up with me")
-/// The previous UI was a two-line footnote in the recording section:
+/// ## Why scene-by-scene instead of one joined string (2026-10-22)
+/// The old implementation showed `Text(liveTranscript).lineLimit(6)` — and
+/// `lineLimit` keeps the **first** six lines, so once six sentences had been
+/// recognised the screen never changed again while recognition kept working.
+/// That reads exactly like "it cannot keep up with me".
 ///
-/// ```swift
-/// Text(direct.liveTranscript).lineLimit(6)
-/// ```
-///
-/// `lineLimit` keeps the **first** six lines and drops everything after them, so
-/// once six sentences had been recognised the panel stopped changing — the
-/// engine was still working, the screen just never showed it. That reads exactly
-/// like "the transcript lags behind the speaker", which is how it was reported.
-///
-/// This panel:
-/// * renders **segments** (not one joined string), each with the card's own
-///   timestamp (`mm:ss`), so the line you hear is the line at the bottom;
-/// * **auto-scrolls to the newest line** on every commit and on every partial
-///   hypothesis update;
-/// * keeps the text after the recording stops (the take you just finished is
-///   what you want to read), and says so;
-/// * says **why** it is empty instead of showing an empty box — no permission
-///   and no offline model are different problems with different fixes;
-/// * expands into a full-screen sheet with a copy button.
-struct PlaudLiveTranscriptPanel: View {
-    @ObservedObject var direct: PlaudDirectService
-    @State private var expanded = false
+/// This list renders `segments` (each with the card's own clock), keeps the
+/// newest line in view, and shows the in-flight hypothesis separately.
+struct PlaudLiveTranscriptList: View {
+    let segments: [PlaudLiveSegment]
+    let partial: String
+    /// `nil` = fill the available height (the 实时 page); a number = that fixed
+    /// height (anywhere the list has to share a screen with other content).
+    var height: CGFloat? = nil
 
     private let bottomAnchor = "plaud-live-bottom"
 
-    private var hasText: Bool {
-        !direct.liveSegments.isEmpty || !direct.livePartial.isEmpty
-    }
-
-    private var isLive: Bool { direct.isRecording || direct.liveStreaming }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            header
-            content
-        }
-        .padding(.vertical, 2)
-        .sheet(isPresented: $expanded) {
-            PlaudTranscriptSheet(direct: direct)
-        }
-    }
-
-    // MARK: Header
-
-    private var header: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "text.bubble")
-                .font(.footnote)
-                .foregroundStyle(Color.appAccent)
-            Text(L10n.Plaud.liveTranscript)
-                .font(.caption.weight(.semibold))
-            if isLive {
-                HStack(spacing: 3) {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 5, height: 5)
-                    Text(L10n.Plaud.liveBadge)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.red)
-                }
-            }
-            Spacer()
-            if hasText {
-                Button {
-                    expanded = true
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(L10n.Plaud.liveExpand)
-            }
-        }
-    }
-
-    // MARK: Body
-
-    @ViewBuilder
-    private var content: some View {
-        if hasText {
-            transcript
-        } else if let notice = direct.liveASRNotice {
-            Text(notice)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        } else if isLive {
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.mini)
-                Text(L10n.Plaud.liveWaiting)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        } else {
-            Text(L10n.Plaud.liveIdle)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 7) {
-                    ForEach(direct.liveSegments) { segment in
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(segments) { segment in
                         PlaudLiveLine(stamp: PlaudLiveLine.stamp(segment.at),
                                       text: segment.text,
                                       isPartial: false)
                     }
-                    if !direct.livePartial.isEmpty {
-                        // The in-flight hypothesis: dimmed and tinted so it is
-                        // obvious which words are not final yet.
-                        PlaudLiveLine(stamp: PlaudLiveLine.stamp(direct.liveSegments.last?.at ?? 0),
-                                      text: direct.livePartial,
+                    if !partial.isEmpty {
+                        // The in-flight hypothesis is tinted — these words are
+                        // not final and will be replaced by the engine.
+                        PlaudLiveLine(stamp: PlaudLiveLine.stamp(segments.last?.at ?? 0),
+                                      text: partial,
                                       isPartial: true)
                     }
                     Color.clear
@@ -127,19 +43,32 @@ struct PlaudLiveTranscriptPanel: View {
                         .id(bottomAnchor)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
             }
-            .frame(height: 168)
+            .modifier(OptionalHeight(height: height))
             .onAppear { proxy.scrollTo(bottomAnchor, anchor: .bottom) }
-            .onChange(of: direct.liveSegments.count) { _ in
+            .onChange(of: segments.count) { _ in
                 withAnimation(.easeOut(duration: 0.15)) {
                     proxy.scrollTo(bottomAnchor, anchor: .bottom)
                 }
             }
-            .onChange(of: direct.livePartial) { _ in
+            .onChange(of: partial) { _ in
                 withAnimation(.easeOut(duration: 0.12)) {
                     proxy.scrollTo(bottomAnchor, anchor: .bottom)
                 }
             }
+        }
+    }
+}
+
+private struct OptionalHeight: ViewModifier {
+    let height: CGFloat?
+    func body(content: Content) -> some View {
+        if let height {
+            content.frame(height: height)
+        } else {
+            content.frame(maxHeight: .infinity)
         }
     }
 }
@@ -178,8 +107,7 @@ struct PlaudLiveLine: View {
 
 // MARK: - Full-screen transcript
 
-/// The whole take, scrollable, with a copy button — the panel is deliberately
-/// short (it sits inside a list row), this is where you actually re-read it.
+/// The whole take, scrollable, with a copy button.
 struct PlaudTranscriptSheet: View {
     @ObservedObject var direct: PlaudDirectService
     @Environment(\.dismiss) private var dismiss
@@ -187,27 +115,16 @@ struct PlaudTranscriptSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    if direct.liveTranscript.isEmpty {
-                        Text(L10n.Plaud.liveIdle)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(direct.liveSegments) { segment in
-                            PlaudLiveLine(stamp: PlaudLiveLine.stamp(segment.at),
-                                          text: segment.text,
-                                          isPartial: false)
-                        }
-                        if !direct.livePartial.isEmpty {
-                            PlaudLiveLine(stamp: PlaudLiveLine.stamp(direct.liveSegments.last?.at ?? 0),
-                                          text: direct.livePartial,
-                                          isPartial: true)
-                        }
-                    }
+            VStack(spacing: 0) {
+                if direct.liveTranscript.isEmpty {
+                    Text(L10n.Plaud.liveIdle)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    PlaudLiveTranscriptList(segments: direct.liveSegments,
+                                            partial: direct.livePartial)
                 }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .navigationTitle(L10n.Plaud.liveTranscript)
             .navigationBarTitleDisplayMode(.inline)

@@ -9,6 +9,10 @@ struct LiveView: View {
     @EnvironmentObject private var bluetooth: BluetoothCoordinator
     @EnvironmentObject private var env: AppEnvironment
     @StateObject private var model = LiveModel()
+    /// Observed so this tab re-evaluates when the PLAUD card connects /
+    /// disconnects — otherwise `showsPlaudLive` would read a stale phase and the
+    /// screen would stay on "no device connected" after the card came up.
+    @ObservedObject private var plaud = PlaudDirectService.shared
     @State private var clipItem: LibraryItem?
     @State private var clipMissing = false
 
@@ -41,13 +45,35 @@ struct LiveView: View {
         Binding(get: { clipItem != nil }, set: { if !$0 { clipItem = nil } })
     }
 
+    /// Whether this tab should show the PLAUD card's live transcript.
+    ///
+    /// Rules, in order:
+    /// * an A1 / D·NOTE source exists → that one wins (full ASR pipeline);
+    /// * a PLAUD card is **connected** → yes;
+    /// * a PLAUD card is merely **paired** → yes as well: the screen then shows
+    ///   the connect hint and the transcript of the last take, which is more
+    ///   useful than "no device connected" for someone who owns only that card.
+    private var showsPlaudLive: Bool {
+        guard liveSource == nil else { return false }
+        return plaud.phase.isConnected || plaud.pairedSN != nil
+    }
+
     var body: some View {
         // The outermost container must be a **stable host** like VStack, not Group: Group is a transparent container,
         // so modifiers are dispatched to the current branch. When `bluetooth.client` changes, the branch switches,
         // and the pushed detail page loses the navigation bar's safe-area layout — this is the phenomenon
         // where "the navigation bar overlaps the body when entering the detail page from the real-time page" (u7y9w25). The path in the database works correctly precisely because the outermost container of RecordingsView is a VStack.
         VStack(spacing: 0) {
-            if let source = liveSource {
+            // ★ 2026-10-22: the PLAUD card owns this tab when it is the device in
+            // play. Its audio is raw PCM, which the Opus-based ASR chain cannot
+            // take, so `PlaudLiveScreen` renders the card's own live transcript,
+            // clock, level and record button instead of `LiveContent`.
+            // The card wins only when no A1/D·NOTE source is available — those
+            // have the full pipeline (translation, save-to-library) and must keep
+            // it.
+            if showsPlaudLive {
+                PlaudLiveScreen()
+            } else if let source = liveSource {
                 LiveContent(model: model, source: source, config: env.config, library: env.library) { item in
                     // nil = The recording is no longer in the database; provide a prompt instead of silently swallowing it
                     if let item { clipItem = item } else { clipMissing = true }

@@ -1491,3 +1491,4 @@
 "plaud.live_copied" = "已复制";
 "plaud.live_needs_permission" = "实时转写需要「语音识别」权限，请在 设置 → Nomily 中允许。录音本身不受影响，只是没有文字。";
 "plaud.live_model_missing" = "这台 iPhone 没有安装该语言的离线语音模型，实时文字已关闭。录音本身不受影响。";
+"plaud.live_need_connect" = "连接卡片后，实时转写会显示在这里。";

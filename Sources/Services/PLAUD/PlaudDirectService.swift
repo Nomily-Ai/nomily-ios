@@ -167,6 +167,19 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// pushes them via `bleMarking`; there is no "how many" query mid-recording,
     /// so this is "what we heard" — same contract as the A1's remark count.
     @Published private(set) var recordMarks: [UInt32] = []
+    /// The same marks as **seconds from the start of the take**, for the UI.
+    ///
+    /// `getMarking` reports mark offsets, and the firmware that answers at all
+    /// reports milliseconds — but a value that already looks like seconds is
+    /// left alone, so the UI can never print "7166:20" from a unit mistake
+    /// (exactly what `BleFile.duration()` did before it was fixed).
+    var markTimestamps: [TimeInterval] {
+        recordMarks.map { raw in
+            let value = Double(raw)
+            return value > 24 * 3600 ? value / 1000 : value
+        }
+        .sorted()
+    }
     /// Mark count as the UI shows it. `max` of everything the card has told us,
     /// because two independent channels can report it (see the marks poll):
     ///   · `bleMarking(markList:)` — the answer to `getMarking(sessionId:)`,
@@ -249,6 +262,11 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// True while the next `bleFileList` answer is the single-entry marks probe
     /// (`getFile(sessionId:)`), not a card listing. See `bleFileList`.
     private var fileProbeForMarks = false
+    /// Session we are in the middle of re-attaching to (app relaunched / link
+    /// restored while the card kept recording). The file probe answers with the
+    /// byte offset the live channel must resume from — see
+    /// `attachToRunningRecording`.
+    private var pendingAttachSessionID: Int?
     /// Session the current `recordMarks` belong to, so a new take starts at zero.
     private var marksSessionID: Int?
     /// ★ 2026-10-21 (7th round): how many `getMarking` requests went out without
@@ -1386,6 +1404,26 @@ final class PlaudDirectService: NSObject, ObservableObject {
             )
         }
         .sorted { $0.sessionID > $1.sessionID }
+        // ★ 2026-10-22 relaunch fallback: the card is recording, but the SDK's
+        // `getCurrentSessionID()` only learns a session from a `bleRecordStart`
+        // — and a relaunch produces none. Without this, reopening the app during
+        // a take left the clock at our guess and pulled no audio at all. The
+        // live take is the newest entry in the card's own list, so adopt it.
+        if isRecording, recordStartedAt == nil, let newest = mapped.first, newest.size > 0 {
+            log.info("plaud attach fallback: adopting newest card file sid=\(newest.sessionID) size=\(newest.size)")
+            DispatchQueue.main.async {
+                self.recordSessionID = newest.sessionID
+                if let duration = newest.duration {
+                    self.deviceElapsed = max(self.deviceElapsed ?? 0, duration)
+                    self.recordStartedAt = Date().addingTimeInterval(-duration)
+                } else if let recordedAt = newest.recordedAt {
+                    self.recordStartedAt = recordedAt
+                    self.deviceElapsed = max(0, Date().timeIntervalSince(recordedAt))
+                }
+            }
+            PlaudDeviceAgent.shared.syncFile(sessionId: newest.sessionID, start: newest.size, end: 0)
+            Task { @MainActor in self.startLiveTranscription() }
+        }
         DispatchQueue.main.async {
             self.cardFileCount = mapped.count
             self.cardFiles = mapped
@@ -1877,29 +1915,96 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
 
     /// Start following a recording we did **not** start (physical key, or it was
     /// already running when we connected).
+    ///
+    /// ★ 2026-10-22 ("killed the app while the card was recording, the clock
+    ///   never matched the card again"). Two independent faults made the timer
+    ///   restart from 0:00 on relaunch:
+    ///
+    ///   ① **The anchor was `Date()`** — literally "the recording began when the
+    ///      app reopened" — and only a positive `blePcmData.millsec` could move
+    ///      it, which that field often is not.
+    ///   ② **The sync channel opened at byte 0**, so the card replayed the whole
+    ///      file from the beginning. What arrived was a backlog of old audio
+    ///      timed from zero, while the card itself was minutes in.
+    ///
+    ///   Now the start time comes from the session id itself (the SDK documents
+    ///   it as a 0-timezone timestamp), the file entry is probed for its real
+    ///   `duration`/`utsStamp`, and the channel opens at the **current end** so
+    ///   only new audio is pushed.
     private func attachToRunningRecording() {
         let sid = PlaudDeviceAgent.shared.getCurrentSessionID()
         log.info("plaud attaching to a running recording (sid \(sid))")
+        guard sid > 0 else {
+            // No sid yet: the SDK has not read the card's session after the
+            // relaunch. Do **not** anchor the clock to "now" here — that is the
+            // bogus 0:00 clock this method exists to fix. Leave `recordStartedAt`
+            // nil and ask the card for its list: the live take is the newest
+            // entry, and `handleFileList` adopts it (see the relaunch fallback).
+            log.warning("plaud attach: no live session id yet — asking for the card list")
+            DispatchQueue.main.async {
+                self.isRecording = true
+                self.liveStreaming = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self, self.isRecording, self.recordStartedAt == nil else { return }
+                self.fileListProbeOnly = true   // count only — never queue a pull mid-take
+                PlaudDeviceAgent.shared.getFileList(startSessionId: 0)
+            }
+            return
+        }
+        let anchored = Self.startDate(fromSessionID: sid)
         DispatchQueue.main.async {
             self.isRecording = true
-            // Last-resort anchor: the card's own stamp is unknown here, so the
-            // clock starts now and gets corrected by `blePcmData.millsec`.
-            if self.recordStartedAt == nil { self.recordStartedAt = Date() }
-            if sid > 0 {
-                self.recordSessionID = sid
-                // A take started on the card's key: marks belong to it, so start
-                // from zero instead of carrying the previous take's number over.
-                if self.marksSessionID != sid {
-                    self.recordMarks = []
-                    self.recordMarkCount = 0
-                    self.marksSessionID = sid
-                }
+            if self.recordStartedAt == nil {
+                self.recordStartedAt = anchored ?? Date()
+            }
+            if self.deviceElapsed == nil, let start = self.recordStartedAt {
+                // The session id already tells us how long the take has been running.
+                self.deviceElapsed = max(0, Date().timeIntervalSince(start))
+            }
+            self.recordSessionID = sid
+            // A take started on the card's key: marks belong to it, so start
+            // from zero instead of carrying the previous take's number over.
+            if self.marksSessionID != sid {
+                self.recordMarks = []
+                self.recordMarkCount = 0
+                self.marksSessionID = sid
             }
             self.liveStreaming = true
         }
-        guard sid > 0 else { return }
-        PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: 0, end: 0)
-        Task { @MainActor in self.startLiveTranscription() }
+        // Probe the file entry first — it carries the byte offset we must start
+        // from and the card's own duration.
+        pendingAttachSessionID = sid
+        fileProbeForMarks = true
+        PlaudDeviceAgent.shared.getFile(sessionId: sid)
+        // If the card never answers the probe, keep audio flowing the old way
+        // (from 0) — the clock stays honest thanks to the session-id anchor.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self, self.pendingAttachSessionID == sid else { return }
+            self.pendingAttachSessionID = nil
+            self.fileProbeForMarks = false
+            log.warning("plaud attach: file probe timed out — opening sync at 0")
+            PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: 0, end: 0)
+            Task { @MainActor in self.startLiveTranscription() }
+        }
+    }
+
+    /// The take's start time from a session id.
+    ///
+    /// The SDK documents `sessionId` as "0 timezone timestamp" — i.e. unix
+    /// seconds in UTC, which `Date(timeIntervalSince1970:)` renders in local
+    /// time correctly. The ±timezone candidates exist because one firmware build
+    /// was seen stamping **local wall-clock seconds as if they were UTC**; the
+    /// first candidate within a sane window wins.
+    private static func startDate(fromSessionID sid: Int) -> Date? {
+        guard sid > 1_600_000_000 else { return nil }
+        let now = Date().timeIntervalSince1970
+        let offset = Double(TimeZone.current.secondsFromGMT())
+        for candidate in [Double(sid), Double(sid) - offset, Double(sid) + offset] {
+            guard candidate <= now + 300, now - candidate < 2 * 86_400 else { continue }
+            return Date(timeIntervalSince1970: candidate)
+        }
+        return nil
     }
 
     // MARK: Recording callbacks (the whole interaction hangs on these)
@@ -2138,9 +2243,36 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             if let sid = activeRecordSessionID,
                let entry = bleFiles.first(where: { $0.sessionId == sid }) {
                 let collect = entry.penCollect
-                log.info("plaud marks fallback sid=\(sid) penCollect=\(collect)")
+                let size = entry.size
+                // ⚠️ `duration` is milliseconds (same trap as the file list).
+                let seconds = size > 0 ? Double(entry.duration()) / 1000.0 : 0
+                let stamp = entry.utsStamp()
+                log.info("plaud file probe sid=\(sid) penCollect=\(collect) size=\(size) duration=\(Int(seconds))s stamp=\(stamp)")
+                let attaching = pendingAttachSessionID == sid
                 DispatchQueue.main.async {
                     self.recordMarkCount = max(self.recordMarkCount, collect)
+                    // The card's own duration beats every local guess — this is
+                    // what a relaunch during a take needs to land on the right
+                    // second instead of starting from 0:00.
+                    if seconds > 0 {
+                        self.deviceElapsed = max(self.deviceElapsed ?? 0, seconds)
+                        self.recordStartedAt = Date().addingTimeInterval(-seconds)
+                    } else if stamp > 0 {
+                        let started = Date(timeIntervalSince1970: TimeInterval(stamp))
+                        if abs(started.timeIntervalSinceNow) < 2 * 86_400 {
+                            self.recordStartedAt = started
+                            self.deviceElapsed = max(0, Date().timeIntervalSince(started))
+                        }
+                    }
+                }
+                if attaching {
+                    pendingAttachSessionID = nil
+                    // ★ From the CURRENT end, not byte 0: opening at 0 made the
+                    // card replay the whole file, so the app heard a backlog
+                    // timed from zero while the card was already minutes in.
+                    log.info("plaud attach: opening sync at current end (\(size) bytes)")
+                    PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: size, end: 0)
+                    Task { @MainActor in self.startLiveTranscription() }
                 }
                 return
             }

@@ -1389,3 +1389,4 @@
 "plaud.live_copied" = "Copied";
 "plaud.live_needs_permission" = "Live transcription needs Speech Recognition permission — allow it in Settings → Nomily. The card still records without text.";
 "plaud.live_model_missing" = "The offline speech model for this language isn't installed on this iPhone, so live text is off. The recording itself is unaffected.";
+"plaud.live_need_connect" = "Connect the card and the live transcript appears here.";
