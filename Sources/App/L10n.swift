@@ -1138,18 +1138,6 @@ enum L10n {
         static var statusRecording: String { NSLocalizedString("watch.status_recording", comment: "") }
         static var statusTransferring: String { NSLocalizedString("watch.status_transferring", comment: "") }
         static var statusOutOfRange: String { NSLocalizedString("watch.status_out_of_range", comment: "") }
-
-        // MARK: 录音首页（★ 2026-10-16 十四改）
-        //
-        // ⚠️ 带 `value:` 内联英文兜底（只补了 en / zh-Hans 两份 .lproj）。
-        /// 读不到心率时的提示。那条波此时是一条**不动的平线**，
-        /// 不解释的话会被读成"坏了"（见 `WatchVoiceWave` 顶部"十四改"）。
-        ///
-        /// ⚠️ 刻意**短**：它和字节数挤在同一行，长了会把整行缩到看不清。
-        static var notWorn: String {
-            NSLocalizedString("watch.not_worn", value: "Not worn",
-                              comment: "Watch recorder caption when no heart rate is available — the watch isn't being worn")
-        }
     }
 
     // MARK: - 手表首页表情（★ 2026-10-16 十三改）

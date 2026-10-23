@@ -1050,4 +1050,3 @@
 "trash.delete_selected" = "Delete %d";
 "trash.delete_selected_title" = "Delete for Good?";
 "trash.delete_selected_message" = "%d item(s) will be removed for good. This can't be undone.";
-"watch.not_worn" = "Not worn";

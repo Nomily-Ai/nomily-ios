@@ -170,21 +170,6 @@ targets:
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.nomily.app
         NSMicrophoneUsageDescription: Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.
-        # ★ 2026-10-16 十一改：录音时那条音波跟着实测心率跳，所以要读心率。
-        # ⚠️ 文案要写清"只读、不外传"：HealthKit 的授权页会原样把这段话摆给用户，
-        #    而"一个录音机为什么要读我心率"是用户当场会问的问题 —— 答案得在这句话里。
-        #
-        # ★★ 2026-10-16 十五改：**这条文案和下面那条 entitlement 暂时留着，
-        #    但代码里已经没有任何地方会去申请它**（用户："不要走心率来"）。
-        #    留着是**刻意**的：删掉 entitlement 会改变 App ID 的能力集合，
-        #    于是又得走一趟门户重签描述文件 —— 换来的只是"少一条不会显示的文案"。
-        #    ⚠️ 代价要记住：如果哪天真的决定不要 HealthKit 了，这里是**两处**
-        #    （`NSHealthShareUsageDescription` + `com.apple.developer.healthkit`），
-        #    删了之后第一次构建会因为描述文件过期而失败，那是预期行为。
-        NSHealthShareUsageDescription: Nomily AI reads your current heart rate while recording, so the waveform on the watch face beats in time with your own pulse. It never reads any other health data and never leaves your devices.
-        # ⚠️ 只需要 `NSHealthShareUsageDescription`（读）。**不写 `NSHealthUpdateUsageDescription`**
-        #    —— 这个 App 从不往健康里写东西，声明了反而会让授权页多出一项写权限，
-        #    用户看到"要写入"会直接拒掉。
         # Background audio on watchOS is UIBackgroundModes, same as iOS.
         # WKBackgroundModes is a different key — it names `WKExtendedRuntimeSession`
         # types (workout-processing, self-care, mindfulness, …) and does not
@@ -193,19 +178,8 @@ targets:
         # there risks installd rejecting the bundle outright.
         UIBackgroundModes:
           - audio
-    # ★ 2026-10-16 十一改：读心率要 HealthKit entitlement。
-    #
-    # ⚠️ 加在 **watch target** 上，不是 iPhone 上：真正读心率的是表上那个 App，
-    #    iPhone 侧一次都没碰过 HealthKit。跟着 iPhone 一起去申请反而会让
-    #    「这个录音 App 要读我健康数据」多出一个莫名其妙的来源。
-    #
-    # ⚠️ 这条会改变 App ID `com.nomily.app.watchkitapp` 的能力集合，所以
-    #    `-allowProvisioningUpdates` 得去门户上把 HealthKit 打开、
-    #    再重签一份 watchOS 描述文件。第一次构建会慢一点，报错时先看这一句。
     entitlements:
       path: Watch/nomily_watch.entitlements
-      properties:
-        com.apple.developer.healthkit: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nomily.app.watchkitapp

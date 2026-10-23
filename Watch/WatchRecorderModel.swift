@@ -188,15 +188,6 @@ final class WatchRecorderModel: NSObject, ObservableObject {
             meter = WatchAudioMeter()
             isRecording = true
             startedAt = Date()
-            // ★ 十一改：跟着录音起停心率采集。放在这里（录音**已经真的开始**之后）
-            //   而不是更早：`record()` 失败时不该白开一路采集。
-            //
-            // ⚠️ 起停必须成对，且和 `isRecording` 同一处 —— 落在别处的话，
-            //    出现"录完还在轮询 HealthKit"这种看不见的电量泄漏。
-            // ★ 十五改：这里原来还有一句 `heart.follow()`（十一改加的，让心率
-            //   采集跟着录音起停）。心率不再驱动那条波之后它就没有消费者了，
-            //   整条链路连同 `prepareHeartRate()` 一起停用 —— 见
-            //   `WatchHeartRate.swift` 顶部那段。
             WKInterfaceDevice.current().play(Self.confirmation)
             startTimer()
             pushState()
@@ -218,8 +209,6 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         // 归零而不是留着最后一格：停止之后首页要立刻切回眼睛，
         // 留着一个电平值会让那条波在消失前闪一下。
         meter = WatchAudioMeter()
-        // ★ 十五改：原来这里还有 `heart.unfollow()` 与 `heartRate = nil`。
-        //   心率那条链路停用之后两句一起去掉（理由同 `start()` 里那句）。
         startedAt = nil
         try? AVAudioSession.sharedInstance().setActive(false)
         WKInterfaceDevice.current().play(Self.confirmation)
