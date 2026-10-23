@@ -80,7 +80,10 @@ final class LiveCaptionController: ObservableObject {
 
     private func makeEngine(config: AppConfig) -> (any PlaudLiveASR)? {
         let localeID = PlaudDirectService.bcp47Language(config.lastSourceLang)
-        var chain: [String] = [config.defaults.asr.primary] + config.defaults.asr.fallbacks
+        var chain: [String] = []
+        // ★ 2026-10-23: honour the pinned live engine first, like the other two paths.
+        if let live = config.defaults.asr.liveProvider, !live.isEmpty { chain.append(live) }
+        chain.append(contentsOf: [config.defaults.asr.primary] + config.defaults.asr.fallbacks)
         chain.append("ondevice")
         for name in chain.map({ $0.lowercased() }) where !name.isEmpty {
             switch name {
@@ -90,6 +93,22 @@ final class LiveCaptionController: ObservableObject {
                     log.info("phone captions engine=azure lang=\(localeID, privacy: .public)")
                     return PlaudAzureLiveTranscriber(key: azure.key, region: azure.region,
                                                      lang: localeID)
+                }
+            case "aliyun":
+                // ★ 2026-10-23: the phone mic also produces 16 kHz mono PCM, so the
+                // Aliyun real-time engine works here unchanged.
+                if let cloud = config.asrProviders.cloud?["aliyun"],
+                   !(cloud.secrets?["accessKeyId"] ?? "").isEmpty,
+                   !(cloud.secrets?["accessKeySecret"] ?? "").isEmpty,
+                   !(cloud.values?["appKey"] ?? "").isEmpty {
+                    let region = (cloud.values?["region"].flatMap { $0.isEmpty ? nil : $0 })
+                        ?? "cn-shanghai"
+                    log.info("phone captions engine=aliyun region=\(region, privacy: .public)")
+                    return PlaudAliyunLiveTranscriber(
+                        accessKeyId: cloud.secrets?["accessKeyId"] ?? "",
+                        accessKeySecret: cloud.secrets?["accessKeySecret"] ?? "",
+                        appKey: cloud.values?["appKey"] ?? "",
+                        region: region)
                 }
             case "ondevice":
                 guard config.onDeviceASREnabled != false else { continue }
@@ -123,9 +142,10 @@ final class LiveCaptionController: ObservableObject {
         engine.start()
         switch engine.unavailable {
         case .modelMissing: notice = L10n.Plaud.liveModelMissing
-        case .noRecognizer, .notAuthorized, .azureMissing:
+        case .noRecognizer, .notAuthorized, .azureMissing, .aliyunMissing:
             notice = L10n.Plaud.liveNeedsPermission
         case .azureFailed(let message): notice = L10n.Plaud.liveAzureFailed(message)
+        case .aliyunFailed(let message): notice = L10n.Plaud.liveAliyunFailed(message)
         case .none: notice = nil
         }
         providerName = engine.providerName
@@ -135,8 +155,9 @@ final class LiveCaptionController: ObservableObject {
 
     /// Azure died mid-take: keep the text and continue on-device.
     private func fallback(reason: PlaudLiveASRUnavailable) {
-        guard engine?.providerName == "azure" else { return }
-        log.warning("phone captions: azure failed (\(String(describing: reason), privacy: .public)) — falling back to on-device")
+        let dead = engine?.providerName
+        guard dead == "azure" || dead == "aliyun" else { return }
+        log.warning("phone captions: \(dead ?? "?", privacy: .public) failed (\(String(describing: reason), privacy: .public)) — falling back to on-device")
         guard let config = AppEnvironment.shared?.config.config,
               let onDevice = PlaudLiveTranscriber.makeIfPermitted(localeID: config.lastSourceLang) else {
             notice = L10n.Plaud.liveNeedsPermission

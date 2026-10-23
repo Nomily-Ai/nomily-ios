@@ -212,6 +212,9 @@ final class LiveModel: ObservableObject {
         case onDevice(OnDeviceLiveASR)
         case azure(AzureLiveASR)
         case azureTranslate(AzureLiveTranslation)
+        /// ★ 2026-10-23: Aliyun real-time — decodes the card's Opus packets to
+        /// 16 kHz mono PCM, then streams them to `nls-gateway`.
+        case aliyun(AliyunLiveASR)
 
         func send(_ data: Data) {
             switch self {
@@ -220,6 +223,7 @@ final class LiveModel: ObservableObject {
             case .onDevice(let asr): asr.send(data)
             case .azure(let asr): asr.send(data)
             case .azureTranslate(let asr): asr.send(data)
+            case .aliyun(let asr): asr.send(data)
             }
         }
 
@@ -230,6 +234,7 @@ final class LiveModel: ObservableObject {
             case .onDevice(let asr): asr.close()
             case .azure(let asr): asr.close()
             case .azureTranslate(let asr): asr.close()
+            case .aliyun(let asr): asr.close()
             }
         }
     }
@@ -1052,6 +1057,31 @@ final class LiveModel: ObservableObject {
                     runEventLoop(local: events)
                     return
                 }
+            case "aliyun":
+                // ★ 2026-10-23: the domestic real-time engine. The card's 160 B
+                // CELT packets are decoded to 16 kHz mono PCM in ~500 ms batches
+                // (`AliyunLiveASR`) — Aliyun's WS takes PCM only, not raw Opus.
+                if let cloud = config.config.asrProviders.cloud?["aliyun"],
+                   !(cloud.secrets?["accessKeyId"] ?? "").isEmpty,
+                   !(cloud.secrets?["accessKeySecret"] ?? "").isEmpty,
+                   !(cloud.values?["appKey"] ?? "").isEmpty {
+                    let region = (cloud.values?["region"].flatMap { $0.isEmpty ? nil : $0 })
+                        ?? "cn-shanghai"
+                    let asr = AliyunLiveASR(
+                        profile: opusProfile,
+                        accessKeyId: cloud.secrets?["accessKeyId"] ?? "",
+                        accessKeySecret: cloud.secrets?["accessKeySecret"] ?? "",
+                        appKey: cloud.values?["appKey"] ?? "",
+                        region: region)
+                    let events = try asr.connect()
+                    currentASR = .aliyun(asr)
+                    activeProvider = "aliyun"
+                    activeASRKind = "aliyun"
+                    currentASRProducedResult = false
+                    diagLive("provider=aliyun rt region=\(region) profile=\(opusProfile.packetBytes)B")
+                    runEventLoop(aliyun: events)
+                    return
+                }
             case "ondevice" where config.config.onDeviceASREnabled:
                 // Needs the phone's offline model for *this* language; if it isn't installed the
                 // only honest move is to skip it rather than start a recogniser that will fail
@@ -1229,6 +1259,27 @@ final class LiveModel: ObservableObject {
     }
 
     private func runEventLoop(onDevice events: AsyncStream<OnDeviceLiveASR.Event>) {
+        eventTask = Task { [weak self] in
+            for await event in events {
+                guard let self else { break }
+                switch event {
+                case .partial(let t):
+                    self.noteASRResult()
+                    self.partialText = t
+                case .final(let t):
+                    if !t.isEmpty {
+                        let ts = self.capturedDuration
+                        self.finalSegments.append(LiveSegment(text: t, translation: nil, timestamp: ts))
+                    }
+                    self.partialText = ""
+                case .closed(let e):
+                    self.handleASRClosed(e)
+                }
+            }
+        }
+    }
+
+    private func runEventLoop(aliyun events: AsyncStream<AliyunLiveASR.Event>) {
         eventTask = Task { [weak self] in
             for await event in events {
                 guard let self else { break }

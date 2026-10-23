@@ -1512,6 +1512,7 @@
 "plaud.live_engine_azure" = "Azure";
 "plaud.live_engine_ondevice" = "本机识别";
 "plaud.live_azure_failed" = "Azure 实时识别中断：%@";
+"plaud.live_aliyun_failed" = "阿里云实时识别中断：%@";
 "plaud.live_azure_fell_back" = "Azure 连接中断，已切换到本机识别，文字会继续。";
 
 /* Phone recording (任务一) */
@@ -1668,7 +1669,7 @@
 "asr.task_failed" = "阿里云识别任务失败：%@";
 "asr.live_engine" = "实时识别引擎";
 "asr.live_engine_auto" = "自动（跟随上方的顺序）";
-"asr.live_engine_footer" = "只列出能推流的引擎：阿里云、百度、腾讯、谷歌等云服务都是文件转写接口，做不了实时字幕。选“自动”时按上方识别服务的顺序挑第一个能实时的。";
+"asr.live_engine_footer" = "只列出能推流的引擎。阿里云有实时语音识别 WebSocket 接口，所以也能做实时；百度、腾讯、谷歌等云服务是文件转写接口，做不了实时字幕。选“自动”时按上方识别服务的顺序挑第一个能实时的。";
 "find.notify_denied" = "这个 App 的通知权限是关的，断开提醒响不了。到系统设置里打开。";
 "find.open_settings" = "打开系统设置";
 "find.test_alert" = "发一条测试通知";

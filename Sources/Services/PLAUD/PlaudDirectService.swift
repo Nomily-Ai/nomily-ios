@@ -484,7 +484,12 @@ final class PlaudDirectService: NSObject, ObservableObject {
         let localeID = Self.bcp47Language(cfg?.lastSourceLang)
         var chain: [String] = []
         if let defaults = cfg?.defaults.asr {
-            chain = [defaults.primary] + defaults.fallbacks
+            // ★ 2026-10-23: an explicitly pinned live engine leads, same rule as
+            // the recorder-card path in `LiveModel.openASR`.
+            if let live = defaults.liveProvider, !live.isEmpty {
+                chain.append(live)
+            }
+            chain.append(contentsOf: [defaults.primary] + defaults.fallbacks)
         }
         chain.append("ondevice")
         for name in chain.map({ $0.lowercased() }) where !name.isEmpty {
@@ -494,6 +499,22 @@ final class PlaudDirectService: NSObject, ObservableObject {
                    !azure.key.isEmpty, !azure.region.isEmpty {
                     log.info("plaud live asr engine=azure lang=\(localeID, privacy: .public)")
                     return PlaudAzureLiveTranscriber(key: azure.key, region: azure.region, lang: localeID)
+                }
+            case "aliyun":
+                // ★ 2026-10-23: domestic real-time. The card's PCM is already
+                // 16 kHz mono, so Aliyun takes it directly.
+                if let cloud = cfg?.asrProviders.cloud?["aliyun"],
+                   !(cloud.secrets?["accessKeyId"] ?? "").isEmpty,
+                   !(cloud.secrets?["accessKeySecret"] ?? "").isEmpty,
+                   !(cloud.values?["appKey"] ?? "").isEmpty {
+                    let region = (cloud.values?["region"].flatMap { $0.isEmpty ? nil : $0 })
+                        ?? "cn-shanghai"
+                    log.info("plaud live asr engine=aliyun region=\(region, privacy: .public)")
+                    return PlaudAliyunLiveTranscriber(
+                        accessKeyId: cloud.secrets?["accessKeyId"] ?? "",
+                        accessKeySecret: cloud.secrets?["accessKeySecret"] ?? "",
+                        appKey: cloud.values?["appKey"] ?? "",
+                        region: region)
                 }
             case "ondevice":
                 guard cfg?.onDeviceASREnabled != false else { continue }
@@ -527,6 +548,8 @@ final class PlaudDirectService: NSObject, ObservableObject {
         case .noRecognizer, .notAuthorized: liveASRNotice = L10n.Plaud.liveNeedsPermission
         case .azureMissing: liveASRNotice = L10n.Plaud.liveNeedsPermission
         case .azureFailed(let message): liveASRNotice = L10n.Plaud.liveAzureFailed(message)
+        case .aliyunMissing: liveASRNotice = L10n.Plaud.liveNeedsPermission
+        case .aliyunFailed(let message): liveASRNotice = L10n.Plaud.liveAliyunFailed(message)
         case .none: liveASRNotice = nil
         }
         liveASRProvider = engine.providerName
@@ -544,8 +567,11 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// already on screen and continue with the on-device recogniser rather than
     /// leaving the user with a frozen transcript.
     @MainActor private func fallbackLiveEngine(reason: PlaudLiveASRUnavailable) {
-        guard liveTranscriber?.providerName == "azure" else { return }
-        log.warning("plaud live asr: azure failed (\(String(describing: reason), privacy: .public)) — falling back to on-device")
+        // ★ 2026-10-23: Aliyun joins Azure in "died mid-take → keep the text,
+        // continue on-device" instead of freezing the transcript.
+        let dead = liveTranscriber?.providerName
+        guard dead == "azure" || dead == "aliyun" else { return }
+        log.warning("plaud live asr: \(dead ?? "?", privacy: .public) failed (\(String(describing: reason), privacy: .public)) — falling back to on-device")
         guard let onDevice = PlaudLiveTranscriber.makeIfPermitted(localeID: configService?.config.lastSourceLang) else {
             liveASRNotice = L10n.Plaud.liveNeedsPermission
             return
@@ -592,10 +618,32 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Stop feeding audio. ⚠️ Deliberately **keeps** the transcript: the text of
     /// the take you just finished is the whole point of a live transcript, and
     /// it used to be wiped the moment the card stopped.
+    ///
+    /// ★ 2026-10-23: the engine is no longer dropped on the spot. Both cloud
+    /// engines only deliver their **last** sentence *after* `stop()` (Aliyun:
+    /// `SentenceEnd`/`TranscriptionCompleted` follow `StopTranscription`), so a
+    /// immediate `nil` used to clip the tail of every take. The old engine is
+    /// kept alive for a few seconds and may only publish while we are still on
+    /// the same take and no new engine has taken over.
     @MainActor private func stopLiveTranscription() {
-        liveTranscriber?.stop()
-        liveTranscriber = nil
         liveAudioSink = nil
+        guard let dying = liveTranscriber else { return }
+        liveTranscriber = nil
+        let sid = liveTranscriptSessionID
+        dying.onTextChange = { [weak self, weak dying] in
+            guard let self, let dying,
+                  self.liveTranscriber == nil,
+                  self.liveTranscriptSessionID == sid else { return }
+            self.liveSegments = dying.segments
+            self.livePartial = dying.partial
+            self.liveTranscript = Self.joinedTranscript(dying.segments, partial: dying.partial)
+        }
+        dying.onFailure = nil      // a dying engine must not trigger a fallback
+        dying.stop()
+        Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            _ = dying              // held until here so its socket can drain
+        }
     }
 
     // MARK: - Marks on the transcript

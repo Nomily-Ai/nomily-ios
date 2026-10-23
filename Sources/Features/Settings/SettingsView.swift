@@ -535,7 +535,9 @@ struct ASRProvidersView: View {
     /// Tencent / Google / AWS / … are batch file APIs — listing them here would
     /// promise something the engine cannot do.
     private var liveCapableASR: [(key: String, label: String)] {
-        let liveKeys: Set<String> = ["ondevice", "azure", "local", "remote"]
+        // ★ 2026-10-23: Aliyun joined the live-capable set (its 实时语音识别 WS
+        // endpoint); Baidu / Tencent / Google / AWS / … are still batch-only.
+        let liveKeys: Set<String> = ["ondevice", "azure", "aliyun", "local", "remote"]
         return configuredASR.filter { liveKeys.contains($0.key) }
     }
 

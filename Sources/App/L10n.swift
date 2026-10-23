@@ -418,6 +418,11 @@ enum L10n {
         static func liveAzureFailed(_ message: String) -> String {
             String(format: NSLocalizedString("plaud.live_azure_failed", value: "Azure live transcription stopped: %@", comment: "Live transcript error from Azure; %@ = reason"), message)
         }
+        /// ★ 2026-10-23: the Aliyun real-time engine has its own wording — a
+        /// token/quota/network failure there is not an "Azure" problem.
+        static func liveAliyunFailed(_ message: String) -> String {
+            String(format: NSLocalizedString("plaud.live_aliyun_failed", value: "Aliyun live transcription stopped: %@", comment: "Live transcript error from Aliyun; %@ = reason"), message)
+        }
         static var liveAzureFellBack: String { NSLocalizedString("plaud.live_azure_fell_back", value: "Azure dropped out — continuing with on-device recognition.", comment: "Automatic fallback after Azure failed mid-take") }
         static var cardFiles: String { NSLocalizedString("plaud.card_files", value: "Recordings on the card", comment: "Home device segment: the card's own file list") }
         static var cardFilesEmpty: String { NSLocalizedString("plaud.card_files_empty", value: "No recordings on the card.", comment: "") }
@@ -874,7 +879,7 @@ enum L10n {
         }
         static var liveEngineFooter: String {
             NSLocalizedString("asr.live_engine_footer",
-                              value: "Only engines that can stream audio are listed: Aliyun, Baidu, Tencent and the other cloud vendors are batch file APIs and cannot do live captions. Automatic picks the first stream-capable service from the order above.",
+                              value: "Only engines that can stream audio are listed. Aliyun has a real-time WebSocket endpoint, so it works live too; Baidu, Tencent, Google and the other cloud vendors are batch file APIs and cannot do live captions. Automatic picks the first stream-capable service from the order above.",
                               comment: "Explains why the live picker is shorter than the transcription picker")
         }
         static var autoTranscribeAfterDownload: String { NSLocalizedString("asr.auto_transcribe_after_download", comment: "") }

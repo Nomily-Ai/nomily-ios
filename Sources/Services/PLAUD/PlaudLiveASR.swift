@@ -12,6 +12,10 @@ enum PlaudLiveASRUnavailable: Equatable {
     case azureMissing
     /// The Azure socket closed (bad key, quota, network).
     case azureFailed(String)
+    /// ★ 2026-10-23: Aliyun real-time — credentials/Appkey incomplete.
+    case aliyunMissing
+    /// ★ 2026-10-23: the Aliyun socket reported a failure (token, quota, network).
+    case aliyunFailed(String)
 }
 
 /// A live transcription engine fed with the PLAUD card's **raw PCM**.
