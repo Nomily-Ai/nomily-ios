@@ -42,20 +42,39 @@ enum WatchLinkMessage {
 
     // MARK: - Face style (phone → watch)
     //
-    // ★ 2026-10-16 十三改：这是**第一次**由手机主动把手表的外观设置推过去。
-    // 在此之前手机→手表只有一条 `stored`（`transferUserInfo`，一次性事件），
-    // 而"手表首页长什么样"一直是手表**本地**偏好（颜色、快捷菜单、语言）。
-    // 用户这一轮明确要求把"首页眼睛的表情"摆在 **iPhone 的设置**里，
-    // 所以它必须过这条线。
+    // ★ 2026-10-16 thirteenth revision: this is the **first time** the phone actively pushes an appearance setting to the watch.
+    // Before this, phone→watch had only one message, `stored` (`transferUserInfo`, a one-shot event),
+    // and "what the watch home screen looks like" had always been a **local** watch preference (colour, quick menu, language).
+    // This round the user explicitly asked for the "home-screen eye expression" to sit **in the iPhone's Settings**,
+    // so it has to cross this link.
 
-    /// 首页那张脸摆哪个表情。值是 `BotFaceStyle.rawValue`。
+    /// Which expression the home-screen face shows. The value is `BotFaceStyle.rawValue`.
     ///
-    /// ⚠️ 走 `updateApplicationContext` 而不是 `transferUserInfo`：这推的是
-    ///    "**当前值**"，不是"发生了一件事"。晚到的旧值没有意义，
-    ///    而 `updateApplicationContext` 的定义正是"新的一版**替换**掉
-    ///    还没送出去的那一版" —— 用户连点三下换个表情，手表只该看到最后那个。
+    /// ⚠️ Goes through `updateApplicationContext` rather than `transferUserInfo`: this pushes
+    ///    the "**current value**", not "something happened". A late-arriving old value means nothing,
+    ///    and the definition of `updateApplicationContext` is precisely "the new version **replaces**
+    ///    the version not yet sent" — when the user taps three times to change the expression, the watch should see only the last one.
     ///
-    /// ℹ️ 两个方向的 application context 是**各自独立**的槽位，所以手表那条
-    ///    "录音状态"的推送（也是 `updateApplicationContext`）不会被这条挤掉。
+    /// ℹ️ The two directions' application contexts are **separate** slots, so the watch's
+    ///    "recording state" push (also `updateApplicationContext`) won't be crowded out by this one.
     static let faceStyleKey = "faceStyle"
+
+    // MARK: - Face settings (phone → watch, ★ 2026-10-20)
+    //
+    // The user asked to drive the face's colour, blink pace and the "square frame with
+    // auto-cycling expressions" from the phone. Same channel and same caveats as
+    // `faceStyleKey`: one `updateApplicationContext` per push, "newest value wins",
+    // watch-local defaults apply when a key is missing (old phone → new watch).
+
+    /// The eye colour as `RRGGBB` hex (no `#`). Absent = follow the watch's own
+    /// "Appearance" palette — the pre-existing watch-local preference stays authoritative
+    /// until the user actually picks a colour on the phone.
+    static let faceColorKey = "faceColor"
+    /// `BotBlinkSpeed.rawValue` — scales the blink-gap tiers. Absent = `normal`.
+    static let blinkSpeedKey = "blinkSpeed"
+    /// Whether the idle expression auto-cycles inside the square frame. Absent = `true`
+    /// (the dynamic behaviour the user asked for is the default).
+    static let faceAutoCycleKey = "faceAutoCycle"
+    /// Whether the rounded-square frame is drawn around the face. Absent = `true`.
+    static let faceFrameKey = "faceFrame"
 }

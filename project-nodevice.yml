@@ -41,7 +41,7 @@ targets:
       properties:
         CFBundleDisplayName: Nomily AI
         CFBundleShortVersionString: "1.0.1"
-        CFBundleVersion: "5"
+        CFBundleVersion: "6"
         # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
         # appropriate when the app's crypto use is exempt from US export
         # documentation requirements:

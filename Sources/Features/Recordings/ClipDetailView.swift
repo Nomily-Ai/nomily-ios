@@ -6,12 +6,12 @@ struct ClipDetailView: View {
 
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var transcription: TranscriptionService
-    /// 摘要 / 翻译 / 格式转换的落盘队列。
+    /// The persistence queue for summary / translation / format conversion.
     ///
-    /// ⚠️ 必须**单独注入**、而不是走 `env.jobs` 取：嵌套 `ObservableObject` 的
-    ///    `@Published` 变化不会让只观察父对象的视图失效（同 `NomilyApp` 里
-    ///    `watch` 那段注释）。走 `env.jobs` 的话，活跑完了这一页不会更新 ——
-    ///    那正是这次改动最不能出的问题。
+    /// ⚠️ Must be **injected separately**, not fetched via `env.jobs`: a nested `ObservableObject`'s
+    ///    `@Published` changes won't invalidate a view that only observes the parent object (same as the
+    ///    `watch` comment in `NomilyApp`). Going through `env.jobs`, the page would never update when a job finishes —
+    ///    precisely the failure this change can least afford.
     @EnvironmentObject private var jobs: JobQueue
     @EnvironmentObject private var configService: ConfigService
     @Environment(\.dismiss) private var dismiss
@@ -22,10 +22,28 @@ struct ClipDetailView: View {
     @State private var deleteTranscriptAlert = false
     @State private var deleteSummaryAlert = false
     @State private var summary: String?
+    /// ★ 2026-10-23 ("页面模板", Plaud parity): a recording carries **several note
+    /// pages**, each generated from its own template. `summary` stays the text of
+    /// the *primary* page (id `NotePage.primaryID`) so the translate/export/menu
+    /// paths around it don't move; `pages` + `selectedPageID` + `pageText` drive
+    /// the chip row — Plaud's 「总结 ▾ | 权力动态 | +」.
+    @State private var pages: [NotePage] = []
+    @State private var selectedPageID: String = NotePage.primaryID
+    /// Body of the selected **non-primary** page (the primary one lives in `summary`).
+    @State private var pageText: String?
+    /// The page the open summarize sheet writes to (regenerate vs. add).
+    @State private var summarizePageID: String = NotePage.primaryID
+    @State private var showAddPage = false
+    @State private var addPageID = ""
+    @State private var deletePageAlert: NotePage?
+    /// The text of whichever page is on screen — the one surface mind map / full
+    /// view / Q&A should all follow.
+    private var currentPageText: String? {
+        selectedPageID == NotePage.primaryID ? summary : pageText
+    }
     @State private var showSummarize = false
     @State private var showNoProvider = false
     @State private var showNoASR = false
-    @State private var showPlayer = false
     @State private var retranscribeAlert = false
     @State private var translation: String?
     @State private var translatedSummary: String?
@@ -35,49 +53,200 @@ struct ClipDetailView: View {
     @State private var showRetranscribeChoice = false
     @State private var showTranslatePicker = false
     @State private var translateTarget: TranslateTarget = .transcript
-    // ★ 2026-10-16 十二改：`translatingTranscript` / `translatingSummary` /
-    // `isExporting` 三个 `@State` 忙碌标记**全部删掉了**，改成从 `jobs`
-    // 算出来（见下面 `activeJob(_:target:)` 那一段）。
+    // ★ Twelfth revision, 2026-10-16: the three `@State` busy flags — `translatingTranscript` / `translatingSummary` /
+    // `isExporting` — are **all deleted**, replaced by values derived from `jobs`
+    // (see the `activeJob(_:target:)` section below).
     //
-    // 理由与这次改动的动机是同一条：内存里的标记在 App 被系统结束之后什么都
-    // 不剩，而活还在磁盘上排着。那种时候界面会显示"没在跑"，比显示不出来更糟
-    // —— 用户会以为任务丢了、又点一次，于是排成两条。
+    // The reason is the very motivation of this change: in-memory flags leave nothing behind once the system ends the app,
+    // while jobs are still queued on disk. In that state the UI would show "not running" — worse than showing nothing at all,
+    // — users would think the job was lost, tap again, and end up with two queued.
     //
-    // `translateError` / `exportError` 那两个 `@State` 加两个 alert 也一并删了：
-    // 活现在可能在**用户看不见的时候**失败，alert 那种"当场弹一下"的形式根本
-    // 覆盖不到；改成在各自的 section 里就地显示（`failedRow`），看得见、可重试。
+    // The two `@State` properties `translateError` / `exportError` and their two alerts are deleted along with them:
+    // jobs can now fail **while the user isn't looking**, and an alert's "pop up on the spot" form simply
+    // can't cover that; they now show in place within their own sections (`failedRow`) — visible and retryable.
     @State private var exportShareURL: URL?
-    /// 用户按下导出之后如果**没离开这一页**，导完把分享面板直接推出来（与十二
-    /// 改之前的行为一致）。离开了就靠 `exportReady` 那一行 —— 它本来就存在。
-    /// 这个标记随视图一起消失，正合语义。
+    /// If the user **doesn't leave this page** after tapping export, push the share sheet straight out when it finishes (same as
+    /// before the twelfth revision). If they leave, the `exportReady` row covers it — it was already there.
+    /// The flag disappears together with the view, which fits the semantics exactly.
     @State private var pendingExportShare = false
     @State private var showVADPreview = false
     @State private var showMindMap = false
     @State private var showExportChoice = false
+    /// ★ 任务二 (2026-10-22): email-with-attachments sheet.
+    @State private var showMailExport = false
+    /// "Marks" pushed by a recorder card while it was recording.
+    ///
+    /// ★ Read once on appear from `<base>.marks.json` and never re-read: a sidecar only ever appears
+    /// **together with** the download that produced this clip, so it cannot change while the page is
+    /// open. Keeping it in `@State` (rather than computing it inside `body`) also avoids decoding the
+    /// JSON on every redraw — `body` re-evaluates once a second while audio plays.
+    @State private var marks: [A1Mark] = []
 
     private enum TranslateTarget { case transcript, summary }
 
+    /// ★ 2026-10-23 ("照 Plaud 的样式", vivo 取证): exactly two tabs, Plaud's
+    /// 「来源 | 笔记」. 来源 = playback + the timestamped, speaker-labelled
+    /// transcript (the *source*); 笔记 = the generated note pages, mind map and
+    /// the note chat (the *product*). The old third To-dos tab is gone, Plaud
+    /// style — to-dos live as a note page (the 待办清单（Plaud） template), and
+    /// TodoExtract's aggregation over all pages remains available there.
+    private enum DetailTab: CaseIterable, Identifiable {
+        case source, notes
+        var id: Int { Self.allCases.firstIndex(of: self) ?? 0 }
+        var title: String {
+            switch self {
+            case .source: L10n.ClipDetail.tabTranscript
+            case .notes: L10n.ClipDetail.tabSummary
+            }
+        }
+    }
+    @State private var detailTab: DetailTab = .source
+    @State private var transcriptQuery = ""
+    @State private var speakerFilter: String?
+    /// ★ 2026-10-22 ("还要支持修改说话人的名称"): the user's names for this clip's
+    /// diarized speakers. Observed (not read once) so a rename in the sheet
+    /// repaints every row and chip behind it.
+    @ObservedObject private var speakerStore = SpeakerNameStore.shared
+    @State private var showSpeakerEditor = false
+    /// Q&A state lives in the page, not in the section: the input bar is pinned to the bottom
+    /// while the answers stay in the scrolling list.
+    @StateObject private var aiChat = AIChatModel()
+
     var body: some View {
         Form {
-            if item.hasAudio { heroCard }
-            transcriptSection
-            if translation != nil { translationSection }
-            summarySection
-            if translatedSummary != nil { translatedSummarySection }
-            if item.hasAudio { exportSection }
-            destructiveSection
+            // ★ 2026-10-23 ("照 Plaud 的样式"): the two tabs sit at the **very top** —
+            //   来源 (left) = audio playback + who said what at what time, 笔记 (right)
+            //   = the generated note pages + mind map. Exactly Plaud's split.
+            Section {
+                Picker("", selection: $detailTab) {
+                    ForEach(DetailTab.allCases) { tab in
+                        Text(tab.title).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+            }
+            switch detailTab {
+            case .source:
+                // The player belongs to 来源, like Plaud's: playback and the
+                // timestamped transcript (who said what, when) are one surface.
+                if item.hasAudio { heroCard }
+                if !marks.isEmpty { marksSection }
+                transcriptSection
+                if translation != nil { translationSection }
+            case .notes:
+                summarySection
+                if translatedSummary != nil { translatedSummarySection }
+                // ★ 2026-10-23 ("待办清单在底部即可"): the to-do list comes back as
+                //   a plain section at the bottom of the 笔记 tab — not its own tab
+                //   (user reverted 136's removal), aggregated over ALL note pages.
+                todoListSection
+                // AI Q&A is a *note* feature ("对此笔记提问") — it lives on the
+                // 笔记 tab, like Plaud's chat bar under the note.
+                if aiChat.isAvailable {
+                    AIChatSection(model: aiChat)
+                }
+            }
+            // Export/delete moved into the top-right menu (Plaud / DingTalk detail-page shape).
+            // Only a *running or failed* export still gets an inline row — progress needs to be
+            // visible without opening a menu.
+            if activeJob(.export) != nil || failedJob(.export) != nil {
+                exportStatusSection
+            }
         }
         .padding(.top, -20)
         .navigationTitle(item.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
-        // ★ 2026-10-15：详情页一出现就算"打开过了"，列表上那颗红点随之消失。
+        // ★ (2026-10-19) The three tabs belong to the app's home shell. Keeping them on a
+        // recording detail page wastes the bottom strip on navigation the user has already
+        // made a decision about — and the Q&A bar needs that strip.
+        .toolbar(.hidden, for: .tabBar)
+        // Answers scroll, the question box does not. The chat belongs to the
+        // 笔记 tab (Plaud's "对此笔记提问") — hidden on 来源 so playback keeps
+        // the bottom strip.
+        .safeAreaInset(edge: .bottom) {
+            if detailTab == .notes, aiChat.isAvailable {
+                AIChatInputBar(model: aiChat)
+            }
+        }
+        // ★ 2026-10-15: The detail page counts as "opened" the moment it appears, and the red dot on the list row goes away with it.
         //
-        // 挂在这里而不是列表的点击回调里：详情页有好几个入口（资料库、
-        // 录音列表、实时页跳过来），挂在点击回调上就只能覆盖到其中一个 ——
-        // 用户从别处点开会发现红点还在，像是没生效。这里只有一处，也永远
-        // 不会因为新增入口而漏。
+        // Hooked here rather than in the list's tap callback: the detail page has several entry points (library,
+        // recording list, live page), and a tap callback would only cover one of them —
+        // users opening it from elsewhere would find the dot still there, as if nothing happened. This is the single spot, and it will never
+        // miss a new entry point.
         .onAppear { ClipReadStore.shared.markSeen(name: item.name) }
         .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                // ★ (2026-10-19) Export + delete live here, not as two sections at the bottom of
+                // the page. Plaud / DingTalk both keep per-recording actions in a single overflow
+                // menu — the old layout pushed them below an arbitrarily long summary, so users
+                // scrolled past every section looking for "delete".
+                Menu {
+                    if item.hasAudio {
+                        Button {
+                            showExportChoice = true
+                        } label: {
+                            Label(L10n.ClipDetail.exportAudio, systemImage: "square.and.arrow.up.on.square")
+                        }
+                        .disabled(activeJob(.export) != nil)
+                    }
+                    // ★ 2026-10-22 (任务二): document export — txt / md / pdf,
+                    // plus the mail-with-attachments entry Plaud's
+                    // `Workflow_send_email_attachments_*` proves out.
+                    if transcript != nil || summary != nil {
+                        Menu {
+                            Button(L10n.ClipDetail.exportAsTXT) { enqueueDocumentExport("txt") }
+                            Button(L10n.ClipDetail.exportAsMarkdown) { enqueueDocumentExport("md") }
+                            Button(L10n.ClipDetail.exportAsPDF) { enqueueDocumentExport("pdf") }
+                        } label: {
+                            Label(L10n.ClipDetail.exportDocument, systemImage: "doc.badge.arrow.up")
+                        }
+                        .disabled(activeJob(.export) != nil)
+                        Button {
+                            showMailExport = true
+                        } label: {
+                            Label(L10n.ClipDetail.emailTitle, systemImage: "envelope")
+                        }
+                    }
+                    if activeJob(.export) == nil, let staged = ExportCenter.shared.ready(forOrigin: item.name) {
+                        Button {
+                            exportShareURL = ExportCenter.shared.url(for: staged)
+                        } label: {
+                            Label(L10n.ClipDetail.exportReady, systemImage: "checkmark.circle")
+                        }
+                    }
+                    if item.hasAudio || transcript != nil || summary != nil {
+                        Divider()
+                    }
+                    if item.hasAudio {
+                        Button(role: .destructive) {
+                            deleteAudioAlert = true
+                        } label: {
+                            Label(L10n.ClipDetail.deleteAudio, systemImage: "trash")
+                        }
+                    }
+                    if transcript != nil {
+                        Button(role: .destructive) {
+                            deleteTranscriptAlert = true
+                        } label: {
+                            Label(L10n.ClipDetail.deleteTranscript, systemImage: "text.badge.xmark")
+                        }
+                    }
+                    if summary != nil {
+                        Button(role: .destructive) {
+                            deleteSummaryAlert = true
+                        } label: {
+                            Label(L10n.ClipDetail.deleteSummary, systemImage: "doc.badge.ellipsis")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel(L10n.ClipDetail.moreActions)
+            }
             if configService.config.isDeveloperMode {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -92,20 +261,54 @@ struct ClipDetailView: View {
         .sheet(isPresented: $showVADPreview) {
             VADPreviewView(item: item)
         }
+        // ★ 2026-10-22 ("还要支持修改说话人的名称").
+        .sheet(isPresented: $showSpeakerEditor) {
+            SpeakerRenameSheet(clip: item.name,
+                               speakers: speakerRoster(transcript?.segments ?? []))
+        }
         .fullScreenCover(isPresented: $showMindMap) {
             // Re-read from state rather than capture: the summary can be
-            // regenerated while the sheet is closed.
-            MindMapScreen(markdown: summary ?? "", fallbackTitle: item.displayTitle)
+            // regenerated while the sheet is closed. Follows the **selected page**.
+            MindMapScreen(markdown: currentPageText ?? "", fallbackTitle: item.displayTitle)
         }
         .task {
             if let url = item.url { player.load(url) }
             languages.fetchTargetLanguagesIfNeeded()
             transcript = TranscriptDocument.load(for: item.name)
+            // Speaker names are a sidecar of this clip; load once per visit.
+            speakerStore.load(clip: item.name)
+            marks = A1MarkStore.sidecar(forClipBase: item.base)
             loadTranslation()
             loadSummary()
             loadTranslatedSummary()
+            // ★ 2026-10-23 ("页面模板"): load the page manifest; a clip from before
+            //   the feature falls back to "just the primary page" inside `NotePages.load`.
+            pages = NotePages.load(for: item.name)
+            if !pages.contains(where: { $0.id == selectedPageID }) {
+                selectedPageID = pages.first?.id ?? NotePage.primaryID
+            }
+            loadSelectedPageText()
+            aiChat.context = aiContext ?? ""
         }
         .onDisappear { player.stop() }
+        .onChange(of: jobs.jobs) { _ in
+            // A summarize job can finish while this page is open (or after the sheet
+            // was dismissed) — the manifest gains the page on disk, so re-read it
+            // here. Guarded by equality so it stays a no-op most of the time.
+            let loaded = NotePages.load(for: item.name)
+            if loaded != pages {
+                pages = loaded
+                if !loaded.contains(where: { $0.id == selectedPageID }) {
+                    selectedPageID = loaded.first?.id ?? NotePage.primaryID
+                }
+                loadSelectedPageText()
+            }
+        }
+        // A rename must reach the Q&A context as well, or answers keep using the
+        // old labels until the page is reopened (2026-10-22).
+        .onChange(of: speakerStore.maps) { _ in
+            aiChat.context = aiContext ?? ""
+        }
         .onChange(of: transcription.inFlight.contains(item.name)) { isRunning in
             // Auto-transcribe landing: the service flips `inFlight` off as
             // soon as the write completes, so this is where the newly-
@@ -114,16 +317,34 @@ struct ClipDetailView: View {
             // the doc itself.
             if !isRunning { transcript = TranscriptDocument.load(for: item.name) }
         }
-        .sheet(isPresented: $showPlayer) {
-            PlayerSheet(player: player, title: item.displayTitle, totalDuration: item.duration)
-        }
         .sheet(isPresented: $showSummarize) {
             if let doc = transcript {
                 SummarizeSheet(
-                    transcriptText: Self.textForSummarization(doc),
-                    audioName: item.name
+                    transcriptText: Self.textForSummarization(doc, speakerNames: speakerMap),
+                    audioName: item.name,
+                    // ★ 2026-10-23 ("页面模板"): the page the action came from — the
+                    //   primary page when the plain "generate" was tapped, the selected
+                    //   page when "更换模板" was.
+                    pageID: summarizePageID
                 ) { text in
-                    summary = text
+                    if summarizePageID == NotePage.primaryID { summary = text }
+                    pages = NotePages.load(for: item.name)
+                    loadSelectedPageText()
+                }
+            }
+        }
+        .sheet(isPresented: $showAddPage) {
+            if let doc = transcript {
+                SummarizeSheet(
+                    transcriptText: Self.textForSummarization(doc, speakerNames: speakerMap),
+                    audioName: item.name,
+                    pageID: addPageID
+                ) { _ in
+                    // The manifest entry is written by the runner when the artifact
+                    // lands; here we only re-read what it wrote.
+                    pages = NotePages.load(for: item.name)
+                    selectedPageID = addPageID
+                    loadSelectedPageText()
                 }
             }
         }
@@ -160,6 +381,23 @@ struct ClipDetailView: View {
             Button(L10n.ClipDetail.exportAsM4A) { enqueueExport(.m4a) }
             Button(L10n.ClipDetail.exportAsWAV) { enqueueExport(.wav) }
             Button(L10n.Common.cancel, role: .cancel) {}
+        }
+        .sheet(isPresented: $showMailExport) {
+            MailExportSheet(clipName: item.name)
+        }
+        // ★ 2026-10-23 ("页面模板"): deleting a note page — the chip's context menu
+        //   hands the page over here. The primary page is excluded in the menu: its
+        //   deletion goes through "删除摘要" (trash flow + translation sidecar).
+        .alert(L10n.ClipDetail.noteDeletePage, isPresented: Binding(
+            get: { deletePageAlert != nil },
+            set: { if !$0 { deletePageAlert = nil } }
+        )) {
+            Button(L10n.Common.delete, role: .destructive) {
+                if let page = deletePageAlert { deletePage(page) }
+            }
+            Button(L10n.Common.cancel, role: .cancel) {}
+        } message: {
+            Text(L10n.ClipDetail.noteDeletePageMessage)
         }
         .confirmationDialog(L10n.ClipDetail.retranscribe, isPresented: $showRetranscribeChoice, titleVisibility: .hidden) {
             Button(L10n.ASR.transcribeAuto) { runTranscribe(locales: nil) }
@@ -207,12 +445,12 @@ struct ClipDetailView: View {
                 enqueueTranslate(target: translateTarget, languageName: lang.name)
             }
         }
-        // ★ 十二改：这两个 alert（翻译失败 / 导出失败）删掉了。
+        // ★ Twelfth revision: these two alerts (translation failed / export failed) are gone.
         //
-        // 活现在可能在**用户看不见的时候**失败，而 alert 只在"当场那一下"能弹；
-        // 更要命的是它还会**重复弹** —— 台账里那条 `lastError` 会一直留着，
-        // 每次界面刷新都能再触发一遍。改成在各自的 section 里就地显示
-        // （`failedRow`）：看得见、可重试、不会自己冒出来。
+        // Jobs can now fail **while the user isn't looking**, and alerts can only fire "right then and there";
+        // worse, they'd **fire repeatedly** — the `lastError` in the ledger sticks around,
+        // retriggering on every UI refresh. Replaced with in-place display in each section
+        // (`failedRow`): visible, retryable, and never popping up on its own.
         .sheet(
             isPresented: Binding(
                 get: { exportShareURL != nil },
@@ -224,8 +462,8 @@ struct ClipDetailView: View {
                 ShareSheet(items: [url])
             }
         }
-        // 队列一有变化就跟上：这条录音上的活跑完了 / 放弃了，摘要、译文、
-        // 分享入口都得跟着变。
+        // Follow along whenever the queue changes: when a job on this recording finishes / gives up, the summary, translation,
+        // and share entry all have to update.
         .onChange(of: jobs.jobs) { _ in jobsChanged() }
     }
 
@@ -233,61 +471,80 @@ struct ClipDetailView: View {
 
     private var heroCard: some View {
         Section {
-            Button { showPlayer = true } label: {
-                HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color.accentColor.opacity(0.12))
-                            .frame(width: 48, height: 48)
-                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title3)
-                            .foregroundColor(.accentColor)
-                    }
+            // ★ (2026-10-19) Inline player instead of "tap → sheet".
+            //   The sheet was the only way to control playback, so reading a transcript meant
+            //   opening and closing a modal for every re-listen; the detail page now owns the
+            //   transport and the transcript below reacts to it.
+            InlineAudioPlayer(player: player, totalDuration: item.duration)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            if let dur = item.durationLabel {
-                                Text(dur)
-                                    .font(.callout.weight(.medium).monospacedDigit())
-                                    .fixedSize()
-                            }
-                            Spacer()
-                            Text(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize()
-                        }
-                        // ★ 2026-10-16 十三改：`.formatted(date:time:)` **不读**
-                        //   SwiftUI 环境里的 locale —— 它取 `Locale.current`，
-                        //   而这句话在 `Text` 看到它之前就已经算成字符串了
-                        //   （只有 `Text(date, format:)` 才会去读环境）。
-                        //   所以这里显式走 `AppLocale`，跟 App 语言走。
-                        //
-                        // ⚠️ 原来的 `.abbreviated` / `.shortened` 是
-                        //   `Date.FormatStyle` 的符号，不是 `DateFormatter.Style`
-                        //   的 —— 后者的取值只有 none/short/medium/long/full。
-                        //   等价换算：`.abbreviated → .medium`、`.shortened → .short`。
-                        Text(AppLocale.string(from: item.recordedAt,
-                                              dateStyle: .medium,
-                                              timeStyle: .short))
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .fixedSize()
-                        Text(item.name)
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-                .padding(.vertical, 4)
-                // `.buttonStyle(.plain)` only takes hits on drawn pixels, so
-                // the gaps between the icon and the labels were dead — the
-                // card looked tappable everywhere but only responded on the
-                // artwork and text.
-                .contentShape(Rectangle())
+            HStack(spacing: 6) {
+                Text(item.name)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Text(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize()
+                Text("·").font(.caption2).foregroundStyle(.tertiary)
+                // Locale comes from `AppLocale` — `.formatted(date:time:)` reads
+                // `Locale.current`, not the SwiftUI environment (thirteenth revision note).
+                Text(AppLocale.string(from: item.recordedAt, dateStyle: .medium, timeStyle: .short))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize()
             }
-            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - remarks (marks)
+
+    /// The marks the card registered with **its own button** while it was recording.
+    ///
+    /// ★ These are not transcription output and not an invention on our side: mid-recording the A1
+    /// emits `AUDIO_CONTROL_REMARK_BUTTON_CLICK` (`0x0B000001`) stamped with the **card's own clock**,
+    /// so the offset from `AUDIO_RECORD_START` survives even when the report is delivered in a batch
+    /// seconds later. It is downloaded as `<base>.marks.json` next to the clip, which is what this reads.
+    ///
+    /// Hidden entirely when there are no marks — an empty "Remarks" header would advertise a feature the
+    /// recording never used, and the user would wonder what they were supposed to have pressed.
+    @ViewBuilder
+    private var marksSection: some View {
+        Section {
+            ForEach(Array(marks.enumerated()), id: \.offset) { _, mark in
+                Button {
+                    guard let url = item.url else { return }
+                    // `load` is a no-op on the same URL, so this is safe even mid-playback.
+                    player.load(url)
+                    player.seek(to: mark.offset)
+                    player.play()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "bookmark.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Text(ClockLabel.mmss(mark.offset))
+                            .font(.callout.monospacedDigit())
+                        Spacer()
+                        Image(systemName: "play.circle")
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        } header: {
+            HStack {
+                Text(L10n.ClipDetail.remarks)
+                Spacer()
+                Text(L10n.ClipDetail.remarksCount(marks.count))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        } footer: {
+            Text(L10n.ClipDetail.remarksFooter)
         }
     }
 
@@ -297,10 +554,10 @@ struct ClipDetailView: View {
         transcription.inFlight.contains(item.name)
     }
 
-    /// 这条录音在转录队列里、且已经试满放弃的那一条。
+    /// This recording's entry in the transcription queue that gave up after max attempts.
     ///
-    /// 判据与设置页那行 `asr.queue_stuck` 完全一致（`attempts >= maxAttempts`），
-    /// 故意不另立标准 —— 同一个事实在两个地方说法不同，用户就不知道该信哪个。
+    /// The criterion is identical to the `asr.queue_stuck` row on the settings page (`attempts >= maxAttempts`);
+    /// deliberately not inventing a second standard — if the same fact reads differently in two places, users won't know which to believe.
     private var stuckTranscription: TranscriptionService.PendingJob? {
         transcription.pending.first {
             $0.name == item.name && $0.attempts >= TranscriptionService.maxAttempts
@@ -322,10 +579,10 @@ struct ClipDetailView: View {
                     .controlSize(.small)
                 }
             } else if let stuck = stuckTranscription {
-                // 转录试满三次、放弃了。
+                // Transcription used its three attempts and gave up.
                 //
-                // 以前这种状态只在设置页那一行里能看到（`asr.queue_stuck_detail`），
-                // 而用户是在**这条录音**上按的按钮 —— 他只会觉得"点了没反应"。
+                // This state used to be visible only in the settings page row (`asr.queue_stuck_detail`),
+                // but the user pressed the button **on this recording** — all they'd feel is "nothing happened".
                 VStack(alignment: .leading, spacing: 6) {
                     Label(L10n.Jobs.statusGaveUp, systemImage: "exclamationmark.triangle.fill")
                         .font(.callout)
@@ -335,18 +592,18 @@ struct ClipDetailView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    // 重试就是再入一次队 —— `enqueue` 会把尝试计数清零，
-                    // 与 `JobQueue.retry(id:)` 是同一个语义。
+                    // Retrying is just enqueueing again — `enqueue` resets the attempt counter,
+                    // the same semantics as `JobQueue.retry(id:)`.
                     Button(L10n.Jobs.retry) { runTranscribe(locales: stuck.locales) }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                 }
             }
 
-            // 转录翻译：跑着 / 放弃了都在这里就地显示。
+            // Transcript translation: shown in place here whether running or given up.
             //
-            // 以前这一行挂在内存里的 `translatingTranscript` 上，切走再回来它
-            // 就没了 —— 用户看不出这条活还在不在，多半会再点一次翻译。
+            // This row used to hang off the in-memory `translatingTranscript`; switch away and back and it
+            // was gone — users couldn't tell whether the job was still alive and would most likely tap translate again.
             if let job = activeJob(.translate, target: "transcript") {
                 runningRow(job, L10n.ClipDetail.translating)
             } else if let job = failedJob(.translate, target: "transcript") {
@@ -355,13 +612,18 @@ struct ClipDetailView: View {
             if let job = lastFinishedJob(.translate, target: "transcript") { notesRow(job) }
 
             if let doc = transcript {
-                Text(transcriptPreview(doc))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
+                if doc.segments.isEmpty {
+                    Text(transcriptPreview(doc))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                } else {
+                    transcriptSearchBar(doc)
+                    transcriptRows(doc)
+                }
 
                 NavigationLink(L10n.ClipDetail.viewFullTranscript) {
-                    TranscriptFullView(document: doc)
+                    TranscriptFullView(document: doc, player: player, speakerNames: speakerMap)
                 }
             } else if item.hasAudio, !isTranscribing {
                 Button {
@@ -400,21 +662,256 @@ struct ClipDetailView: View {
         }
     }
 
-    private func triggerTranscribe(locales: [String]?) {
-        if env.config.config.asrProviders.hasConfiguredProvider {
+    /// Index of the segment playing right now (`nil` before playback starts).
+    private func activeSegmentIndex(_ segments: [AsrSegment]) -> Int? {
+        guard !segments.isEmpty, player.currentTime > 0 else { return nil }
+        return segments.lastIndex { $0.start <= player.currentTime }
+    }
+
+    /// Four rows of context that slide with the audio — enough to read along without turning
+    /// the detail page into an endless list.
+    private func inlineSegmentWindow(_ segments: [AsrSegment]) -> [AsrSegment] {
+        let windowSize = 4
+        guard segments.count > windowSize else { return segments }
+        let active = activeSegmentIndex(segments) ?? 0
+        let start = max(0, min(active - 1, segments.count - windowSize))
+        return Array(segments[start..<(start + windowSize)])
+    }
+
+    // MARK: transcript search & speaker filter (★ 2026-10-19, DingTalk parity)
+
+    /// Search field + speaker chips. Hidden for single-speaker short transcripts where
+    /// there is nothing to find faster than reading.
+    @ViewBuilder
+    private func transcriptSearchBar(_ doc: TranscriptDocument) -> some View {
+        if doc.segments.count > 1 {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField(L10n.ClipDetail.searchTranscript, text: $transcriptQuery)
+                    .textFieldStyle(.plain)
+                    .font(.callout)
+                    .autocorrectionDisabled()
+                if !transcriptQuery.isEmpty {
+                    Button {
+                        transcriptQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            if distinctSpeakers(doc.segments).count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        speakerChip(nil, L10n.ClipDetail.speakerAll)
+                        ForEach(distinctSpeakers(doc.segments), id: \.self) { speaker in
+                            speakerChip(speaker, nil)
+                        }
+                        // ★ 2026-10-22 ("还要支持修改说话人的名称"): the chips are the
+                        // only place speakers are named, so the rename entry belongs
+                        // at the end of them — right where the user notices "说话人 2"
+                        // is not a person's name.
+                        Button {
+                            showSpeakerEditor = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "pencil").font(.caption2)
+                                Text(L10n.ClipDetail.editSpeakerNames).font(.caption)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.appAccent.opacity(0.12)))
+                            .foregroundStyle(Color.appAccent)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    /// While searching or filtering: all matching lines (highlighted, capped) with tap-to-seek;
+    /// otherwise the playback-following window.
+    @ViewBuilder
+    private func transcriptRows(_ doc: TranscriptDocument) -> some View {
+        let isSearching = !transcriptQuery.isEmpty || speakerFilter != nil
+        if isSearching {
+            let matches = doc.segments.filter { segment in
+                (speakerFilter == nil || segment.speaker == speakerFilter)
+                    && (transcriptQuery.isEmpty || segment.text.localizedCaseInsensitiveContains(transcriptQuery))
+            }
+            if matches.isEmpty {
+                Text(L10n.ClipDetail.noTranscriptMatch)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(matches.prefix(40), id: \.start) { seg in
+                    TranscriptSegmentRow(
+                        segment: seg,
+                        isActive: activeSegmentIndex(doc.segments).map { doc.segments[$0].start == seg.start } ?? false,
+                        highlight: transcriptQuery.isEmpty ? nil : transcriptQuery,
+                        speakerNames: speakerMap
+                    ) {
+                        player.seek(to: max(0, seg.start - 0.3))
+                        if !player.isPlaying { player.play() }
+                    }
+                }
+                if matches.count > 40 {
+                    Text("+\(matches.count - 40)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            // A short window that **follows playback**: the current sentence stays on screen
+            // and tapping any line jumps the audio there.
+            ForEach(inlineSegmentWindow(doc.segments), id: \.start) { seg in
+                TranscriptSegmentRow(
+                    segment: seg,
+                    isActive: activeSegmentIndex(doc.segments).map { doc.segments[$0].start == seg.start } ?? false,
+                    speakerNames: speakerMap
+                ) {
+                    player.seek(to: max(0, seg.start - 0.3))
+                    if !player.isPlaying { player.play() }
+                }
+            }
+        }
+    }
+
+    private func distinctSpeakers(_ segments: [AsrSegment]) -> [String] {
+        var seen: [String] = []
+        for segment in segments {
+            guard let speaker = segment.speaker, !speaker.isEmpty else { continue }
+            if !seen.contains(speaker) { seen.append(speaker) }
+        }
+        return seen
+    }
+
+    private func speakerChip(_ value: String?, _ label: String?) -> some View {
+        let selected = speakerFilter == value
+        // Renamed speakers keep their **id** as the filter key (the segment field
+        // never changes) and only the visible text is the user's name.
+        let resolved = label
+            ?? value.map { speakerStore.display($0, clip: item.name) }
+        return Button {
+            speakerFilter = value
+        } label: {
+            Text(resolved ?? L10n.ClipDetail.speakerAll)
+                .font(.caption)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule().fill(selected ? Color.appAccent.opacity(0.18) : Color(uiColor: .secondarySystemBackground))
+                )
+                .foregroundStyle(selected ? Color.appAccent : Color.secondary)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Distinct speaker ids in first-appearance order, with their line counts —
+    /// the rename sheet shows the counts because "which one is speaker 2?" is the
+    /// actual question when four people were in the room.
+    private func speakerRoster(_ segments: [AsrSegment]) -> [(id: String, lines: Int)] {
+        var order: [String] = []
+        var counts: [String: Int] = [:]
+        for segment in segments {
+            guard let speaker = segment.speaker, !speaker.isEmpty else { continue }
+            if counts[speaker] == nil { order.append(speaker) }
+            counts[speaker, default: 0] += 1
+        }
+        return order.map { (id: $0, lines: counts[$0] ?? 0) }
+    }
+
+    /// Raw id → display name, for the rows / export / AI context.
+    private var speakerMap: [String: String] {
+        speakerStore.names(for: item.name)
+    }
+
+    /// Everything the in-page AI Q&A may read: the summary plus the timestamped transcript.
+    /// Capped so a three-hour recording still fits one request — the tail of a long meeting is
+    /// the part a summary already covers best.
+    private var aiContext: String? {
+        var parts: [String] = []
+        if let summary, !summary.isEmpty {
+            parts.append("SUMMARY\n" + String(summary.prefix(6_000)))
+        }
+        if let transcript {
+            let body: String
+            if transcript.segments.isEmpty {
+                body = transcript.text
+            } else {
+                body = transcript.segments
+                    .map { seg in
+                        // Renamed speakers go into the AI context too — otherwise the
+                        // answers keep saying "说话人 1" right after the user fixed it.
+                        let who = seg.speaker.flatMap { id -> String? in
+                            guard !id.isEmpty else { return nil }
+                            let named = speakerMap[id].flatMap { $0.isEmpty ? nil : $0 } ?? id
+                            return "\(named): "
+                        }
+                        return "[\(ClockLabel.mmss(seg.start))] " + (who ?? "") + seg.text
+                    }
+                    .joined(separator: "\n")
+            }
+            parts.append("TRANSCRIPT\n" + String(body.prefix(12_000)))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+    }
+
+    // MARK: To-do list (bottom of the 笔记 tab)
+
+    /// ★ 2026-10-23 ("待办清单在底部即可"): the to-do list lives at the **bottom of
+    /// the 笔记 tab** — not its own tab (that was 136's removal, reverted on user
+    /// feedback), and not Plaud-strict either. Action items lifted from the
+    /// markdown of **all** note pages, so a 待办清单（Plaud） generated page lands
+    /// here too. An honest empty state when no page has such a section.
+    @ViewBuilder
+    private var todoListSection: some View {
+        Section {
+            let todos = pages
+                .compactMap { NotePages.text(of: $0, for: item.name) }
+                .flatMap { TodoExtract.fromSummary($0) }
+            if !todos.isEmpty {
+                MarkdownBlocksView(blocks: todos)
+            } else if !pages.isEmpty {
+                Text(L10n.ClipDetail.todosEmpty)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else if transcript != nil {
+                Text(L10n.ClipDetail.todosNeedSummary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(L10n.ClipDetail.transcribeFirst)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(L10n.ClipDetail.tabTodos)
+        }
+    }
+
+    private func triggerTranscribe(locales: [String]?) {        if env.config.config.asrProviders.hasConfiguredProvider {
             runTranscribe(locales: locales)
         } else {
             showNoASR = true
         }
     }
 
-    /// 转发到 `JobRunners.summarizableText` —— **只留一份实现**。
+    /// Forwards to `JobRunners.summarizableText` — **keep exactly one implementation**.
     ///
-    /// 十二改之后摘要有了第二条入口（`JobQueue` 的 runner，它从磁盘读转录），
-    /// 那一条必须喂进去一模一样的文本。两处各写一遍，迟早会漂开，而表现是
-    /// "同一个模板，隔一天跑出来的摘要结构不一样" —— 那种问题没人查得动。
-    private static func textForSummarization(_ doc: TranscriptDocument) -> String {
-        JobRunners.summarizableText(text: doc.text, segments: doc.segments)
+    /// After the twelfth revision summarizing gained a second entry point (the `JobQueue` runner, which reads the transcript from disk),
+    /// and that path must be fed the exact same text. Written separately in two places they will eventually drift, manifesting as
+    /// "the same template producing summaries with different structures a day apart" — a problem no one can debug.
+    private static func textForSummarization(_ doc: TranscriptDocument,
+                                             speakerNames: [String: String] = [:]) -> String {
+        JobRunners.summarizableText(text: doc.text,
+                                    segments: doc.segments,
+                                    speakerNames: speakerNames)
     }
 
     private func transcriptPreview(_ doc: TranscriptDocument) -> String {
@@ -422,38 +919,38 @@ struct ClipDetailView: View {
         return String(doc.segments.map(\.text).joined(separator: " ").prefix(200))
     }
 
-    /// 发起转录。
+    /// Start a transcription.
     ///
-    /// ★ 2026-10-16 十二改：改走 `enqueue` 而**不是** `transcribe`。
+    /// ★ Twelfth revision, 2026-10-16: switched to `enqueue` **instead of** `transcribe`.
     ///
-    /// 差别只在"App 中途被杀"那一种情况下看得出来：直接跑的那条活在进程没了
-    /// 的时候就凭空消失，用户第二天回来只看到一条没转录的录音，也不会知道曾经
-    /// 试过。`enqueue` 先落盘再开跑，`resumePending()` 下次启动会把它捞回来 ——
-    /// 这正是用户那句"可以先退出后台等完成后再进行查看"要的东西。
+    /// The difference only shows in the one case of "app killed midway": a directly-run job vanishes into thin air
+    /// the moment the process is gone; the user comes back the next day to an untranscribed recording, with no way of knowing an attempt
+    /// was ever made. `enqueue` persists first, runs second, and `resumePending()` picks it up on next launch —
+    /// exactly what the user's "exit to the background first and check when it's done" asked for.
     ///
-    /// 不再是 `async`：入队本身是同步的，真正的等待由 `transcription.inFlight`
-    /// / `pending` 驱动界面（见 `isTranscribing` 与 `stuckTranscription`）。
-    /// 硬留着 `async` 会让每个调用点报 "no 'async' operations occur within
-    /// 'await' expression"，而本工程是零告警的。
+    /// No longer `async`: enqueueing is synchronous, and the real waiting is driven into the UI by `transcription.inFlight`
+    /// / `pending` (see `isTranscribing` and `stuckTranscription`).
+    /// Keeping `async` would make every call site warn "no 'async' operations occur within
+    /// 'await' expression", and this project builds with zero warnings.
     private func runTranscribe(locales: [String]? = nil) {
         guard let fileURL = item.url else { return }
         env.transcription.enqueue(fileURL: fileURL, locales: locales)
     }
 
-    // MARK: - 任务队列联动（★ 2026-10-16 十二改）
+    // MARK: - Job queue integration (★ twelfth revision 2026-10-16)
 
-    /// 这条录音上、这一类活里正在跑的那条（界面拿它决定按钮的忙碌态）。
+    /// The running job of this kind on this recording (the UI uses it for the button's busy state).
     private func activeJob(_ kind: JobKind, target: String? = nil) -> Job? {
         jobs.activeJobs(for: item.name).first { job in
             job.kind == kind && (target == nil || job.translateTarget == target)
         }
     }
 
-    /// 这条录音上、这一类活里**试满放弃**的那条。
+    /// The job of this kind on this recording that **gave up after max attempts**.
     ///
-    /// "有 `finishedAt` 且有 `lastError`" 就是放弃 —— 成功那条 `lastError` 是
-    /// nil，取消那条也是 nil，三个状态靠这两个字段就能分开（见 `JobQueue.State`）。
-    /// 用户一旦重新发起（`enqueue` 会清 `lastError`）或点重试，这一行自动消失。
+    /// "Has `finishedAt` and a `lastError`" means gave up — on success `lastError` is
+    /// nil, and so it is on cancellation; the three states separate on these two fields alone (see `JobQueue.State`).
+    /// Once the user starts again (`enqueue` clears `lastError`) or taps retry, this row disappears on its own.
     private func failedJob(_ kind: JobKind, target: String? = nil) -> Job? {
         jobs.jobs.first { job in
             job.clipName == item.name && job.kind == kind
@@ -462,12 +959,12 @@ struct ClipDetailView: View {
         }
     }
 
-    /// 某类活**最近一次成功跑完**的那条（用来显示结果附注）。
+    /// The most recently **finished successfully** job of a given kind (used to show the result note).
     ///
-    /// 只认"成功"（`finishedAt` 有值且 `lastError` 为 nil）：失败的原因已经在
-    /// `failedRow` 里说过一次了，在这里再说一遍只会让人以为是两个问题。
-    /// 取"最近一次"而不是任意一条：同一条录音可以先后翻成好几种语言，附注
-    /// （比如"被截断"）必须对应**用户现在看到的那份内容**。
+    /// Only "success" counts (`finishedAt` set and `lastError` nil): the reason for failure has already been
+    /// stated once in `failedRow`; repeating it here would only make people think there are two problems.
+    /// "Most recent" rather than any entry: one recording can be translated into several languages in turn, and the note
+    /// (say, "truncated") must match **the content the user is looking at now**.
     private func lastFinishedJob(_ kind: JobKind, target: String? = nil) -> Job? {
         jobs.jobs
             .filter {
@@ -478,12 +975,12 @@ struct ClipDetailView: View {
             .max { ($0.finishedAt ?? .distantPast) < ($1.finishedAt ?? .distantPast) }
     }
 
-    /// 结果附注那一小块（兜底通道 / 走了分段 / 正文被截断）。
+    /// The little result-note block (fallback channel / chunked / body truncated).
     ///
-    /// 没有内容时它什么都不画。**为什么非要有它**：附注是"结果的一部分"，
-    /// 而这条活多半是在用户看不见的时候跑完的 —— 不留在这里，"我明明设的是
-    /// Open Router，怎么是 Ollama 生成的"就永远没人回答；而一份被截断的
-    /// 正文读起来和完整的完全一样。
+    /// Draws nothing when there's no content. **Why it must exist**: the note is "part of the result",
+    /// and such jobs usually finish while the user isn't looking — without keeping it here, the question "I set
+    /// Open Router, so why was this generated by Ollama?" goes unanswered forever; and a truncated
+    /// body reads exactly like a complete one.
     @ViewBuilder
     private func notesRow(_ job: Job) -> some View {
         if job.wasTruncated == true {
@@ -498,10 +995,10 @@ struct ClipDetailView: View {
         }
     }
 
-    /// 「正在跑」那一行。
+    /// The "in progress" row.
     ///
-    /// 用户在详情页发起、然后切走再回来时，这是他能看出"它还在跑"的唯一地方
-    /// —— 以前这一行只在 `await` 还没返回时存在（内存标记），切走回来就没了。
+    /// When the user starts it here, switches away, and comes back, this is the only place they can see "it's still running"
+    /// — the row used to exist only while the `await` hadn't returned (in-memory flag), vanishing after a switch away and back.
     @ViewBuilder
     private func runningRow(_ job: Job, _ label: String) -> some View {
         HStack(spacing: 8) {
@@ -523,10 +1020,10 @@ struct ClipDetailView: View {
         }
     }
 
-    /// 「试满放弃」那一行 + 就地重试。
+    /// The "gave up after max attempts" row + retry in place.
     ///
-    /// **必须显示**：用户切走再回来，如果只看到内容还是旧的，会以为它还在跑
-    /// （或者以为按钮坏了），然后多半会再点一次 —— 结果又排一条。
+    /// **Must be shown**: coming back after switching away, if the content still looks old, users will think it's still running
+    /// (or that the button is broken), and will most likely tap again — queueing a second job.
     @ViewBuilder
     private func failedRow(_ job: Job) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -544,23 +1041,23 @@ struct ClipDetailView: View {
         }
     }
 
-    /// 队列一有变化就跟上。
+    /// Follow along whenever the queue changes.
     ///
-    /// ⚠️ 挂 `.onChange(of: jobs.jobs)` 而不是等 runner 回调视图：活很可能
-    ///    是在这一页**根本不存在**的时候跑完的（那正是十二改要支持的场景）。
-    ///    所以这里能做的只有一件事 —— 重新从**磁盘**读一遍产物。
+    /// ⚠️ Hooked on `.onChange(of: jobs.jobs)` rather than waiting for the runner to call back into the view: jobs very often
+    ///    finish while this page **doesn't even exist** (exactly the scenario the twelfth revision set out to support).
+    ///    So the only thing to do here is re-read the output from **disk**.
     ///
-    /// 代价是分段进度每跳一次也重读一次（几十次小文件读），换来的是一条不需要
-    /// 任何额外状态同步的实现。值。
+    /// The cost is one re-read per chunk-progress tick (a few dozen small file reads); the payoff is an implementation needing
+    /// no extra state synchronization at all. Worth it.
     private func jobsChanged() {
         loadSummary()
         loadTranslation()
         loadTranslatedSummary()
 
-        // 导出完成 → 分享面板（与十二改之前"导完就弹"一致）。
+        // Export finished → share sheet (same "pop up when done" behavior as before the twelfth revision).
         //
-        // 只在用户按下导出后**没离开这一页**的时候弹：那个标记随视图一起消失，
-        // 离开了就靠 `exportReady` 那一行 —— 它本来就在，不需要新加东西。
+        // Pops only if the user **didn't leave this page** after tapping export: the flag disappears with the view,
+        // and if they left, the `exportReady` row covers it — it was already there; nothing new to add.
         if pendingExportShare, activeJob(.export) == nil, failedJob(.export) == nil,
            let staged = ExportCenter.shared.ready(forOrigin: item.name) {
             pendingExportShare = false
@@ -570,10 +1067,10 @@ struct ClipDetailView: View {
 
     // MARK: - translation (Live-produced or on-demand via tapTranslate(.transcript))
 
-    /// 转录翻译正在跑。
+    /// The transcript translation is running.
     ///
-    /// 从 `@State` 改成算出来 —— 见文件顶部那段注释。三个标记一套写法，这样
-    /// "界面显示在跑、其实早就不在跑了"（App 被杀之后的状态）从结构上不可能发生。
+    /// Computed instead of an `@State` — see the comment at the top of the file. All three flags follow the same pattern, so
+    /// "the UI says it's running when it stopped long ago" (the state after the app is killed) becomes structurally impossible.
     private var translatingTranscript: Bool { activeJob(.translate, target: "transcript") != nil }
     private var translatingSummary: Bool { activeJob(.translate, target: "summary") != nil }
 
@@ -613,7 +1110,12 @@ struct ClipDetailView: View {
                 .lineLimit(3)
 
             NavigationLink(L10n.ClipDetail.viewFullTranslatedSummary) {
-                SummaryFullView(text: translatedSummary!)
+                SummaryFullView(
+                    text: translatedSummary!,
+                    posterTitle: item.customTitle ?? item.name,
+                    posterDate: item.modifiedAt,
+                    posterDuration: item.duration
+                )
             }
         } header: {
             Text(L10n.ClipDetail.translatedSummary)
@@ -640,52 +1142,134 @@ struct ClipDetailView: View {
         showTranslatePicker = true
     }
 
-    /// 入队一份翻译。**不再自己 `await`** —— 见 `JobQueue` 顶部那段：
-    /// 内存里的 `Task` 在 App 被系统结束时一起消失，落盘的活不会。
+    /// Enqueue a translation. **No longer awaits itself** — see the note at the top of `JobQueue`:
+    /// an in-memory `Task` disappears when the system ends the app; a persisted job doesn't.
     ///
-    /// 保活令牌（`BackgroundKeeper.acquire(.summary)`）也搬进了
-    /// `JobRunners.translate` —— 谁干活谁占令牌，四个执行体一套写法。
+    /// The keep-alive token (`BackgroundKeeper.acquire(.summary)`) moved into
+    /// `JobRunners.translate` — whoever does the work holds the token; all four runners follow the same pattern.
     private func enqueueTranslate(target: TranslateTarget, languageName: String) {
-        // `TranslateTarget` → 活里的 `translateTarget` 字符串。用 `String` 而不是
-        // 把这个私有枚举搬到 `Job` 里：那个枚举是**界面**的（它决定点的是哪个
-        // 按钮），而活需要的是"翻的是转录还是摘要"这个事实；两件事不必共用一个类型。
+        // `TranslateTarget` → the job's `translateTarget` string. A `String` rather than
+        // moving this private enum into `Job`: the enum belongs to the **UI** (it decides which
+        // button is tapped), while the job needs only the fact "transcript or summary is being translated"; the two don't need to share a type.
         let t = target == .summary ? "summary" : "transcript"
         jobs.enqueue(Job.translate(clip: item.name, target: t, languageName: languageName))
     }
 
     // MARK: - summary
 
+    /// The summarize job running / failed / finished for the **selected page** —
+    /// pages run independently, so the status rows must follow the chip, not the clip.
+    private func summarizeJob(_ pick: (Job) -> Bool) -> Job? {
+        jobs.jobs.first {
+            $0.clipName == item.name && $0.kind == .summarize
+                && ($0.pageID ?? NotePage.primaryID) == selectedPageID
+                && pick($0)
+        }
+    }
+
+    /// Plaud's 「总结 ▾ | 权力动态 | +」 row: one chip per note page, long-press for
+    /// 更换模板 / 删除此页, "+" to generate another page from any template.
+    private var pageChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(pages) { page in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            selectedPageID = page.id
+                        }
+                        loadSelectedPageText()
+                    } label: {
+                        Text(page.title)
+                            .font(.footnote.weight(page.id == selectedPageID ? .semibold : .regular))
+                            .lineLimit(1)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                Capsule().fill(page.id == selectedPageID
+                                               ? Color.accentColor.opacity(0.16)
+                                               : Color.secondary.opacity(0.12))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            tapSummarize(pageID: page.id)
+                        } label: {
+                            Label(L10n.ClipDetail.noteChangeTemplate,
+                                  systemImage: "arrow.trianglehead.2.counterclockwise")
+                        }
+                        if page.id != NotePage.primaryID {
+                            Button(role: .destructive) {
+                                deletePageAlert = page
+                            } label: {
+                                Label(L10n.ClipDetail.noteDeletePage, systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+                if transcript != nil {
+                    Button {
+                        addPage()
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.footnote.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.ClipDetail.noteAddPage)
+                }
+            }
+        }
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+    }
+
     @ViewBuilder
     private var summarySection: some View {
         Section {
-            // 摘要本身 + 摘要的翻译，两种活都产出"摘要区的内容"，摆在一起。
+            // ★ 2026-10-23 ("页面模板"): the chip row always shows once a transcript
+            //   exists — even with zero pages it offers "+", Plaud's way into a second
+            //   note without leaving the recording.
+            if transcript != nil { pageChips }
+            // The summary itself plus its translation — both kinds produce "summary section content", so they sit together.
             //
-            // ★ 这里最重要的一种情况：用户在**摘要 sheet 里点了模板、然后
-            //   直接把它划掉了**（那正是十二改要支持的用法）。没有这两行的话，
-            //   他回到详情页只看到"生成摘要"按钮还在，完全看不出活正在跑。
-            if let job = activeJob(.summarize) {
+            // ★ The most important case here: the user **picked a template in the summary sheet and then
+            //   swiped it away** (exactly the usage the twelfth revision set out to support). Without these two lines,
+            //   they'd return to the detail page to find only the "Generate summary" button, with no sign a job is running.
+            if let job = summarizeJob({ $0.finishedAt == nil }) {
                 runningRow(job, L10n.Summarize.summarizing)
-            } else if let job = failedJob(.summarize) {
+            } else if let job = summarizeJob({ $0.finishedAt != nil && $0.lastError != nil }) {
                 failedRow(job)
             }
-            if let job = activeJob(.translate, target: "summary") {
+            // Summary translation is a primary-page feature (the job reads the
+            // classic `.summary.md` file) — offered only while that page is shown.
+            if selectedPageID == NotePage.primaryID,
+               let job = activeJob(.translate, target: "summary") {
                 runningRow(job, L10n.ClipDetail.translating)
-            } else if let job = failedJob(.translate, target: "summary") {
+            } else if selectedPageID == NotePage.primaryID,
+                      let job = failedJob(.translate, target: "summary") {
                 failedRow(job)
             }
-            if let summary {
-                Text(String(summary.prefix(200)))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
+            if let text = currentPageText {
+                // ★ (2026-10-19) The summary tab is the "AI minutes" reading surface, so the
+                //   whole document renders inline (headings / bullets, no truncation) instead of
+                //   a 14-block teaser behind a link.
+                MarkdownBlocksView(blocks: MarkdownBlocks.parse(text))
 
                 NavigationLink(L10n.ClipDetail.viewFullSummary) {
-                    SummaryFullView(text: summary)
+                    SummaryFullView(
+                        text: text,
+                        posterTitle: item.customTitle ?? item.name,
+                        posterDate: item.modifiedAt,
+                        posterDuration: item.duration
+                    )
                 }
 
                 // Only offered when the summary actually has section
                 // structure to plot — a flat block of prose has no map.
-                if MarkdownOutline.parse(summary) != nil {
+                if MarkdownOutline.parse(text) != nil {
                     Button {
                         showMindMap = true
                     } label: {
@@ -694,7 +1278,7 @@ struct ClipDetailView: View {
                 }
             } else if transcript != nil {
                 Button {
-                    tapSummarize()
+                    tapSummarize(pageID: selectedPageID)
                 } label: {
                     Label(L10n.ClipDetail.summarize, systemImage: "sparkles")
                 }
@@ -704,22 +1288,25 @@ struct ClipDetailView: View {
                     .font(.callout)
             }
 
-            // 结果附注（兜底通道 / 分段 / 被截断）。放在内容之后 —— 它描述的
-            // 是上面那一份内容。
-            if let job = lastFinishedJob(.summarize) { notesRow(job) }
-            if let job = lastFinishedJob(.translate, target: "summary") { notesRow(job) }
+            // Result note (fallback channel / chunked / truncated). Placed after the content — it describes
+            // the content above. Scoped to the selected page for the same reason as the status rows.
+            if let job = summarizeJob({ $0.finishedAt != nil && $0.lastError == nil }) { notesRow(job) }
+            if selectedPageID == NotePage.primaryID,
+               let job = lastFinishedJob(.translate, target: "summary") { notesRow(job) }
         } header: {
             HStack {
                 Text(L10n.ClipDetail.summary)
                 Spacer()
-                if summary != nil {
-                    Button { tapTranslate(.summary) } label: {
-                        Image(systemName: "character.bubble")
-                            .font(.caption)
+                if currentPageText != nil {
+                    if selectedPageID == NotePage.primaryID {
+                        Button { tapTranslate(.summary) } label: {
+                            Image(systemName: "character.bubble")
+                                .font(.caption)
+                        }
+                        .disabled(translatingSummary)
                     }
-                    .disabled(translatingSummary)
                     if transcript != nil {
-                        Button { tapSummarize() } label: {
+                        Button { tapSummarize(pageID: selectedPageID) } label: {
                             Image(systemName: "arrow.trianglehead.2.counterclockwise")
                                 .font(.caption)
                         }
@@ -729,12 +1316,50 @@ struct ClipDetailView: View {
         }
     }
 
-    private func tapSummarize() {
+    /// Open the template sheet for a **note page** (default: the primary page —
+    /// every pre-existing call path lands here).
+    private func tapSummarize(pageID: String = NotePage.primaryID) {
         let providers = env.config.config.llmProviders
         if providers.primary == nil || providers.primary!.isEmpty || providers.configuredProviders.isEmpty {
             showNoProvider = true
         } else {
+            summarizePageID = pageID
             showSummarize = true
+        }
+    }
+
+    /// The "+" chip: generate one more note page from a fresh id. The template
+    /// (and language) are picked in the sheet; the manifest entry appears when
+    /// the job's artifact lands — never before there is something to show.
+    private func addPage() {
+        let providers = env.config.config.llmProviders
+        guard providers.primary != nil, !(providers.primary ?? "").isEmpty,
+              !providers.configuredProviders.isEmpty else {
+            showNoProvider = true
+            return
+        }
+        addPageID = UUID().uuidString
+        summarizePageID = addPageID
+        showAddPage = true
+    }
+
+    /// Remove a note page (manifest + body file) and keep the selection valid.
+    private func deletePage(_ page: NotePage) {
+        pages = NotePages.remove(id: page.id, for: item.name)
+        if selectedPageID == page.id {
+            selectedPageID = pages.first?.id ?? NotePage.primaryID
+        }
+        loadSelectedPageText()
+    }
+
+    /// Refresh the on-screen page body after any manifest/selection change.
+    private func loadSelectedPageText() {
+        if selectedPageID == NotePage.primaryID {
+            loadSummary()
+        } else if let page = pages.first(where: { $0.id == selectedPageID }) {
+            pageText = NotePages.text(of: page, for: item.name)
+        } else {
+            pageText = nil
         }
     }
 
@@ -747,6 +1372,21 @@ struct ClipDetailView: View {
     }
 
     // MARK: - export
+
+    /// Inline progress for a running / failed export. Every other export action now lives in
+    /// the top-right menu; this row stays so progress is visible without opening it.
+    @ViewBuilder
+    private var exportStatusSection: some View {
+        Section {
+            if let job = activeJob(.export) {
+                runningRow(job, L10n.ClipDetail.exporting)
+            } else if let job = failedJob(.export) {
+                failedRow(job)
+            }
+        } header: {
+            Text(L10n.ClipDetail.export)
+        }
+    }
 
     @ViewBuilder
     private var exportSection: some View {
@@ -764,28 +1404,28 @@ struct ClipDetailView: View {
             }
             .disabled(activeJob(.export) != nil)
 
-            // 转换中 / 转换失败（试满三次）。都在这里就地显示 —— 用户切走再
-            // 回来，这一行是他唯一能看出"转码还在跑"或者"它其实失败了"的地方。
+            // Converting / conversion failed (max attempts used). Both shown in place here — after switching away and
+            // coming back, this row is the only place they can tell "the transcode is still running" or "it actually failed".
             if let job = activeJob(.export) {
                 runningRow(job, L10n.ClipDetail.exporting)
             } else if let job = failedJob(.export) {
                 failedRow(job)
             }
 
-            // ★ 2026-10-15 六改：**上次已经导好的那一份还在**就直接给分享入口。
+            // ★ Sixth revision, 2026-10-15: if **the previously exported copy is still there**, offer the share entry directly.
             //
-            // 这一行解决的是用户的原话"防止退出需要重新等待"：大文件转码要
-            // 等很久，用户等不及切走了 —— 回来的时候如果只看到那个"导出音频"
-            // 按钮，等于让他从头再等一遍。这里告诉他"东西已经好了，点这里发
-            // 出去"，顺带给出体积（那是他决定要不要先清掉它的依据）。
+            // This row answers the user's words "so leaving doesn't mean waiting all over again": transcoding a large file takes
+            // a long time and users switch away before it's done — if all they find on return is that "Export audio"
+            // button, it means waiting all over again from scratch. This tells them "it's ready — tap here to send
+            // it out", along with the size (that's how they decide whether to clear it first).
             //
-            // ⚠️ 只认 `origin == item.name`：批量导出备好的那份属于别的条目，
-            //    在这条录音的详情页上给它一个分享入口会让人以为"分享的是这条"。
+            // ⚠️ Only accept `origin == item.name`: the copy prepared by a batch export belongs to another item,
+            //    and offering a share entry for it on this recording's detail page would imply "this is what's being shared".
             if activeJob(.export) == nil, let staged = ExportCenter.shared.ready(forOrigin: item.name) {
                 HStack(spacing: 8) {
                     Button {
-                        // 复用上面那个由 `exportShareURL` 驱动的分享面板 ——
-                        // 为这个入口再挂一个 `.sheet` 只会多一条需要同步的状态。
+                        // Reuse the share sheet above driven by `exportShareURL` —
+                        // attaching another `.sheet` for this entry would only add one more piece of state to keep in sync.
                         exportShareURL = ExportCenter.shared.url(for: staged)
                     } label: {
                         HStack(spacing: 8) {
@@ -820,17 +1460,25 @@ struct ClipDetailView: View {
         }
     }
 
-    /// 「1 个文件 · 42 MB」。体积要给，那是用户判断"要不要先清掉它"的依据。
+    /// "1 file · 42 MB". The size matters — it's how the user decides whether to clear it first.
     private static func readyDetail(_ item: ExportCenter.Ready) -> String {
         let size = ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file)
         return "\(L10n.ClipDetail.exportReadyFiles(item.itemCount)) · \(size)"
     }
 
-    /// 入队一次格式转换。**不再自己 `await`**（理由同 `enqueueTranslate`）。
+    /// Enqueue a format conversion. **No longer awaits itself** (same reason as `enqueueTranslate`).
     ///
-    /// `ExportCenter.publish` 也搬进了 `JobRunners.export` —— 产物落盘与台账
-    /// 登记必须是同一段代码，否则"App 被杀"会留下"文件转了但台账里没有"。
+    /// `ExportCenter.publish` also moved into `JobRunners.export` — writing the output to disk and registering it in the ledger
+    /// must be the same stretch of code, otherwise an app kill leaves "file converted but absent from the ledger".
     private func enqueueExport(_ format: AudioExportFormat) {
+        pendingExportShare = true
+        jobs.enqueue(Job.export(clip: item.name, format: format))
+    }
+
+    /// ★ 任务二 (2026-10-22): document formats ride the same export job id
+    /// ("export:<clip>") — only the last-picked format is kept, matching the
+    /// audio behaviour and the single-slot staging directory.
+    private func enqueueDocumentExport(_ format: String) {
         pendingExportShare = true
         jobs.enqueue(Job.export(clip: item.name, format: format))
     }
@@ -866,14 +1514,18 @@ struct ClipDetailView: View {
     /// Removes only the audio payload. The transcript / translation / summary
     /// / title stay on disk and the clip lives on as a text-only Library entry.
     ///
-    /// ★ 2026-10-15：音频不再直接 `removeItem`，而是**搬进回收站**（保护 30 天）。
-    /// 落盘名与路径一律不变，所以恢复回去之后扫描器看到的就是原来那一条。
+    /// ★ 2026-10-15: Audio is no longer removed via `removeItem` outright — it's **moved to the trash** (protected for 30 days).
+    /// The on-disk name and path stay exactly the same, so once restored the scanner sees the very same item as before.
     private func deleteAudio() {
         player.stop()
         var urls: [URL] = []
         if let url = item.url { urls.append(url) }
-        // 音频是这条最后一块拼图时，`.title` 会立刻变成"孤儿标题" —— 扫描器
-        // 照着它能重建出一条既没音频也没正文的幽灵条目。所以一起搬走。
+        // The "mark" dots belong to the audio timeline — a marker pointing at a deleted recording is
+        // noise. `move` skips non-existent paths, so this needs no existence check, and putting it in
+        // the same group is what makes restore bring the marks back with the clip.
+        urls.append(A1MarkStore.sidecarURLForTrash(clipBase: item.base))
+        // When the audio is this item's last remaining piece, `.title` instantly becomes an "orphaned title" — the scanner
+        // would use it to rebuild a ghost entry with neither audio nor body text. So it moves together with the audio.
         if let title = ClipTrash.titleSidecar(
             forLocalName: item.name,
             hasOtherArtefacts: item.hasTranscript || item.hasSummary
@@ -885,10 +1537,10 @@ struct ClipDetailView: View {
                 localName: item.name,
                 title: item.displayTitle,
                 urls: urls,
-                // 音频这一份没了，所以"已从设备下过"的凭据要注销 —— 否则
-                // 设备列表里它永远显示"已下载"，再也下不回来。恢复时补回去。
+                // With the audio copy gone, the "already downloaded from the device" credentials must be revoked — otherwise
+                // the device list would show it as "downloaded" forever, never downloadable again. Restored back on recovery.
                 download: ClipTrash.downloadRecord(forLocalName: item.name, in: env.library),
-                // 来源在删除这一刻定死，见 `TrashedItem.source`。
+                // The source is fixed at the moment of deletion; see `TrashedItem.source`.
                 source: ClipTrash.sourceLabel(forLocalName: item.name, in: env.library)
             )],
             library: env.library
@@ -913,8 +1565,8 @@ struct ClipDetailView: View {
                 localName: item.name,
                 title: item.displayTitle,
                 urls: urls,
-                // ⚠️ 这里**不能**带 download：音频还在，注销了凭据就等于
-                // 把一条仍然存在的素材从 manifest 里抹掉。
+                // ⚠️ `download` **must not** be included here: the audio is still present, and revoking the credentials would amount to
+                // erasing a still-existing asset from the manifest.
                 download: nil,
                 source: ClipTrash.sourceLabel(forLocalName: item.name, in: env.library)
             )],
@@ -942,13 +1594,16 @@ struct ClipDetailView: View {
                 localName: item.name,
                 title: item.displayTitle,
                 urls: urls,
-                download: nil,    // 同上：音频没动，凭据留着。
+                download: nil,    // Ditto: the audio is untouched, credentials kept.
                 source: ClipTrash.sourceLabel(forLocalName: item.name, in: env.library)
             )],
             library: env.library
         )
         summary = nil
         translatedSummary = nil
+        // ★ 2026-10-23 ("页面模板"): the primary page also leaves the manifest —
+        //   other pages are untouched (they have their own chips and delete path).
+        pages = NotePages.remove(id: NotePage.primaryID, for: item.name)
     }
 }
 
@@ -986,7 +1641,7 @@ struct PlayerSheet: View {
                 } else {
                     ZStack {
                         Circle()
-                            .fill(Color.accentColor.opacity(0.1))
+                            .fill(Color.appAccent.opacity(0.1))
                             .frame(width: 120, height: 120)
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 44))
@@ -1062,6 +1717,12 @@ struct PlayerSheet: View {
 
 struct TranscriptFullView: View {
     let document: TranscriptDocument
+    /// The detail page's controller — shared so a tap here keeps one playback session
+    /// (★ 2026-10-19: this page used to be a dead wall of text).
+    @ObservedObject var player: AudioPlaybackController
+    /// ★ 2026-10-22: the user's speaker names (see `SpeakerNameStore`), so the
+    /// full-screen page and the text it shares say the same names as the rows behind it.
+    var speakerNames: [String: String] = [:]
     @State private var showShareSheet = false
 
     private var plainText: String {
@@ -1069,7 +1730,9 @@ struct TranscriptFullView: View {
         return document.segments.map { seg in
             var line = ""
             if let speaker = seg.speaker, !speaker.isEmpty {
-                line += "[\(speaker)] "
+                let name = speakerNames[speaker].flatMap { $0.isEmpty ? nil : $0 }
+                    ?? L10n.ClipDetail.speaker(speaker)
+                line += "[\(name)] "
             }
             let s = Int(seg.start)
             let e = Int(seg.end)
@@ -1087,29 +1750,30 @@ struct TranscriptFullView: View {
                 // Lazy: a multi-hour clip is thousands of segments, and an
                 // eager VStack lays every one of them out before the push
                 // animation can start.
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(Array(document.segments.enumerated()), id: \.offset) { _, seg in
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    if let speaker = seg.speaker, !speaker.isEmpty {
-                                        Text(L10n.ClipDetail.speaker(speaker))
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(stampLabel(seg))
-                                        .font(.caption2.monospacedDigit())
-                                        .foregroundStyle(.secondary)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(document.segments.enumerated()), id: \.offset) { index, seg in
+                                TranscriptSegmentRow(segment: seg,
+                                                     isActive: activeIndex == index,
+                                                     speakerNames: speakerNames) {
+                                    player.seek(to: max(0, seg.start - 0.3))
+                                    if !player.isPlaying { player.play() }
                                 }
-                                Text(seg.text)
-                                    .font(.body)
-                                    .lineSpacing(6)
-                                    .textSelection(.enabled)
+                                .id(index)
                             }
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
                     }
-                    .padding()
+                    // Follow the audio while it plays, so the page never drifts away from what
+                    // the user is hearing.
+                    .onChange(of: activeIndex) { newValue in
+                        guard let newValue, player.isPlaying else { return }
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            proxy.scrollTo(newValue, anchor: .center)
+                        }
+                    }
                 }
             }
         }
@@ -1134,15 +1798,27 @@ struct TranscriptFullView: View {
         let e = Int(seg.end)
         return String(format: "%d:%02d\u{2013}%d:%02d", s / 60, s % 60, e / 60, e % 60)
     }
+
+    /// The segment under the playhead, driving both the highlight and the auto-scroll.
+    private var activeIndex: Int? {
+        guard player.currentTime > 0, !document.segments.isEmpty else { return nil }
+        return document.segments.lastIndex { $0.start <= player.currentTime }
+    }
 }
 
 // MARK: - Full-screen summary view
 
 struct SummaryFullView: View {
     let text: String
+    /// Poster header metadata (image-text share). Optional — the poster
+    /// collapses missing rows, so the translated-summary entry can skip them.
+    var posterTitle: String? = nil
+    var posterDate: Date? = nil
+    var posterDuration: Double? = nil
     @State private var showRaw = false
     @State private var showShareSheet = false
     @State private var showMindMap = false
+    @State private var showPoster = false
 
     var body: some View {
         Group {
@@ -1171,6 +1847,12 @@ struct SummaryFullView: View {
                         Image(systemName: showRaw ? "doc.richtext" : "doc.plaintext")
                     }
                     Button {
+                        showPoster = true
+                    } label: {
+                        Image(systemName: "photo.on.rectangle.angled")
+                    }
+                    .accessibilityLabel(L10n.ClipDetail.shareAsImage)
+                    Button {
                         showShareSheet = true
                     } label: {
                         Image(systemName: "square.and.arrow.up")
@@ -1183,6 +1865,14 @@ struct SummaryFullView: View {
         }
         .fullScreenCover(isPresented: $showMindMap) {
             MindMapScreen(markdown: text, fallbackTitle: L10n.ClipDetail.summary)
+        }
+        .sheet(isPresented: $showPoster) {
+            SummaryPosterView(
+                markdown: text,
+                title: posterTitle,
+                date: posterDate,
+                duration: posterDuration
+            )
         }
     }
 }

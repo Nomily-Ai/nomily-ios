@@ -32,6 +32,14 @@ enum ClipArtefact {
     /// sidecar and a lone `.title` would resurrect a ghost clip.
     static let titleSuffix = ".title"
 
+    /// "Mark" dots dropped by a recorder card mid-recording (`A1MarkStore`).
+    ///
+    /// Also metadata rather than one of the three artefacts: it belongs to the **audio**, and it is
+    /// never shown on its own. Deliberately not classified as `.audio` — `ClipTrash.restore` picks the
+    /// audio file of a group by `ClipArtefact.of(...) == .audio`, and a second match would let the
+    /// sidecar win that pick and re-register the download under the wrong name.
+    static let marksSuffix = ".marks.json"
+
     static func of(fileNamed name: String) -> ClipArtefact? {
         if audioExtensions.contains((name as NSString).pathExtension.lowercased()) {
             return .audio
@@ -51,10 +59,13 @@ enum ClipArtefact {
         if name.hasSuffix(titleSuffix) {
             return String(name.dropLast(titleSuffix.count))
         }
+        if name.hasSuffix(marksSuffix) {
+            return String(name.dropLast(marksSuffix.count))
+        }
         return nil
     }
 
-    /// Deletes `.title` sidecars whose clip has no audio/transcript/summary
+    /// Deletes metadata sidecars (`.title`, `.marks.json`) whose clip has no audio/transcript/summary
     /// left. Call after any partial delete so the Library doesn't keep showing
     /// an entry that has nothing behind it.
     static func sweepOrphanTitles() {
@@ -64,17 +75,19 @@ enum ClipArtefact {
         ) else { return }
 
         var basesWithContent = Set<String>()
-        var titles: [(url: URL, base: String)] = []
+        // Metadata sidecars: `.title` and the recorder's `.marks.json`. Both resurrect a ghost clip
+        // (or a set of markers pointing at nothing) once nothing is left behind them.
+        var metadata: [(url: URL, base: String)] = []
         for url in entries {
             let name = url.lastPathComponent
-            if name.hasSuffix(titleSuffix) {
-                if let base = base(ofFileNamed: name) { titles.append((url, base)) }
+            if name.hasSuffix(titleSuffix) || name.hasSuffix(marksSuffix) {
+                if let base = base(ofFileNamed: name) { metadata.append((url, base)) }
             } else if let base = base(ofFileNamed: name), of(fileNamed: name) != nil {
                 basesWithContent.insert(base)
             }
         }
-        for title in titles where !basesWithContent.contains(title.base) {
-            try? fm.removeItem(at: title.url)
+        for item in metadata where !basesWithContent.contains(item.base) {
+            try? fm.removeItem(at: item.url)
         }
     }
 }

@@ -1,34 +1,34 @@
 import Foundation
 import SwiftUI
 
-// MARK: - 首页两侧的滑动菜单
+// MARK: - The side swipe menus on the home screen
 //
-// ★ 2026-10-16 七改（用户原话："4 个菜单需要往左或者往右滑在出现……然后需要在
-// 手表的快捷录音的手表的菜单栏里面出现可以添加快捷的菜单设置，这个设置是在
-// 手表的 wifi 那个菜单栏里面进行点击添加的组件"）：
+// ★ 2026-10-16 revision seven (user's words: "the four menus should appear by swiping left or right ... and then
+// the watch menu bar for quick recording should offer a setting to add a shortcut, and that setting is
+// the component added by tapping in the watch's Wi-Fi menu bar"):
 //
-// 这 4 项原来是**钉死在首页四角**的（`WatchRingCorner`，四个角各一个
-// `NavigationLink`）。现在首页正中让给了 Bot，四项改成**横向分页的两侧菜单**：
-// 往左滑、往右滑各出现一页，而且**放哪几项由用户自己勾**。
+// These 4 items used to be **pinned to the four corners of the home screen** (`WatchRingCorner`, one
+// `NavigationLink` per corner). Now the centre of the home screen is given to the Bot, and the four become **two side menus with horizontal paging**:
+// swiping left and right each reveals a page, and **which items go there is ticked by the user**.
 //
-// ## 为什么把"哪几项"做成可配置
-// 用户明确要"可以添加快捷的菜单设置"。所以可选清单从 4 项扩到 **6 项**
-// （多了待传队列和版本）—— 只有"可选项比默认项多"，"添加"这个动作才真的有
-// 东西可加；一个只能关不能开的开关列表不叫"添加"。
+// ## Why "which items" is made configurable
+// The user explicitly asked for "menu settings you can add to". So the option list grew from 4 to **6**
+// (adding the pending-transfer queue and version) — only when "there are more options than defaults" is there really
+// something to add; a toggle list you can only turn off isn't "adding".
 //
-// ## 为什么存"哪些开着"而不是"顺序"
-// 顺序永远按 `allCases` 走。让用户排顺序的话，取消勾选再勾回来就会跑到队尾，
-// 菜单项会在左右两页之间乱跳，用户下次找同一个功能得重新找一遍。
+// ## Why store "which are on" rather than "the order"
+// The order always follows `allCases`. If the user arranged the order, unticking then re-ticking would send an item to the back,
+// menu items would jump around between the left and right pages, and the user would have to hunt for the same feature again.
 
-/// 首页两侧滑动菜单里能放哪几页。
+/// Which pages can go in the home screen's side swipe menus.
 enum WatchHomeMenu: String, CaseIterable, Identifiable, Codable {
-    // ⚠️ 声明顺序 = 分页顺序：前一半去左页，后一半去右页。
-    // 前四项是原来那 4 个角标（默认开），保持"升级上来还是熟悉的四项"。
+    // ⚠️ Declaration order = paging order: the first half goes to the left page, the second half to the right.
+    // The first four are the original 4 corner dots (on by default), keeping "upgrading still leaves the familiar four".
     case appearance
     case history
     case language
     case settings
-    // 后两项是新增的"可以添加上去"的。
+    // The last two are the new "can be added on" ones.
     case queue
     case about
 
@@ -56,8 +56,8 @@ enum WatchHomeMenu: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// 设置页里那一行底下的小字。一句话说清"点进去能看到什么"——
-    /// 表上空间太小，光一个"外观"看不出是调什么。
+    /// The small print under that row on the settings page. One sentence to make clear "what you'll see when you tap in" —
+    /// space on the watch is too tight, and a bare "Appearance" doesn't show what it adjusts.
     var subtitle: String {
         switch self {
         case .appearance: return L10n.Watch.menuHintAppearance
@@ -69,11 +69,11 @@ enum WatchHomeMenu: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// 这个菜单项通向哪一页。全都是**独立页面**（用户 2026-10-15 的要求：
-    /// "4 个菜单点击应该是出独立一页"）。
+    /// Which page this menu item leads to. All of them are **standalone pages** (the user's 2026-10-15 request:
+    /// "tapping the four menus should open a page of their own").
     ///
-    /// ⚠️ 语言页复用 `WatchLanguageView`（它同时兼着 `LocalizedWatchRoot`
-    /// 的整树重建），不在这里另起一份。
+    /// ⚠️ The language page reuses `WatchLanguageView` (which also doubles as the whole-tree
+    /// rebuild of `LocalizedWatchRoot`), rather than starting another copy here.
     @ViewBuilder
     var destination: some View {
         switch self {
@@ -87,22 +87,22 @@ enum WatchHomeMenu: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-/// 「首页两侧显示哪几个菜单」这一份偏好，存手表本地 `UserDefaults`。
+/// The "which menus show on the home screen's two sides" preference, stored in the watch's local `UserDefaults`.
 ///
-/// 做法与 `WatchRingStyleStore` / `WatchRecordingPrefs` 同款：JSON 化、
-/// 解不开就当没存过。**刻意独立第三份** —— 那两家的 `reset()` 分别是
-/// "恢复默认外观"和"恢复默认录音方式"，把菜单布局也顺手重置掉会很意外。
+/// Same approach as `WatchRingStyleStore` / `WatchRecordingPrefs`: JSON-encode it,
+/// and treat it as never stored if it won't decode. **Deliberately a separate third store** — those two's `reset()` are
+/// "restore default appearance" and "restore default recording method", and resetting the menu layout too would be surprising.
 final class WatchMenuPreferences: ObservableObject {
     static let shared = WatchMenuPreferences()
 
     private static let key = "watch.home_menu.v1"
 
-    /// 默认就是原来那 4 个角标。**升级上来必须还是这四项** ——
-    /// 老用户没去设置里动过，首页却少了两个入口，那是丢功能不是新功能。
+    /// Defaults to the original 4 corner dots. **Upgrading must still leave these four** —
+    /// if an existing user never touched the settings yet the home screen lost two entries, that's losing a feature, not gaining one.
     static let defaultItems: [WatchHomeMenu] = [.appearance, .history, .language, .settings]
 
     @Published var enabled: Set<WatchHomeMenu> {
-        // `didSet` 在 init 期间不触发，所以构造时读盘不会反过来写盘。
+        // `didSet` doesn't fire during init, so reading from disk in the initialiser won't write back to disk.
         didSet { persist() }
     }
 
@@ -117,33 +117,33 @@ final class WatchMenuPreferences: ObservableObject {
         }
     }
 
-    /// 当前开着的菜单项，**按 `allCases` 的顺序**。
+    /// The currently on menu items, **in `allCases` order**.
     ///
-    /// ⚠️ 不按用户点选的先后：见文件顶部那段 —— 顺序会跳。
+    /// ⚠️ Not in the order the user ticked them: see the block at the top of the file — the order would jump.
     var ordered: [WatchHomeMenu] {
         WatchHomeMenu.allCases.filter { enabled.contains($0) }
     }
 
-    /// 往右滑出现的那一页（左页）。
+    /// The page that appears when swiping right (the left page).
     ///
-    /// 只有一项时**全放左边**：右边留一页空白页，用户滑过去会以为坏了。
+    /// When there's only one item **it all goes left**: leaving a blank page on the right would make the user think it's broken when they swipe over.
     var leadingItems: [WatchHomeMenu] {
         let all = ordered
         guard all.count > 1 else { return all }
         return Array(all.prefix((all.count + 1) / 2))
     }
 
-    /// 往左滑出现的那一页（右页）。
+    /// The page that appears when swiping left (the right page).
     var trailingItems: [WatchHomeMenu] {
         let all = ordered
         guard all.count > 1 else { return [] }
         return Array(all.suffix(from: (all.count + 1) / 2))
     }
 
-    /// 首页中间那一页是不是唯一的（= 两侧都没菜单）。
+    /// Whether the middle page of the home screen is the only one (= no menus on either side).
     ///
-    /// 用来决定要不要提示"去设置里添加快捷菜单"—— 全关掉之后首页会变成
-    /// 一个孤零零的 Bot，不说明一句用户会以为菜单被删了。
+    /// Used to decide whether to hint "go add shortcut menus in Settings" — turn them all off and the home screen becomes
+    /// a lone Bot, and without a word the user would think the menus were deleted.
     var isEmpty: Bool { ordered.isEmpty }
 
     func isOn(_ item: WatchHomeMenu) -> Bool { enabled.contains(item) }
@@ -156,13 +156,13 @@ final class WatchMenuPreferences: ObservableObject {
         }
     }
 
-    /// 只重置**菜单布局**，不碰外观、不碰录音方式（见类型顶部那段）。
+    /// Only resets the **menu layout**, not appearance, not recording method (see the block at the top of the type).
     func reset() { enabled = Set(Self.defaultItems) }
 
     private func persist() {
-        // 存 rawValue 数组而不是 `Set` 本身：`Set` 的 JSON 表现是未排序的，
-        // 虽然这里读回来还会按 `allCases` 排，但落盘的东西保持可读、
-        // 可人工核对 —— 排查"我的菜单呢"这类问题时值这几十个字节。
+        // Stores an array of rawValues rather than the `Set` itself: a `Set`'s JSON representation is unordered,
+        // and although reading back here re-sorts by `allCases`, keeping what's persisted readable
+        // and human-checkable is worth those few dozen bytes when chasing a "where are my menus" kind of problem.
         defaults.set(ordered.map(\.rawValue), forKey: Self.key)
     }
 }

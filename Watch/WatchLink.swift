@@ -47,13 +47,13 @@ final class WatchLink: NSObject, ObservableObject {
         guard !queuedNames.contains(name) else { return }
         WCSession.default.transferFile(url, metadata: [WatchLinkMessage.fileNameKey: name])
         refreshQueue()
-        // ★ 记账。大小在这里取（文件还在），`didFinish` 那一步就取不到了。
+        // ★ Record-keeping. The size is taken here (the file is still around); the `didFinish` step no longer can.
         WatchTransferLog.shared.noteQueued(name: name, bytes: Self.fileSize(of: url))
         log.info("queued \(name, privacy: .public) for the iPhone")
         #endif
     }
 
-    /// 文件字节数。取不到就 0 —— 记录里显示 0 KB 好过整条不出现。
+    /// File byte count. 0 if it can't be read — showing 0 KB in the record beats the whole entry not showing up.
     private static func fileSize(of url: URL) -> Int64 {
         (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
     }
@@ -122,16 +122,19 @@ final class WatchLink: NSObject, ObservableObject {
         )
     }
 
-    /// 收下手机推来的"首页表情"。
+    /// Take in the face settings pushed from the phone.
     ///
-    /// ★ 十三改新增。这是手机上**唯一**会主动推给手表的外观设置，
-    /// 理由与选型（为什么走 `updateApplicationContext`）写在
-    /// `WatchLinkMessage.faceStyleKey` 那段。
+    /// ★ Added in the thirteenth revision (expression), ★ extended 2026-10-20
+    ///   (colour / blink pace / auto-cycle / square frame). This is the **only** appearance
+    ///   setting on the phone that actively pushes to the watch; the reasoning and the choice
+    ///   (why it goes through `updateApplicationContext`) are written in
+    ///   the block at `WatchLinkMessage.faceStyleKey`.
     ///
-    /// ⚠️ 不认识的值会被 `WatchFaceStore.apply` 静默丢掉（两端版本可以不一致），
-    ///    所以这里不判合法性、也不报错 —— 那是 store 的事，这里只管搬运。
+    /// ⚠️ Unrecognised values are silently dropped by `WatchFaceStore` (the two ends' versions may differ),
+    ///    so this validates nothing and reports nothing — that's the store's business; here we just move it along.
     private func apply(remoteContext context: [String: Any]) {
         WatchFaceStore.shared.apply(context[WatchLinkMessage.faceStyleKey] as? String)
+        WatchFaceStore.shared.applySettings(context)
     }
 }
 
@@ -142,11 +145,11 @@ extension WatchLink: WCSessionDelegate {
         error: (any Error)?
     ) {
         let activated = activationState == .activated
-        // ★ 十三改：手机最后推来的那份 context 就躺在 `receivedApplicationContext`
-        //   里等着 —— 冷启动时先把它读一遍，否则表上的脸会先画默认表情、
-        //   一直等到手机下一次推送才跳成用户选的那一档。
-        //   （手机侧同样在激活时读 `receivedApplicationContext` 拿录音状态，
-        //    见 `WatchSyncService`。）
+        // ★ Thirteenth revision: the last context the phone pushed is lying in `receivedApplicationContext`
+        //   waiting — read it once on a cold launch, otherwise the face on the watch draws the default expression first and
+        //   sits there until the phone's next push, only then jumping to the style the user chose.
+        //   (The phone side likewise reads `receivedApplicationContext` on activation to get the recording state,
+        //    see `WatchSyncService`.)
         let pending = session.receivedApplicationContext
         Task { @MainActor in
             self.refreshQueue()
@@ -165,11 +168,11 @@ extension WatchLink: WCSessionDelegate {
         }
     }
 
-    /// 手机推来的"当前值"（★ 十三改：现在是首页表情）。
+    /// The "current value" pushed from the phone (★ thirteenth revision: now the home-screen expression).
     ///
-    /// ⚠️ 和手表自己那条 `updateApplicationContext`（录音状态）**不会**打架：
-    ///    application context 是**按方向各有一个槽位**的，手表发出去的不会
-    ///    被手机发进来的覆盖。
+    /// ⚠️ It **won't** fight the watch's own `updateApplicationContext` (the recording state):
+    ///    application context has **one slot per direction**, so what the watch sends out won't
+    ///    be overwritten by what the phone sends in.
     nonisolated func session(
         _ session: WCSession,
         didReceiveApplicationContext applicationContext: [String: Any]
@@ -185,9 +188,9 @@ extension WatchLink: WCSessionDelegate {
         let name = fileTransfer.file.fileURL.lastPathComponent
         Task { @MainActor in
             self.refreshQueue()
-            // ★ 失败也要记账。这是**唯一**能看到失败原因的时机 ——
-            //    `didFinish` 的 `error` 以前只写进 os_log，而手表上读不到日志，
-            //    用户看到的只是"那条一直卡在待传里"。
+            // ★ Failures get accounted too. This is the **only** moment the failure reason is visible —
+            //    `didFinish`'s `error` used to go only into os_log, and logs can't be read on the watch,
+            //    so all the user saw was "that one stuck in pending forever".
             WatchTransferLog.shared.noteFinished(name: name, error: error)
             guard error == nil else {
                 log.error("transfer of \(name, privacy: .public) failed: \(String(describing: error), privacy: .public)")

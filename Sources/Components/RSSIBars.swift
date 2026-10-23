@@ -13,7 +13,7 @@ struct RSSIBars: View {
         HStack(alignment: .bottom, spacing: 2) {
             ForEach(0..<4, id: \.self) { i in
                 Capsule()
-                    .fill(i < bars ? Color.accentColor : Color.secondary.opacity(0.25))
+                    .fill(i < bars ? Color.appAccent : Color.secondary.opacity(0.25))
                     .frame(width: 3, height: CGFloat(4 + i * 3))
             }
         }

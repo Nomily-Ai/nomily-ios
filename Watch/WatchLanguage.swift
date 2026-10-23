@@ -45,9 +45,9 @@ final class WatchLanguageStore: ObservableObject {
         // Applied before the first frame: everything below reads `L10n`, which
         // goes through `Bundle.main`.
         Bundle.applyLanguage(stored)
-        // ★ 2026-10-16 十三改：**两个半边都要拨**。`Bundle` 管字符串，
-        //   `Locale` 管日期/数字 —— 只拨前者的表现是"界面英文、传输记录里
-        //   的时间还是中文"（手机那边同款问题，见 `AppLocale` 顶部那段）。
+        // ★ 2026-10-16 thirteenth revision: **both halves have to be flipped**. `Bundle` handles strings,
+        //   `Locale` handles dates/numbers — flipping only the former shows up as "UI in English, while in the transfer records
+        //   the time is still Chinese" (the same problem on the phone side; see the block at the top of `AppLocale`).
         AppLocale.set(stored)
     }
 

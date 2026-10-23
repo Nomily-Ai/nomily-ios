@@ -3,28 +3,37 @@ import os.log
 
 private let log = Logger(subsystem: "com.nomily.app.ios", category: "jobs")
 
-// MARK: - 活的构造（id 的唯一来源）
+// MARK: - Building jobs (the single source of id)
 //
-// ⚠️ `id` 一律从这里生成，调用方**不要**自己拼字符串。理由：`id` 同时是
-//    幂等键（同一条活重复入队不叠加）、是界面的行身份、也是"这条录音的活完没完"
-//    的查询键 —— 三处各拼一遍，迟早会有一处漏掉一个字段（比如翻译忘了带目标
-//    语言），于是"同一条录音换一种语言再翻一次"会被误判成同一条活的重复入队。
+// ⚠️ `id` is always generated here; callers **must not** assemble the string themselves. Reason: `id` is at once
+//    the idempotency key (enqueueing the same job again doesn't stack), the row identity in the UI, and the query key for "are this recording's jobs done"
+//    — assemble it in three places and sooner or later one will drop a field (say translation forgetting the target
+//    language), so that "translate the same recording again into another language" gets mistaken for re-enqueueing the same job.
 extension Job {
 
-    /// 摘要：**一条录音同时只允许一条**（换模板再生成就是重跑那一条）。
-    static func summarize(clip: String, prompt: String, templateName: String) -> Job {
-        Job(
-            id: "summarize:\(clip)",
+    /// Summary: one job per **note page**. The primary page (`pageID ==
+    /// NotePage.primaryID`, the default) keeps the historical id `summarize:<clip>`
+    /// so AiTask's "wait for the summary job" and the auto-summary dedup keep
+    /// working; an extra page appends `#<pageID>` — pages run **independently**,
+    /// generating one must not cancel another.
+    ///
+    /// ★ 2026-10-23 ("页面模板", Plaud parity).
+    static func summarize(clip: String, prompt: String, templateName: String,
+                          pageID: String = NotePage.primaryID) -> Job {
+        let suffix = pageID == NotePage.primaryID ? "" : "#\(pageID)"
+        return Job(
+            id: "summarize:\(clip)\(suffix)",
             kind: .summarize,
             clipName: clip,
             enqueuedAt: Date(),
             prompt: prompt,
-            templateName: templateName
+            templateName: templateName,
+            pageID: pageID
         )
     }
 
-    /// 翻译。`target` 取 `"transcript"` / `"summary"` —— 两者是**两条独立的活**
-    /// （用户可能只翻了摘要、没翻全文），所以目标语言与目标对象都要进 `id`。
+    /// Translation. `target` is `"transcript"` / `"summary"` — the two are **two independent jobs**
+    /// (the user may have translated only the summary, not the full text), so both the target language and the target object go into `id`.
     static func translate(clip: String, target: String, languageName: String) -> Job {
         Job(
             id: "translate:\(target):\(clip)",
@@ -36,9 +45,9 @@ extension Job {
         )
     }
 
-    /// 格式转换 / 导出。**一条录音同时只留最后点的那一种格式** —— 用户点了
-    /// m4a 又点 wav，他要的是 wav；两条都跑只会让 `ExportCenter`（只留一份）
-    /// 里躺着哪一份变成运气。
+    /// Format conversion / export. **Only the last-picked format is kept per recording at a time** — the user taps
+    /// m4a then wav, and what they want is wav; running both would only make it a lottery which one ends up
+    /// sitting in `ExportCenter` (which keeps only one).
     static func export(clip: String, format: AudioExportFormat) -> Job {
         Job(
             id: "export:\(clip)",
@@ -48,76 +57,213 @@ extension Job {
             exportFormat: format.rawValue
         )
     }
+
+    /// ★ 2026-10-22 (任务二): document export (`txt` / `md` / `pdf`). Same job id
+    /// as the audio export — the two share one slot per recording on purpose.
+    static func export(clip: String, format: String) -> Job {
+        Job(
+            id: "export:\(clip)",
+            kind: .export,
+            clipName: clip,
+            enqueuedAt: Date(),
+            exportFormat: format
+        )
+    }
 }
 
-// MARK: - 三个执行体
+// MARK: - The three runners
 //
-// 由 `AppEnvironment` 注册进 `JobQueue`。放在这里而不是写进组合根：
-// 每个执行体都有二三十行"读源文件 → 调服务 → 落产物"，塞进 `init` 会让那个
-// 文件只剩下时序统计和一段查不到结尾的闭包。
+// Registered into `JobQueue` by `AppEnvironment`. Kept here rather than written into the composition root:
+// each runner has twenty or thirty lines of "read source file → call service → persist the artifact", and cramming that into `init` would leave that
+// file with nothing but timing bookkeeping and a closure you can't find the end of.
 //
-// ## 共同的形状
-// 每个执行体做三件事：**① 自己占 `BackgroundKeeper` 的令牌 → ② 读源文件、
-// 没有就抛 `JobSourceMissing` → ③ 干活并落产物**。
+// ## The shared shape
+// Each runner does three things: **① take a `BackgroundKeeper` token itself → ② read the source file,
+// throwing `JobSourceMissing` if it's absent → ③ do the work and persist the artifact**.
 //
-// ⚠️ 令牌由执行体自己占，`JobQueue` 不碰。这样四类活（含转录那条不在队列里的）
-//    对 `BackgroundKeeper` 的用法完全一致 —— 队列只负责"什么时候跑"，
-//    "跑的时候别被系统挂起"是每个执行体自己的事。
+// ⚠️ The token is taken by the runner itself; `JobQueue` doesn't touch it. That way all four job kinds (including the transcription one that isn't in the queue)
+//    use `BackgroundKeeper` identically — the queue only handles "when to run",
+//    and "don't get suspended by the system while running" is each runner's own business.
 enum JobRunners {
 
-    /// 摘要。原来这段在 `SummarizeSheet.runSummarize` 里（内存 `Task`），
-    /// 十二改搬到这里，唯一的目的是让它在 App 被杀之后还能被捞起来接着跑。
+    /// Summary. This used to live in `SummarizeSheet.runSummarize` (an in-memory `Task`),
+    /// moved here in revision twelve for the sole purpose of letting it be picked up and resumed after the App is killed.
     ///
-    /// ⚠️ 片段进度与"结果附注"（用了兜底通道 / 被分段）**必须回话给队列**，
-    ///    不能只留在视图里：这条活很可能是在用户看不见的时候跑完的。
+    /// ⚠️ Chunk progress and the "result note" (used the fallback channel / was chunked) **must be reported back to the queue**,
+    ///    not left only in the view: this job most likely finished while the user wasn't looking.
     @MainActor
     static func summarize(
         _ job: Job, config: AppConfig, reporter: JobQueue.Reporter
     ) async throws {
         guard let prompt = job.prompt else { throw JobSourceMissing(what: L10n.Jobs.sourcePrompt) }
         let source = try transcriptText(for: job.clipName)
+        // ★ 2026-10-22 ("转写只有简短一句话的话使用模板，模板文字比一句话还多"):
+        // a meeting-minutes skeleton on a one-sentence voice note produces more
+        // headings than content — the same failure Plaud and Vobot both avoid by
+        // **not applying the full template** to a tiny source. The gate lives
+        // here (the runner), not in the sheet, so the queue re-runs after an app
+        // kill take exactly the same path.
+        let effectivePrompt = Self.adaptedPrompt(templatePrompt: prompt, source: source)
 
         BackgroundKeeper.shared.acquire(.summary)
         defer { BackgroundKeeper.shared.release(.summary) }
 
-        let outcome = try await LLMCompletionService.completeResilient(
-            systemPrompt: prompt,
-            userContent: source,
-            config: config,
-            onChunk: { done, total in reporter.progress(done, total) }
-        )
+        // ★ 2026-10-22 ("有转写但摘要生不出来"): the LLM error used to exist only
+        // as the job's `lastError`, which nobody sees unless the task center is
+        // open. Log the provider chain + the concrete gap into the diag file so
+        // "Open Router is set up but it won't run" can be answered from one pull.
+        let gap = config.llmProviders.primary.map {
+            LLMCompletionService.configGap($0, config) ?? "none"
+        } ?? "no-primary"
+        TicNoteDiagLog.log("LLM", "summarize start clip=\(job.clipName) primary=\(config.llmProviders.primary ?? "-") gap=\(gap) chars=\(source.count)")
+        let outcome: LLMCompletionService.Outcome
+        do {
+            outcome = try await LLMCompletionService.completeResilient(
+                systemPrompt: effectivePrompt,
+                userContent: source,
+                config: config,
+                // ★ Reuse finished chunk sections **only on a retry**. On a first
+                // run there is nothing cached anyway, and on a deliberate
+                // "generate again" the user expects new text — resurrecting the
+                // old sections would make the button look like it did nothing.
+                allowSectionReuse: job.attempts > 0,
+                onChunk: { done, total in reporter.progress(done, total) }
+            )
+        } catch {
+            TicNoteDiagLog.log("LLM", "summarize FAILED clip=\(job.clipName) primary=\(config.llmProviders.primary ?? "-") gap=\(gap) error=\(error.localizedDescription)")
+            throw error
+        }
+        TicNoteDiagLog.log("LLM", "summarize ok clip=\(job.clipName) provider=\(outcome.providerKey) chars=\(outcome.completion.text.count)")
         try Task.checkCancellation()
 
-        // ⚠️ 摘要与标题**一起落盘**，不等用户点保存。
+        // ⚠️ The summary and the title are **persisted together**, without waiting for the user to tap save.
         //
-        // 这是十二改带来的必然变化：活的产物必须自己落地，否则"跑完了回来
-        // 看结果"就没有结果可看（原来的模式是"结果攥在 sheet 的内存里，
-        // 用户点保存才写"—— 那种模式在"App 被杀"面前什么都不剩）。
-        // 顺带修掉一个老毛病：以前摘要写盘与标题写盘是两步，中途取消会留下
-        // "改了名但没有摘要"的状态；现在两步在同一段同步代码里，只有全成
-        // 或全不成。
-        try? outcome.completion.text.data(using: .utf8)?
-            .write(to: StorageLocations.summaryURL(for: job.clipName), options: .atomic)
+        // This is an inevitable consequence of revision twelve: a job's artifact must land on its own, otherwise "come back after it finishes
+        // and look at the result" has no result to look at (the old mode was "the result is held in the sheet's memory,
+        // and only written when the user taps save" — that mode leaves nothing behind in the face of "App killed").
+        // It also fixes an old flaw: summary-to-disk and title-to-disk used to be two steps, and cancelling mid-way would leave
+        // a "renamed but no summary" state; now both steps are in the same synchronous block, so it's all or
+        // nothing.
+        // ★ 2026-10-23: strip what the prompt could only discourage — fields whose
+        //   value is a placeholder, sections left with nothing, items repeated
+        //   under two headings. Mechanical, so the result is predictable; see
+        //   `SummaryPolish`. The title is extracted from the **cleaned** text so
+        //   it can never be named after a placeholder line.
+        let text = SummaryPolish.clean(outcome.completion.text)
+        // ★ 2026-10-23 ("页面模板"): the artifact lands on **its own page**. The
+        //   primary page still is `<base>.summary.md` (nothing pre-existing moves);
+        //   extra pages get `<base>.note.<id>.md` plus a manifest entry. The
+        //   manifest upsert happens here, not in the sheet — a job can finish after
+        //   the app was killed, and the page must then appear without any UI open.
+        let pageID = job.pageID ?? NotePage.primaryID
+        try? text.data(using: .utf8)?
+            .write(to: StorageLocations.notePageURL(for: job.clipName, pageID: pageID), options: .atomic)
+        NotePages.upsert(id: pageID,
+                         title: job.templateName ?? L10n.ClipDetail.noteDefaultTitle,
+                         for: job.clipName)
 
-        if let title = await extractTitle(
-            from: outcome.completion.text,
+        // The recording's display title is derived from the **primary** page only —
+        // an extra page (say, "逐字稿") must not rename the recording in the list.
+        if pageID == NotePage.primaryID, let title = await extractTitle(
+            from: text,
             config: config,
-            // ★ 直接找刚才真正干活的那个通道。不指定的话，主通道已经证明
-            //   不可用了，这一步还要**再等它超时一次**才轮到兜底 ——
-            //   那条超时在云端是 120 秒、在本机 Ollama 是 600 秒。
+            // ★ Directly target the channel that actually did the work. Without specifying it, the primary channel has already proven
+            //   unusable, and this step would **wait for it to time out once more** before the fallback gets its turn —
+            //   that timeout is 120 seconds in the cloud, 600 seconds for local Ollama.
             preferred: outcome.providerKey
         ) {
             try? title.data(using: .utf8)?
                 .write(to: StorageLocations.titleURL(for: job.clipName), options: .atomic)
         }
 
-        // 附注放在最后：它是**结果**的一部分，前面任何一步抛出去都不该留下
-        // "跑完了而且一切正常"的假象。
-        reporter.notes(notices(for: outcome, config: config), outcome.completion.truncated)
+        // The note goes last: it's part of the **result**, and any earlier step throwing shouldn't leave behind
+        // the illusion of "it finished and everything was fine".
+        var notes = notices(for: outcome, config: config)
+        if effectivePrompt != prompt {
+            notes.append(L10n.Summarize.shortSourceNote)
+        }
+        reporter.notes(notes, outcome.completion.truncated)
         log.info("summary done for \(job.clipName, privacy: .public) via \(outcome.providerKey, privacy: .public)")
     }
 
-    /// 翻译。原来在 `ClipDetailView.runTranslate` 里，分转录 / 摘要两条支路。
+    // MARK: - Short-source adaptation (Plaud/Vobot parity)
+
+    /// Thresholds in "content weight" (CJK characters count one each, Latin
+    /// words count one each — see `contentWeight`). Below the gate the source
+    /// is a sentence or two; below the compact line it is a short paragraph.
+    private static let shortGateWeight = 60
+    private static let compactThreshold = 500
+
+    /// Adapt the template to the size of the source.
+    ///
+    /// * **Tiny** (a sentence or two): the template is replaced entirely by a
+    ///   two-sentence reply prompt. No headings, no tables, no skeleton — the
+    ///   output must never be longer than the thing it summarises.
+    /// * **Short but real** (a short paragraph): the template stays, but with
+    ///   an instruction to drop empty sections and keep the output no longer
+    ///   than the source. This is the "structured minutes on a 30 s note"
+    ///   case that produces three pages of `## 待确认` placeholders.
+    /// * Anything else: the template verbatim.
+    static func adaptedPrompt(templatePrompt: String, source: String) -> String {
+        let weight = contentWeight(source)
+        if weight < shortGateWeight {
+            return NSLocalizedString("summarize.short_prompt", value: """
+            The transcript below is very short — most likely a quick voice note. \
+            Reply in the user's language with at most two short sentences: what was said, \
+            plus any task, date or decision it contains. \
+            Do NOT use headings, tables or template sections, and never write more text than the transcript itself.
+            """, comment: "System prompt replacing the full template when the transcript is a sentence or two")
+                + "\n\n" + SummaryPolicy.tinyNote
+        }
+        // ★ 2026-10-23 ("摘要里很多无关紧要的内容"): the templates are Vobot
+        //   skeletons and the model used to fill every empty slot with
+        //   【To Be Confirmed】, plus a restatement of the recording's metadata.
+        //   The rules ride along with every template — including the chunked and
+        //   merge passes, which reuse this same system prompt — so all 60+
+        //   templates inherit the discipline without being rewritten.
+        let rules = SummaryPolicy.rules
+        if weight < compactThreshold {
+            return templatePrompt + "\n\n" + NSLocalizedString("summarize.compact_note", value: """
+            The source text is short. Keep the output shorter than the source: drop every \
+            section that has nothing real to say instead of filling the template with placeholders.
+            """, comment: "Appended to the template prompt when the source is a short paragraph")
+                + "\n\n" + rules
+        }
+        return templatePrompt + "\n\n" + rules
+    }
+
+    /// One number for "how much is actually said here": CJK characters count
+    /// one each (they are the meaning-bearing unit), Latin words count one
+    /// each. Timestamps and speaker labels ride along, which biases upward —
+    /// fine for a threshold that is deliberately generous.
+    static func contentWeight(_ text: String) -> Int {
+        var cjk = 0
+        var words = 0
+        var inWord = false
+        for ch in text {
+            if isCJK(ch) {
+                cjk += 1
+                inWord = false
+            } else if ch.isLetter {
+                if !inWord { words += 1; inWord = true }
+            } else {
+                inWord = false
+            }
+        }
+        return cjk + words
+    }
+
+    private static func isCJK(_ ch: Character) -> Bool {
+        guard let scalar = ch.unicodeScalars.first else { return false }
+        switch scalar.value {
+        case 0x2E80...0x9FFF, 0x3400...0x4DBF, 0xF900...0xFAFF, 0xFF00...0xFFEF:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Translation. Used to be in `ClipDetailView.runTranslate`, split into a transcript branch and a summary branch.
     @MainActor
     static func translate(
         _ job: Job, config: AppConfig, reporter: JobQueue.Reporter
@@ -130,9 +276,9 @@ enum JobRunners {
         BackgroundKeeper.shared.acquire(.summary)
         defer { BackgroundKeeper.shared.release(.summary) }
 
-        // 译文也可能被输出上限截断。上一版是当场弹一句 alert；活改成后台跑
-        // 之后那个 alert 覆盖不到（用户不在这一页），所以改成随产物落进
-        // `Job.notes`，回来随时看得到。半截的译文和完整的译文长得一模一样。
+        // The translation can also be truncated by the output cap. The previous version popped an alert on the spot; once the job runs in the background
+        // that alert can't reach (the user isn't on this page), so it's now persisted alongside the artifact into
+        // `Job.notes`, visible any time you come back. A half-finished translation looks exactly like a complete one.
         func report(_ output: LLMCompletionService.Completion) {
             reporter.notes(
                 output.truncated ? [L10n.Summarize.truncatedWarning] : [],
@@ -170,16 +316,17 @@ enum JobRunners {
         log.info("translated \(job.clipName, privacy: .public) → \(languageName, privacy: .public)")
     }
 
-    /// 格式转换 / 导出。原来在 `ClipDetailView.runExport` 里。
+    /// Format conversion / export. Used to be in `ClipDetailView.runExport`.
+    /// ★ 2026-10-22 (任务二): also handles the document formats `txt` / `md` /
+    /// `pdf` (and `png` = mind-map image) alongside the two audio formats.
     @MainActor
     static func export(_ job: Job, config: AppConfig) async throws {
-        guard let raw = job.exportFormat,
-              let format = AudioExportFormat(rawValue: raw) else {
+        guard let raw = job.exportFormat else {
             throw JobSourceMissing(what: L10n.Jobs.sourceFormat)
         }
-        // ⚠️ 音频按**文件名**在 `decryptedDir` 里找，不把绝对路径存进活里 ——
-        //    沙盒容器路径在重装 / 迁移之后会变，存下来的路径第二天就失效
-        //    （`TranscriptionService` 那条队列在这里是同一个取舍）。
+        // ⚠️ The audio is looked up by **filename** in `decryptedDir`, and the absolute path isn't stored in the job —
+        //    the sandbox container path changes after a reinstall / migration, so a saved path is stale the very next day
+        //    (`TranscriptionService`'s queue makes the same trade-off here).
         let source = StorageLocations.decryptedDir.appendingPathComponent(job.clipName)
         guard FileManager.default.fileExists(atPath: source.path) else {
             throw JobSourceMissing(what: L10n.Jobs.sourceAudio)
@@ -188,59 +335,81 @@ enum JobRunners {
         BackgroundKeeper.shared.acquire(.export)
         defer { BackgroundKeeper.shared.release(.export) }
 
-        // ★ 写进 `ExportCenter` 的暂存目录而不是 `tmp`：`tmp` 会被 iOS 随时
-        //   清掉，而"导完切走、回来再分享"正是这条路要支持的场景。
+        // ★ Write into `ExportCenter`'s staging directory rather than `tmp`: `tmp` can be
+        //   cleared by iOS at any time, and "export, switch away, come back and share" is exactly the scenario this path exists to support.
         let dir = try ExportCenter.shared.beginNewStaging()
         let stem = (job.clipName as NSString).deletingPathExtension
-        let url = try await AudioExporter.export(
-            format, source: source, suggestedName: stem, directory: dir
-        )
-        try Task.checkCancellation()
-        ExportCenter.shared.publish(
-            id: dir.lastPathComponent,
-            title: stem,
-            itemCount: 1,
-            bytes: fileSize(url),
-            origin: job.clipName
-        )
-        log.info("exported \(job.clipName, privacy: .public) as \(raw, privacy: .public)")
+        do {
+            let url: URL
+            if raw == "txt" || raw == "md" || raw == "pdf" || raw == "png" {
+                url = try DocumentExporter.export(raw, clipName: job.clipName, into: dir)
+            } else {
+                guard let format = AudioExportFormat(rawValue: raw) else {
+                    throw JobSourceMissing(what: L10n.Jobs.sourceFormat)
+                }
+                url = try await AudioExporter.export(
+                    format, source: source, suggestedName: stem, directory: dir
+                )
+            }
+            try Task.checkCancellation()
+            ExportCenter.shared.publish(
+                id: dir.lastPathComponent,
+                title: stem,
+                itemCount: 1,
+                bytes: fileSize(url),
+                origin: job.clipName
+            )
+            log.info("exported \(job.clipName, privacy: .public) as \(raw, privacy: .public)")
+            Telemetry.success("export_share_\(raw)", ["bytes": String(fileSize(url))])
+        } catch {
+            Telemetry.failed("export_share_\(raw)", reason: error.localizedDescription)
+            throw error
+        }
     }
 
-    // MARK: - 源文件
+    // MARK: - Source file
 
-    /// 这条录音喂给模型的转录正文。
+    /// The transcript text fed to the model for this recording.
     ///
-    /// ⚠️ **不能直接读 `{base}.txt`**。磁盘上那份是
-    ///    `TranscriptionService.formatTranscript` 写的，规则是
-    ///    "有分段就用 `formatted()`（**带时间戳**），没分段就用整段文本"；
-    ///    而详情页发起摘要时用的是 `textForSummarization`，规则是
-    ///    "有说话人就用 `formatted()`，**没有说话人就用不带时间戳的纯文本**"。
-    ///    两者在"有分段但没识别出说话人"这一种情况下**不一样** ——
-    ///    直接读文件会让同一份转录生成出结构不同的摘要，用户只会觉得
-    ///    "这个功能时好时坏"。
+    /// ⚠️ **It must not read `{base}.txt` directly.** The one on disk is
+    ///    written by `TranscriptionService.formatTranscript`, whose rule is
+    ///    "if there are segments use `formatted()` (**with timestamps**), otherwise use the whole text";
+    ///    while the detail page uses `textForSummarization` when starting a summary, whose rule is
+    ///    "if there are speakers use `formatted()`, **if there are no speakers use plain text without timestamps**".
+    ///    The two **differ** in the one case of "there are segments but no speakers were recognised" —
+    ///    reading the file directly would produce structurally different summaries from the same transcript, and the user would just think
+    ///    "this feature works sometimes and not others".
     ///
-    /// ⇒ 一律转发到 `summarizableText`，与详情页**逐字同源**。
+    /// ⇒ Always forward to `summarizableText`, **letter-for-letter the same source** as the detail page.
     private static func transcriptText(for clipName: String) throws -> String {
         let urls = StorageLocations.transcriptURLs(for: clipName)
-        // 优先 `.asr.json`：里面有分段与说话人，`summarizableText` 需要它们。
+        // Prefer `.asr.json`: it has the segments and speakers, which `summarizableText` needs.
         if let data = try? Data(contentsOf: urls.json),
            let result = try? JSONDecoder().decode(AsrResult.self, from: data) {
-            return summarizableText(text: result.text, segments: result.segments)
+            return summarizableText(text: result.text,
+                                    segments: result.segments,
+                                    speakerNames: SpeakerNameStore.namesOnDisk(for: clipName))
         }
-        // 只剩 `.txt` 的情况（老数据的 json 被清掉了）：它就是全部信息了。
+        // The case where only `.txt` is left (an old item's json was cleared): that's all the information there is.
         return try read(urls.txt, what: L10n.Jobs.sourceTranscript)
     }
 
-    /// 摘要 / 翻译真正喂进去的那串文本。
+    /// The actual text string fed to summary / translation.
     ///
-    /// ★ 这是**唯一实现**：`ClipDetailView.textForSummarization(_:)` 现在也转发
-    ///   到这里。以前它自己写了一遍，而十二改之后摘要有了第二条入口（队列），
-    ///   两份拷贝迟早会漂开 —— 那时表现是"同一个按钮，隔一天跑出来的摘要
-    ///   结构不一样"，非常难查。
-    static func summarizableText(text: String, segments: [AsrSegment]) -> String {
+    /// ★ This is the **single implementation**: `ClipDetailView.textForSummarization(_:)` now forwards
+    ///   here too. It used to have its own copy, and after revision twelve summary gained a second entry point (the queue),
+    ///   so the two copies would eventually drift apart — and the symptom would be "the same button produces summaries with a different
+    ///   structure a day apart", which is very hard to trace.
+    /// `speakerNames` is the user's rename map (`SpeakerNameStore`). The queue has no
+    /// UI, so it reads the sidecar off disk by itself; the detail page passes the map
+    /// it already has. Either way the text handed to the model says "张伟", not
+    /// "Speaker 1" — ★ 2026-10-22 ("还要支持修改说话人的名称").
+    static func summarizableText(text: String,
+                                 segments: [AsrSegment],
+                                 speakerNames: [String: String] = [:]) -> String {
         if segments.isEmpty { return text }
         if segments.contains(where: { !($0.speaker ?? "").isEmpty }) {
-            return segments.map { $0.formatted() }.joined(separator: "\n")
+            return segments.map { $0.formatted(speakerNames: speakerNames) }.joined(separator: "\n")
         }
         return segments.map(\.text).joined(separator: "\n")
     }
@@ -258,15 +427,15 @@ enum JobRunners {
         return text
     }
 
-    // MARK: - 结果附注
+    // MARK: - Result note
 
-    /// 把 `Outcome` 翻成人话。**两条都要说清楚**：
-    /// 用的不是主通道（配置出了问题）、以及内容被分段处理过（结果的结构与
-    /// 整篇一次生成会有细微差别，用户看到分段标题缺失会以为是 bug）。
+    /// Translate the `Outcome` into plain words. **Both must be spelled out**:
+    /// that a non-primary channel was used (the configuration had a problem), and that the content was chunked (the result's structure differs subtly
+    /// from generating the whole thing in one go, and a user seeing a missing chunk heading would think it's a bug).
     ///
-    /// 从 `SummarizeSheet` 搬过来的 —— 它现在是"结果的一部分"，随产物一起
-    /// 落进 `Job.notes`，而不是只在发起的那一页里有意义（那条活很可能是在
-    /// 用户看不见的时候跑完的）。
+    /// Moved over from `SummarizeSheet` — it is now "part of the result", persisted along with
+    /// the artifact into `Job.notes`, rather than only being meaningful on the page that started it (that job most likely finished
+    /// while the user wasn't looking).
     static func notices(for outcome: LLMCompletionService.Outcome, config: AppConfig) -> [String] {
         var result: [String] = []
         let primary = config.llmProviders.primary ?? ""
@@ -282,10 +451,10 @@ enum JobRunners {
         return result
     }
 
-    // MARK: - 标题（best-effort）
+    // MARK: - Title (best-effort)
 
-    /// 从摘要正文里再要一个短标题。失败就返回 nil —— 摘要本身是有效的，
-    /// 不该因为标题生成不出来而把整条活判成失败。
+    /// Ask for a short title from the summary body as well. On failure return nil — the summary itself is valid,
+    /// and it shouldn't be that a title can't be generated and the whole job is judged a failure.
     @MainActor
     private static func extractTitle(
         from summary: String, config: AppConfig, preferred: String?
@@ -299,7 +468,7 @@ enum JobRunners {
                 systemPrompt: instruction,
                 userContent: String(summary.prefix(1000)),
                 config: config,
-                // 标题就 1000 字输入，没什么可分段的。
+                // Title generation gets only 1000 characters of input; nothing to chunk.
                 allowChunking: false,
                 preferred: preferred
             )

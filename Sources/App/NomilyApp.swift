@@ -16,27 +16,27 @@ struct NomilyApp: App {
 
     init() {
         _ = Self.appInitAt  // `static let` is lazy; touch it so it stamps now
-        // ★ 未读账本必须在**启动时**就建出来，不能等资料库被打开。
+        // ★ The unread ledger must be built **at launch**, not when the Library is opened.
         //
-        // `origin`（"本功能上线的那一刻"）是懒加载时取的 —— 如果等到用户
-        // 第一次进资料库才建，那么"App 已经跑着、卡刚传完一条、然后才点进
-        // 资料库"这条最常见的路径上，到货时间会早于 `origin`，那条新录音
-        // 就**永远等不到红点**。启动时摸一下，origin 就落在任何一次传输之前。
+        // `origin` ("the moment this feature shipped") is taken lazily — if it waited until the user
+        // first opened the Library to be built, then on the most common path — "the app is already running, a card just finished transferring one, and only then you tap into
+        // the Library" — the arrival time would precede `origin`, and that new recording
+        // would **never get a red dot**. Touching it at launch places origin before any transfer.
         _ = ClipReadStore.shared
-        // ★ 回收站的"30 天后自动删除"靠这里跑第一趟。
+        // ★ The trash's "auto-delete after 30 days" gets its first run from here.
         //
-        // 没有 `BGTaskScheduler` 可挂（那需要额外的后台模式声明，而且系统
-        // 什么时候给调度完全不受我们控制），所以过期清理只能挂在两个用户
-        // 一定会经过的点上：**启动**（这里）和**打开回收站**（`TrashView`）。
-        // 启动时跑还有个额外好处 —— 清理发生在任何界面读磁盘之前，过期条目
-        // 不会先被设置页那个条数徽标数进去、再"自己少一个"。
+        // There's no `BGTaskScheduler` to hang it on (that needs an extra background-mode declaration, and when the system
+        // actually schedules it is entirely beyond our control), so expiry cleanup can only hang off two points the user
+        // is bound to pass through: **launch** (here) and **opening the trash** (`TrashView`).
+        // Running it at launch has an extra benefit — cleanup happens before any screen reads the disk, so expired entries
+        // aren't first counted into that count badge on the settings page and then "lose one by themselves".
         _ = ClipTrash.shared.purgeExpired()
-        // 落盘诊断的**会话分隔行**。两个作用：
-        //   1. 让 `Documents/ticnote-ble.log` 一定存在 —— 否则"用户没连过卡"
-        //      与"诊断器没生效"看起来一模一样（都是没有这个文件），分不开；
-        //   2. 多次启动的日志会追加在同一份文件里，靠这行切段，
-        //      才能回答"这条记录是哪一次启动里的"。
-        TicNoteDiagLog.log("DIAG", "App 启动 —— ticnote 诊断开始")
+        // Disk‑based diagnostic **session separator line**. Two purposes:
+        //   1. Ensure `Documents/ticnote-ble.log` always exists — otherwise "user never connected a card"
+        //      and "diagnostic not effective" looks identical (both lack this file), cannot be distinguished;
+        //   2. Logs from multiple launches are appended to the same file, and this line splits sections,
+        //      so we can answer "which launch this record belongs to".
+        TicNoteDiagLog.log("DIAG", "App launch — ticnote diagnostic start")
     }
 
     var body: some Scene {
@@ -47,10 +47,10 @@ struct NomilyApp: App {
                 .environmentObject(environment.config)
                 .environmentObject(environment.library)
                 .environmentObject(environment.transcription)
-                // ★ 2026-10-16 十二改：后台任务队列（摘要 / 翻译 / 格式转换）。
-                // 与 `watch` 同一条理由 —— 嵌套 ObservableObject 的 `@Published`
-                // 变化不会让只观察父对象的视图失效，不单独注入的话详情页与
-                // 后台任务页会一直停在旧状态上（"活跑完了但界面不更新"）。
+                // ★ 2026-10-16 twelfth revision: the background job queue (summary / translation / format conversion).
+                // Same reason as `watch` — changes to a nested ObservableObject's `@Published`
+                // don't invalidate a view that observes only the parent object, so without injecting it separately the detail page and
+                // the background-jobs page would stay stuck on the old state ("the job finished but the UI doesn't update").
                 .environmentObject(environment.jobs)
                 .environmentObject(environment.localization)
                 // Injected in its own right, not reached through `environment`:
@@ -74,6 +74,13 @@ struct NomilyApp: App {
 private struct LocalizedRoot: View {
     @EnvironmentObject private var localization: LocalizationService
 
+    @State private var linkNotice: String?
+    @State private var linkNoticeTitle: String?
+    /// ★ (2026-10-19) Branded splash: the system launch screen is a bare red page; the logo
+    /// now stays on it for a beat before the app is revealed. Purely presentational — the
+    /// root is laid out underneath from the first frame, so nothing is blocked.
+    @State private var splashVisible = true
+
     var body: some View {
         RootView()
             // Dates, numbers and RTL follow the chosen language too — otherwise
@@ -81,5 +88,74 @@ private struct LocalizedRoot: View {
             .environment(\.locale, Locale(identifier: localization.effective))
             .environment(\.layoutDirection, localization.layoutDirection)
             .id(localization.selected ?? "system")
+            .overlay {
+                if splashVisible {
+                    SplashView()
+                        .transition(.opacity)
+                        .zIndex(10)
+                }
+            }
+            .task {
+                // Hold the logo for a second, then fade. `task` starts with the first frame,
+                // so the beat is measured from what the user actually sees.
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                withAnimation(.easeOut(duration: 0.3)) {
+                    splashVisible = false
+                }
+            }
+            // ★ `nomily-a1://import/…` — how a QR code scanned with the system Camera app (or
+            // a tapped link in a chat) becomes a stored credential. The in-app scanner calls
+            // the same parser; this is only the "already outside the app" entry point.
+            //
+            // Registering the scheme is worth it even with the scanner available: a code read
+            // by the Camera app needs *some* handler, and without one iOS shows a dead URL.
+            .onOpenURL { url in handleIncoming(url) }
+            .alert(linkNoticeTitle ?? "", isPresented: Binding(
+                get: { linkNotice != nil },
+                set: { if !$0 { linkNotice = nil; linkNoticeTitle = nil } }
+            )) {
+                Button(L10n.Common.ok, role: .cancel) { linkNotice = nil; linkNoticeTitle = nil }
+            } message: {
+                Text(linkNotice ?? "")
+            }
+    }
+
+    private func handleIncoming(_ url: URL) {
+        linkNoticeTitle = L10n.A1.importedFromLink
+        do {
+            let credential = try DingTalkA1Credential.parse(link: url)
+            DingTalkA1CredentialStore.save(credential)
+            linkNotice = L10n.A1.importedFromLinkBody(credential.displayName)
+        } catch {
+            linkNoticeTitle = L10n.A1.importFailed
+            linkNotice = L10n.A1.scanFailed
+        }
+    }
+}
+
+/// The one-second branded splash: same red as the launch screen, the app mark floating
+/// in the middle. No interaction, no progress — a beat of brand before the app appears.
+private struct SplashView: View {
+    var body: some View {
+        Color.accentColor
+            .ignoresSafeArea()
+            .overlay {
+                VStack(spacing: 22) {
+                    Image("NomiLogo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 116, height: 116)
+                        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                        .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+
+                    // App name in SF Pro (the system font) — the closest thing
+                    // to an "Apple-style" wordmark without shipping a custom face.
+                    Text("Nomily AI")
+                        .font(.system(size: 30, weight: .semibold, design: .default))
+                        .tracking(0.6)
+                        .foregroundStyle(.white.opacity(0.96))
+                }
+            }
+            .ignoresSafeArea()
     }
 }

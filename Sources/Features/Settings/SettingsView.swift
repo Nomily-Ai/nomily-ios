@@ -5,12 +5,12 @@ struct SettingsView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var watch: WatchSyncService
     @EnvironmentObject private var localization: LocalizationService
-    /// 后台任务队列。单独注入的理由见 `NomilyApp` 里 `.environmentObject`
-    /// 那一段：嵌套 `ObservableObject` 的 `@Published` 不会让只观察父对象的
-    /// 视图失效，走 `env.jobs` 的话入口那颗数字永远停在旧值上。
+    /// Background job queue. For why it's injected separately see the `.environmentObject`
+    /// block in `NomilyApp`: a nested `ObservableObject`'s `@Published` won't invalidate
+    /// views that only observe the parent, so going through `env.jobs` would leave the entry badge stuck on its old value forever.
     @EnvironmentObject private var jobs: JobQueue
-    /// 回收站里躺着的条数要显示在那一行右边，所以得观察它 —— 在详情页删了
-    /// 一条再回到设置页，数字要跟着变。
+    /// The number of items sitting in the trash is shown on the right of that row, so it has to be observed — delete
+    /// one on the detail page and come back to the settings page, and the number has to follow.
     @ObservedObject private var trash = ClipTrash.shared
     @State private var versionTapCount = 0
     @State private var versionTapResetTask: Task<Void, Never>?
@@ -19,72 +19,119 @@ struct SettingsView: View {
     private static let tapsToToggle = 7
     private static let tapsBeforeHint = 3
 
-    /// 还没干完的活：摘要 / 翻译 / 格式转换（`jobs`）+ 转录（`transcription`）。
+    /// Jobs not finished yet: summary / translation / format conversion (`jobs`) + transcription (`transcription`).
     ///
-    /// 两类**都算**：入口那颗数字回答的是"后台还有没有东西在忙"，把转录漏掉
-    /// 会让人在只排着转录的时候看到一个空白的入口，以为这一页是空的。
+    /// **Both** kinds count: the entry badge answers "is anything still busy in the background", and leaving transcription out
+    /// would show a blank entry when only transcription is queued, making people think the page is empty.
     private var busyJobCount: Int {
         jobs.unfinishedCount + env.transcription.pending.count
     }
 
+    /// One settings row: a coloured glyph tile, the title, and an optional right-hand
+    /// detail (current value) or count (badge).
+    ///
+    /// 2026-10-22 ("按照苹果的简约风格来"): the rows used to be bare
+    /// `NavigationLink(title)`s, so ten items of six different kinds read as one
+    /// undifferentiated list. The tile gives each area a shape to recognise and
+    /// makes the groups scan vertically instead of requiring the labels to be read.
+    @ViewBuilder
+    private func settingsRow<D: View>(
+        _ title: String,
+        icon: String,
+        tint: Color,
+        detail: String? = nil,
+        count: Int? = nil,
+        @ViewBuilder destination: () -> D
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(tint.gradient)
+                    .frame(width: 28, height: 28)
+                    .overlay {
+                        Image(systemName: icon)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .accessibilityHidden(true)
+                Text(title)
+                Spacer(minLength: 8)
+                if let detail {
+                    Text(detail).foregroundStyle(.secondary)
+                }
+                if let count {
+                    Text("\(count)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+        }
+    }
+
     var body: some View {
         Form {
+            // ★ 2026-10-22 ("按照苹果的简约风格来"): one flat Section held ten
+            // rows in no particular order, so "where do I change the ASR vendor"
+            // was a full-page scan. Now four groups, each a place the user would
+            // look for that thing: what records, what generates text, the files
+            // themselves, and how the app behaves.
             Section {
-                NavigationLink(L10n.Settings.asrProviders) { ASRProvidersView() }
-                NavigationLink(L10n.Settings.llmProviders) { LLMProvidersView() }
-                NavigationLink(L10n.Settings.recordings) { RecordingsSettingsView() }
-                NavigationLink(L10n.Settings.summarizeTemplates) { SummarizeTemplatesView() }
-                NavigationLink(L10n.Settings.devicesAndLibrary) { DevicesLibraryView() }
-                // 回收站紧挨着"设备与资料库"：它管的正是资料库里那些条目，
-                // 放在这一区里、语言之前。只在里面真有东西时才显示条数 ——
-                // 一个常驻的"0"会被读成"这里有 0 个东西坏了"。
-                NavigationLink {
+                settingsRow(L10n.Settings.recordings, icon: "waveform", tint: .blue) {
+                    RecordingsSettingsView()
+                }
+                settingsRow(L10n.Settings.asrProviders, icon: "text.bubble", tint: .indigo) {
+                    ASRProvidersView()
+                }
+            } header: {
+                Text(L10n.Settings.groupCapture)
+            }
+
+            Section {
+                settingsRow(L10n.Settings.llmProviders, icon: "sparkles", tint: .purple) {
+                    LLMProvidersView()
+                }
+                settingsRow(L10n.Settings.summarizeTemplates, icon: "doc.text", tint: .teal) {
+                    SummarizeTemplatesView()
+                }
+            } header: {
+                Text(L10n.Settings.groupGenerate)
+            }
+
+            Section {
+                settingsRow(L10n.Settings.devicesAndLibrary, icon: "externaldrive", tint: .orange) {
+                    DevicesLibraryView()
+                }
+                // ⛔ PLAUD lives on Recordings → Device, not here (2026-10-21): it is
+                // a device-scoped feature, not an app-wide setting. DingTalk A1 is
+                // likewise **not** here (2026-10-18): its credential belongs only on
+                // that card's own device-info page, because from Settings a
+                // card-shaped secret reads as account-level and people paste the
+                // wrong card's key.
+                settingsRow(L10n.Trash.settingsRow, icon: "trash", tint: .gray,
+                            count: trash.items.isEmpty ? nil : trash.items.count) {
                     TrashView()
-                } label: {
-                    HStack {
-                        Text(L10n.Trash.settingsRow)
-                        Spacer()
-                        if !trash.items.isEmpty {
-                            Text("\(trash.items.count)")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
                 }
-                // ★ 2026-10-16 十二改：四类长任务的**总览**。
-                //
-                // 放在这一区而不是塞进"录音设置"：四类活里转录属于录音、
-                // 摘要与翻译属于 LLM、格式转换属于资料库 —— 它不属于其中
-                // 任何一区，硬塞进某一区，用户得先猜是哪一区才找得到。
-                //
-                // 右边那颗数字只在真有活没干完时出现（同上面回收站那一行）：
-                // 常驻的"0"会被读成"有 0 个东西坏了"。
-                NavigationLink {
+                settingsRow(L10n.Jobs.openQueue, icon: "clock.arrow.circlepath", tint: .green,
+                            count: busyJobCount > 0 ? busyJobCount : nil) {
                     TaskCenterView()
-                } label: {
-                    HStack {
-                        Text(L10n.Jobs.openQueue)
-                        Spacer()
-                        if busyJobCount > 0 {
-                            Text("\(busyJobCount)")
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                    }
                 }
-                // Language sits last, right above About: it belongs to none of
-                // the four feature areas above, and slotting it among them
-                // would break their order. The row shows the current choice so
-                // you don't have to open it to see what's set.
-                NavigationLink {
+            } header: {
+                Text(L10n.Settings.groupLibrary)
+            }
+
+            Section {
+                settingsRow(L10n.Settings.language, icon: "globe", tint: .cyan,
+                            detail: currentLanguageLabel) {
                     LanguagePickerView()
-                } label: {
-                    HStack {
-                        Text(L10n.Settings.language)
-                        Spacer()
-                        Text(currentLanguageLabel)
-                            .foregroundStyle(.secondary)
-                    }
                 }
+                settingsRow(L10n.Settings.theme, icon: "circle.lefthalf.filled", tint: currentTheme.accent,
+                            detail: currentTheme.title) {
+                    ThemePickerView()
+                }
+            } header: {
+                Text(L10n.Settings.groupGeneral)
             }
 
             watchSection
@@ -92,7 +139,12 @@ struct SettingsView: View {
 
             aboutSection
         }
-        .padding(.top, -20)
+        // ★ 2026-10-22 ("设置里面顶部的录音与转写被顶部遮挡住了"): this Form carried
+        // `.padding(.top, -20)` — a leftover from when the page had no navigation
+        // title (it pulled the empty nav-bar strip away). The bar now shows a
+        // principal title, so the same -20 slid the first section header *under*
+        // it and the group header was clipped. The nav bar reserves its own space;
+        // no compensation needed.
         .navigationTitle("")
         .navigationDestination(isPresented: $env.navigateToASRProviders) {
             ASRProvidersView()
@@ -111,33 +163,33 @@ struct SettingsView: View {
     /// only when "Automatic App Install" is on, and otherwise leaves it sitting
     /// in the Watch app's Available Apps list with no notification.
     ///
-    /// ★ 2026-10-16 十三改：这一区多了一行**首页表情**（当时是独立一行 +
-    /// 独立 Section）。
+    /// ★ 2026-10-16 revision thirteen: this section gained a **Home Face** row (at the time an independent row +
+    /// independent Section).
     ///
-    /// ★★ 2026-10-16 十五改：那两行**合并成一行**（用户原话："将 watch 的首页
-    ///   表情添加到Nomily AI APP 的手表设置里面，点击 apple watch 里面就是菜单栏，
-    ///   将已安装的则点击进入设置表情，合并而不是独立出一个手表的表情菜单栏，
-    ///   然后如果未安装点击则跳转手机 watch app"）。
+    /// ★★ 2026-10-16 revision fifteen: those two rows were **merged into one** (user's words: "add the watch
+    ///   home-screen expression to the Nomily AI app's watch settings; tapping Apple Watch there is the menu bar,
+    ///   and when it is installed a tap goes into the expression settings -- merge it rather than giving the watch its own expression menu bar;
+    ///   and when it is not installed, a tap jumps to the phone's Watch app").
     ///
-    /// 于是这一行现在按**手表 App 装没装**分岔：
-    ///   · **已装** —— `NavigationLink` 进表情选择器，右侧显示当前那一档的名字；
-    ///   · **没装**（含没配对手表）—— 变成一个按钮，点一下**跳到 iPhone 上的
-    ///     「Watch」App**，装它在那儿（右侧仍是原来的状态文字，再多一个"外跳"角标）。
+    /// So this row now branches on **whether the watch App is installed**:
+    ///   · **Installed** — a `NavigationLink` into the expression picker, with the current option's name on the right;
+    ///   · **Not installed** (including a watch that isn't paired) — becomes a button that **jumps to the
+    ///     "Watch" App on the iPhone**, to install it there (the right side keeps the original status text, plus an "opens elsewhere" badge).
     ///
-    /// ⚠️ 为什么合并是对的：安装状态和表情设置本来就是**同一个对象**的两件事，
-    ///    分成两行之后，用户在"未安装"那一行看不到任何出路 —— 那一行只能看，
-    ///    不能点，而"怎么办"写在 footer 的一长段说明里。合并之后"这一行点了会
-    ///    发生什么"和"它现在的状态"落在同一个位置上。
+    /// ⚠️ Why merging is right: install state and expression setting are two things about the **same object** to begin with,
+    ///    and once split into two rows the user sees no way out on the "not installed" row — that row can only be looked at,
+    ///    not tapped, while "what to do" is buried in a long footer. After the merge, "what happens when
+    ///    you tap this row" and "its current state" land in the same place.
     ///
-    /// ⚠️ 判断用 `isWatchAppInstalled` **且** `isActivated`：激活完成之前那个
-    ///    flag 一定是 `false`（见 `WatchSyncService` 顶部），只看它会把启动后
-    ///    头几秒误判成"没装"，于是用户点一下就被甩到 Watch App 去。
+    /// ⚠️ The check uses `isWatchAppInstalled` **and** `isActivated`: before activation completes that
+    ///    flag is necessarily `false` (see the top of `WatchSyncService`), and looking at it alone would misjudge
+    ///    the first few seconds after launch as "not installed", so a single tap throws the user over to the Watch App.
     private var watchSection: some View {
         Section {
             watchRow
         } footer: {
-            // 两句话各管各的：一句说这一行现在是什么（选表情），
-            // 一句说手表那边现在是什么状态（装没装 / 连没连）。
+            // The two sentences each do their own job: one says what this row is now (pick an expression),
+            // the other says what state the watch side is in (installed or not / connected or not).
             VStack(alignment: .leading, spacing: 6) {
                 Text(L10n.Face.rowFooter)
                 Text(watchFooter)
@@ -145,7 +197,7 @@ struct SettingsView: View {
         }
     }
 
-    /// 这一区唯一的那一行。三种形态见 `watchSection` 上面那段。
+    /// The single row of this section. For the three forms see the block above `watchSection`.
     @ViewBuilder
     private var watchRow: some View {
         if watch.isActivated, watch.isPaired, watch.isWatchAppInstalled {
@@ -155,31 +207,31 @@ struct SettingsView: View {
                 watchRowLabel(trailing: chosenFaceTitle, leavesTheApp: false)
             }
         } else if watch.isActivated, isWatchAppReachableOnThisOS {
-            // 没装（或没配对）—— 点一下去 Watch App 处理。没配对时也走这里：
-            // Watch App 正是配对的地方。
+            // Not installed (or not paired) — tap to go handle it in the Watch App. Unpaired also goes here:
+            // the Watch App is exactly where you pair.
             //
-            // ⚠️ 这一支要求 `isActivated`：激活之前 `isWatchAppInstalled` 必然是
-            //    `false`，那时给按钮的话，用户在启动后头几秒点一下会被甩去
-            //    Watch App —— 而手表 App 其实早就装好了。那几秒里老实当一个
-            //    只读的状态行（"检测中…"）。
+            // ⚠️ This branch requires `isActivated`: before activation `isWatchAppInstalled` is necessarily
+            //    `false`, and offering a button then would throw the user to the
+            //    Watch App in the first few seconds after launch — when the watch App was installed long ago. For those seconds, honestly be a
+            //    read-only status row ("Checking…").
             Button(action: openWatchApp) {
                 watchRowLabel(trailing: watchStatus, leavesTheApp: true)
             }
-            // ⚠️ `.plain` 而不是默认样式：默认会把整行的文字和图标签染成蓝色，
-            //    那样这一行会在字体大小、粗细上和上下每一行都不一样。
+            // ⚠️ `.plain` rather than the default style: the default tints the whole row's text and label blue,
+            //    which would make this row differ from every row above and below in font size and weight.
             .buttonStyle(.plain)
         } else {
-            // 还没激活，或者 iOS 16 上这个功能永远不可能就绪
-            // （见 `isWatchAppReachableOnThisOS`）：老实当一个只读的状态行，
-            // 不要给一个点了没用的按钮。
+            // Not activated yet, or on iOS 16 this feature can never become ready
+            // (see `isWatchAppReachableOnThisOS`): honestly be a read-only status row,
+            // don't offer a button that does nothing when tapped.
             watchRowLabel(trailing: watchStatus, leavesTheApp: false)
         }
     }
 
-    /// 那一行的内容。`trailing` 是右边的状态/当前值。
+    /// The row's content. `trailing` is the status/current value on the right.
     ///
-    /// ⚠️ 图标用 `Label` 而不是 `Image` + `Text` 两段：`Label` 会自动把符号
-    ///    对齐到文字基线，手写两段则要在不同动态字体下自己调。
+    /// ⚠️ The icon uses `Label` rather than an `Image` + `Text` pair: `Label` automatically aligns the symbol
+    ///    to the text baseline, whereas a hand-rolled pair has to be adjusted by hand across dynamic type sizes.
     private func watchRowLabel(trailing: String, leavesTheApp: Bool) -> some View {
         HStack {
             Label(L10n.Watch.settingsTitle, systemImage: "applewatch")
@@ -187,8 +239,8 @@ struct SettingsView: View {
             Text(trailing)
                 .foregroundStyle(.secondary)
             if leavesTheApp {
-                // 一个"会跳到别的 App"的角标。没有它，这一行看起来和上面那些
-                // `NavigationLink` 一样，用户点完发现"整个 App 被切走了"会懵。
+                // A badge for "this jumps to another App". Without it this row looks like the
+                // `NavigationLink`s above, and the user is baffled when tapping leaves "the whole App switched away".
                 Image(systemName: "arrow.up.forward.app")
                     .font(.footnote)
                     .foregroundStyle(.tertiary)
@@ -196,28 +248,28 @@ struct SettingsView: View {
         }
     }
 
-    /// 打开 iPhone 上的「Watch」App —— 手表 App 没装时，用户得去那里点安装。
+    /// Open the "Watch" App on the iPhone — when the watch App isn't installed, the user has to tap install there.
     ///
-    /// ## 为什么不用 `canOpenURL`
-    /// `itms-watchs://` 是系统 App 的私有 scheme，没写进 `LSApplicationQueriesSchemes`
-    /// 时 `canOpenURL` **一定**回 `false`（这是 iOS 9 起的查询限制）——
-    /// 用它做前置判断会让这个按钮在所有设备上都是死的。所以直接 `open`，
-    /// 拿它的完成回调判断成没成。
+    /// ## Why not `canOpenURL`
+    /// `itms-watchs://` is a system App's private scheme; unless it's listed in `LSApplicationQueriesSchemes`,
+    /// `canOpenURL` **always** returns `false` (the query restriction since iOS 9) —
+    /// using it as a pre-check would make this button dead on every device. So `open` directly
+    /// and use its completion callback to tell whether it worked.
     private func openWatchApp() {
         guard let url = URL(string: "itms-watchs://") else { return }
         UIApplication.shared.open(url, options: [:]) { opened in
             guard !opened,
                   let fallback = URL(string: UIApplication.openSettingsURLString)
             else { return }
-            // 打不开（比如 iPad 上没有 Watch App）就退到**本 App 的设置页**：
-            // 那里至少能翻到"麦克风"之类的权限。总比"点了没反应"强。
+            // If it can't open (say there's no Watch App on iPad), fall back to **this App's settings page**:
+            // there you can at least dig up permissions like "Microphone". Better than "tap and nothing happens".
             UIApplication.shared.open(fallback)
         }
     }
 
-    /// 那一行右边显示的名字 —— 当前这一档的本地化名。
+    /// The name shown on the right of that row — the localised name of the current option.
     ///
-    /// 和语言那一行同款：不必点进去就知道现在是哪个。
+    /// Same as the language row: you know what's set without tapping in.
     private var chosenFaceTitle: String {
         (BotFaceStyle.decode(configService.config.watchFaceStyle) ?? .calm).title
     }
@@ -289,6 +341,13 @@ struct SettingsView: View {
         return AppLanguage.autonym(of: AppLanguage.resolve(tag))
     }
 
+    /// Which palette the app is actually rendering with. Same "resolve, don't
+    /// trust the tag" rule as the language row: an unknown tag from a newer
+    /// build resolves to the default, and the row must show what's on screen.
+    private var currentTheme: AppTheme {
+        AppTheme.resolve(configService.config.appTheme)
+    }
+
     private var appVersion: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
@@ -349,18 +408,28 @@ struct SettingsView: View {
 
 struct ASRProvidersView: View {
     @EnvironmentObject private var configService: ConfigService
-    /// 2026-10-15：为了读转录队列的状态（`pending` / `inFlight`）。
+    /// 2026-10-15: to read the transcription queue state (`pending` / `inFlight`).
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
-    @State private var azureVerify: VerifyState = .idle
     /// Active connectivity test for the local server (added 2026-10-13).
     /// `detail` / `warning` are separated: `VerifyState.success` carries no value,
     /// And after "connected", a detail line and a warning line for "a port did not respond" must be shown.
     @State private var localProbe: VerifyState = .idle
     @State private var localProbeDetail: String?
     @State private var localProbeWarning: String?
-    @State private var showAzureHelp = false
     @State private var showLeaveWarning = false
+    /// Connectivity/auth test for the custom (OpenAI-compatible) server.
+    @State private var customProbe: VerifyState = .idle
+    @State private var customProbeDetail: String?
+    /// ★ 2026-10-20: connectivity/auth test for the remote live (WSS) server.
+    @State private var remoteProbe: VerifyState = .idle
+    @State private var remoteProbeDetail: String?
+    // ★ 2026-10-23: cloud-vendor sheets live here, not on `ASRCloudSection` —
+    // a sheet attached to a Form Section gets cancelled whenever the section's
+    // subtree re-renders during presentation (config writes, AppEnvironment
+    // publishes), which showed up as "sheet flashes open then closes".
+    @State private var editingCloud: ASRCloudSpec?
+    @State private var showAzureSheet = false
 
     /// When the user provides a host but omits the port, a default port is supplied. **Only written when creating the record**,
     // and not used as the displayed value for an empty field.
@@ -369,14 +438,27 @@ struct ASRProvidersView: View {
     var body: some View {
         Form {
             transcriptionSection
-            azureSection
+            // ★ 2026-10-22 ("ASR 里面 Azure Speech 这个没有在云转写里面"):
+            // Azure's own section used to sit here, **above** the cloud list — so
+            // the only vendor that can actually transcribe was the one missing
+            // from "云转写". It is now the first row of `ASRCloudSection` (its
+            // sheet is `AzureSpeechSheet`), which keeps one list of cloud vendors
+            // instead of two places writing the same credentials.
+            ASRCloudSection(editing: $editingCloud, showAzure: $showAzureSheet)
             localSection
+            customSection
+            remoteLiveSection
+        }
+        .sheet(item: $editingCloud) { spec in
+            ASRCloudSheet(spec: spec)
+                .environmentObject(configService)
+        }
+        .sheet(isPresented: $showAzureSheet) {
+            AzureSpeechSheet()
+                .environmentObject(configService)
         }
         .navigationTitle(L10n.Settings.asrProviders)
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { azureVerify = storedAzureVerify }
-        .onDisappear { configService.saveNow() }
-        .sheet(isPresented: $showAzureHelp) { AzureSpeechSetupGuide() }
         // Partial or unverified configurations are excluded from transcription; report this before returning so the user isn’t surprised during transcription.
         .navigationBarBackButtonHidden(azureNeedsAttention)
         .toolbar {
@@ -409,18 +491,25 @@ struct ASRProvidersView: View {
         azureKeyMissing || azureRegionMissing
     }
 
-    /// When re‑entering the page, show the previous verification result; otherwise “Saved” and “Verified usable” look identical in the UI.
-    private var storedAzureVerify: VerifyState {
-        switch configService.config.asrProviders.azure?.verification {
-        case true: return .success
-        case false: return .failed(L10n.ASR.lastVerifyFailed)
-        case nil: return .idle
-        }
-    }
-
     private var configuredASR: [(key: String, label: String)] {
         var result: [(String, String)] = []
+        // On-device first: it needs no credentials, so it is the only entry that is always
+        // available and the one most users will want as the active service.
+        if configService.config.onDeviceASREnabled {
+            result.append(("ondevice", L10n.ASR.onDevice))
+        }
         // Only list services that are fully filled **and** whose credentials have not been rejected by verification: partially filled configs and those that failed verification would produce no transcription, and showing them as candidates would mislead users into thinking they are set up.
+        // ★ 2026-10-22: Aliyun is wired into file transcription (`AliyunFileASR`),
+        // so it joins the picker once the AK pair + Appkey + OSS bucket are all
+        // in — the primary market for this app transcribes Chinese, so it leads
+        // the cloud entries.
+        if let c = configService.config.asrProviders.cloud?["aliyun"],
+           !(c.secrets?["accessKeyId"] ?? "").isEmpty,
+           !(c.secrets?["accessKeySecret"] ?? "").isEmpty,
+           !(c.values?["appKey"] ?? "").isEmpty,
+           !(c.values?["ossBucket"] ?? "").isEmpty {
+            result.append(("aliyun", L10n.ASR.aliyun))
+        }
         if let a = configService.config.asrProviders.azure,
            !a.key.isEmpty, !a.region.isEmpty, a.verification != false {
             result.append(("azure", L10n.ASR.azure))
@@ -428,7 +517,38 @@ struct ASRProvidersView: View {
         if let l = configService.config.asrProviders.local, !l.host.isEmpty {
             result.append(("local", L10n.ASR.localServer))
         }
+        if let c = configService.config.asrProviders.custom, !c.endpoint.isEmpty {
+            result.append(("custom", L10n.ASR.customServer))
+        }
+        // ★ 2026-10-20: the remote live server serves **live** transcription; it is
+        // offered here so the live chain can pick it as primary/fallback. The file
+        // chain ignores the key "remote" (`TranscriptionService.hasCredentials`
+        // returns false for it), so choosing it never breaks file transcription.
+        if let r = configService.config.asrProviders.remoteLive, !r.endpoint.isEmpty {
+            result.append(("remote", L10n.ASR.remoteLive))
+        }
         return result
+    }
+
+    /// ★ 2026-10-23 ("实时转写要支持选择已经配置好的 ASR"): only the providers that
+    /// can actually stream audio are offered for live captions. Aliyun / Baidu /
+    /// Tencent / Google / AWS / … are batch file APIs — listing them here would
+    /// promise something the engine cannot do.
+    private var liveCapableASR: [(key: String, label: String)] {
+        // ★ 2026-10-23: Aliyun joined the live-capable set (its 实时语音识别 WS
+        // endpoint); Baidu / Tencent / Google / AWS / … are still batch-only.
+        let liveKeys: Set<String> = ["ondevice", "azure", "aliyun", "local", "remote"]
+        return configuredASR.filter { liveKeys.contains($0.key) }
+    }
+
+    private var liveEngineBinding: Binding<String> {
+        Binding(
+            get: { configService.config.defaults.asr.liveProvider ?? "" },
+            set: {
+                configService.config.defaults.asr.liveProvider = $0.isEmpty ? nil : $0
+                configService.scheduleSave()
+            }
+        )
     }
 
     private var transcriptionSection: some View {
@@ -436,6 +556,20 @@ struct ASRProvidersView: View {
             if !configuredASR.isEmpty {
                 Picker(L10n.ASR.activeProvider, selection: primaryBinding) {
                     ForEach(configuredASR, id: \.key) { Text($0.label).tag($0.key) }
+                }
+            }
+
+            // ★ Live captions have their own engine choice: the batch vendors above
+            // cannot stream, and pinning a live engine must not change file order.
+            if !liveCapableASR.isEmpty {
+                Picker(selection: liveEngineBinding) {
+                    Text(L10n.ASR.liveEngineAuto).tag("")
+                    ForEach(liveCapableASR, id: \.key) { Text($0.label).tag($0.key) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(L10n.ASR.liveEngine)
+                        InfoTip(text: L10n.ASR.liveEngineFooter)
+                    }
                 }
             }
 
@@ -461,6 +595,41 @@ struct ASRProvidersView: View {
                 )
             }
 
+            // ★ 2026-10-18: the phone's own offline model. Kept next to "Auto-transcribe" because both
+            // answer the same question — "can I get text without setting up a cloud account".
+            Toggle(isOn: Binding(
+                get: { configService.config.onDeviceASREnabled },
+                set: {
+                    configService.config.onDeviceASREnabled = $0
+                    configService.scheduleSave()
+                    // Turning it off while it is the active service would leave the picker
+                    // pointing at something that no longer exists; fall back to whatever is
+                    // configured, or to nothing (the picker then hides itself).
+                    if !$0, configService.config.defaults.asr.primary.lowercased() == "ondevice" {
+                        let fallback = configuredASR.first?.key ?? ""
+                        configService.config.defaults.asr.primary = fallback
+                        configService.scheduleSave()
+                    }
+                }
+            )) {
+                HStack(spacing: 4) {
+                    Text(L10n.ASR.onDevice)
+                    InfoTip(text: L10n.ASR.onDeviceFooter)
+                }
+            }
+
+            // "Summarize right after transcribing" — the LLM half of the pipeline the user asked for:
+            // speech → text → summary, with no tap in between.
+            Toggle(isOn: Binding(
+                get: { configService.config.autoSummarizeAfterTranscription },
+                set: { configService.config.autoSummarizeAfterTranscription = $0; configService.scheduleSave() }
+            )) {
+                HStack(spacing: 4) {
+                    Text(L10n.ASR.autoSummarize)
+                    InfoTip(text: L10n.ASR.autoSummarizeFooter)
+                }
+            }
+
             Toggle(isOn: Binding(
                 get: { configService.config.localVADEnabled },
                 set: { configService.config.localVADEnabled = $0; configService.scheduleSave() }
@@ -471,7 +640,7 @@ struct ASRProvidersView: View {
                 }
             }
 
-            // ★ 2026-10-15：后台保活。
+            // ★ 2026-10-15: background keep-alive.
             Toggle(isOn: Binding(
                 get: { configService.config.backgroundKeepAliveEnabled },
                 set: { configService.config.backgroundKeepAliveEnabled = $0; configService.scheduleSave() }
@@ -482,8 +651,8 @@ struct ASRProvidersView: View {
                 }
             }
 
-            // 队列状态只有在真有活排着的时候才出现 —— 空着的时候多加一行
-            // 只是噪音（而且会让人以为"是不是坏了"）。
+            // The queue state only appears when there's really a job queued — adding an extra row while it's empty
+            // is just noise (and makes people think "is it broken?").
             if !env.transcription.pending.isEmpty {
                 queueStatusRow
             }
@@ -492,12 +661,12 @@ struct ASRProvidersView: View {
         }
     }
 
-    /// 「还有几条没转录完」。
+    /// "How many are still waiting to be transcribed".
     ///
-    /// 为什么值得占一行：这个队列是**跨启动**的。用户可能压根不记得自己昨天
-    /// 传过几条录音在等转录，而那些活要么正悄悄跑着、要么已经试满三次悄悄
-    /// 放弃了 —— 不说的话，两种都只能从"资料库里那条录音始终没有转录文本"
-    /// 反推出来，而"没有转录"和"转录失败"在列表里长得一模一样。
+    /// Why it deserves a row: this queue is **cross-launch**. Users may simply not remember that yesterday
+    /// they fed it a few recordings waiting to be transcribed, and those jobs are either quietly running or have quietly
+    /// given up after three tries — without saying so, both can only be inferred from "that recording in the library never gets transcript text",
+    /// and "not transcribed" and "transcription failed" look exactly alike in the list.
     private var queueStatusRow: some View {
         let pending = env.transcription.pending
         let running = pending.filter { $0.attempts < TranscriptionService.maxAttempts }.count
@@ -523,8 +692,8 @@ struct ASRProvidersView: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
             }
-            // 只报**第一条**放弃的：报全部会把这个 Section 撑成一屏，
-            // 而用户此刻要的是"知道有东西卡住了"，不是逐条读错误。
+            // Only report the **first** one given up: reporting them all would stretch this Section to a full screen,
+            // when what the user wants right now is "to know something is stuck", not to read every error one by one.
             if stuck > 0,
                let first = pending.first(where: { $0.attempts >= TranscriptionService.maxAttempts }) {
                 Text(L10n.ASR.queueStuckDetail(
@@ -538,96 +707,6 @@ struct ASRProvidersView: View {
             }
         }
         .padding(.vertical, 2)
-    }
-
-    private var azureSection: some View {
-        Section {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    SecureField(L10n.ASR.subscriptionKey, text: azureKeyBinding)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.body.monospaced())
-                    keyHint(configService.config.asrProviders.azure?.key)
-                    if azureKeyMissing {
-                        fieldError(L10n.ASR.keyRequired)
-                    }
-                    // The reason for verification failure must be displayed in the UI: changing the button to a red X alone leaves the user unaware of “why”.
-                    if case .failed(let reason) = azureVerify {
-                        fieldError(reason)
-                    }
-                }
-                verifyButton(azureVerify) {
-                    let key = configService.config.asrProviders.azure?.key ?? ""
-                    let region = configService.config.asrProviders.azure?.region ?? ""
-                    // No network call while a required field is empty — the
-                    // user gets a per-field hint instead of the provider's
-                    // English "Key and region required".
-                    guard !key.isEmpty, !region.isEmpty else {
-                        // The per-field hints below are already on screen for
-                        // whichever box is empty; nothing to add here.
-                        azureVerify = .idle
-                        return
-                    }
-                    azureVerify = .verifying
-                    let r = await LLMModelService.verifyAzure(key: key, region: region)
-                    azureVerify = r.ok ? .success : .failed(r.error ?? L10n.ASR.verifyFailed)
-                    // The conclusion must be persisted: only then will the next page load distinguish between "saved" and "verification passed",
-                    // and the transcription pipeline will know that these credentials have been rejected.
-                    var azure = configService.config.asrProviders.azure ?? .init(key: key, region: region)
-                    azure.verifiedFingerprint = AppConfig.AsrProviders.Azure.fingerprint(key: key, region: region)
-                    azure.verifiedOK = r.ok
-                    configService.config.asrProviders.azure = azure
-                    configService.scheduleSave()
-                }
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                TextField(L10n.ASR.region, text: azureRegionBinding)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                if azureRegionMissing {
-                    fieldError(L10n.ASR.regionRequired)
-                }
-            }
-            azureStatusRow
-        } header: {
-            HStack(spacing: 4) {
-                Text(L10n.ASR.azureSpeech)
-                Spacer()
-                Button(L10n.ASR.azureHowToGetKey) { showAzureHelp = true }
-                    .buttonStyle(.plain)
-                    .font(.caption)
-                    .foregroundColor(.accentColor)
-                    .textCase(nil)
-            }
-        } footer: {
-            // Providing only the key‑retrieval step leaves the user unable to judge “why configure” and “where the audio was sent”.
-            // Since the page lacks a save button, without clear wording the user won’t know whether those previous entries count.
-            Text(L10n.ASR.azurePurposeFooter + "\n\n" + L10n.ASR.autosaveNote)
-        }
-    }
-
-    /// “Filled” and “Usable” are different: only after successful verification can we claim the configuration is usable.
-    @ViewBuilder
-    private var azureStatusRow: some View {
-        switch azureVerify {
-        case .success:
-            Label(L10n.ASR.statusVerified, systemImage: "checkmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.green)
-        case .verifying:
-            Text(L10n.ASR.statusVerifying)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        case .failed:
-            EmptyView()   // The failure reason is already displayed below the key field.
-        case .idle:
-            if !azureIncomplete {
-                Text(L10n.ASR.statusUnverified)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
     }
 
     private var localSection: some View {
@@ -649,6 +728,11 @@ struct ASRProvidersView: View {
                 }
             }
             localProbeRow
+            // ★ 2026-10-20: the "I don't know what a faster-whisper server is" escape hatch.
+            // Copies a one-shot prompt the user pastes into ChatGPT / Claude Code on the
+            // computer that will run the server; the AI does the install and prints the
+            // host/port to type above.
+            SetupAssistantRow()
         } header: {
             Text(L10n.ASR.localASRServer)
         } footer: {
@@ -736,8 +820,10 @@ struct ASRProvidersView: View {
             },
             set: { new in
                 configService.config.defaults.asr.primary = new
-                let other = (new == "azure") ? "local" : "azure"
-                configService.config.defaults.asr.fallbacks = [other]
+                // Fallbacks = every other configured provider, in a sensible order
+                // (server first, offline model last — it is already appended by the chain).
+                let others = configuredASR.map(\.key).filter { $0 != new }
+                configService.config.defaults.asr.fallbacks = others
                 configService.scheduleSave()
             }
         )
@@ -768,31 +854,299 @@ struct ASRProvidersView: View {
             .foregroundStyle(.red)
     }
 
-    private var azureKeyBinding: Binding<String> {
-        Binding(
-            get: { configService.config.asrProviders.azure?.key ?? "" },
-            set: { new in
-                var azure = configService.config.asrProviders.azure ?? .init(key: "", region: "")
-                azure.key = new
-                configService.config.asrProviders.azure = azure
-                // Changing credentials invalidates the previous verification result.
-                azureVerify = .idle
-                configService.scheduleSave()
-            }
-        )
+    // MARK: - Custom (OpenAI-compatible) server
+
+    private func writeCustom(_ custom: AppConfig.AsrProviders.Custom) {
+        // Same hygiene as `writeLocal`: a half-typed endpoint must not linger as a
+        // configured provider (it would appear in the picker and fail every transcription).
+        let hasEndpoint = !custom.endpoint
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        configService.config.asrProviders.custom = hasEndpoint ? custom : nil
+        configService.scheduleSave()
     }
 
-    private var azureRegionBinding: Binding<String> {
+    /// ★ 2026-10-21: model dropdown for the custom (API-key) ASR server.
+    /// Filled from `GET {base}/v1/models` and filtered to transcription-
+    /// capable models only — chat/embedding/image models would just fail at
+    /// transcribe time, so they are not offered. Manual entry stays available
+    /// as a fallback (some servers ship no usable /models).
+    @State private var customModelChoices: [String] = []
+    @State private var customModelTotal = 0
+    @State private var customModelLoading = false
+    @State private var customModelManual = false
+    @State private var customModelNotice: String?
+
+    private var customModelBinding: Binding<String> {
         Binding(
-            get: { configService.config.asrProviders.azure?.region ?? "" },
-            set: { new in
-                var azure = configService.config.asrProviders.azure ?? .init(key: "", region: "")
-                azure.region = new
-                configService.config.asrProviders.azure = azure
-                azureVerify = .idle
-                configService.scheduleSave()
+            get: { configService.config.asrProviders.custom?.model ?? "" },
+            set: {
+                writeCustom(AppConfig.AsrProviders.Custom(
+                    endpoint: configService.config.asrProviders.custom?.endpoint ?? "",
+                    apiKey: configService.config.asrProviders.custom?.apiKey,
+                    model: $0.isEmpty ? nil : $0,
+                    language: configService.config.asrProviders.custom?.language))
+            })
+    }
+
+    @ViewBuilder
+    private var customModelRow: some View {
+        if !customModelChoices.isEmpty && !customModelManual {
+            Picker(L10n.ASR.customModel, selection: customModelBinding) {
+                ForEach(customModelChoices, id: \.self) { Text($0).tag($0) }
+                if !customModelChoices.contains(customModelBinding.wrappedValue),
+                   !customModelBinding.wrappedValue.isEmpty {
+                    Text(customModelBinding.wrappedValue).tag(customModelBinding.wrappedValue)
+                }
             }
-        )
+            .labelsHidden()
+            if let notice = customModelNotice {
+                Text(notice).font(.caption2).foregroundStyle(.secondary)
+            }
+            Button(L10n.ASR.customModelsManual, systemImage: "keyboard") {
+                customModelManual = true
+            }
+        } else {
+            TextField(L10n.ASR.customModel, text: customModelBinding)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button {
+                Task { await loadCustomModels() }
+            } label: {
+                if customModelLoading {
+                    ProgressView()
+                } else {
+                    Label(L10n.ASR.customLoadModels, systemImage: "list.bullet")
+                        .font(.footnote)
+                }
+            }
+            .disabled(customModelLoading
+                      || (configService.config.asrProviders.custom?.endpoint.isEmpty ?? true))
+            if let notice = customModelNotice {
+                Text(notice).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func loadCustomModels() async {
+        guard let custom = configService.config.asrProviders.custom,
+              !custom.endpoint.isEmpty else {
+            customModelNotice = L10n.ASR.customModelsNone
+            return
+        }
+        customModelLoading = true
+        customModelNotice = nil
+        defer { customModelLoading = false }
+        if let result = await CustomASR.listModels(endpoint: custom.endpoint,
+                                                   apiKey: custom.apiKey ?? "") {
+            customModelChoices = result.models
+            customModelTotal = result.total
+            customModelManual = false
+            customModelNotice = L10n.ASR.customModelsLoaded(result.models.count)
+        } else {
+            customModelChoices = []
+            customModelManual = false
+            customModelNotice = L10n.ASR.customModelsNone
+        }
+    }
+
+    private var customSection: some View {
+        Section {
+            TextField(L10n.ASR.customEndpoint, text: Binding(
+                get: { configService.config.asrProviders.custom?.endpoint ?? "" },
+                set: {
+                    writeCustom(AppConfig.AsrProviders.Custom(
+                        endpoint: $0,
+                        apiKey: configService.config.asrProviders.custom?.apiKey,
+                        model: configService.config.asrProviders.custom?.model,
+                        language: configService.config.asrProviders.custom?.language))
+                    customProbe = .idle
+                    // A model list fetched from the previous endpoint is now stale.
+                    customModelChoices = []
+                    customModelNotice = nil
+                    customModelManual = false
+                }))
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            SecureField(L10n.ASR.customApiKey, text: Binding(
+                get: { configService.config.asrProviders.custom?.apiKey ?? "" },
+                set: {
+                    writeCustom(AppConfig.AsrProviders.Custom(
+                        endpoint: configService.config.asrProviders.custom?.endpoint ?? "",
+                        apiKey: $0.isEmpty ? nil : $0,
+                        model: configService.config.asrProviders.custom?.model,
+                        language: configService.config.asrProviders.custom?.language))
+                }))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            customModelRow
+            TextField(L10n.ASR.customLanguage, text: Binding(
+                get: { configService.config.asrProviders.custom?.language ?? "" },
+                set: {
+                    writeCustom(AppConfig.AsrProviders.Custom(
+                        endpoint: configService.config.asrProviders.custom?.endpoint ?? "",
+                        apiKey: configService.config.asrProviders.custom?.apiKey,
+                        model: configService.config.asrProviders.custom?.model,
+                        language: $0.isEmpty ? nil : $0))
+                }))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            customProbeRow
+        } header: {
+            Text(L10n.ASR.customServer)
+        } footer: {
+            Text(L10n.ASR.customProbeFooter)
+        }
+    }
+
+    @ViewBuilder
+    private var customProbeRow: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L10n.ASR.customProbe)
+                switch customProbe {
+                case .success:
+                    if let detail = customProbeDetail {
+                        Text(L10n.ASR.localProbeReachable(detail))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                case .failed(let reason):
+                    fieldError(reason)
+                case .verifying:
+                    Text(L10n.ASR.statusVerifying)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                case .idle:
+                    EmptyView()
+                }
+            }
+            Spacer()
+            verifyButton(customProbe) { await runCustomProbe() }
+        }
+    }
+
+    private func runCustomProbe() async {
+        guard let custom = configService.config.asrProviders.custom,
+              !custom.endpoint.isEmpty else {
+            customProbe = .failed(L10n.ASR.localProbeNoHost)
+            return
+        }
+        customProbe = .verifying
+        customProbeDetail = nil
+        let result = await CustomASR.probe(endpoint: custom.endpoint,
+                                           apiKey: custom.apiKey ?? "")
+        if result.ok {
+            customProbeDetail = result.detail
+            customProbe = .success
+            // Key is proven good — fetch the model dropdown for free, so the
+            // user's next tap is picking a model, not hunting for a button.
+            await loadCustomModels()
+        } else {
+            customProbe = .failed(result.error ?? L10n.ASR.verifyFailed)
+        }
+    }
+
+    // MARK: - Remote live (WSS) server ★ 2026-10-20
+
+    /// Endpoint + API key for the **remote secure** live service. Key never touches
+    /// disk: `ConfigService.extractSecrets` pulls it into the Keychain at the save
+    /// boundary, so these bindings can treat `config` as the source of truth exactly
+    /// like every other provider.
+    private func writeRemoteLive(_ remote: AppConfig.AsrProviders.RemoteLive) {
+        // Same hygiene as `writeCustom`: a half-typed endpoint must not linger as a
+        // configured provider.
+        let hasEndpoint = !remote.endpoint
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        configService.config.asrProviders.remoteLive = hasEndpoint ? remote : nil
+        configService.scheduleSave()
+    }
+
+    /// True when the user typed an endpoint that can never work: an explicit
+    /// plaintext `ws://` (LAN-only shape) or something the normalizer can't parse.
+    private var remoteEndpointInvalid: Bool {
+        let raw = configService.config.asrProviders.remoteLive?.endpoint ?? ""
+        guard !raw.isEmpty else { return false }
+        return RemoteLiveASR.listenURL(raw) == nil
+    }
+
+    private var remoteLiveSection: some View {
+        Section {
+            TextField(L10n.ASR.remoteEndpoint, text: Binding(
+                get: { configService.config.asrProviders.remoteLive?.endpoint ?? "" },
+                set: {
+                    writeRemoteLive(AppConfig.AsrProviders.RemoteLive(
+                        endpoint: $0,
+                        apiKey: configService.config.asrProviders.remoteLive?.apiKey))
+                    remoteProbe = .idle
+                }))
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.body.monospaced())
+            if remoteEndpointInvalid {
+                fieldError(L10n.ASR.remoteErrInvalidScheme)
+            }
+            SecureField(L10n.ASR.remoteApiKey, text: Binding(
+                get: { configService.config.asrProviders.remoteLive?.apiKey ?? "" },
+                set: {
+                    writeRemoteLive(AppConfig.AsrProviders.RemoteLive(
+                        endpoint: configService.config.asrProviders.remoteLive?.endpoint ?? "",
+                        apiKey: $0.isEmpty ? nil : $0))
+                }))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            remoteProbeRow
+        } header: {
+            Text(L10n.ASR.remoteLive)
+        } footer: {
+            Text(L10n.ASR.remoteFooter)
+        }
+    }
+
+    @ViewBuilder
+    private var remoteProbeRow: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L10n.ASR.remoteProbe)
+                switch remoteProbe {
+                case .success:
+                    if let detail = remoteProbeDetail {
+                        Text(L10n.ASR.localProbeReachable(detail))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                case .failed(let reason):
+                    fieldError(reason)
+                case .verifying:
+                    Text(L10n.ASR.statusVerifying)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                case .idle:
+                    EmptyView()
+                }
+            }
+            Spacer()
+            verifyButton(remoteProbe) { await runRemoteProbe() }
+        }
+    }
+
+    private func runRemoteProbe() async {
+        guard let remote = configService.config.asrProviders.remoteLive,
+              !remote.endpoint.isEmpty else {
+            remoteProbe = .failed(L10n.ASR.localProbeNoHost)
+            return
+        }
+        remoteProbe = .verifying
+        remoteProbeDetail = nil
+        let result = await RemoteLiveASR.probe(endpoint: remote.endpoint,
+                                               apiKey: remote.apiKey ?? "")
+        if result.ok {
+            remoteProbeDetail = result.detail
+            remoteProbe = .success
+        } else {
+            remoteProbe = .failed(result.error ?? L10n.ASR.verifyFailed)
+        }
     }
 
     /// When no local server is configured, the config should not contain a `local` entry — e.g., `{host: "", port: 1}`
@@ -837,17 +1191,20 @@ struct ASRProvidersView: View {
 
 struct LLMProvidersView: View {
     @EnvironmentObject private var configService: ConfigService
+    // ★ 2026-10-23: sheet hangs off the Form (stable identity), not the grid
+    // Section — otherwise any @Published change during presentation cancels it.
+    @State private var editingProvider: LLMProviderSpec?
 
     private var configured: [(key: String, label: String)] {
         configService.config.llmProviders.configuredProviders
     }
 
-    /// 主通道配不全的原因。非 nil ⇒ 上面那个 Picker 会显示成"没选"。
+    /// Why the primary channel is incompletely configured. Non-nil ⇒ the Picker above shows as "nothing selected".
     ///
-    /// ★ 2026-10-15：这个状态实测真的发生过 —— `primary = "openRouter"`，
-    /// 而 `open_router` 段里连 `api_key` 都没有。而 Picker 只列出**配全了**
-    /// 的通道，于是标签对不上、界面看起来只是"什么都没选"，一点线索都没有；
-    /// 用户只会看到每次摘要都先失败一次再兜底。
+    /// ★ 2026-10-15: this state really happened in practice — `primary = "openRouter"`,
+    /// while the `open_router` section didn't even have an `api_key`. And the Picker only lists **fully configured**
+    /// channels, so the tags don't line up, the UI just looks like "nothing is selected", with no clue at all;
+    /// the user only sees every summary fail once before falling back.
     private var primaryGap: String? {
         guard let primary = configService.config.llmProviders.primary, !primary.isEmpty else {
             return nil
@@ -868,11 +1225,11 @@ struct LLMProvidersView: View {
                             }
                         )) {
                             Text(L10n.Common.none).tag("")
-                            // ★ 2026-10-15：主通道配不全时它**不在** `configured`
-                            //   里，于是没有任何 tag 等于当前 selection，Picker 会
-                            //   渲染成"什么都没选" —— 用户看到的只是一个空白的
-                            //   下拉框，而真正的原因是旁边那条橙色提示。
-                            //   补一个带"未配置"标注的条目，选中态才落得下来。
+                            // ★ 2026-10-15: when the primary channel is incompletely configured it is **not** in `configured`
+                            //   so no tag equals the current selection, and the Picker
+                            //   renders as "nothing selected" — all the user sees is a blank
+                            //   dropdown, when the real cause is the orange notice beside it.
+                            //   Add an entry labelled "Not configured" so the selected state has somewhere to land.
                             if let primary = configService.config.llmProviders.primary,
                                !primary.isEmpty,
                                !configured.contains(where: { $0.key == primary }) {
@@ -889,9 +1246,9 @@ struct LLMProvidersView: View {
                         }
                     }
 
-                    // 配不全时补上原因 + 一键改用兜底。一键这件事在这里最值：
-                    // 用户既然点进了这一页，他要的就是"把它改对"，而不是
-                    // 自己判断该填哪个框、或者该换个通道。
+                    // When it's incomplete, add the reason + a one-tap switch to the fallback. The one-tap part pays off most here:
+                    // since the user tapped into this page, what they want is "make it right", not to
+                    // work out for themselves which field to fill in, or that they should switch channels.
                     if let gap = primaryGap {
                         VStack(alignment: .leading, spacing: 6) {
                             Label(gap, systemImage: "exclamationmark.triangle.fill")
@@ -913,21 +1270,16 @@ struct LLMProvidersView: View {
                 }
             }
 
-            OpenRouterSection()
-            KeyedProviderSection(
-                title: "OpenAI", placeholder: "gpt-4.1",
-                keyPath: \.openai, fetch: { await LLMModelService.fetchOpenAI(apiKey: $0) }
+            ProviderGridSection(
+                title: L10n.LLM.gridTitle,
+                footer: L10n.LLM.gridFooter,
+                specs: LLMProviderSpec.all,
+                editing: $editingProvider
             )
-            KeyedProviderSection(
-                title: "Claude", placeholder: "claude-opus-4-0-20250514",
-                keyPath: \.claude, fetch: { await LLMModelService.fetchClaude(apiKey: $0) }
-            )
-            KeyedProviderSection(
-                title: "Gemini", placeholder: "gemini-2.5-pro",
-                keyPath: \.gemini, fetch: { await LLMModelService.fetchGemini(apiKey: $0) }
-            )
-            OllamaSection()
-            CustomEndpointSection()
+        }
+        .sheet(item: $editingProvider) { spec in
+            ProviderConfigSheet(spec: spec)
+                .environmentObject(configService)
         }
         .navigationTitle(L10n.Settings.llmProviders)
         .navigationBarTitleDisplayMode(.inline)
@@ -935,574 +1287,530 @@ struct LLMProvidersView: View {
     }
 }
 
-// MARK: - Keyed provider (OpenAI / Claude / Gemini)
+// MARK: - Provider grid (every provider, one sheet)
 
-private struct KeyedProviderSection: View {
+/// 2026-10-22 request:
+/// > "下面的 openrouter 也要要国外的主流模型，Claude / chatgpt / gemini，ollama 跟用户自定义的模型
+/// >  也要加入进去，然后给这些模型配置对应的图标，然后他们的模型要兼容 —
+/// >  能够根据我们支持的模型才可以在里面进行选择"
+///
+/// So the grid covers all ten providers and every one of them opens the **same**
+/// sheet. Before this, each provider had its own hand-written section, which is
+/// why OpenRouter had a provider-prefix field, Ollama had a debounce probe and
+/// Custom had a different model row — three behaviours to learn for one task.
+private struct ProviderGridSection: View {
     let title: String
-    let placeholder: String
-    let keyPath: WritableKeyPath<AppConfig.LlmProviders, AppConfig.LlmProviders.KeyedProvider?>
-    let fetch: (String) async -> LLMModelService.FetchResult
+    let footer: String?
+    let specs: [LLMProviderSpec]
+    // ★ 2026-10-23: sheet state moved to the owning Form view — same
+    // "sheet flashes then closes" fix as `ASRCloudSection`.
+    @Binding var editing: LLMProviderSpec?
 
     @EnvironmentObject private var configService: ConfigService
-    @State private var verify: VerifyState = .idle
-    @State private var models: [String] = []
-
-    private var provider: AppConfig.LlmProviders.KeyedProvider? {
-        configService.config.llmProviders[keyPath: keyPath]
-    }
 
     var body: some View {
-        Section(title) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    SecureField(L10n.LLM.apiKey, text: apiKeyBinding)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.body.monospaced())
-                    keyHint(provider?.apiKey)
-                }
-                verifyButton(verify) {
-                    guard let key = provider?.apiKey, !key.isEmpty else {
-                        verify = .failed("No key"); return
-                    }
-                    verify = .verifying
-                    let r = await fetch(key)
-                    if r.ok {
-                        verify = .success
-                        models = r.models
-                    } else {
-                        verify = .failed(r.error ?? "Failed")
-                    }
-                }
-            }
-
-            if models.isEmpty {
-                TextField(L10n.LLM.modelPlaceholder(placeholder), text: modelBinding)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-            } else {
-                Picker(L10n.LLM.model, selection: modelPickerBinding) {
-                    Text(L10n.LLM.selectModel).tag("")
-                    ForEach(models, id: \.self) { Text($0).tag($0) }
-                }
-            }
-        }
-    }
-
-    private var apiKeyBinding: Binding<String> {
-        Binding(
-            get: { provider?.apiKey ?? "" },
-            set: { new in
-                if new.isEmpty {
-                    configService.config.llmProviders[keyPath: keyPath] = nil
-                } else {
-                    var p = provider ?? .init(apiKey: new)
-                    p.apiKey = new
-                    configService.config.llmProviders[keyPath: keyPath] = p
-                }
-                configService.config.llmProviders.autoSelectPrimaryIfFirst()
-                verify = .idle; models = []
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var modelBinding: Binding<String> {
-        Binding(
-            get: { provider?.model ?? "" },
-            set: { new in
-                var p = provider ?? .init(apiKey: "")
-                p.model = new.isEmpty ? nil : new
-                configService.config.llmProviders[keyPath: keyPath] = p
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var modelPickerBinding: Binding<String> {
-        Binding(
-            get: { provider?.model ?? "" },
-            set: { new in
-                var p = provider ?? .init(apiKey: "")
-                p.model = new.isEmpty ? nil : new
-                configService.config.llmProviders[keyPath: keyPath] = p
-                configService.scheduleSave()
-            }
-        )
-    }
-}
-
-// MARK: - Open Router
-
-private struct OpenRouterSection: View {
-    @EnvironmentObject private var configService: ConfigService
-    @State private var verify: VerifyState = .idle
-    @State private var models: [String] = []
-    @State private var providerFilter = ""
-
-    private let defaultEndpoint = "https://openrouter.ai/api/v1"
-
-    private var config: AppConfig.LlmProviders.EndpointProvider? {
-        configService.config.llmProviders.openRouter
-    }
-
-    var body: some View {
-        Section("Open Router") {
-            VStack(alignment: .leading, spacing: 2) {
-                SecureField(L10n.LLM.apiKey, text: apiKeyBinding)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                keyHint(config?.apiKey)
-            }
-
-            HStack {
-                TextField(L10n.LLM.providerPlaceholder("anthropic"), text: $providerFilter)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                    .onChange(of: providerFilter) { _ in models = [] }
-                verifyButton(verify) {
-                    guard let key = config?.apiKey, !key.isEmpty else {
-                        verify = .failed("No key"); return
-                    }
-                    guard !providerFilter.isEmpty else {
-                        verify = .failed("Enter provider first"); return
-                    }
-                    verify = .verifying
-                    let r = await LLMModelService.fetchOpenRouter(apiKey: key, providerPrefix: providerFilter)
-                    if r.ok {
-                        verify = .success
-                        models = r.models
-                    } else {
-                        verify = .failed(r.error ?? "Failed")
-                    }
-                }
-            }
-
-            if models.isEmpty {
-                TextField(L10n.LLM.modelPlaceholder("anthropic/claude-opus-4-0"), text: modelBinding)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-            } else {
-                Picker(L10n.LLM.model, selection: modelPickerBinding) {
-                    Text(L10n.LLM.selectModel).tag("")
-                    ForEach(models, id: \.self) { Text($0).tag($0) }
-                }
-            }
-        }
-        .onAppear {
-            if let model = config?.model, let slash = model.firstIndex(of: "/") {
-                providerFilter = String(model[model.startIndex..<slash])
-            }
-        }
-    }
-
-    private var apiKeyBinding: Binding<String> {
-        Binding(
-            get: { config?.apiKey ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: defaultEndpoint)
-                p.apiKey = new.isEmpty ? nil : new
-                if p.endpoint.isEmpty { p.endpoint = defaultEndpoint }
-                configService.config.llmProviders.openRouter = p
-                configService.config.llmProviders.autoSelectPrimaryIfFirst()
-                verify = .idle; models = []
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var modelBinding: Binding<String> {
-        Binding(
-            get: { config?.model ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: defaultEndpoint)
-                p.model = new.isEmpty ? nil : new
-                if p.endpoint.isEmpty { p.endpoint = defaultEndpoint }
-                configService.config.llmProviders.openRouter = p
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var modelPickerBinding: Binding<String> {
-        Binding(
-            get: { config?.model ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: defaultEndpoint)
-                p.model = new.isEmpty ? nil : new
-                if p.endpoint.isEmpty { p.endpoint = defaultEndpoint }
-                configService.config.llmProviders.openRouter = p
-                configService.scheduleSave()
-            }
-        )
-    }
-}
-
-// MARK: - Model selection row (shared by Ollama / Custom)
-
-/// Three forms of the "model" row. **By default it is always a tappable list entry, not a text field.**
-///
-/// User quote (2026-10-14):
-/// > "When entering the port, you need to click once to automatically pop up the model list for selection instead of manually typing the model name"
-///
-/// | Form | When it appears | Why it looks like this |
-/// |---|---|---|
-/// | `Picker` | List already obtained | Tap to present selectable list (`Form` + `NavigationStack` push) |
-/// | **Full‑row tappable button** | Not fetched yet, and not failed | This is the “tap once to auto‑pop up” the user wants, without first tapping the adjacent verification icon |
-/// | `TextField` + retry button | Fetch **failed** | When the list cannot be fetched, you shouldn't block the user; manual entry is **fallback**, not default |
-///
-/// Extract a shared view instead of writing it separately in Ollama / Custom: the only difference between the two is
-/// "which fetch function to use", the interaction must be identical — duplicating it will eventually require a single change.
-private struct ModelListField: View {
-    let models: [String]
-    let verify: VerifyState
-    let model: Binding<String>
-    let placeholder: String
-    let load: () async -> Void
-
-    /// Success or failure can only be read from `verify` — it also holds the failure reason.
-    private var isFailed: Bool {
-        if case .failed = verify { return true }
-        return false
-    }
-
-    private var isLoading: Bool { verify == .verifying }
-
-    /// Options for the `Picker`.
-    ///
-    /// ★ Must also include the **currently saved value**: after switching machines or the server deletes that model,
-    /// `config.model` will point to a name not present in the list. And the `Picker`'s `selection`
-    /// when not in any `tag` renders as blank and triggers a runtime warning — the user will think
-    /// "model not set". Adding it ensures the "currently selected" model is always visible.
-    private var options: [String] {
-        let current = model.wrappedValue
-        guard !current.isEmpty, !models.contains(current) else { return models }
-        return [current] + models
-    }
-
-    var body: some View {
-        if !models.isEmpty {
-            // List obtained: this is the only "normal" form.
-            Picker(L10n.LLM.model, selection: model) {
-                Text(L10n.LLM.selectModel).tag("")
-                ForEach(options, id: \.self) { Text($0).tag($0) }
-            }
-        } else if !isFailed {
-            // ★ Not fetched yet → whole row tappable. Tapping it initiates fetch; after fetching, the row becomes a Picker.
-            Button {
-                Task { await load() }
-            } label: {
-                HStack {
-                    Text(L10n.LLM.model).foregroundStyle(.primary)
-                    Spacer(minLength: 8)
-                    if isLoading {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text(L10n.LLM.tapToLoadModels).foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-            .disabled(isLoading)
-        } else {
-            // If fetching fails → allow manual entry, and keep a "retry" icon to bring the user back to the list.
-            HStack {
-                TextField(L10n.LLM.modelPlaceholder(placeholder), text: model)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
+        Section {
+            ForEach(specs) { spec in
                 Button {
-                    Task { await load() }
+                    editing = spec
                 } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .frame(width: 24, height: 24)
+                    ProviderRow(spec: spec)
                 }
-                .buttonStyle(.borderless)
-                .disabled(isLoading)
-                .accessibilityLabel(L10n.LLM.loadModelList)
+                .tint(.primary)
             }
-        }
-    }
-}
-
-/// "Model" section footer. **Both states share a single place** — to avoid writing half of the failure text and half of the success text, which could become inconsistent when only one side is changed.
-/// writing them separately could lead to mismatched updates.
-///
-/// * Failure → show the sentence from `verify` (empty address / incomplete address / server has no model / network unreachable).
-/// * Success → show `detail`: model count · round‑trip latency · server version.
-///
-/// Why we need to write something on success: providing only a checkmark leaves the user unable to distinguish "connected" from "this is the machine I want"
-/// — the ASR probe already does this (`localProbeReachable`),
-/// 2026-10-14 user explicitly requested alignment on the Ollama side:
-/// > "Ollama test shows the model list on click, and clicking should also perform a connectivity test"
-///
-/// ⚠️ In `case .success` you must **also** check whether `detail` is empty: when successful but no details are available
-/// nothing should be displayed, rather than leaving an empty line that occupies space.
-@ViewBuilder
-private func modelFetchFooter(_ verify: VerifyState, detail: String?) -> some View {
-    switch verify {
-    case .failed(let message):
-        Text(message)
-    case .success:
-        if let detail, !detail.isEmpty {
-            Text(L10n.LLM.probeReachable(detail))
-        }
-    case .idle, .verifying:
-        EmptyView()
-    }
-}
-
-/// Replace the **system original** sentence returned by `LLMModelService` with a user‑actionable message.
-///
-/// Returning only the original text is insufficient: when the local endpoint fails it is usually
-/// `The Internet connection appears to be offline.` — but the real reasons are typically just two
-/// (phone and computer not on the same Wi‑Fi, or local network permission not granted), and the system message mentions none of these.
-private func fetchFailureMessage(_ raw: String?) -> String {
-    let reason = (raw.flatMap { $0.isEmpty ? nil : $0 }) ?? "Failed"
-    return reason + "\n" + L10n.LLM.fetchFailedHint
-}
-
-// MARK: - Ollama
-
-private struct OllamaSection: View {
-    @EnvironmentObject private var configService: ConfigService
-    @State private var verify: VerifyState = .idle
-    @State private var models: [String] = []
-    /// Connectivity detail: `1 model · 23 ms · v0.12.6`. Filled by `loadModels()`.
-    ///
-    /// Store a separate `@State` instead of embedding it in `VerifyState.success` — that case is
-    /// shared by three providers, and adding a payload here would affect Azure / OpenAI as well.
-    @State private var probeDetail: String?
-
-    private let defaultEndpoint = "http://localhost:11434"
-
-    private var config: AppConfig.LlmProviders.EndpointProvider? {
-        configService.config.llmProviders.ollama
-    }
-
-    /// Endpoint snapshot for `.task(id:)`.
-    private var endpointText: String { config?.endpoint ?? "" }
-
-    var body: some View {
-        Section {
-            HStack {
-                TextField(L10n.LLM.endpointURL, text: endpointBinding)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                // "Verification" and "fetch model list" are **the same operation**, so they share a single entry point.
-                verifyButton(verify) { await loadModels() }
-            }
-            // ★ Once the endpoint stabilizes, **automatically** fetch the model list (debounce 0.7 s) —
-            //   the user doesn't need to tap the adjacent verification icon; the list appears on its own.
-            //
-            // ⚠️ Attach to **this row** instead of the `Section`: wrapping `Section` with another modifier adds an extra layer,
-            //    while `Form` determines header/footer based on the type of its direct child nodes.
-            //    Attaching to the row avoids this concern entirely (a row is just a regular view).
-            //    Side benefit: `List` is lazily loaded, so this section only sends a request when scrolled into view.
-            //
-            // ⚠️ Pitfall: `try?` swallows the `CancellationError` thrown by `Task.sleep` **as well**.
-            //    `.task(id:)` cancels the previous task each time the id changes; without the following line
-            //    `Task.isCancelled` check, the user would trigger an HTTP request for every keystroke.
-            .task(id: endpointText) {
-                guard !endpointText.isEmpty else { return }
-                try? await Task.sleep(nanoseconds: 700_000_000)
-                guard !Task.isCancelled else { return }
-                await loadModels()
-            }
-
-            ModelListField(models: models,
-                           verify: verify,
-                           model: modelBinding,
-                           placeholder: "qwen2.5:3b",
-                           load: { await loadModels() })
         } header: {
-            Text("Ollama")
+            Text(title)
         } footer: {
-            modelFetchFooter(verify, detail: probeDetail)
+            if let footer { Text(footer) }
         }
-    }
-
-    /// Fetch the model list. **The sole** entry point for retrieval (debounced automatically, clicking the icon, or tapping the model row all use it),
-    /// which also serves as the "connectivity test" — obtaining the list itself proves connectivity, and additionally
-    /// displays model count / latency / server version.
-    private func loadModels() async {
-        let ep = endpointText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !ep.isEmpty else {
-            invalidateProbe()
-            verify = .failed(L10n.LLM.noEndpoint)
-            return
-        }
-        // Hostname is required: if `http://` is omitted, `URL(string:)` still "succeeds"
-        // (treating the whole string as a path), and the request will return an incomprehensible error.
-        guard let url = URL(string: ep), url.host != nil else {
-            invalidateProbe()
-            verify = .failed(L10n.LLM.badEndpoint)
-            return
-        }
-        invalidateProbe()
-        verify = .verifying
-        let r = await LLMModelService.fetchOllama(endpoint: ep)
-        // If cancelled (user changed the endpoint), do not set state, otherwise it would overwrite the new endpoint's result.
-        if Task.isCancelled { return }
-        if r.ok {
-            models = r.models
-            // ★ "Connected but no models" **is not** a fetch failure. State it separately,
-            //   otherwise the user will repeatedly check the network while the issue is actually on the server.
-            if r.models.isEmpty {
-                verify = .failed(L10n.LLM.noModelsOnServer)
-            } else {
-                verify = .success
-                probeDetail = r.detail
-            }
-        } else {
-            verify = .failed(fetchFailureMessage(r.error))
-        }
-    }
-
-    /// Clear the previous result. When changing the endpoint, re‑testing, or on failure, invoke it —
-    /// otherwise a "previous machine 23 ms" illusion pointing to the now‑replaced old server will remain.
-    private func invalidateProbe() {
-        probeDetail = nil
-    }
-
-    private var endpointBinding: Binding<String> {
-        Binding(
-            get: { config?.endpoint ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: defaultEndpoint)
-                p.endpoint = new
-                configService.config.llmProviders.ollama = p
-                configService.config.llmProviders.autoSelectPrimaryIfFirst()
-                // When the host changes, the old list becomes invalid. Here we clear it; re‑fetching is handled by the debounce of `.task(id:)`
-                // — sending requests while typing is pointless.
-                // `probeDetail` is also cleared: keeping the previous machine's latency would mislead users.
-                verify = .idle; models = []; probeDetail = nil
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var modelBinding: Binding<String> {
-        Binding(
-            get: { config?.model ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: defaultEndpoint)
-                p.model = new.isEmpty ? nil : new
-                configService.config.llmProviders.ollama = p
-                configService.scheduleSave()
-            }
-        )
     }
 }
 
-// MARK: - Custom endpoint
-
-private struct CustomEndpointSection: View {
+private struct ProviderRow: View {
+    let spec: LLMProviderSpec
     @EnvironmentObject private var configService: ConfigService
-    @State private var verify: VerifyState = .idle
-    @State private var models: [String] = []
-    /// Same as the Ollama section: `2 models · 31 ms`. This part **does not query version** —
-    /// the OpenAI compatibility layer lacks a unified version endpoint (reason documented in `LLMModelService`).
-    @State private var probeDetail: String?
 
-    private var config: AppConfig.LlmProviders.EndpointProvider? {
-        configService.config.llmProviders.custom
+    private var key: String { configService.config.llmProviders.apiKeyValue(for: spec.storage) ?? "" }
+    private var model: String { configService.config.llmProviders.modelValue(for: spec.storage) ?? "" }
+    private var endpoint: String {
+        let stored = configService.config.llmProviders.endpointValue(for: spec.storage) ?? ""
+        return stored.isEmpty ? spec.defaultEndpoint : stored
     }
 
-    /// Endpoint snapshot for `.task(id:)`.
-    private var endpointText: String { config?.endpoint ?? "" }
-
     var body: some View {
-        Section {
-            HStack {
-                TextField(L10n.LLM.endpointURL, text: endpointBinding)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                verifyButton(verify) { await loadModels() }
-            }
-            // Same debounce as Ollama: automatically fetch once 0.7 s after the endpoint stabilizes.
-            // Attach to the row rather than the Section, and after sleep you must check `Task.isCancelled`
-            // — both reasons are documented in `OllamaSection`; not repeated here.
-            .task(id: endpointText) {
-                guard !endpointText.isEmpty else { return }
-                try? await Task.sleep(nanoseconds: 700_000_000)
-                guard !Task.isCancelled else { return }
-                await loadModels()
-            }
-
-            // ★ Same interaction as the Ollama section: tap to show the list, manual entry appears only when fetching fails.
-            //   User (2026-10-14) wants "no manual model name entry", and this part
-            //   previously **didn't even have a Picker**, which is a step behind the Ollama section.
-            ModelListField(models: models,
-                           verify: verify,
-                           model: modelBinding,
-                           placeholder: "gpt-4o-mini",
-                           load: { await loadModels() })
-
+        HStack(spacing: 12) {
+            ProviderMark(spec: spec)
             VStack(alignment: .leading, spacing: 2) {
-                SecureField(L10n.LLM.apiKeyOptional, text: apiKeyBinding)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                keyHint(config?.apiKey)
+                Text(spec.name).foregroundStyle(.primary)
+                Text(detailLine)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
-        } header: {
-            Text("Custom")
-        } footer: {
-            modelFetchFooter(verify, detail: probeDetail)
+            Spacer(minLength: 8)
+            // Last measured round trip, if this provider was ever probed. Shown on
+            // the row rather than only inside the sheet, because "which of these is
+            // actually fast" is a question you have while looking at the list.
+            if let ms = LLMLatencyMemory.millis(for: spec.id) {
+                Text("\(ms) ms")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            status
         }
     }
 
-    /// Fetch model list + connectivity test. Uses the OpenAI‑compatible `GET {base}/v1/models`, key optional.
-    private func loadModels() async {
-        let ep = endpointText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !ep.isEmpty else {
-            probeDetail = nil
-            verify = .failed(L10n.LLM.noEndpoint)
-            return
-        }
-        guard let url = URL(string: ep), url.host != nil else {
-            probeDetail = nil
-            verify = .failed(L10n.LLM.badEndpoint)
-            return
-        }
-        probeDetail = nil
-        verify = .verifying
-        let r = await LLMModelService.fetchOpenAICompatible(endpoint: ep, apiKey: config?.apiKey)
-        if Task.isCancelled { return }
-        if r.ok {
-            models = r.models
-            if r.models.isEmpty {
-                verify = .failed(L10n.LLM.noModelsOnServer)
+    /// Second line: what you'd recognise the provider by — the model when one is
+    /// chosen, otherwise the address. Showing the model matters more than the host
+    /// once it's set ("which model am I actually on?" is the recurring question).
+    private var detailLine: String {
+        if !model.isEmpty { return model }
+        if !endpoint.isEmpty, let host = URL(string: endpoint)?.host { return host + pathSuffix }
+        return L10n.LLM.notConfigured
+    }
+
+    private var pathSuffix: String {
+        guard let url = URL(string: endpoint), url.path.count > 1 else { return "" }
+        return url.path
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        if hasAnyConfig {
+            if model.isEmpty {
+                Text(L10n.LLM.presetNeedsModel).font(.caption2).foregroundStyle(.orange)
+            } else if spec.keyRequired, key.isEmpty {
+                Text(L10n.LLM.presetNeedsKey).font(.caption2).foregroundStyle(.orange)
             } else {
-                verify = .success
-                probeDetail = r.detail
+                Text(L10n.LLM.presetReady).font(.caption2).foregroundStyle(.green)
             }
         } else {
-            verify = .failed(fetchFailureMessage(r.error))
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
         }
+    }
+
+    /// "Is there anything stored for this provider" — deliberately not
+    /// `endpointValue`, which returns the **default** address for the three
+    /// fixed-endpoint providers and would make every row look configured.
+    private var hasAnyConfig: Bool {
+        let p = configService.config.llmProviders
+        return p.apiKeyValue(for: spec.storage) != nil || p.modelValue(for: spec.storage) != nil
+    }
+}
+
+/// Brand tile — the vendor's own logo on its brand-coloured square.
+///
+/// 2026-10-22:
+/// > "不要文字字幕做图标，需要按照当前他们模型 Logo 做图标"
+///
+/// so the letter marks ("通" / "DS" / "豆" / "火") are gone. The logos are
+/// monochrome template images; the tile supplies the colour, which means the same
+/// asset works in light and dark mode and never looks like a mismatched sticker.
+/// `custom` has no vendor, so it keeps a symbol rather than a fake logo.
+private struct ProviderMark: View {
+    let spec: LLMProviderSpec
+
+    private var color: Color {
+        let t = spec.tint
+        return Color(red: t.r, green: t.g, blue: t.b)
+    }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(
+                LinearGradient(colors: [color, color.opacity(0.72)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+            .frame(width: 32, height: 32)
+            .overlay { glyph }
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var glyph: some View {
+        if let asset = spec.brandAsset {
+            Image(asset)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(.white)
+                .padding(7)
+        } else if spec.id == "custom" {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+        } else {
+            Text(spec.mark)
+                .font(.system(size: spec.mark.count > 1 ? 11 : 15, weight: .bold))
+                .foregroundStyle(.white)
+        }
+    }
+}
+
+/// Key + address + model for one provider, in the same order every time.
+///
+/// Endpoints are pre-filled from `LLMProviderSpec`, which is the whole request:
+/// tap the icon, and the address is already right. Where the API fixes the
+/// address (OpenAI / Claude / Gemini) the row is shown but locked — a free-text
+/// field there could only produce a 404.
+private struct ProviderConfigSheet: View {
+    let spec: LLMProviderSpec
+
+    @EnvironmentObject private var configService: ConfigService
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var verify: VerifyState = .idle
+    @State private var models: [String] = []
+    @State private var manualModel = false
+    @State private var fetchHint: String?
+    @State private var modelQuery = ""
+    @State private var probing = false
+    @State private var probe: LLMConnectivityService.Result?
+
+    private var key: String { configService.config.llmProviders.apiKeyValue(for: spec.storage) ?? "" }
+    private var model: String { configService.config.llmProviders.modelValue(for: spec.storage) ?? "" }
+    private var endpoint: String {
+        let stored = configService.config.llmProviders.endpointValue(for: spec.storage) ?? ""
+        return stored.isEmpty ? spec.defaultEndpoint : stored
+    }
+    private var isConfigured: Bool {
+        let p = configService.config.llmProviders
+        // Same rule as the row's badge: a *stored* value, not the default address
+        // that `endpointValue` synthesises for fixed-endpoint providers.
+        return p.apiKeyValue(for: spec.storage) != nil || p.modelValue(for: spec.storage) != nil
+    }
+
+    /// Always offer the saved value: a model that was renamed upstream, or an
+    /// `ep-…` access point typed by hand, is not in any fetched list — and a
+    /// Picker whose selection matches no tag renders blank.
+    private var options: [String] {
+        var list = models.isEmpty ? spec.curatedModels : models
+        if !model.isEmpty, !list.contains(model) { list.insert(model, at: 0) }
+        if !modelQuery.isEmpty {
+            let q = modelQuery.lowercased()
+            list = list.filter { $0.lowercased().contains(q) }
+        }
+        return list
+    }
+
+    /// Unfiltered list for the pushed picker: the picker has its **own** search,
+    /// and handing it the in-form query would have made "the list looks empty"
+    /// read as "this vendor has no models".
+    private var pickerOptions: [String] {
+        var list = models.isEmpty ? spec.curatedModels : models
+        if !model.isEmpty, !list.contains(model) { list.insert(model, at: 0) }
+        return list
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 12) {
+                        ProviderMark(spec: spec)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(spec.name).font(.headline)
+                            Text(endpoint.isEmpty ? L10n.LLM.notConfigured : (URL(string: endpoint)?.host ?? endpoint))
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if spec.keyRequired {
+                        SecureField(L10n.LLM.apiKey, text: keyBinding)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.body.monospaced())
+                    } else {
+                        SecureField(L10n.LLM.apiKeyOptional, text: keyBinding)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.body.monospaced())
+                    }
+
+                    if spec.endpointEditable {
+                        TextField(L10n.LLM.presetEndpointFilled, text: endpointBinding)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.caption.monospaced())
+                    } else {
+                        LabeledContent(L10n.LLM.endpointURL) {
+                            Text(endpoint)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let console = spec.console, spec.keyRequired {
+                            Text("\(L10n.LLM.presetConsole): \(console)")
+                        }
+                        if !spec.endpointEditable {
+                            Text(L10n.LLM.endpointFixedByAPI)
+                        }
+                    }
+                    .font(.footnote)
+                }
+
+                Section {
+                    if manualModel || options.isEmpty {
+                        TextField(L10n.LLM.modelPlaceholder(spec.curatedModels.first ?? "model-name"), text: modelBinding)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.body.monospaced())
+                    } else {
+                        // ★ 2026-10-22: was an inline `Picker`. See `ModelPickerView`
+                        // for why the first tap used to be swallowed — the pushed
+                        // list re-laid itself out mid-animation.
+                        NavigationLink {
+                            ModelPickerView(title: L10n.LLM.model,
+                                            options: pickerOptions,
+                                            current: model,
+                                            allowsEmpty: true) { picked in
+                                modelBinding.wrappedValue = picked
+                            }
+                        } label: {
+                            LabeledContent(L10n.LLM.model) {
+                                Text(model.isEmpty ? L10n.LLM.selectModel : model)
+                                    .font(model.isEmpty ? .body : .body.monospaced())
+                                    .foregroundStyle(model.isEmpty ? .secondary : .primary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
+                    }
+
+                    // OpenRouter alone lists several hundred models; scrolling them
+                    // in a Picker is unusable, so filter first.
+                    if !manualModel, models.count > 15 {
+                        HStack {
+                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                            TextField(L10n.LLM.modelSearch, text: $modelQuery)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .font(.footnote.monospaced())
+                        }
+                    }
+
+                    Button {
+                        Task { await loadModels() }
+                    } label: {
+                        HStack {
+                            Text(L10n.LLM.presetFetchModels)
+                            Spacer()
+                            if verify == .verifying {
+                                ProgressView().controlSize(.small)
+                            } else if !options.isEmpty, !manualModel {
+                                Text("\(models.isEmpty ? spec.curatedModels.count : models.count)")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .disabled(verify == .verifying || (spec.keyRequired && key.isEmpty))
+
+                    if !options.isEmpty, !manualModel {
+                        Button(L10n.LLM.presetManualModel) { manualModel = true }
+                            .font(.footnote)
+                    } else if !spec.curatedModels.isEmpty {
+                        Button(L10n.LLM.useCuratedModels) { manualModel = false }
+                            .font(.footnote)
+                    }
+                } header: {
+                    Text(L10n.LLM.model)
+                } footer: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let note = spec.note { Text(note) }
+                        Text(L10n.LLM.chatOnlyNote)
+                        if let fetchHint { Text(fetchHint) }
+                        if case .failed(let reason) = verify {
+                            Text(reason).foregroundStyle(.red)
+                        }
+                    }
+                    .font(.footnote)
+                }
+
+                // Probe last, and after the model row: it needs a key *and* a model,
+                // and it is the only row that spends a token of quota, so it should
+                // be the last thing on the page you touch.
+                Section {
+                    Button {
+                        Task { await runProbe() }
+                    } label: {
+                        probeRow
+                    }
+                    .disabled(probing || !canProbe)
+                } header: {
+                    Text(L10n.LLM.testSection)
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L10n.LLM.testNote)
+                        if !canProbe {
+                            Text(spec.keyRequired && key.isEmpty ? L10n.LLM.testNeedKey : L10n.LLM.testNeedModel)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .font(.footnote)
+                }
+
+                if spec.id == "ollama" {
+                    Section { SetupAssistantRow() }
+                }
+
+                if isConfigured {
+                    Section {
+                        Button(role: .destructive) {
+                            configService.config.llmProviders.removeProvider(for: spec.storage)
+                            configService.scheduleSave()
+                            dismiss()
+                        } label: {
+                            Text(L10n.LLM.presetRemove)
+                        }
+                    }
+                }
+            }
+            // A focused text field swallows the first tap on the next row (it is
+            // spend dismissing the keyboard). This page is mostly fields, so let
+            // the scroll dismiss the keyboard instead of eating taps.
+            .scrollDismissesKeyboard(.immediately)
+            .navigationTitle(spec.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(L10n.Common.done) {
+                        configService.saveNow()
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .onAppear(perform: prime)
+    }
+
+    // MARK: - Behaviour
+
+    /// Fill in what the user shouldn't have to type. Endpoint first (that is the
+    /// promise), then a sensible default model, so the key field is the only empty
+    /// thing on screen.
+    ///
+    /// Never overwrites an existing choice — coming back to change the key must not
+    /// silently swap the model.
+    private func prime() {
+        models = spec.curatedModels
+        manualModel = spec.curatedModels.isEmpty
+        let stored = configService.config.llmProviders
+        if spec.endpointEditable,
+           (stored.endpointValue(for: spec.storage) ?? "").isEmpty,
+           !spec.defaultEndpoint.isEmpty {
+            configService.config.llmProviders.setEndpointURL(spec.defaultEndpoint, for: spec.storage)
+            configService.scheduleSave()
+        }
+        if (stored.modelValue(for: spec.storage) ?? "").isEmpty,
+           let first = spec.curatedModels.first,
+           spec.kind != .local {
+            configService.config.llmProviders.setModel(first, for: spec.storage)
+            configService.scheduleSave()
+        }
+    }
+
+    private func loadModels() async {
+        verify = .verifying
+        fetchHint = nil
+        modelQuery = ""
+        let result = await LLMModelService.fetchModels(for: spec, endpoint: endpoint, apiKey: key)
+        if Task.isCancelled { return }
+        if result.ok, !result.models.isEmpty {
+            models = result.models
+            verify = .success
+            manualModel = false
+            fetchHint = result.detail
+        } else if result.ok {
+            // Reachable, but nothing callable — say exactly that instead of a red
+            // "failed", because the key was fine.
+            models = []
+            verify = .failed(L10n.LLM.noChatModels)
+            fetchHint = spec.curatedModels.isEmpty ? L10n.LLM.presetBuiltinHint : nil
+        } else {
+            verify = .failed((result.error ?? L10n.LLM.noModelsOnServer) + "\n" + L10n.LLM.fetchFailedHint)
+            models = spec.curatedModels
+            fetchHint = L10n.LLM.presetBuiltinHint
+        }
+    }
+
+    // MARK: - Probe
+
+    private var canProbe: Bool {
+        !model.isEmpty && (!spec.keyRequired || !key.isEmpty)
+    }
+
+    @ViewBuilder
+    private var probeRow: some View {
+        HStack(spacing: 10) {
+            if probing {
+                ProgressView().controlSize(.small)
+                Text(L10n.LLM.testRunning).foregroundStyle(.primary)
+            } else if let probe {
+                Image(systemName: probe.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(probe.ok ? Color.green : Color.red)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(probe.ok ? L10n.LLM.testOK(probe.millis) : (probe.error ?? ""))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                    if probe.ok {
+                        Text("\(L10n.LLM.testBand(probe.millis)) · \(probe.detail ?? "")")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                Image(systemName: "bolt.horizontal.circle").foregroundStyle(.primary)
+                Text(L10n.LLM.testButton).foregroundStyle(.primary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func runProbe() async {
+        probing = true
+        probe = nil
+        let result = await LLMConnectivityService.test(
+            spec: spec, endpoint: endpoint, apiKey: key, model: model
+        )
+        guard !Task.isCancelled else { probing = false; return }
+        probing = false
+        probe = result
+        // Only a pass is worth remembering: a failure is usually a half-typed key,
+        // and caching that would put a stale "N ms" on the row of a provider that
+        // has since been fixed.
+        if result.ok { LLMLatencyMemory.save(result.millis, for: spec.id) }
+        else { LLMLatencyMemory.clear(spec.id) }
+    }
+
+    // MARK: - Bindings
+
+    private var keyBinding: Binding<String> {
+        Binding(
+            get: { key },
+            set: { new in
+                configService.config.llmProviders.setAPIKey(new, for: spec.storage)
+                configService.config.llmProviders.autoSelectPrimaryIfFirst()
+                verify = .idle
+                probe = nil
+                configService.scheduleSave()
+            }
+        )
     }
 
     private var endpointBinding: Binding<String> {
         Binding(
-            get: { config?.endpoint ?? "" },
+            get: { endpoint },
             set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: "")
-                p.endpoint = new
-                configService.config.llmProviders.custom = p
-                configService.config.llmProviders.autoSelectPrimaryIfFirst()
-                // Change host → old list and old latency values are invalidated (re‑fetch handled by `.task(id:)` debounce).
-                verify = .idle; models = []; probeDetail = nil
+                configService.config.llmProviders.setEndpointURL(new, for: spec.storage)
+                verify = .idle
+                probe = nil
                 configService.scheduleSave()
             }
         )
@@ -1510,23 +1818,10 @@ private struct CustomEndpointSection: View {
 
     private var modelBinding: Binding<String> {
         Binding(
-            get: { config?.model ?? "" },
+            get: { model },
             set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: "")
-                p.model = new.isEmpty ? nil : new
-                configService.config.llmProviders.custom = p
-                configService.scheduleSave()
-            }
-        )
-    }
-
-    private var apiKeyBinding: Binding<String> {
-        Binding(
-            get: { config?.apiKey ?? "" },
-            set: { new in
-                var p = config ?? .init(apiKey: nil, endpoint: "")
-                p.apiKey = new.isEmpty ? nil : new
-                configService.config.llmProviders.custom = p
+                configService.config.llmProviders.setModel(new, for: spec.storage)
+                probe = nil
                 configService.scheduleSave()
             }
         )
@@ -1535,7 +1830,7 @@ private struct CustomEndpointSection: View {
 
 // MARK: - Azure Speech setup guide
 
-private struct AzureSpeechSetupGuide: View {
+struct AzureSpeechSetupGuide: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -1934,6 +2229,13 @@ struct RecordingsSettingsView: View {
 struct DevicesLibraryView: View {
     @EnvironmentObject private var configService: ConfigService
     @EnvironmentObject private var library: Library
+    /// PLAUD direct-connect service. Its live state (battery, recording,
+    /// history count) is what the PLAUD row adds on top of the plain ledger
+    /// fields the other devices show.
+    @ObservedObject private var plaudDirect = PlaudDirectService.shared
+    /// Needed for the "switch to this card" row: a PLAUD card is not a
+    /// `RecorderLink`, so nothing else releases the previous card's link.
+    @EnvironmentObject private var bluetooth: BluetoothCoordinator
     // Scan the on-disk library so the stats match what the Library tab
     // shows. The manifest (`library.entries`) only tracks device downloads,
     // so imported clips were missing from the total (showed 0).
@@ -2020,7 +2322,13 @@ struct DevicesLibraryView: View {
         ) {
             for url in items {
                 let name = url.lastPathComponent
-                let shouldDelete = target.map { ClipArtefact.of(fileNamed: name) == $0 } ?? true
+                // `.marks.json` rides with the audio: it is a set of timestamps into that recording, so
+                // "clear audio" must take it too — otherwise the next scan finds markers for a clip that
+                // no longer exists. (`ClipArtefact` keeps it unclassified on purpose; see `marksSuffix`.)
+                let marksRidesWithAudio = name.hasSuffix(ClipArtefact.marksSuffix)
+                let shouldDelete = target.map {
+                    ClipArtefact.of(fileNamed: name) == $0 || (marksRidesWithAudio && $0 == .audio)
+                } ?? true
                 if shouldDelete {
                     do { try fm.removeItem(at: url) } catch { failures += 1 }
                 }
@@ -2076,28 +2384,124 @@ struct DevicesLibraryView: View {
         }
     }
 
+    /// One row of the known-devices list.
+    ///
+    /// Built from the ledger, PLUS a synthesised entry when a PLAUD card is
+    /// paired but has no ledger row yet — that happens on installs upgraded
+    /// from a build that predates the ledger write, and it would otherwise look
+    /// like "my card disappeared" even though it is connected.
+    private struct DeviceRow: Identifiable {
+        let id: String
+        let record: AppConfig.DeviceRecord
+        let plaudSN: String?
+    }
+
+    private var deviceRows: [DeviceRow] {
+        var rows = sortedDevices.map {
+            DeviceRow(id: $0.0, record: $0.1, plaudSN: Self.plaudSerial(fromLedgerID: $0.0))
+        }
+        if let sn = plaudDirect.pairedSN {
+            let key = PlaudDirectService.ledgerID(for: sn)
+            if !rows.contains(where: { $0.id == key }) {
+                rows.insert(
+                    DeviceRow(id: key, record: .init(name: PlaudDirectService.modelName(for: sn)), plaudSN: sn),
+                    at: 0
+                )
+            }
+        }
+        return rows
+    }
+
     private var devicesSection: some View {
         Section(L10n.DevicesLibrary.knownDevices) {
-            if configService.config.devices.isEmpty {
+            // ★ 2026-10-22 ("切换卡片点击了但是没有同步切换卡片过去"): a switch is a
+            // BLE round trip — wake, scan, bind — and it produced **no** visible
+            // change until it finished (or silently failed). This line makes it
+            // observable, and the row roles below flip the instant `pairedSN`
+            // moves, so the list agrees with the card being switched to.
+            if let note = plaudDirect.switchNote {
+                HStack(spacing: 8) {
+                    if plaudDirect.phase.isBusy {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.caption)
+                    }
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if deviceRows.isEmpty {
                 Text(L10n.DevicesLibrary.noDevicesYet)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(sortedDevices, id: \.0) { id, record in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(record.name).font(.body)
-                        Text(id).font(.caption2.monospaced()).foregroundStyle(.secondary)
-                        if let last = record.lastConnected {
-                            Text(L10n.DevicesLibrary.lastSeen(last)).font(.caption2).foregroundStyle(.secondary)
+                ForEach(deviceRows) { row in
+                    // PLAUD cards live in the SAME ledger (key `plaud-<SN>`) but
+                    // get a richer row + their own page, because they carry live
+                    // BLE state the plain record can't hold.
+                    if let sn = row.plaudSN {
+                        // ★ 2026-10-22: every PLAUD row used to push the SAME
+                        // page — the one bound to `pairedSN` — so tapping card B
+                        // showed card A's details and nothing switched. Only the
+                        // active card opens the page now; the others switch first.
+                        if sn == plaudDirect.pairedSN {
+                            NavigationLink {
+                                PlaudDeviceDetailView()
+                            } label: {
+                                PlaudLedgerRow(sn: sn, record: row.record)
+                            }
+                        } else {
+                            Button {
+                                // ★ 2026-10-22: one card at a time. Switching
+                                // *to* PLAUD used to skip the teardown that
+                                // `connectToDevice` does for the other cards,
+                                // so the old link stayed live and kept owning
+                                // the pill — "选 PLAUD 切换不过去，其他卡片可以".
+                                if bluetooth.client != nil || bluetooth.recorderLink != nil {
+                                    bluetooth.disconnect()
+                                }
+                                plaudDirect.switchCard(to: sn)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    PlaudLedgerRow(sn: sn, record: row.record)
+                                    Spacer(minLength: 4)
+                                    Text(L10n.DevicesLibrary.switchToThis)
+                                        .font(.caption2)
+                                        .foregroundStyle(Color.appAccent)
+                                }
+                            }
+                            .tint(.primary)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.record.name).font(.body)
+                            Text(row.id).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                            if let last = row.record.lastConnected {
+                                Text(L10n.DevicesLibrary.lastSeen(last)).font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
                 .onDelete { indices in
-                    let keys = sortedDevices.map(\.0)
+                    let keys = deviceRows.map(\.id)
                     for i in indices { configService.config.devices.removeValue(forKey: keys[i]) }
                     configService.scheduleSave()
                 }
             }
         }
+        // Reading the row's history count is a probe, not a transfer.
+        .onAppear {
+            guard plaudDirect.phase.isConnected else { return }
+            plaudDirect.refreshVitals()
+            plaudDirect.refreshCardRecordings()
+        }
+    }
+
+    /// `plaud-881…` → `881…`; nil for every other ledger key.
+    private static func plaudSerial(fromLedgerID id: String) -> String? {
+        id.hasPrefix("plaud-") ? String(id.dropFirst("plaud-".count)) : nil
     }
 
     private var librarySection: some View {

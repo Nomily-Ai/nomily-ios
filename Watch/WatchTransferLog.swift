@@ -3,29 +3,29 @@ import os.log
 
 private let log = Logger(subsystem: "com.nomily.app.watch", category: "transfer-log")
 
-/// 一条传输记录。
+/// One transfer record.
 ///
-/// ★ 2026-10-15（用户："右上角就是手表的传输记录"）：右上角那个角标从
-/// 「呼吸灯速率」换成这一页 —— 呼吸灯并进了左上的外观页（它本来就是外观的
-/// 一部分），空出来的位置给了一个**真正需要单独一页**的东西。
+/// ★ 2026-10-15 (user: "the top-right corner is the watch's transfer log"): the top-right dot changed from
+/// "breathing-light rate" to this page — the breathing light merged into the top-left appearance page (it was always part of
+/// appearance), and the freed slot went to something that **really needs its own page**.
 ///
-/// ## 为什么值得记
-/// 手表的录音是"先落在表上、再传给手机、最后由手机确认入库"，中间任何一步
-/// 都可能停住。以前这三步的证据只存在于 `WatchLink` 的两个内存 `Set` 里 ——
-/// 表一重启就没了，而"我早上录的那条到底传上去没有"恰恰是重启之后才会问的
-/// 问题。落一份盘，这个问题才有答案。
+/// ## Why it's worth recording
+/// A watch recording is "lands on the watch first, then transfers to the phone, finally the phone confirms it's stored", and any step in between
+/// can stall. The evidence for those three steps used to exist only in `WatchLink`'s two in-memory `Set`s —
+/// gone the moment the watch restarts, and "did that one I recorded this morning actually go up" is exactly the question asked after a restart.
+/// Persist a copy to disk and that question has an answer.
 struct WatchTransferRecord: Codable, Identifiable, Equatable {
     enum State: String, Codable {
-        /// 交给 WatchConnectivity 排队了，还没出门。
+        /// Handed to WatchConnectivity for queueing, hasn't left yet.
         case queued
-        /// 系统已经把它投给了手机那侧的守护进程 —— 但**手机 App 还没确认写盘**。
-        /// 这个中间态必须单独显示：这一步卡住是"看着像成功、其实没入库"。
+        /// The system has delivered it to the phone-side daemon — but **the phone App hasn't confirmed writing to disk**.
+        /// This intermediate state must be shown separately: stalling here is "looks like success but it's not stored".
         case delivered
-        /// 手机 App 确认已入库。只有到这一步，手表上的本地副本才会删掉。
+        /// The phone App confirms it's stored. Only at this step is the watch's local copy deleted.
         case stored
         case failed
 
-        /// 排序用：越"完成"越靠后。仅用于同一时刻的稳定排序，不参与展示。
+        /// For sorting: the more "complete", the further back. Used only for stable ordering at the same instant, never shown.
         var rank: Int {
             switch self {
             case .failed:    return 0
@@ -38,28 +38,28 @@ struct WatchTransferRecord: Codable, Identifiable, Equatable {
 
     var name: String
     var bytes: Int64
-    /// 最近一次状态变化的时刻。列表按它倒序。
+    /// The time of the most recent state change. The list is in reverse order of it.
     var updatedAt: Date
     var state: State
-    /// 失败原因；成功入库时记送达时刻的文案由视图自己拼。
+    /// The failure reason; on successful storing, the text recording the delivery time is assembled by the view itself.
     var detail: String?
 
     var id: String { name }
     var displayTitle: String { RecordingName.displayTitle(for: name) }
 }
 
-/// 传输记录的落盘账本。**只增不删**（除了用户主动清空 + 容量上限）。
+/// The persisted ledger of transfer records. **Append-only** (except for the user actively clearing it + the capacity cap).
 ///
-/// ## 为什么放在手表自己的 Documents
-/// 这份记录是**手表视角**的：同一条录音在手表上可能"已入库"，而手机那边
-/// 用户已经把它删了。两边语义不同，混在一份账里迟早对不上。手表这份只回答
-/// "我发出去的东西有没有着落"。
+/// ## Why it lives in the watch's own Documents
+/// This record is from the **watch's point of view**: the same recording may be "stored" on the watch while on the phone side
+/// the user has already deleted it. The two sides' semantics differ, and mixing them in one ledger would eventually fail to reconcile. The watch's copy only answers
+/// "did the things I sent out land".
 @MainActor
 final class WatchTransferLog: ObservableObject {
     static let shared = WatchTransferLog()
 
-    /// 上限。手表磁盘小，而且"上周那条传没传上去"没人会翻到第 200 条之后。
-    /// 记满就砍最老的 —— 砍的是**记录**，不是录音文件。
+    /// The cap. The watch's disk is small, and nobody scrolls past entry 200 to check "did last week's one go up".
+    /// Once full, the oldest is dropped — what's dropped is the **record**, not the recording file.
     static let maxEntries = 200
 
     @Published private(set) var records: [WatchTransferRecord] = []
@@ -74,22 +74,22 @@ final class WatchTransferLog: ObservableObject {
         load()
     }
 
-    // MARK: - 记账
+    // MARK: - Recording entries
 
-    /// 排队成功。同名重复调用会被忽略（`WatchLink` 自己也会去重，
-    /// 但保留文件被重新排队时要能刷新 —— 所以这里允许"更新已存在的失败条目"）。
+    /// Queued successfully. Repeated calls with the same name are ignored (`WatchLink` de-dupes too,
+    /// but a retained file being re-queued has to be able to refresh — so "update an existing failed entry" is allowed here).
     func noteQueued(name: String, bytes: Int64) {
         upsert(name: name, bytes: bytes, state: .queued, detail: nil)
     }
 
-    /// `didFinish` 回来了。`error == nil` ⇒ 已交给手机守护进程（`.delivered`），
-    /// 非 nil ⇒ `.failed` 并把原因记下来 —— 这个原因在表上原本**完全看不到**，
-    /// 用户只能看到"一直转圈"。
+    /// `didFinish` came back. `error == nil` ⇒ handed to the phone daemon (`.delivered`),
+    /// non-nil ⇒ `.failed` and the reason is recorded — a reason that was originally **completely invisible** on the watch,
+    /// where the user only saw "spinning forever".
     func noteFinished(name: String, error: Error?) {
         if let error {
-            // `URLError` 的 `localizedDescription` 是系统腔的英文，
-            // 但它是唯一能区分"对方没应答"和"没连上"的东西，比一句
-            // "传输失败"有用得多，留着。
+            // `URLError`'s `localizedDescription` is system-flavoured English,
+            // but it's the only thing that distinguishes "the other side didn't answer" from "never connected", which is far more useful
+            // than a bare "transfer failed", so it's kept.
             upsert(
                 name: name,
                 bytes: nil,
@@ -101,7 +101,7 @@ final class WatchTransferLog: ObservableObject {
         }
     }
 
-    /// 手机确认入库。
+    /// The phone confirms it's stored.
     func noteStored(name: String) {
         upsert(name: name, bytes: nil, state: .stored, detail: nil)
     }
@@ -112,11 +112,11 @@ final class WatchTransferLog: ObservableObject {
         save()
     }
 
-    // MARK: - 内部
+    // MARK: - Internal
 
-    /// 有则改、无则加。**不改 `name` 之外的旧字段**（`bytes` 传 nil 就保留原值）：
-    /// `didFinish` 回调里拿不到文件大小（文件可能已经被删了），
-    /// 若在那里写成 0，列表上就会出现"0 KB 已入库"这种假信息。
+    /// Update if present, add if not. **Doesn't change old fields other than `name`** (passing nil for `bytes` keeps the original value):
+    /// `didFinish`'s callback can't get the file size (the file may already be deleted),
+    /// and writing 0 there would put fake information like "0 KB stored" in the list.
     private func upsert(name: String, bytes: Int64?, state: WatchTransferRecord.State, detail: String?) {
         if let index = records.firstIndex(where: { $0.name == name }) {
             records[index].state = state
@@ -132,7 +132,7 @@ final class WatchTransferLog: ObservableObject {
                 detail: detail
             ))
         }
-        // 新的排前面。同一时刻（比如"排队 → 立刻送出"）靠 `rank` 稳定排序。
+        // Newer first. At the same instant (say "queued → sent immediately") `rank` provides stable ordering.
         records.sort { ($0.updatedAt, $0.state.rank) > ($1.updatedAt, $1.state.rank) }
         if records.count > Self.maxEntries {
             records.removeLast(records.count - Self.maxEntries)

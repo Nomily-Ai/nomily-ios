@@ -7,12 +7,12 @@ private let log = Logger(subsystem: "com.nomily.app.ios", category: "asr")
 /// audio file at a time. Writes `{name}.txt` + `{name}.asr.json` next to the
 /// decrypted audio so the artefacts travel together.
 ///
-/// 2026-10-15 起多三件事，都是为了"转录老是失败 / 切到后台就断"：
-/// - **保活**：整段转录期间占住 `BackgroundKeeper`，切后台不挂起；
-/// - **退避重试**：网络抖动、429、超时这类**临时**失败自动再试，
-///   401/格式错这类**必然**失败不重试（重试只是白花额度）；
-/// - **持久化队列**：自动转录进来的活落盘一份，App 被杀掉后
-///   下次启动 / 回到前台接着跑。
+/// Since 2026-10-15 there are three more things, all for "transcription keeps failing / dies the moment you switch to the background":
+/// - **Keep-alive**: holds `BackgroundKeeper` for the whole transcription so switching to the background doesn't suspend it;
+/// - **Backoff retries**: **temporary** failures like network flakiness, 429s and timeouts are retried automatically,
+///   while **inevitable** failures like 401s / format errors are not retried (retrying only wastes quota);
+/// - **Persistent queue**: jobs that come in through auto-transcription are written to disk, so after the app is killed
+///   they carry on at the next launch / on returning to the foreground.
 @MainActor
 final class TranscriptionService: ObservableObject {
     private let config: ConfigService
@@ -24,8 +24,8 @@ final class TranscriptionService: ObservableObject {
     /// though the pipeline is already doing the work).
     @Published private(set) var inFlight: Set<String> = []
 
-    /// 排着队 / 失败等着重试的活（跟 `inFlight` 不是一个概念：那个是"此刻
-    /// 正在跑"，这个是"还没干完"）。持久化，所以跨启动还在。
+    /// Jobs queued up / waiting to be retried after a failure (not the same concept as `inFlight`: that is "running
+    /// right now", while this is "not finished yet"). Persisted, so it survives across launches.
     @Published private(set) var pending: [PendingJob] = []
 
     /// Per-file task handles for cancellation. Duplicate calls for the same
@@ -39,21 +39,27 @@ final class TranscriptionService: ObservableObject {
     /// that clip starts. Observed by ClipDetailView for a non-blocking notice.
     @Published private(set) var fallbackWarnings: [String: [String]] = [:]
 
-    /// 队列的串行泵，防止两次 `resumePending()` 同时开跑把同一条活跑两遍。
+    /// The queue's serial pump, preventing two `resumePending()` calls running at once from running the same job twice.
     private var drainTask: Task<Void, Never>?
+
+    /// Fired on the main actor after a transcript has been **written**, with the audio's file name
+    /// (`clip.m4a`), which is the same key the summary job uses for `clipName`. Wired up in
+    /// `AppEnvironment`; `TranscriptionService` deliberately doesn't know about `JobQueue` (this
+    /// file is about speech, not about scheduling work).
+    var onTranscribed: ((String) -> Void)?
 
     init(config: ConfigService) {
         self.config = config
         self.pending = Self.loadQueue()
-        // ★ 载入时就把"音频已经不在了"的条目剔掉。
+        // ★ Strip out entries whose "audio is already gone" at load time.
         //
-        // 光靠 `runDrainLoop` 里那道 `fileExists` 不够：试满 `maxAttempts`
-        // 的条目会被 `resumePending` 的 gate 挡在门外，drain 根本不跑，
-        // 于是"用户删掉了那条录音、但队列里还留着它的失败记录"会永久挂在
-        // 设置页那一行上，怎么点都消不掉。
+        // Relying only on the `fileExists` check inside `runDrainLoop` isn't enough: an entry that has used up all `maxAttempts`
+        // is kept outside by `resumePending`'s gate, so drain never runs,
+        // and "the user deleted that recording, but its failure record is still in the queue" hangs forever on
+        // that line on the settings page, never clearing however you tap.
         //
-        // 只在启动做一次（每条一次 `fileExists`，量级是几十），不在
-        // `forget` 之外的热路径上加。
+        // Done once at launch only (one `fileExists` per entry, on the order of tens), not on any hot path
+        // other than `forget`.
         let before = pending.count
         pending.removeAll { job in
             let url = StorageLocations.decryptedDir.appendingPathComponent(job.name)
@@ -63,42 +69,42 @@ final class TranscriptionService: ObservableObject {
             log.info("queue: pruned \(before - self.pending.count) orphaned job(s) on load")
             saveQueue()
         }
-        // 把开关镜像到 keeper。keeper 是个单例、config 不是，所以每次
-        // config 落盘都刷新一次（`syncBackgroundKeeper`）。
+        // Mirror the switch onto the keeper. The keeper is a singleton and config isn't, so it's refreshed
+        // every time config is written to disk (`syncBackgroundKeeper`).
         syncBackgroundKeeper()
     }
 
-    // MARK: - 保活开关
+    // MARK: - Keep-alive switch
 
-    /// 把 `config.backgroundKeepAliveEnabled` 镜像给 `BackgroundKeeper`。
-    /// 设置页改完开关调它；`init` 也调一次，好让"上次就关着"的状态
-    /// 在冷启动时立刻生效（否则第一条录音会白占用几秒会话）。
+    /// Mirrors `config.backgroundKeepAliveEnabled` onto `BackgroundKeeper`.
+    /// The settings page calls it after changing the switch; `init` calls it too, so that "it was already off last time"
+    /// takes effect immediately on a cold start (otherwise the first recording needlessly occupies a session for a few seconds).
     func syncBackgroundKeeper() {
         BackgroundKeeper.shared.audioKeepAliveEnabled = config.config.backgroundKeepAliveEnabled
     }
 
-    // MARK: - 队列（持久化）
+    // MARK: - Queue (persistent)
 
-    /// 一条还没干完的活。
+    /// One job that isn't finished yet.
     struct PendingJob: Codable, Identifiable, Equatable {
-        /// 音频文件名 —— 与 `inFlight` / `fallbackWarnings` 同一个键空间。
+        /// The audio file name — the same key space as `inFlight` / `fallbackWarnings`.
         var name: String
         var locales: [String]?
         var enforceMinDuration: Bool
-        /// 已经试过几轮（含正在跑的那一轮）。
+        /// How many rounds have been tried (including the one running now).
         var attempts: Int
-        /// 最后一轮失败的原因，给界面显示。
+        /// The reason the last round failed, for the UI to show.
         var lastError: String?
         var enqueuedAt: Date
         var id: String { name }
     }
 
-    /// 一次转录最多试几轮：1 次首发 + 2 次重试。
-    /// 再多就没意义了 —— 本机 Ollama 那种几分钟一轮的，试 5 次用户会以为卡死。
+    /// At most how many rounds one transcription tries: 1 first attempt + 2 retries.
+    /// More would be pointless — with something like local Ollama at minutes per round, 5 attempts would make the user think it's frozen.
     static let maxAttempts = 3
 
-    /// 第 `attempt` 轮失败后的等待。指数退避（2/8/30 秒），**不封顶到分钟级**
-    /// 是因为用户多半就在看着这个菊花；等太久还不如早点报错让人重按。
+    /// The wait after round `attempt` fails. Exponential backoff (2/8/30 seconds), **not capped up to the minute scale**,
+    /// because the user is most likely watching that spinner; waiting too long is worse than erroring early and letting them retry.
     private static func backoff(afterAttempt attempt: Int) -> Duration {
         switch attempt {
         case 1: return .seconds(2)
@@ -107,46 +113,46 @@ final class TranscriptionService: ObservableObject {
         }
     }
 
-    /// 取消的两种表现：Swift 并发的 `CancellationError`，以及 URLSession
-    /// 被取消时抛的 `URLError.cancelled`。**必须都认** —— 只认前者的话，
-    /// 用户按"取消"之后那条活还会被当成"临时失败"重试两次。
+    /// The two shapes of cancellation: Swift Concurrency's `CancellationError`, and `URLError.cancelled`
+    /// that URLSession throws when cancelled. **Both must be recognised** — recognising only the former,
+    /// the job would still be treated as a "temporary failure" and retried twice after the user taps "Cancel".
     private static func isCancellation(_ error: Error) -> Bool {
         if error is CancellationError { return true }
         if let urlError = error as? URLError, urlError.code == .cancelled { return true }
         return false
     }
 
-    /// 这个错误值不值得再试一轮。
+    /// Whether this error is worth another round.
     ///
-    /// 判定口径是"**再试一次有没有可能不一样**"，不是"错误严不严重"：
-    /// - 取消 → 不试（用户不想跑了）；
-    /// - 没配对 provider / 缺密钥 / 没配端点 → 不试（配置不会自己变）；
-    /// - 时长不够 → 不试（文件不会自己变长）；
-    /// - 剩下的（HTTP、transport、decoding、empty）→ 都试。429 要退避、
-    ///   5xx 是服务端抖、超时是网络抖、decoding/empty 偶尔是半截响应。
+    /// The test is "**could another attempt be different**", not "how serious is the error":
+    /// - cancelled → don't retry (the user doesn't want it to run);
+    /// - no provider configured / missing key / no endpoint configured → don't retry (config won't change on its own);
+    /// - too short → don't retry (the file won't grow on its own);
+    /// - the rest (HTTP, transport, decoding, empty) → retry them all. A 429 wants backoff,
+    ///   5xx is server flakiness, a timeout is network flakiness, and decoding/empty is occasionally a truncated response.
     private static func isRetriable(_ error: Error) -> Bool {
         if isCancellation(error) { return false }
         guard let asr = error as? AsrError else { return true }
         switch asr {
         case .missingCredentials, .noProviderConfigured, .tooShort,
-             .azureRequiredForTranslation:
+             .azureRequiredForTranslation, .stillRunning, .taskFailed:
             return false
         case .allProvidersUnreachable, .http, .transport, .decoding, .empty:
             return true
         }
     }
 
-    /// 把一条活排进队列（自动转录那几条路走这里）。
+    /// Enqueue a job (the auto-transcription paths come through here).
     ///
-    /// 与直接 `transcribe(...)` 的区别：**先落盘再开跑**。区别只在
-    /// "App 中途被杀"这一种情况下才看得出来 —— 那种情况下直接跑的那条
-    /// 活就凭空消失了，用户第二天回来只看到一条没转录的录音，也不会知道
-    /// 曾经试过。
+    /// The difference from calling `transcribe(...)` directly: **persist first, run second**. The difference only shows
+    /// in the one case of "the app getting killed midway" — in that case the job that ran directly
+    /// vanishes into thin air, and coming back the next day the user sees only an untranscribed recording with no idea
+    /// an attempt was ever made.
     func enqueue(fileURL: URL, locales: [String]? = nil, enforceMinDuration: Bool = false) {
         let key = fileURL.lastPathComponent
         if let idx = pending.firstIndex(where: { $0.name == key }) {
-            // 已经在队列里：不重复加，但把重试计数**清零**（用户又主动
-            // 要了一次，说明上一次的放弃不算数）。
+            // Already in the queue: don't add a duplicate, but **reset** the retry count (the user asked for it again
+            // on purpose, which means the previous give-up doesn't count).
             pending[idx].attempts = 0
             pending[idx].lastError = nil
         } else {
@@ -163,38 +169,45 @@ final class TranscriptionService: ObservableObject {
         startDrainIfNeeded()
     }
 
-    /// 排进队列并**等它出队**（成功、试满放弃、或音频已不在）。
+    /// Enqueue and **wait for it to leave the queue** (success, giving up after exhausting attempts, or the audio being gone).
     ///
-    /// 给"要等结果再刷新界面"的调用方用 —— 目前只有手表到货那条：它原本
-    /// `await transcribe` 完再发 `libraryDidChange`，好让资料库列表立刻
-    /// 带出转录文本。注意等的是"**这条活出队**"，不是"某一次 `transcribe`
-    /// 返回"：重试期间它一直挂在队列上。
+    /// For callers that "wait for a result before refreshing the UI" — currently only the watch-arrival path: it used
+    /// to `await transcribe` and then post `libraryDidChange`, so the library list would immediately
+    /// bring up the transcription text. Note what's awaited is "**this job leaving the queue**", not "one particular `transcribe`
+    /// returning": during retries it stays on the queue the whole time.
     func enqueueAndWait(fileURL: URL, locales: [String]? = nil, enforceMinDuration: Bool = false) async {
         enqueue(fileURL: fileURL, locales: locales, enforceMinDuration: enforceMinDuration)
-        // 同一个 main actor 上同步赋值 / 同步读取，不存在"还没起来"的窗口。
+        // Synchronous assignment and synchronous read on the same main actor, so there's no "hasn't started yet" window.
         await drainTask?.value
     }
 
-    /// 从队列里拿掉一条（用户手动删了那条录音、或转录成了）。
+    /// Remove one from the queue (the user deleted that recording by hand, or the transcription succeeded).
     func forget(name: String) {
         guard pending.contains(where: { $0.name == name }) else { return }
         pending.removeAll { $0.name == name }
         saveQueue()
     }
 
-    /// 重启那些还没干完的活。挂两个点：**App 启动**（`NomilyApp.init`）和
-    /// **回到前台**（`RootView` 的 scenePhase 变 .active）。
+    /// Restart jobs that aren't finished yet. Hooked in at two points: **app launch** (`NomilyApp.init`) and
+    /// **returning to the foreground** (`RootView`'s scenePhase becoming .active).
     ///
-    /// 有这个才能叫"后台转录" —— 光靠 `BackgroundKeeper` 只顶得住"切走一会儿"，
-    /// 顶不住"系统在内存紧张时把进程咔嚓掉"。那种情况下唯一能救回来的办法
-    /// 就是下次启动时照着这份清单重来。
+    /// Only with this can it be called "background transcription" — `BackgroundKeeper` alone only survives "switching away for a bit",
+    /// not "the system snuffing out the process under memory pressure". In that case the only way to recover
+    /// is to start over from this list at the next launch.
     func resumePending() {
         guard pending.contains(where: { $0.attempts < Self.maxAttempts }) else { return }
         startDrainIfNeeded()
     }
 
-    /// 队列的串行泵。`@MainActor` 上同步赋值 ⇒ 紧跟其后的 `drainTask?.value`
-    /// 一定能看到它，没有"任务还没起步"的竞态。
+    /// Whether this clip is still queued for transcription (or mid-run).
+    /// ★ (2026-10-22) `AiTaskCenter`'s launch recovery reads this to tell
+    /// "the queue replay will finish it" from "it died with the process".
+    func hasPending(clipName: String) -> Bool {
+        pending.contains { $0.name == clipName } || inFlight.contains(clipName)
+    }
+
+    /// The queue's serial pump. Synchronous assignment on `@MainActor` ⇒ the `drainTask?.value`
+    /// right after is guaranteed to see it, with no "task hasn't started" race.
     private func startDrainIfNeeded() {
         guard drainTask == nil else { return }
         drainTask = Task { @MainActor [weak self] in
@@ -204,17 +217,17 @@ final class TranscriptionService: ObservableObject {
         }
     }
 
-    /// 串行地把队列里的活跑一遍。同一时间只跑一条：ASR 侧本来就有额度，
-    /// 并发提交只会让本机那张单卡的队列排得更长。
+    /// Runs through the queued jobs serially. Only one runs at a time: the ASR side has quota as it is,
+    /// and submitting concurrently would only lengthen the local single card's queue.
     private func runDrainLoop() async {
-        // 用 `first(where:)` 而不是 `first`：试满 `maxAttempts` 的活会**留在
-        // 队列里**（界面要能说"这条一直没成功"），但不能再被挑出来跑 ——
-        // 用 `first` 的话它会永远排在队首，每次启动都白试一轮。
+        // Uses `first(where:)` rather than `first`: a job that has exhausted `maxAttempts` **stays
+        // in the queue** (the UI must be able to say "this one never succeeded"), but must not be picked up to run again —
+        // with `first` it would sit at the head of the queue forever and waste a round every launch.
         while let job = pending.first(where: { $0.attempts < Self.maxAttempts }) {
             let url = StorageLocations.decryptedDir.appendingPathComponent(job.name)
             guard FileManager.default.fileExists(atPath: url.path) else {
-                // 音频已经不在了（用户删了录音，或还没下载下来）——
-                // 留着它只会每次启动都白试一轮。
+                // The audio is already gone (the user deleted the recording, or it hasn't been downloaded yet) —
+                // keeping it would only waste a round on every launch.
                 log.info("queue: dropping \(job.name, privacy: .public) — audio gone")
                 forget(name: job.name)
                 continue
@@ -228,7 +241,7 @@ final class TranscriptionService: ObservableObject {
                 )
                 forget(name: job.name)
             } catch where Self.isCancellation(error) {
-                // 用户主动取消：不当失败，也不再自动重来。
+                // The user cancelled deliberately: not treated as a failure, and not retried automatically either.
                 forget(name: job.name)
             } catch {
                 guard let idx = pending.firstIndex(where: { $0.name == job.name }) else { continue }
@@ -238,9 +251,9 @@ final class TranscriptionService: ObservableObject {
                 saveQueue()
                 if attempts >= Self.maxAttempts {
                     log.warning("queue: \(job.name, privacy: .public) gave up after \(attempts) attempts")
-                    // 试到头了。留档不删 —— 让界面能显示"这条一直没成功"，
-                    // 而不是让用户以为从没试过。用户手动再按一次转录
-                    // （`enqueue`）会把计数清零，重新获得 3 次机会。
+                    // Attempts exhausted. Kept on record rather than deleted — so the UI can show "this one never succeeded",
+                    // rather than letting the user think it was never tried. The user tapping transcribe once more by hand
+                    // (`enqueue`) resets the count and grants it 3 more chances.
                     continue
                 }
                 try? await Task.sleep(for: Self.backoff(afterAttempt: attempts))
@@ -275,18 +288,18 @@ final class TranscriptionService: ObservableObject {
         forget(name: name)
     }
 
-    /// 重试队列里的一条（用户从后台任务页 / 详情页点的）。
+    /// One item in the retry queue (tapped by the user from the background jobs page / the detail page).
     ///
-    /// ★ 2026-10-16 十二改新增。存在的理由是**别让调用方自己拼路径**：
-    /// `enqueue` 是按 `fileURL.lastPathComponent` 认人的，调用方就得知道
-    /// "音频在 `decryptedDir` 里、活的名字就是文件名"这套约定 —— 那是这个类的
-    /// 内部知识，散到界面上去迟早会有一处拼错（比如用了 `root` 而不是
-    /// `decryptedDir`，然后表现为"点了重试没反应"）。
+    /// ★ Added in the twelfth revision, 2026-10-16. It exists so that **callers don't have to assemble the path themselves**:
+    /// `enqueue` identifies things by `fileURL.lastPathComponent`, so a caller would have to know
+    /// the whole convention of "the audio is in `decryptedDir` and the job's name is the file name" — that is this class's
+    /// internal knowledge, and scattering it into the UI would sooner or later produce one wrong path (say, using `root` instead of
+    /// `decryptedDir`, showing up as "tapping retry does nothing").
     ///
-    /// 走 `enqueue` 而不是另开一条路：`enqueue` 对**已存在**的条目只清
-    /// `attempts` 与 `lastError`，不动 `locales` / `enforceMinDuration` ——
-    /// 也就是说"重试"重试的是**原来那条活**，包括用户当初指定的识别语言。
-    /// 这正是 `JobQueue.retry(id:)` 的语义，两边保持一致。
+    /// Goes through `enqueue` rather than opening another path: for an **existing** entry `enqueue` only clears
+    /// `attempts` and `lastError`, leaving `locales` / `enforceMinDuration` alone —
+    /// that is, "retry" retries **the original job**, including the recognition language the user specified originally.
+    /// This is exactly the semantics of `JobQueue.retry(id:)`, kept consistent on both sides.
     func retry(name: String) {
         guard pending.contains(where: { $0.name == name }) else { return }
         enqueue(fileURL: StorageLocations.decryptedDir.appendingPathComponent(name))
@@ -303,8 +316,8 @@ final class TranscriptionService: ObservableObject {
     /// threshold, which otherwise surfaces a confusing error right after
     /// the user just asked to transcribe a short clip.
     ///
-    /// `viaQueue` 是给队列自己用的内部开关，外部别传：它决定失败时要不要
-    /// 退回队列等下一次，以及要不要按退避节奏多试几轮。
+    /// `viaQueue` is an internal switch for the queue itself; don't pass it from outside: it decides whether a failure
+    /// goes back to the queue for another go, and whether to try a few more rounds on the backoff schedule.
     func transcribe(
         fileURL: URL,
         locales: [String]? = nil,
@@ -320,11 +333,11 @@ final class TranscriptionService: ObservableObject {
             return try await existing.value
         }
 
-        // ★ 保活从这个瞬间开始，一直占到这条活出去为止。
+        // ★ The keep-alive starts at this instant and holds until this job leaves.
         //
-        // 位置很讲究：必须在 `Task` **外面**占。放进去的话，`Task` 是异步
-        // 起步的，从"用户点转录"到"任务真正开跑"之间有个窗口，用户正好
-        // 在这个窗口切走就没人顶着进程了 —— 而那恰恰是最容易切走的时刻。
+        // The placement matters: it must be taken **outside** the `Task`. Put it inside and, since `Task` starts
+        // asynchronously, there's a window between "the user taps transcribe" and "the task actually runs"; if the user
+        // switches away in that window, no one is holding the process up — and that's precisely the easiest moment to switch away.
         BackgroundKeeper.shared.acquire(.transcription)
 
         let task = Task<AsrResult, Error> { [weak self] in
@@ -348,8 +361,8 @@ final class TranscriptionService: ObservableObject {
         return try await task.value
     }
 
-    /// 退避重试外壳。**只包管线，不包去重** —— 去重必须在外面，
-    /// 否则第二轮重试会撞上自己那条已经登记好的 task 而直接返回。
+    /// The backoff-retry shell. **It wraps the pipeline only, not deduplication** — dedup has to be outside,
+    /// otherwise the second retry round would hit its own already-registered task and return straight away.
     private func runWithRetry(
         fileURL: URL,
         locales: [String]?,
@@ -367,8 +380,8 @@ final class TranscriptionService: ObservableObject {
                 )
             } catch {
                 try Task.checkCancellation()
-                // 队列那条路自己管重试（它要跨启动、要落盘计数），这里
-                // 直接抛出，别两边各退避一次。
+                // The queue path manages retries itself (it needs to survive launches and persist a count), so this
+                // throws straight out; don't back off on both sides.
                 guard !viaQueue,
                       attempt < Self.maxAttempts,
                       Self.isRetriable(error) else { throw error }
@@ -405,6 +418,7 @@ final class TranscriptionService: ObservableObject {
         // the last error wins — which is "Local server not configured").
         let chain = providerChain()
         guard !chain.isEmpty else { throw AsrError.noProviderConfigured }
+        TicNoteDiagLog.log("ASR", "chain clip=\(key): \(chain.joined(separator: " → ")) minGate=\(enforceMinDuration)")
 
         fallbackWarnings[key] = []
 
@@ -477,7 +491,19 @@ final class TranscriptionService: ObservableObject {
                     // expects on the on-disk audio.
                     result = Self.remapTimestamps(result, ranges: vadRanges)
                 }
+                try Task.checkCancellation()
+                // ★ 2026-10-22: the diag file had no trace of *which* provider
+                // ran, which is how "ASR provider returned HTTP 422" survived a
+                // whole day without an answer. One line per attempt, success or
+                // failure — the ASR path is low-frequency, so this cannot flood
+                // the 512 KB ring.
+                TicNoteDiagLog.log("ASR", "ok clip=\(key) provider=\(name) chars=\(result.text.count) segments=\(result.segments.count)")
                 try writeArtefacts(result, audioName: key)
+                // ★ "Summarize right after transcribing" (2026-10-18). The hook lives here rather than in every
+                //   caller: manual, auto-after-download and the resumed queue all funnel through
+                //   this line, so one call covers all three — and a summary can only be generated
+                //   once the `.asr.json` is actually on disk, which is exactly this moment.
+                onTranscribed?(key)
                 return result
             } catch {
                 // Any flavour of cancellation (CancellationError or
@@ -486,6 +512,7 @@ final class TranscriptionService: ObservableObject {
                 // credits on a run the user already stopped.
                 if Task.isCancelled { throw CancellationError() }
                 log.warning("provider \(name, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                TicNoteDiagLog.log("ASR", "failed clip=\(key) provider=\(name): \(error.localizedDescription)")
                 lastError = error
                 // If there is a next provider, record this failure so the UI
                 // can surface it non-intrusively while the fallback runs.
@@ -541,6 +568,12 @@ final class TranscriptionService: ObservableObject {
         for fallback in defaults.fallbacks where fallback != defaults.primary {
             chain.append(fallback)
         }
+        // On-device goes last, for the same reason as in `LiveModel.openASR`: a configured
+        // service wins on quality, but the chain must never come back empty when the phone can
+        // do the job itself. Without this line "On-device recognition" would be a switch that never runs.
+        if config.config.onDeviceASREnabled, !chain.contains("ondevice") {
+            chain.append("ondevice")
+        }
         return chain.filter { !$0.isEmpty && hasCredentials($0) }
     }
 
@@ -554,6 +587,22 @@ final class TranscriptionService: ObservableObject {
         case "local":
             guard let l = config.config.asrProviders.local else { return false }
             return !l.host.isEmpty && l.port > 0
+        case "ondevice":
+            // No credentials to check — only the switch, plus the honest question of whether
+            // this phone actually has an offline model for the language we'd ask it for.
+            return config.config.onDeviceASREnabled
+        case "custom":
+            guard let c = config.config.asrProviders.custom else { return false }
+            return !c.endpoint.isEmpty
+        case "aliyun":
+            // ★ 2026-10-22: wired file transcription. Needs the AK pair (probe
+            // covers it) plus the two things the probe can't check: the NLS
+            // project Appkey and an OSS bucket to stage the audio in.
+            guard let c = config.config.asrProviders.cloud?["aliyun"] else { return false }
+            return !(c.secrets?["accessKeyId"] ?? "").isEmpty
+                && !(c.secrets?["accessKeySecret"] ?? "").isEmpty
+                && !(c.values?["appKey"] ?? "").isEmpty
+                && !(c.values?["ossBucket"] ?? "").isEmpty
         default:
             return false
         }
@@ -577,6 +626,47 @@ final class TranscriptionService: ObservableObject {
             }
             let client = LocalASR(host: local.host, port: local.port)
             return try await client.transcribe(fileURL: fileURL)
+        case "ondevice":
+            // ★ Belt and braces: `hasCredentials` already filters this out when the switch is
+            //   off, but a queued job can name a provider from an older config — reaching
+            //   `Speech` after the user disabled it is exactly what used to crash on launch.
+            guard config.config.onDeviceASREnabled else {
+                throw AsrError.missingCredentials("On-device speech")
+            }
+            // ★ Offline, on the phone, no key. The locale has to be *named* — Apple has no
+            // auto-detect — so an explicitly chosen source language wins, otherwise the UI
+            // language is the best guess (a zh-Hans user recording Chinese needs no setup).
+            let locale = locales?.first
+                ?? config.config.lastSourceLang
+                ?? (config.config.appLanguage ?? Locale.current.identifier)
+            return try await OnDeviceASR.transcribeFile(url: fileURL, localeID: locale)
+        case "custom":
+            guard let custom = config.config.asrProviders.custom,
+                  !custom.endpoint.isEmpty else {
+                throw AsrError.missingCredentials("Custom server")
+            }
+            let client = CustomASR(
+                endpoint: custom.endpoint,
+                apiKey: custom.apiKey ?? "",
+                model: custom.model ?? "",
+                language: custom.language ?? ""
+            )
+            return try await client.transcribe(fileURL: fileURL, locales: locales)
+        case "aliyun":
+            guard let c = config.config.asrProviders.cloud?["aliyun"],
+                  let id = c.secrets?["accessKeyId"], !id.isEmpty,
+                  let secret = c.secrets?["accessKeySecret"], !secret.isEmpty,
+                  let appKey = c.values?["appKey"], !appKey.isEmpty,
+                  let bucket = c.values?["ossBucket"], !bucket.isEmpty else {
+                throw AsrError.missingCredentials(L10n.ASR.aliyun)
+            }
+            let client = AliyunFileASR(
+                accessKeyId: id,
+                accessKeySecret: secret,
+                appKey: appKey,
+                ossBucket: bucket,
+                region: (c.values?["region"].flatMap { $0.isEmpty ? nil : $0 }) ?? "cn-shanghai")
+            return try await client.transcribe(fileURL: fileURL, locales: locales)
         default:
             throw AsrError.missingCredentials(name)
         }

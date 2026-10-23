@@ -3,72 +3,72 @@ import os.log
 
 private let log = Logger(subsystem: "com.nomily.app.ios", category: "trash")
 
-/// 回收站：删掉的录音先在这里躺 30 天，之后自动清掉。
+/// Trash: deleted recordings lie here for 30 days, then get cleared automatically.
 ///
-/// ## 为什么是"搬家"而不是"记一笔再删"
-/// 真把文件挪到 `.trash/<id>/` 里，好处是**删除立刻释放了"当前资料库"的
-/// 空间语义**（列表、扫描、统计都看不见它了），恢复时又能一个字节不差地
-/// 放回来。反过来"打个标记留着原地"会让 `LibraryScanner` 仍然把它扫出来，
-/// 于是每一条删除都要在扫描器里补一个例外 —— 那种例外漏一个，回收站里
-/// 的东西就漏进列表了。
+/// ## Why it "moves house" rather than "making a note and deleting"
+/// Actually moving the files into `.trash/<id>/` has the advantage that **deletion immediately frees the
+/// "current library" space semantics** (lists, scans and stats no longer see it), while a restore can put it back
+/// byte for byte. Conversely "mark it and leave it in place" would still have `LibraryScanner` scan it up,
+/// so every deletion would need another exception in the scanner — miss one of those and something in the trash
+/// leaks into the list.
 ///
-/// ## 目录为什么在 `audioDir/.trash` 而不是 `decryptedDir`
-/// `decryptedDir` 是扫描器要遍历的目录，往里塞东西就得靠"跳过隐藏文件"
-/// 这种隐式约定。放成它的**兄弟目录**，扫描器天生看不见，索引文件也和
-/// `.durations.json` / `.manifest.json` 挨在一起。
+/// ## Why the directory sits at `audioDir/.trash` rather than `decryptedDir`
+/// `decryptedDir` is the directory the scanner walks, so stuffing things into it would rely on "skip hidden files"
+/// as an implicit convention. Put it as a **sibling directory** and the scanner can't see it by nature, and the index file sits
+/// right next to `.durations.json` / `.manifest.json`.
 ///
-/// ## 30 天怎么落地
-/// 没有后台任务可挂，所以 `purgeExpired()` 在**App 启动**和**打开回收站**
-/// 时各跑一次。只要用户还会打开这个 App，过期的东西就不会一直躺着 ——
-/// 这是"30 天后自动删除"在没有 BGTaskScheduler 的情况下能给出的最强承诺。
+/// ## How the 30 days are implemented
+/// There is no background task to hook onto, so `purgeExpired()` runs once at **app launch** and once when
+/// **the trash is opened**. As long as the user still opens this app, expired items won't just sit there —
+/// that is the strongest promise "auto-delete after 30 days" can make without BGTaskScheduler.
 @MainActor
 final class ClipTrash: ObservableObject {
     static let shared = ClipTrash()
 
-    /// 保护期。用户要的 30 天。
+    /// Protection period. The 30 days the user asked for.
     ///
-    /// ⚠️ **必须是 `nonisolated`**：`TrashedItem.expiry` 是嵌在里面的普通
-    /// struct 上的计算属性，它不在 main actor 上，直接读这个 `@MainActor`
-    /// 类的静态量会报"main actor-isolated static property can not be
-    /// referenced from a nonisolated context"。常量而已，不隔离更准确。
+    /// ⚠️ **It must be `nonisolated`**: `TrashedItem.expiry` is a computed property on a plain
+    /// struct nested inside, it isn't on the main actor, and reading this `@MainActor`
+    /// class's static value directly would report "main actor-isolated static property can not be
+    /// referenced from a nonisolated context". It's only a constant; leaving it unisolated is more accurate.
     nonisolated static let retentionDays = 30
 
     @Published private(set) var items: [TrashedItem] = []
 
-    // MARK: - 模型
+    // MARK: - Model
 
     struct TrashedItem: Codable, Identifiable, Equatable {
-        /// 目录名，同时也是 `.trash/<id>/`。
+        /// Directory name, which is also `.trash/<id>/`.
         var id: String
-        /// 原来的落盘 base（不带扩展名）。恢复时按它拼回原名。
+        /// The original on-disk base (without the extension). Restores rebuild the original name from it.
         var base: String
-        /// 目录里的文件名（都是原名），恢复时原样放回。
+        /// The file names inside the directory (all original names); they are put back as-is on restore.
         var files: [String]
         var deletedAt: Date
-        /// 删除那一刻的显示标题。用户改过的名字也在这里 —— 恢复之后
-        /// `.title` 旁车文件会一起回来，所以只是给回收站列表看的。
+        /// The display title at the moment of deletion. A name the user changed is in here too — after a restore
+        /// the `.title` sidecar comes back with it, so this is only for the trash list to read.
         var title: String
         var bytes: Int64
-        /// 这条素材"已从设备下过"的凭据。非 nil ⇒ 这次删掉了音频，
-        /// 恢复时要把 manifest 那条补回去。
+        /// The credential that this item "was already downloaded from the device". Non-nil ⇒ this deletion removed the audio,
+        /// and a restore has to put that manifest entry back.
         var download: Download?
 
-        /// 删除那一刻的**来源显示名**（"录音卡-3N9H" / "Apple Watch" /
-        /// "本机导入"…）。
+        /// The **source display name** at the moment of deletion ("Recorder card-3N9H" / "Apple Watch" /
+        /// "Imported"…).
         ///
-        /// ★ 2026-10-15：用户在回收站里问"这条是从哪来的，怎么只有删除"。
-        /// 光靠上面那条 `download` 答不全 —— 它只在**设备下载**的条目上非空
-        /// （手表 / 实时流 / 导入的从来都是 nil，因为它们本来就没有"再下载
-        /// 一次"这回事）。所以来源必须在**删除那一刻**定死：晚一步就问不到了，
-        /// 那时 manifest 里的记录已经被注销。
+        /// ★ 2026-10-15: users ask in the trash "where did this come from, and why is there only delete".
+        /// The `download` field above can't answer that fully — it is non-nil only on **device-download** entries
+        /// (watch / live stream / imported are always nil, because they have no such thing as "downloading
+        /// it again" at all). So the source has to be pinned at **the moment of deletion**: a step later and it can't be asked for,
+        /// because by then the manifest entry has already been unregistered.
         ///
-        /// 可选是有意的：老版本的 `index.json` 里没有这个键，`decodeIfPresent`
-        /// 解出来就是 nil，界面回落到"不显示来源"，而不是整份索引解不开。
+        /// Optional is deliberate: older `index.json` files have no such key, and `decodeIfPresent`
+        /// yields nil, so the UI falls back to "show no source" rather than the whole index failing to decode.
         var source: String?
 
-        /// 设备那边的原始记录。字段与 `Library.Entry` 一一对应，
-        /// 刻意**不**直接复用那个类型：回收站要能独立解码（那个类型在
-        /// `Library` 里，改它的 `CodingKeys` 会连带把已入回收站的数据读不出来）。
+        /// The original record on the device side. Fields map one-to-one with `Library.Entry`,
+        /// deliberately **not** reusing that type directly: the trash has to decode independently (that type lives in
+        /// `Library`, and changing its `CodingKeys` would also make already-trashed data unreadable).
         struct Download: Codable, Equatable {
             var name: String
             var size: Int
@@ -82,8 +82,8 @@ final class ClipTrash: ObservableObject {
             deletedAt.addingTimeInterval(TimeInterval(ClipTrash.retentionDays) * 24 * 3600)
         }
 
-        /// 还剩几天。向上取整 —— 剩 3 小时也显示"还剩 1 天"，
-        /// 显示 0 天却还在，比多报一天更让人困惑。
+        /// How many days are left. Rounded up — with 3 hours left it still shows "1 day left",
+        /// and showing 0 days while it's still there is more confusing than overstating by a day.
         var daysLeft: Int {
             max(0, Int(ceil(expiry.timeIntervalSinceNow / (24 * 3600))))
         }
@@ -99,23 +99,23 @@ final class ClipTrash: ObservableObject {
         }
     }
 
-    /// 一次删除要保护的东西。
+    /// What one deletion has to preserve.
     struct Payload {
-        /// 落盘文件名。`StorageLocations` 那一套旁车路径都以它为基准。
+        /// On-disk file name. The whole sidecar path set in `StorageLocations` is based on it.
         var localName: String
-        /// 列表里的显示标题（用户改过的优先）。
+        /// Display title in the list (a user-edited one takes priority).
         var title: String
-        /// 这次要搬走的文件。**不存在的会被跳过** —— "只删转录"时音频
-        /// 本来就不在列表里。
+        /// The files to move out this time. **Non-existent ones are skipped** — when "deleting only the transcription" the audio
+        /// isn't in the list in the first place.
         var urls: [URL]
-        /// 见 `TrashedItem.download`。
+        /// See `TrashedItem.download`.
         var download: TrashedItem.Download?
-        /// 见 `TrashedItem.source`。**删除前**就要填好（删除会把 manifest
-        /// 记录注销，之后就查不出来了）。
+        /// See `TrashedItem.source`. It has to be filled in **before deletion** (deletion unregisters
+        /// the manifest entry, after which it can't be looked up).
         var source: String?
     }
 
-    // MARK: - 位置
+    // MARK: - Location
 
     private static var trashDir: URL {
         StorageLocations.audioDir.appendingPathComponent(".trash", isDirectory: true)
@@ -129,13 +129,13 @@ final class ClipTrash: ObservableObject {
         load()
     }
 
-    // MARK: - 入站
+    // MARK: - Inbound
 
-    /// 搬进回收站。返回真的搬走了几组。
+    /// Move into the trash. Returns how many groups were actually moved.
     ///
-    /// - Parameter library: 只用来注销"已从设备下过"的凭据。删掉音频之后
-    ///   **必须**注销，否则同一条录音再也下载不回来（`isDownloaded` 一直为真）。
-    ///   恢复时 `restore` 会凭 `download` 把它补回去。
+    /// - Parameter library: used only to unregister the "already downloaded from the device" credential. After the audio is deleted
+    ///   it **must** be unregistered, otherwise the same recording can never be downloaded back (`isDownloaded` stays true forever).
+    ///   On restore, `restore` puts it back using `download`.
     @discardableResult
     func move(_ payloads: [Payload], library: Library) -> Int {
         let fm = FileManager.default
@@ -159,8 +159,8 @@ final class ClipTrash: ObservableObject {
                 }
                 added.append(TrashedItem(
                     id: id,
-                    // 组里所有文件都共用这个 base 前缀（旁车命名规则如此），
-                    // 所以从落盘名推一次就够，不用去猜每个文件的。
+                    // Every file in the group shares this base prefix (that's the sidecar naming rule),
+                    // so deriving it once from the on-disk name is enough; no need to guess each file's.
                     base: (payload.localName as NSString).deletingPathExtension,
                     files: names,
                     deletedAt: Date(),
@@ -169,14 +169,14 @@ final class ClipTrash: ObservableObject {
                     download: payload.download,
                     source: payload.source
                 ))
-                // ⚠️ **文件搬完了才注销 manifest**：反过来的话中途出错会留下
-                // "记录没了、文件还在"的孤儿 —— 那条录音既下载不回来，
-                // 又不在回收站里。同 `LibraryView.runBatchDelete` 的顺序理由。
+                // ⚠️ **Only unregister the manifest once the files are moved**: the other way round, a mid-way error leaves
+                // an orphan where "the record is gone but the files remain" — that recording can neither be downloaded back
+                // nor is it in the trash. Same ordering rationale as `LibraryView.runBatchDelete`.
                 if payload.download != nil {
                     library.forget(localName: payload.localName)
                 }
             } catch {
-                // 出错就把已经搬进临时目录的文件**搬回去**，不留半条。
+                // On error, **move back** the files already moved into the temp directory; don't leave half an item.
                 Self.rollback(dir: dir)
                 log.error("trash move failed for \(payload.localName, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
@@ -186,31 +186,31 @@ final class ClipTrash: ObservableObject {
             items.append(contentsOf: added)
             save()
         }
-        // 顺手清一次过期的：删除本来就要写盘，搭个顺风车不额外花钱。
+        // Purge expired items while we're at it: a deletion writes to disk anyway, so hitching a ride costs nothing extra.
         purgeExpired()
         return added.count
     }
 
-    // MARK: - 出站
+    // MARK: - Outbound
 
-    /// 放回去。返回是否成功。
+    /// Put it back. Returns whether it succeeded.
     ///
-    /// 名字撞车时**整组一起顺延**到 `base-2`：旁车文件全靠 base 前缀和音频
-    /// 配对，只给音频改名会让 `.txt` / `.summary.md` 全部变成孤儿。
+    /// On a name collision the **whole group is bumped together** to `base-2`: the sidecar files all pair with the audio
+    /// via the base prefix, and renaming only the audio would orphan every `.txt` / `.summary.md`.
     @discardableResult
     func restore(_ item: TrashedItem, library: Library) -> Bool {
         let fm = FileManager.default
         let dir = Self.trashDir.appendingPathComponent(item.id, isDirectory: true)
         guard fm.fileExists(atPath: dir.path) else {
-            // 目录已经没了（被外部清掉过）—— 把它从索引里摘掉，别留一条
-            // 点了没反应的记录。
+            // The directory is already gone (cleared externally at some point) — drop it from the index rather than leaving
+            // a record that does nothing when tapped.
             forget(item)
             return false
         }
 
-        // 每个文件相对 base 的那截后缀（`.opus` / `.txt` / `.summary.md` / `.title`）。
-        // 理论上每个文件都带这个前缀；万一不带（手改过目录），就保持原名不动，
-        // 而不是拼出一个四不像。
+        // Each file's suffix relative to the base (`.opus` / `.txt` / `.summary.md` / `.title`).
+        // In theory every file carries this prefix; if one doesn't (the directory was hand-edited), keep its name unchanged
+        // rather than assembling a mongrel.
         let suffixes: [String?] = item.files.map {
             $0.hasPrefix(item.base) ? String($0.dropFirst(item.base.count)) : nil
         }
@@ -231,7 +231,7 @@ final class ClipTrash: ObservableObject {
                 if ClipArtefact.of(fileNamed: newName) == .audio { audioName = newName }
             }
         } catch {
-            // 放一半最糟 —— 列表里会出现"有转录没音频"的残缺条目。全部退回。
+            // Half-restoring is the worst — the list would show a broken entry "with a transcription but no audio". Roll it all back.
             for (index, name) in movedBack.enumerated() {
                 try? fm.moveItem(
                     at: target.appendingPathComponent(name),
@@ -242,8 +242,8 @@ final class ClipTrash: ObservableObject {
             return false
         }
 
-        // 凭据补回去。`localName` 用**新的**落盘名：名字顺延过的话 manifest
-        // 里那条也得跟着改，否则下次进列表，来源标识会查不到（索引按落盘名）。
+        // Put the credential back. `localName` uses the **new** on-disk name: if the name was bumped, the entry in the manifest
+        // has to change with it, otherwise the next time the list loads the source label can't be found (the index is keyed by on-disk name).
         if let download = item.download {
             library.recordDownload(
                 name: download.name,
@@ -255,12 +255,12 @@ final class ClipTrash: ObservableObject {
             )
         }
 
-        // 恢复出来的不算"新到的"。
+        // Something restored doesn't count as "newly arrived".
         //
-        // 文件的 `modifiedAt` 会变成此刻 —— 刚好越过未读账本里那个 `origin`
-        // 时间戳，不记一笔的话，用户亲手捞回来 5 条就会看到 5 颗红点，像是
-        // 又来了 5 条新录音。名字用**顺延后**的那个（重名时是 `base-2.opus`）；
-        // 组里没有音频（只删过转录）时，列表用的是扫描器合成的 `base.opus`。
+        // The file's `modifiedAt` becomes right now — just past the `origin`
+        // timestamp in the unread ledger, and without recording one, a user fishing back 5 items by hand would see 5 red dots, as if
+        // 5 new recordings had come in. The name used is the **bumped** one (`base-2.opus` on a collision);
+        // when the group has no audio (only the transcription was deleted), the list uses the scanner-synthesised `base.opus`.
         ClipReadStore.shared.markSeen(name: audioName ?? "\(item.base).opus")
 
         try? fm.removeItem(at: dir)
@@ -268,28 +268,28 @@ final class ClipTrash: ObservableObject {
         return true
     }
 
-    /// 从索引里摘掉一条（不碰文件）。
+    /// Drop one entry from the index (files untouched).
     private func forget(_ item: TrashedItem) {
         items.removeAll { $0.id == item.id }
         save()
     }
 
-    // MARK: - 清理
+    // MARK: - Cleanup
 
-    /// 永久删除一条。**不可撤销** —— 调用方负责二次确认。
+    /// Permanently delete one item. **Irreversible** — the caller is responsible for the confirmation prompt.
     func purge(_ item: TrashedItem) {
         Self.deleteFiles(of: item)
         forget(item)
     }
 
-    /// 清空。
+    /// Empty it.
     func purgeAll() {
         for item in items { Self.deleteFiles(of: item) }
         items.removeAll()
         save()
     }
 
-    /// 清掉过期的。返回清掉了几条。
+    /// Purge the expired ones. Returns how many were purged.
     @discardableResult
     func purgeExpired() -> Int {
         let now = Date()
@@ -308,9 +308,9 @@ final class ClipTrash: ObservableObject {
         )
     }
 
-    // MARK: - 工具
+    // MARK: - Helpers
 
-    /// 找一个不撞的 base：原 base 没被占用就用它，否则 `base-2`、`base-3`…
+    /// Find a base that doesn't collide: use the original base if it's free, otherwise `base-2`, `base-3`…
     private static func availableBase(_ base: String, suffixes: [String]) -> String {
         let fm = FileManager.default
         let dir = StorageLocations.decryptedDir
@@ -323,7 +323,7 @@ final class ClipTrash: ObservableObject {
         return "\(base)-\(n)"
     }
 
-    /// 把已经搬进 `.trash/<id>/` 的文件原样搬回 `decryptedDir`。
+    /// Move the files already moved into `.trash/<id>/` back to `decryptedDir` as-is.
     private static func rollback(dir: URL) {
         let fm = FileManager.default
         let back = StorageLocations.decryptedDir
@@ -342,7 +342,7 @@ final class ClipTrash: ObservableObject {
         return Int64(size)
     }
 
-    // MARK: - 磁盘
+    // MARK: - Disk
 
     private struct Index: Codable {
         var items: [TrashedItem]
@@ -352,14 +352,14 @@ final class ClipTrash: ObservableObject {
         let fm = FileManager.default
         if let data = try? Data(contentsOf: Self.indexURL),
            let index = try? JSONDecoder().decode(Index.self, from: data) {
-            // 索引里有、目录里没有 ⇒ 这条已经没文件了，摘掉（否则点恢复
-            // 只会得到一句"失败"）。
+            // In the index but not in the directory ⇒ this item has no files left, drop it (otherwise tapping restore
+            // just yields a "failed").
             items = index.items.filter {
                 fm.fileExists(atPath: Self.trashDir.appendingPathComponent($0.id).path)
             }
         }
-        // 目录里有、索引里没有 ⇒ 孤立目录（索引写盘失败时留下的）。
-        // 它们在磁盘上永远占着空间，且没有任何界面能碰到，直接清掉。
+        // In the directory but not in the index ⇒ an orphan directory (left behind when the index write to disk failed).
+        // They take up space on disk forever and no UI can reach them, so clear them outright.
         let known = Set(items.map(\.id))
         let dirs = (try? fm.contentsOfDirectory(at: Self.trashDir, includingPropertiesForKeys: nil)) ?? []
         for dir in dirs where dir.hasDirectoryPath && !known.contains(dir.lastPathComponent) {
@@ -378,48 +378,48 @@ final class ClipTrash: ObservableObject {
     }
 }
 
-// MARK: - 从 Library 取下载凭据
+// MARK: - Fetching the download credential from Library
 
 extension ClipTrash {
 
-    /// 该不该把 `.title` 旁车**一起**带进回收站。
+    /// Whether the `.title` sidecar should be taken into the trash **along with** it.
     ///
-    /// 只在"这条除了正在删的那部分，就再没有别的 artefact 了"时返回 URL。
-    /// 原因是 `ClipArtefact.sweepOrphanTitles()`：`.title` 不算三种可删
-    /// artefact 之一，一旦它成了唯一残留物，扫描器会照它重建出一条既没音频
-    /// 也没正文的幽灵条目，所以孤儿标题必须清掉。可"清掉"对回收站来说太绝了 ——
-    /// 恢复了音频而标题回不来。搬进来同进同出，才是"删除可撤销"该有的样子。
+    /// Returns a URL only when "this item has no other artefact besides the part being deleted".
+    /// The reason is `ClipArtefact.sweepOrphanTitles()`: `.title` isn't one of the three deletable
+    /// artefacts, and once it becomes the only remnant, the scanner rebuilds a ghost entry from it that has neither audio
+    /// nor body, so orphan titles must be swept. But "sweep" is too final for the trash —
+    /// you'd get the audio back but not the title. Moving it in and out together is what "undoable deletion" should look like.
     ///
-    /// - Parameter hasOtherArtefacts: **这次删除之后**这条还剩不剩别的
-    ///   artefact（音频 / 转录 / 摘要任一）。调用方按"没在删的那些"判断。
+    /// - Parameter hasOtherArtefacts: whether this item still has any other
+    ///   artefact left **after this deletion** (any of audio / transcription / summary). The caller judges by "the ones not being deleted".
     static func titleSidecar(forLocalName localName: String, hasOtherArtefacts: Bool) -> URL? {
         guard !hasOtherArtefacts else { return nil }
         let url = StorageLocations.titleURL(for: localName)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    /// 这条素材的来源显示名（"录音卡-3N9H" / "Apple Watch" / …）。
+    /// This item's source display name ("Recorder card-3N9H" / "Apple Watch" / …).
     ///
-    /// 复用 `Library.ClipSource.displayName` 而不是在这里另写一套：那一份
-    /// 已经处理了"用户别名 → 落库名 → 兜底词 + SN 末 4 位"的全部回落，
-    /// 回收站里另写一遍迟早和资料库列表显示得不一样 —— 而用户会拿两边对照。
+    /// Reuses `Library.ClipSource.displayName` instead of writing another set here: that one
+    /// already handles every fallback in "user alias → stored name → fallback word + last 4 of the SN",
+    /// and a second copy in the trash would sooner or later differ from the library list — and users will compare the two.
     ///
-    /// ⚠️ **必须在删除动作发起之前调**。`ClipTrash.move` 会顺手把 manifest
-    /// 里那条记录注销掉，之后就再也查不到来源了（查不到会回落成"导入"，
-    /// 于是卡上的录音被标成用户自己导进来的）。
+    /// ⚠️ **Must be called before the delete action is started**. `ClipTrash.move` will happily unregister
+    /// that manifest entry, after which the source can never be found again (a miss falls back to "Imported",
+    /// so a recording off the card gets labelled as something the user imported themselves).
     static func sourceLabel(forLocalName localName: String, in library: Library) -> String? {
         let name = library.source(forLocalName: localName).displayName
         return name.isEmpty ? nil : name
     }
 
-    /// 这条素材"已从设备下过"的凭据（没有就 nil）。
+    /// This item's "already downloaded from the device" credential (nil if none).
     ///
-    /// 只有**设备下载**（键形如 `serial::name`）才需要记账：手表 / 实时流 /
-    /// 导入的条目本来就没有"再下载一次"这回事，给它们记一条只会在恢复时
-    /// 往 manifest 里塞脏数据。
+    /// Only **device downloads** (keys shaped like `serial::name`) need bookkeeping: watch / live stream /
+    /// imported entries have no such thing as "downloading it again", and recording one for them would only stuff
+    /// dirty data into the manifest on restore.
     ///
-    /// 名字取的是键里 `::` **后面**那段（设备那边的原始文件名），而不是落盘名：
-    /// 两者只有在重名时才不同，而恢复时要用前者+serial 才能拼回同一条键。
+    /// The name taken is the segment **after** `::` in the key (the original file name on the device side), not the on-disk name:
+    /// the two differ only on a name collision, and a restore needs the former + the serial to rebuild the same key.
     static func downloadRecord(
         forLocalName localName: String, in library: Library
     ) -> TrashedItem.Download? {

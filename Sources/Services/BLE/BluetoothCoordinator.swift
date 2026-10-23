@@ -516,7 +516,14 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
             throw RecorderLinkError.unsupported("cached peripheral id is not a UUID")
         }
         // First ask "is it already connected" (common when the app is suspended and comes back), then ask "can the handle be retrieved".
-        let candidates = central.retrieveConnectedPeripherals(withServices: TicNoteRecorderSpec.serviceUUIDs)
+        //
+        // ⚠️ The service list must come from **this card's own spec**, not hard-coded to
+        // TicNote's: `retrieveConnectedPeripherals(withServices:)` only returns peripherals
+        // that expose one of the given services, so asking about the wrong card's service makes
+        // the fast path silently miss (and fall back to a 90-second scan) for every other protocol.
+        let services = RecorderProtocolRegistry.spec(for: identity.protocolID)?.serviceUUIDs
+            ?? TicNoteRecorderSpec.serviceUUIDs
+        let candidates = central.retrieveConnectedPeripherals(withServices: services)
             + central.retrievePeripherals(withIdentifiers: [uuid])
         guard let peripheral = candidates.first(where: { $0.identifier == uuid }) else {
             // Failing to retrieve it usually means "switched phones / reinstalled / the system cleared peripheral records" —— honestly fall back to scanning.
@@ -563,6 +570,16 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
         recorderLink = link
         recorderDeviceInfo = nil
         if let matched { matchedRecorder = matched }
+        // ★ 2026-10-22 ("其他的几款卡片也要加入一下当前寻找卡片的板块"):
+        // the "find card" page is protocol-agnostic now (last-seen time/place +
+        // RSSI radar + drop alert), so whichever card just came up has to be
+        // registered with the finder. This is the **one funnel** every connect
+        // path goes through — manual tap, Wi-Fi fast transfer, auto-reconnect —
+        // so doing it here means no future protocol can forget it.
+        //   · `name` is what the radio advertises → used for RSSI matching;
+        //   · `displayName` is the alias the user gave the card → used in the header.
+        PlaudCardFinder.shared.register(cardName: matched?.name ?? link.displayName,
+                                        label: matched?.displayName ?? link.displayName)
         // ⚠️ Identity must be "update if present, keep otherwise". When `matched == nil` the advertised identity is unavailable,
         //    and if we wrote a record with `identityHex = ""` anyway, it would wipe the SN recorded last time ——
         //    and the SN is the only source of Wi-Fi fast-transfer credentials, so the result is "the fast-transfer button suddenly doesn't light up after reconnecting".
@@ -629,6 +646,30 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
                 peripheral: recorder.peripheral,
                 central: central,
                 serialNumber: recorder.identityText
+            )
+        case DingTalkA1Spec.identifier:
+            // The A1 authenticates with a **per-card credential** that has to be imported once
+            // (see `DingTalkA1Credential`). Resolution order matters:
+            //
+            //   1. match the advertisement's SN tail (`"0655"`) against the stored cards — the
+            //      common case, and the only one that stays correct when the user owns two A1s;
+            //   2. fall back to the single stored card, for the case where the advertisement
+            //      carried no manufacturer data (the fast-reconnect path rebuilds the
+            //      advertisement from cache, so `raw` is empty there).
+            //
+            // Deliberately **not** an error when nothing matches: we still want the card to
+            // appear and connect, so the UI can say "this card needs its credential imported"
+            // instead of the user staring at a scan list that never lists their device.
+            let credential = DingTalkA1CredentialStore.credential(matchingTail: recorder.identityText)
+                ?? DingTalkA1CredentialStore.single
+            link = DingTalkA1Link(
+                peripheral: recorder.peripheral,
+                central: central,
+                credential: credential,
+                // Kept for the mid-connection re-resolve: after the user imports the
+                // credential on the (still connected) link, `ensureAuthenticated` matches
+                // again by this tail instead of failing until a full reconnect.
+                identityHint: recorder.identityText
             )
         default:
             // A protocol was added to the registry but not wired up here —— the symptom would be "can scan, can't connect", the hardest to track down.
@@ -940,6 +981,13 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
             do {
                 let result = try await group.next()!
                 group.cancelAll()
+                // ★ 2026-10-22 ("当前 V05E 里面没有卡片丢失的板块，其他的卡片有"):
+                // the D·NOTE/V05E card is the one family that does **not** go
+                // through `adoptRecorderLink`, so it needs its own registration
+                // here — otherwise its "find card" page has no name to look for
+                // and its drops are recorded without a label.
+                PlaudCardFinder.shared.register(cardName: peripheral.name,
+                                                label: result.displayName)
                 return result
             } catch {
                 // Resume the continuation BEFORE cancelling the task
@@ -1009,6 +1057,14 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
             recorder.handleDisconnect(error: RecorderLinkError.notConnected)
             recorderLink = nil
             recorderDeviceInfo = nil
+            // ★ 2026-10-22 ("卡片断开时候通知我，包含手机蓝牙直接关闭"): a radio that
+            // was switched off never delivers `didDisconnectPeripheral`, so the
+            // recorder branch there — the only place that alerted — stayed
+            // silent. This is the same event, just noticed from the other side.
+            let name = recorder.displayName
+            Task { @MainActor in
+                PlaudCardFinder.shared.noteBluetoothOff(cardName: name)
+            }
         }
 
         guard let active = client else { return }
@@ -1016,9 +1072,14 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
         // Fails every in-flight command and transfer, so a download that was
         // running stops waiting instead of hanging until its own timeout.
         active.handleDisconnect(error: DnoteError.notConnected)
+        let clientName = active.displayName
         client = nil
         connectedDeviceSID = nil
         pendingPairing = nil
+        // Same reasoning as the recorder branch above (D·NOTE cards).
+        Task { @MainActor in
+            PlaudCardFinder.shared.noteBluetoothOff(cardName: clientName)
+        }
         // Deliberately *not* counted as an unexpected drop: reconnecting is
         // impossible while the adapter is off. The adapter-state observer in
         // RootView picks it up when Bluetooth comes back, and that path now
@@ -1211,6 +1272,18 @@ extension BluetoothCoordinator: CBCentralManagerDelegate {
                 // trap the user in a "spinning" state. **Not counted in `unexpectedDisconnects`** ——
                 // That counter triggers automatic reconnection for D·NOTE.
                 let recordID = recorder.peripheral.identifier.uuidString
+                // ★ 2026-10-22: record the drop for the shared find page before
+                // the link state is torn down — this is the only place that sees
+                // **any** recorder card disappear, whatever the protocol is.
+                // `unexpected` mirrors the reconnect condition a few lines below:
+                // a Wi-Fi hand-off or a self-initiated teardown is not a loss, so
+                // it must not ring; a real drop must.
+                let lostUnexpectedly = self.recorderReconnectTask == nil
+                    && self.recorderWifiTransferCount == 0
+                PlaudCardFinder.shared.noteDisconnected(
+                    unexpected: lostUnexpectedly,
+                    cardName: self.matchedRecorder?.displayName ?? recorder.displayName
+                )
                 recorder.handleDisconnect(error: error)
                 self.recorderLink = nil
                 self.recorderDeviceInfo = nil
@@ -1237,6 +1310,14 @@ extension BluetoothCoordinator: CBCentralManagerDelegate {
                 return
             }
             if self.client?.peripheral.identifier == peripheral.identifier {
+                // ★ 2026-10-22: record the drop for the shared find page before the
+                // client is discarded. `userInitiatedDisconnect` is the flag that
+                // already distinguishes "the user tapped disconnect" from "the card
+                // walked away", so reuse it instead of inventing a second rule.
+                let finderName = self.client?.displayName
+                let lostUnexpectedly = !self.userInitiatedDisconnect
+                PlaudCardFinder.shared.noteDisconnected(unexpected: lostUnexpectedly,
+                                                        cardName: finderName)
                 self.client?.handleDisconnect(error: error)
                 self.client = nil
                 self.connectedDeviceSID = nil

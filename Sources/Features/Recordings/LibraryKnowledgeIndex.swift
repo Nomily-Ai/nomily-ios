@@ -1,44 +1,44 @@
 import Foundation
 
-/// 「知识库检索」的正文索引：把每条录音的**转录 / 译文 / 摘要**读成纯文本
-/// 放在内存里，供列表搜索用。
+/// The body-text index for "knowledge-base search": each recording's **transcript / translation / summary** is read as plain text
+/// and kept in memory for list search.
 ///
-/// ## 为什么必须是 `actor`
-/// 一次检索要读几十上百个 `.txt` / `.md`，每个几十到几百 KB。放在主线程上
-/// 就是"每敲一个字卡一下"。检索整条链路都在这个 actor 上跑，主线程只拿结果。
+/// ## Why it must be an `actor`
+/// One search reads dozens to hundreds of `.txt` / `.md` files, each tens to hundreds of KB. On the main thread that
+/// means "a hitch on every keystroke". The whole search chain runs on this actor; the main thread only takes the result.
 ///
-/// ## ★ 缓存怎么失效（这里的关键取舍）
-/// 调用方把 `LibraryScanner.Signature`（目录里最新的 mtime + 条目数）
-/// 当作**整块失效键**。目录里任何一个文件被写它都会变 —— 于是
-/// "重新转录一次""重新生成摘要"这类**覆盖写**也会让缓存作废。
+/// ## ★ How the cache invalidates (the key trade-off here)
+/// The caller uses `LibraryScanner.Signature` (the newest mtime in the directory + entry count)
+/// as a **whole-block invalidation key**. Writing any file in the directory changes it — so
+/// **overwrites** like "transcribe again" or "regenerate the summary" also invalidate the cache.
 ///
-/// 代价是任何无关的新文件也会把缓存丢掉（重建一次，可接受），换来的是
-/// "永远不会拿旧正文去匹配"。
+/// The cost is that any unrelated new file drops the cache too (one rebuild, acceptable), and what it buys is
+/// "never matching against stale body text".
 ///
-/// ## 内存
-/// 缓存的是**有正文的那些**条目的纯文本，量级 = 条数 × 单条转录大小
-/// （10 分钟会议≈10 KB，一小时的≈60 KB）。几百条就是几 MB 到几十 MB，
-/// 换掉了"每敲一个字重读一遍盘"。刻意不做 LRU / 字节上限：真正的上限来自
-/// 用户转过的条目数，而为一个"整块失效"的缓存加淘汰逻辑只会让
-/// "这次搜得到、下次搜不到"变成随机故障。真要收敛，该在**存转录**那一侧
-/// 定大小上限，不是在这里。
+/// ## Memory
+/// What's cached is the plain text of **the entries that have body text**, on the order of = entries × single-transcript size
+/// (a 10-minute meeting ≈ 10 KB, an hour-long one ≈ 60 KB). A few hundred entries is a few MB to a few tens of MB,
+/// traded for "re-reading the disk on every keystroke". Deliberately no LRU / byte cap: the real cap comes from
+/// how many entries the user has transcribed, and adding eviction to a "whole-block invalidation" cache would only make
+/// "findable this time, not next time" a random failure. If it really needs reining in, that belongs on the **storing the transcript** side,
+/// capping the size there, not here.
 ///
-/// 刻意**不**逐文件比对大小 / mtime：那要给每条 clip 多打 2~4 次 `stat`，
-/// 省下的那点重建远不抵这些 syscall —— 而且漏判的后果是搜出来一段
-/// 已经不存在的正文。
+/// Deliberately **doesn't** compare size / mtime per file: that would take 2~4 extra `stat`s per clip,
+/// and the rebuilds saved are nowhere near worth those syscalls — and a miss would surface a snippet of body text
+/// that no longer exists.
 actor LibraryKnowledgeIndex {
     static let shared = LibraryKnowledgeIndex()
 
-    /// 失效键与正文**同进同退**：键变了必须整块清掉，不能只换键。
+    /// The invalidation key and the body text **move together**: when the key changes the whole block must be cleared, not just the key swapped.
     private var stamp: LibraryScanner.Signature?
     private var docs: [String: String] = [:]
 
-    /// 在 `bases` 这些条目里找 `query`。
+    /// Find `query` among the `bases` entries.
     ///
-    /// - Returns: `base -> 命中片段`，**只含命中**的条目。
+    /// - Returns: `base -> matched snippet`, containing **only the entries that matched**.
     ///
-    /// 匹配对大小写与变音符都不敏感：用户转写里的 `Café` 应当能被
-    /// `cafe` 找到，`Ç` 也能被 `c` 找到。
+    /// Matching is case- and diacritic-insensitive: a `Café` in the user's transcript should be findable by
+    /// `cafe`, and `Ç` should be findable by `c`.
     func search(
         _ query: String,
         bases: [String],
@@ -54,8 +54,8 @@ actor LibraryKnowledgeIndex {
 
         var hits: [String: String] = [:]
         for base in bases {
-            // 打字很快时上层会把上一次整条取消掉；读盘循环里必须真的看这个标志，
-            // 否则取消只是"上层不等结果"，盘照读（库里 1900 条时差别很大）。
+            // When typing fast the layer above cancels the whole previous search; the read loop must actually check this flag,
+            // otherwise cancellation only means "the layer above stops waiting", and the disk is still read (a big difference at 1900 entries in the library).
             if Task.isCancelled { return hits }
             guard let text = text(for: base), !text.isEmpty else { continue }
             guard let match = text.range(
@@ -67,13 +67,13 @@ actor LibraryKnowledgeIndex {
         return hits
     }
 
-    /// 取一条 clip 的正文（首次读盘，之后走缓存）。真的没有正文时返回 nil。
+    /// Get one clip's body text (reads the disk the first time, then goes through the cache). Returns nil when there really is no body text.
     private func text(for base: String) -> String? {
-        // 空串也是**有意义的缓存值**：表示"这条确认没有正文"，
-        // 不加这个哨兵就会每次检索都为同一批空条目重新读盘。
+        // An empty string is also a **meaningful cached value**: it means "this one is confirmed to have no body text",
+        // and without this sentinel every search would re-read the disk for the same batch of empty entries.
         if let cached = docs[base] { return cached.isEmpty ? nil : cached }
 
-        // 顺序即优先级：转录在最前，摘要垫后。
+        // Order is priority: transcript first, summary last.
         let names = [
             "\(base).txt",
             "\(base).translated.txt",
@@ -94,10 +94,10 @@ actor LibraryKnowledgeIndex {
         return joined.isEmpty ? nil : joined
     }
 
-    /// 命中点前后各取一段，并**压平所有空白**。
+    /// Take a span around the hit and **flatten all whitespace**.
     ///
-    /// 为什么必须压平换行：转录是一行一句，原文里的 `\n` 直接塞进列表行，
-    /// 一段片段会把行撑成十几行高，整个列表就毁了。
+    /// Why newlines must be flattened: the transcript is one sentence per line, and dropping the `\n`s from the source straight into a list row
+    /// would stretch one snippet to a dozen rows tall and wreck the whole list.
     private static func snippet(
         in text: String,
         match: Range<String.Index>,
@@ -114,18 +114,18 @@ actor LibraryKnowledgeIndex {
         s = s.replacingOccurrences(of: "\t", with: " ")
         while s.contains("  ") { s = s.replacingOccurrences(of: "  ", with: " ") }
         s = s.trimmingCharacters(in: .whitespaces)
-        // 两端截断处补省略号，读片段的人才知道这不是完整句子。
+        // Add an ellipsis at each truncation point so whoever reads the snippet knows it isn't a complete sentence.
         if start != text.startIndex { s = "…" + s }
         if end != text.endIndex { s += "…" }
         return s
     }
 }
 
-/// 资料库搜索的作用域。
+/// The scope of library search.
 ///
-/// 默认 `.knowledge` —— 用户要的是"方便**知识库**检索"：只在他已经转录成文本
-/// 或已经生成摘要的那些条目**正文**里找。`.all` 是逃生口：
-/// 按文件名 / 自定义标题找一条还没转录的录音时用它。
+/// Defaults to `.knowledge` — what the user wants is "convenient **knowledge-base** search": only in the **body text** of entries
+/// he has already transcribed to text or generated a summary for. `.all` is the escape hatch:
+/// use it to find a not-yet-transcribed recording by filename / custom title.
 enum LibrarySearchScope: String, CaseIterable, Identifiable {
     case knowledge
     case all

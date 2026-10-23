@@ -198,7 +198,14 @@ struct MindMapLayout {
             columnWidth[entry.node.depth] = max(columnWidth[entry.node.depth], width)
         }
         var columnX = [CGFloat](repeating: margin, count: deepest + 1)
-        for depth in 1...max(0, deepest) {
+        // ★ (2026-10-18) `stride`, not `1...max(0, deepest)`.
+        //
+        // Collapsing every branch leaves only the root visible, so `deepest == 0` and
+        // `1...max(0, 0)` becomes `1...0` — an invalid range, which Swift traps on with
+        // `_assertionFailure` (crash report: `EXC_BREAKPOINT / SIGTRAP` inside
+        // `MindMapLayout.build(tree:collapsed:)`, triggered by `MindMapScreen.toggle`).
+        // `stride(from: 1, through: 0, by: 1)` is simply empty, which is the correct geometry.
+        for depth in stride(from: 1, through: deepest, by: 1) {
             columnX[depth] = columnX[depth - 1] + columnWidth[depth - 1] + horizontalGap
         }
 
@@ -718,25 +725,26 @@ struct MindMapScreen: View {
     @MainActor
     private func exportPNG() {
         guard let layout else { return }
-        let content = MindMapCanvas(layout: layout, labelForRoot: fallbackTitle)
-            .padding(20)
-            .background(scheme == .dark ? Color(white: 0.07) : Color(red: 0.980, green: 0.980, blue: 0.969))
-            .environment(\.colorScheme, scheme)
-
-        let renderer = ImageRenderer(content: content)
-        // Pick the scale from the pixel budget rather than a fixed 2×: a
-        // deep map is already thousands of points across, and at 3× it
-        // would try to allocate a bitmap large enough to fail outright.
+        // ★ (2026-10-19) Drawn with Core Graphics instead of `ImageRenderer`.
+        //
+        // `ImageRenderer` on this canvas came back as a **blank page** on device: the SwiftUI
+        // tree renders fine on screen, but off-screen it produced an empty bitmap, so the share
+        // sheet previewed (and shared) nothing. The exporter below draws the same layout —
+        // background, edges, node cards, labels — straight into a bitmap context, with no view
+        // hierarchy in the loop at all, which cannot come out blank.
+        let scale: CGFloat
         let points = layout.size.width * layout.size.height
         if points > 8_000_000 {
-            renderer.scale = 1
+            scale = 1
         } else if points > 2_000_000 {
-            renderer.scale = 2
+            scale = 2
         } else {
-            renderer.scale = 3
+            scale = 3
         }
 
-        guard let image = renderer.uiImage, let data = image.pngData() else {
+        guard let image = MindMapExporter.image(
+            layout: layout, rootLabel: fallbackTitle, dark: scheme == .dark, scale: scale
+        ), let data = image.pngData() else {
             exportError = L10n.ClipDetail.mindMapExportFailed
             return
         }
@@ -750,5 +758,116 @@ struct MindMapScreen: View {
         } catch {
             exportError = error.localizedDescription
         }
+    }
+}
+
+// MARK: - Core Graphics export
+
+/// Draws a laid-out mind map straight into a bitmap. Deliberately separate from the SwiftUI
+/// canvas: the export has to be reproducible off-screen, and it is the only copy of this
+/// drawing that runs without a window.
+enum MindMapExporter {
+
+    @MainActor
+    static func image(layout: MindMapLayout, rootLabel: String, dark: Bool, scale: CGFloat) -> UIImage? {
+        let size = layout.size
+        guard size.width > 1, size.height > 1,
+              size.width.isFinite, size.height.isFinite,
+              size.width * size.height < 60_000_000 else { return nil }
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = min(max(scale, 1), 3)
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+
+        return renderer.image { context in
+            let background = dark
+                ? UIColor(white: 0.07, alpha: 1)
+                : UIColor(red: 0.980, green: 0.980, blue: 0.969, alpha: 1)
+            background.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+
+            // Edges first, same curve as `EdgeShape`.
+            for edge in layout.edges {
+                let dx = max(12, (edge.to.x - edge.from.x) * 0.45)
+                let path = UIBezierPath()
+                path.move(to: edge.from)
+                path.addCurve(
+                    to: edge.to,
+                    controlPoint1: CGPoint(x: edge.from.x + dx, y: edge.from.y),
+                    controlPoint2: CGPoint(x: edge.to.x - dx, y: edge.to.y)
+                )
+                path.lineWidth = edge.depth <= 1 ? 2 : 1.4
+                path.lineCapStyle = .round
+                UIColor(branchPalette[edge.branchIndex % branchPalette.count]
+                    .resolve(dark ? .dark : .light))
+                    .withAlphaComponent(edge.depth <= 1 ? 0.75 : 0.5)
+                    .setStroke()
+                path.stroke()
+            }
+
+            for item in layout.items {
+                drawNode(item, rootLabel: rootLabel, dark: dark)
+            }
+        }
+    }
+
+    private static func drawNode(_ item: MindMapLayout.Item, rootLabel: String, dark: Bool) {
+        let rect = item.frame
+        let radius: CGFloat = item.depth == 0 ? 10 : (item.depth == 1 ? 9 : 7)
+
+        let fill: UIColor
+        if item.depth == 0 {
+            fill = dark ? UIColor(white: 0.92, alpha: 1) : UIColor(white: 0.20, alpha: 1)
+        } else {
+            fill = dark ? UIColor(white: 1, alpha: 0.07) : .white
+        }
+        fill.setFill()
+        UIBezierPath(roundedRect: rect, cornerRadius: radius).fill()
+
+        // A depth-1 card gets a thin accent edge, matching the on-screen node.
+        if item.depth == 1 {
+            UIColor(branchPalette[item.branchIndex % branchPalette.count]
+                .resolve(dark ? .dark : .light))
+                .withAlphaComponent(0.55)
+                .setStroke()
+            let outline = UIBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), cornerRadius: radius)
+            outline.lineWidth = 1
+            outline.stroke()
+        }
+
+        let title = (item.title.isEmpty && item.depth == 0 && !rootLabel.isEmpty) ? rootLabel : item.title
+        guard !title.isEmpty else { return }
+
+        let textColor: UIColor
+        if item.depth == 0 {
+            textColor = dark ? .black : .white
+        } else {
+            textColor = dark ? .white : UIColor(white: 0.12, alpha: 1)
+        }
+        let font = UIFont.systemFont(
+            ofSize: item.depth == 0 ? 15 : 13.5,
+            weight: item.depth == 0 ? .semibold : (item.depth == 1 ? .medium : .regular)
+        )
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byTruncatingTail
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraph,
+        ]
+        let inset: CGFloat = 6
+        let available = CGSize(width: max(1, rect.width - inset * 2), height: max(1, rect.height - 4))
+        let bounding = (title as NSString).boundingRect(
+            with: available, options: [.usesLineFragmentOrigin], attributes: attributes, context: nil
+        )
+        let textRect = CGRect(
+            x: rect.minX + inset,
+            y: rect.midY - bounding.height / 2,
+            width: available.width,
+            height: min(bounding.height, available.height)
+        )
+        (title as NSString).draw(in: textRect, withAttributes: attributes)
     }
 }

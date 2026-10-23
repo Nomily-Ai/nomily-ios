@@ -11,6 +11,7 @@ struct RootView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var bluetooth: BluetoothCoordinator
     @EnvironmentObject private var configService: ConfigService
+    @ObservedObject private var plaudDirect = PlaudDirectService.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var showScanner = false
     @State private var showDevice = false
@@ -18,6 +19,10 @@ struct RootView: View {
     /// The recorder card detail page (`RecorderSheet`) to open after successful reconnection.
     /// It shares the same responsibility as the same-named state inside the Scan page, but the entry point is on the main interface.
     @State private var openedRecorder: DiscoveredRecorder?
+    /// PLAUD device-info sheet (2026-10-21, 3rd round): the card's SN / battery /
+    /// storage / unbind actions live here, reached by tapping the pill — the home
+    /// page only lists what is ON the card.
+    @State private var showPlaudInfo = false
     @State private var selectedTab: Tab = .recordings
     @State private var streamingTab: Tab?
     @State private var pendingTab: Tab?
@@ -77,6 +82,38 @@ struct RootView: View {
         knownDevices.filter { !configService.isRecorderRecord($0.id) }
     }
 
+    /// ★ Top-left pill identity for a PLAUD card (2026-10-21).
+    ///
+    /// Only offered when no other device is live: D·NOTE and the recorder cards
+    /// own the pill while they are connected, and PLAUD must never steal the
+    /// label from them. When nothing else is up, the card we paired with **last**
+    /// is the honest answer to "which device did I use before" — that is exactly
+    /// the user's "顶部设备显示应该是上一次链接过的设备名称".
+    private var plaudPill: PlaudPillState? {
+        guard let sn = plaudDirect.pairedSN else { return nil }
+        let ledgerID = "plaud-\(sn)"
+        // A live PLAUD link **is** the current card — it wins even if a recorder
+        // handle is still winding down, otherwise the pill keeps the old name
+        // right after a successful switch ("切换了但没有同步过去" again).
+        if !plaudDirect.phase.isConnected {
+            guard bluetooth.client == nil, bluetooth.recorderLink == nil else { return nil }
+            // A card whose ledger row was removed stays silent in the pill — unless it
+            // is actually connected, where pretending otherwise would be a lie.
+            guard configService.config.devices[ledgerID] != nil else { return nil }
+            // …and only when it really is the **last** device used. Otherwise a
+            // remembered PLAUD would hijack the label from the TicNote the user
+            // actually unplugged a minute ago.
+            if let newest = knownDevices.first, newest.id != ledgerID { return nil }
+        }
+        return PlaudPillState(
+            name: plaudDirect.displayName,
+            sn: sn,
+            isConnected: plaudDirect.phase.isConnected,
+            isRecording: plaudDirect.isRecording,
+            isBusy: plaudDirect.phase.isBusy
+        )
+    }
+
     var body: some View {
         TabView(selection: $selectedTab) {
             tabContent(L10n.Tab.recordings, RecordingsView(session: recorderSession))
@@ -90,6 +127,29 @@ struct RootView: View {
             tabContent(L10n.Tab.settings, SettingsView())
                 .tabItem { Label(L10n.Tab.settings, systemImage: "gearshape") }
                 .tag(Tab.settings)
+        }
+        // ★ Theme: one place, whole app.
+        //
+        // `.tint()` writes `EnvironmentValues.tint`, and since iOS 16 that is the
+        // **same key** `Color.appAccent` resolves through (`accentColor(_:)` is
+        // only its deprecated spelling). So the ~20 call sites that already say
+        // `Color.appAccent` follow along without being touched — including the
+        // ones in sheets, because a presented sheet inherits the environment of
+        // the view that presented it.
+        //
+        // ⚠️ Do not turn this into a hard-coded `Color` anywhere else "just this
+        // once": the next palette then leaves a patch of the old red behind.
+        .tint(AppTheme.resolve(configService.config.appTheme).accent)
+        // ★ 2026-10-20: the "transcript ready" toast, user's words: "有消息转录完成则弹出
+        //   顶部导航栏提示告知转录完成". Top-aligned overlay on the whole TabView (not per
+        //   tab) so it appears wherever the user happens to be, right under the status bar
+        //   — over the navigation bar, which is what "顶部导航栏" names. Tapping deep-opens
+        //   the clip through `openClipFromBanner`.
+        .overlay(alignment: .top) {
+            TranscriptionBannerView { clipName in
+                openClipFromBanner(clipName)
+            }
+            .padding(.horizontal, 16)
         }
         .sheet(isPresented: $showScanner) {
             ScannerSheet(onConnected: { showScanner = false })
@@ -106,6 +166,11 @@ struct RootView: View {
         // `cardInfoContent`), adding another layer of dialog results in a dialog‑in‑dialog.
         .sheet(item: $openedRecorder) { recorder in
             RecorderSheet(recorder: recorder, mode: .deviceInfo)
+        }
+        // PLAUD's own device page — same shape as the recorder cards' device
+        // sheet, which is why the pill opens it for both device families.
+        .sheet(isPresented: $showPlaudInfo) {
+            PlaudDeviceInfoSheet()
         }
         .sheet(isPresented: $showDevice) {
             if let client = bluetooth.client {
@@ -135,6 +200,18 @@ struct RootView: View {
         .onChange(of: bluetooth.adapter) { newState in
             if newState == .poweredOn && bluetooth.client == nil && !isReconnecting {
                 Task { await autoReconnect() }
+            }
+            // ★ 2026-10-22 ("卡片断开时候通知我，包含手机蓝牙直接关闭"): the PLAUD
+            // SDK owns its own central, so `BluetoothCoordinator`'s teardown — the
+            // place that now alerts for the other cards — cannot see it. Turning
+            // the radio off kills that link without a disconnect callback, so the
+            // state has to be settled (and the user told) from here.
+            //
+            // `.poweredOff` only: `.resetting` is a transient restart during which
+            // the link usually comes straight back, and alerting on it would train
+            // the user to ignore the one alert that matters.
+            if newState == .poweredOff {
+                plaudDirect.handleAdapterOff()
             }
         }
         .onChange(of: bluetooth.unexpectedDisconnects) { _ in
@@ -248,27 +325,44 @@ struct RootView: View {
             // way a button-press start shows up in the UI.
             await pollDeviceInfo()
         }
-        // ★ 2026-10-15：回到前台时，把上次没干完的转录接着跑。
+        // ★ 2026-10-15: on returning to the foreground, resume the transcription that didn't finish last time.
         //
-        // 为什么要这个点（`AppEnvironment.init` 已经挂过一次了）：进程在后台
-        // 被系统咔嚓掉时，`init` 那条路**根本没机会跑** —— 因为那是"下一次
-        // 冷启动"。但还有更常见的一种：进程**没死**，只是任务在挂起期间
-        // 被 URLSession 断掉了，此时用户切回来，`init` 不会再跑一次。
-        // 挂在 `scenePhase` 上两种情况都能盖住，且不依赖任何持久化标记。
+        // Why this point (with `AppEnvironment.init` having already hung it once): when the process is
+        // killed by the system in the background, the `init` path **never gets a chance to run** — because that's "the next
+        // cold launch". But there's a more common case: the process **isn't dead**, it's just that the task was
+        // cut off by URLSession during suspension, and when the user switches back, `init` won't run again.
+        // Hanging it on `scenePhase` covers both cases, and depends on no persistence flag.
         //
-        // 重入由 `TranscriptionService.startDrainIfNeeded` 挡着，重复调安全。
+        // Re-entry is guarded by `TranscriptionService.startDrainIfNeeded`, so repeated calls are safe.
         //
-        // ★ 2026-10-16 十二改：这里同时把摘要 / 翻译 / 格式转换那条队列也
-        // resume 一下（`env.jobs.resume()`）。两处 resume 的理由完全对称：
-        // 只挂 `init` 会漏掉"进程活着、任务被断掉"那半边；只挂这里会漏掉
-        // "进程被杀、用户重新冷启动"那半边。两处的重入都由各自的
-        // `startDrainIfNeeded` 挡着。
+        // ★ 2026-10-16 twelfth revision: here we also resume the summary / translation / format conversion queue
+        // (`env.jobs.resume()`). The reasoning for both resumes is perfectly symmetric:
+        // hanging only off `init` misses the "process alive, task cut off" half; hanging only off here misses
+        // the "process killed, user cold-starts again" half. Both re-entries are guarded by their own
+        // `startDrainIfNeeded`.
         .onChange(of: scenePhase) { phase in
             if phase == .active {
                 env.transcription.resumePending()
                 env.jobs.resume()
+                // A toast that finished queuing in the background must not pop up
+                // minutes after unlock — drop anything past its shelf life.
+                TranscriptionBannerCenter.shared.dropStale()
             }
         }
+    }
+
+    /// Deep-open the clip the "transcript ready" banner was tapped for.
+    ///
+    /// The path is three layers (tab → library segment → `detailItem`), and each layer owns
+    /// its own lock: the tab switch is blocked by the transfer alert while a BLE transfer
+    /// runs, and `RecordingsView` guards the segment switch the same way. So this only
+    /// **sets the intent** (`env.pendingClipOpen`); the library consumes it whenever the
+    /// user actually reaches it. While transferring, the toast is informational — tapping
+    /// it lands on the recordings tab and nothing more, which beats fighting the locks.
+    private func openClipFromBanner(_ clipName: String) {
+        selectedTab = .recordings
+        guard !env.isBLETransferring else { return }
+        env.pendingClipOpen = clipName
     }
 
     private func pollDeviceInfo() async {
@@ -306,6 +400,7 @@ struct RootView: View {
                             knownDevices: knownDevices,
                             isReconnecting: isReconnecting,
                             recorderReconnectState: bluetooth.recorderReconnectState,
+                            plaud: plaudPill,
                             onTapDevice: handlePillTap,
                             onAddDevice: { showScanner = true },
                             onSelectDevice: handleSelectDevice,
@@ -325,21 +420,87 @@ struct RootView: View {
     }
 
     private func handlePillTap() {
+        // ★ 2026-10-22: PLAUD is checked **first**. It has no `DnoteClient` and no
+        // `RecorderLink`, so the branches below can't recognise it, and while any
+        // other card's handle lingered the tap opened *that* card's sheet while
+        // the pill label already said PLAUD — one tap, two answers.
+        if plaudDirect.phase.isConnected {
+            showPlaudInfo = true
+            return
+        }
         if bluetooth.client != nil {
             showDevice = true
         } else if bluetooth.recorderLink?.isConnected == true,
                   let recorder = bluetooth.matchedRecorder {
             openedRecorder = recorder
+        } else if plaudDirect.pairedSN != nil {
+            // ★ 2026-10-21 user report: "tapping the PLAUD pill in the top-left
+            // does not connect or wake the device", then (2nd round) "the device
+            // info should only appear when I tap the device in the top-left".
+            //
+            // So the pill now *is* the way into the card's own page: it opens the
+            // device info sheet (SN / firmware / battery / storage / unbind /
+            // transfer prefs), and if the link is down it also kicks a wake +
+            // bind so the page fills in.
+            if !plaudDirect.phase.isConnected, !plaudDirect.phase.isBusy {
+                plaudDirect.reconnect()
+            }
+            showPlaudInfo = true
         } else if let first = knownDevices.first {
             // A connect attempt is already in flight (spinner showing) —
             // tapping again would start a second scan on the same device and
             // the two would race to set/clear `isReconnecting` (3op2cmn).
             guard !isReconnecting else { return }
-            Task { await connectToDevice(id: first.id) }
+            if first.id.hasPrefix("plaud-") {
+                openPlaud(ledgerID: first.id)
+            } else {
+                Task { await connectToDevice(id: first.id) }
+            }
         }
     }
 
+    /// Wake / bind a PLAUD card identified by its ledger id (`plaud-<SN>`),
+    /// then land the user on the page that shows what is on it.
+    ///
+    /// Kept in one place because three entries hit the same path: the pill, the
+    /// pill's device picker, and (defensively) `connectToDevice`.
+    ///
+    /// ★ 2026-10-22 ("切换卡片的时候选择 PLAUD 无法切换，但是选择其他的卡片可以"):
+    /// switching **to** a PLAUD card never went through `connectToDevice` — the
+    /// only path that tears the previous card down — so the TicNote/A1/D·NOTE
+    /// link stayed live, kept owning the pill (see `plaudPill`), and the switch
+    /// looked like it never happened even when the card did bind. The other
+    /// direction worked precisely because it *did* go through `connectToDevice`.
+    /// One card at a time, both ways.
+    private func openPlaud(ledgerID: String) {
+        let sn = String(ledgerID.dropFirst("plaud-".count))
+        guard !sn.isEmpty else { return }
+        releaseOtherCardsForPlaud()
+        // `switchCard` is the single entry now: it handles "connected to another
+        // PLAUD card", "idle", and "stuck mid-scan" the same way (`connectKnown`
+        // used to return silently in two of those three cases).
+        plaudDirect.switchCard(to: sn)
+        selectedTab = .recordings
+        showPlaudInfo = true
+    }
+
+    /// Drop whatever card is holding the BLE link so a PLAUD card can take it.
+    ///
+    /// `userInitiated` semantics matter: this is a deliberate card change, so the
+    /// old link must not be reconnected by the recorder watchdog, and it must not
+    /// fire a "card left behind" alert either.
+    private func releaseOtherCardsForPlaud() {
+        guard bluetooth.client != nil || bluetooth.recorderLink != nil else { return }
+        bluetooth.disconnect()
+    }
+
     private func handleSelectDevice(_ id: String) {
+        // PLAUD rows in the picker are ledger ids (`plaud-<SN>`) — they have no
+        // `RecorderLink` to connect through, so route them to the card service.
+        if id.hasPrefix("plaud-") {
+            openPlaud(ledgerID: id)
+            return
+        }
         if bluetooth.client?.peripheral.identifier.uuidString == id {
             showDevice = true
         } else if bluetooth.recorderLink?.isConnected == true,
@@ -362,6 +523,17 @@ struct RootView: View {
     }
 
     private func removeKnownDevice(_ device: KnownDevice) {
+        // PLAUD: "remove" drops the ledger row (so it no longer sits next to the
+        // other cards) and closes the link. The BLE credential/binding is NOT
+        // erased here — that is the explicit "unbind card" action on the card's
+        // own settings page, and wiping it from a menu tap would be a nasty
+        // surprise. Reconnecting later re-creates the row automatically.
+        if device.id.hasPrefix("plaud-") {
+            plaudDirect.disconnect()
+            configService.config.devices.removeValue(forKey: device.id)
+            configService.scheduleSave()
+            return
+        }
         if bluetooth.client?.peripheral.identifier.uuidString == device.id ||
             bluetooth.recorderLink?.peripheral.identifier.uuidString == device.id {
             bluetooth.disconnect()
@@ -371,6 +543,19 @@ struct RootView: View {
     }
 
     private func connectToDevice(id: String) async {
+        // Defensive: a PLAUD ledger id must never reach the recorder-card scan
+        // (it has no advertisement to match, so the scan would just time out).
+        if id.hasPrefix("plaud-") {
+            openPlaud(ledgerID: id)
+            return
+        }
+        // ★ 2026-10-22: the same "one card at a time" rule in reverse. Switching
+        // from a PLAUD card to a TicNote/A1/D·NOTE used to leave the PLAUD link
+        // up (it is not a `RecorderLink`, so `bluetooth.disconnect()` cannot see
+        // it), and the two then competed for the same radio.
+        if plaudDirect.phase.isConnected || plaudDirect.phase.isBusy {
+            plaudDirect.disconnect()
+        }
         // Spinner from the first await: the recording-state check below
         // waits on the command lock, and that wait is the user's only
         // feedback until the old link is torn down.

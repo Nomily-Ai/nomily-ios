@@ -163,7 +163,7 @@ final class TicNoteLink: NSObject, ObservableObject, RecorderLink {
     /// has a stagnant value (real device stays at constant `49920`) that never increments; after 6 s it will be judged as ended.
     ///
     /// ⚠️ This constant is the toggle for the user's complaint:
-    /// > "After tapping record, Bluetooth auto-transfers and then automatically starts another recording"
+    /// > "After tapping record, Bluetooth finishes transfer and then automatically starts another recording"
     /// Previously the criterion was "if `0x14` seen within the last 2 hours, consider recording" (`sessionOpenTrustWindow`).
     /// Consequently, the **post-session residual notification** causes the UI to re-enter recording mode and the stopwatch to keep counting,
     /// The user can only tap stop once — and the next residual will light it again.
@@ -2515,6 +2515,10 @@ extension TicNoteLink: LiveAudioSource {
 
     // MARK: Audio pipeline
 
+    /// TicNote reports a written byte count, not a duration, and its stream does not stall the
+    /// way the A1's does — the packet-derived clock is already right for it.
+    func liveDeviceElapsed() async -> TimeInterval? { nil }
+
     func liveAudio(firstFrameTimeout: TimeInterval) -> AsyncThrowingStream<Data, Error> {
         // ★★ Two cleanup steps for "starting a new session" are both required (2026-10-12):
         //   ① `liveGeneration` +1 — lets the previous round's `onTermination` recognize
@@ -2606,7 +2610,7 @@ extension TicNoteLink: LiveAudioSource {
         livePump = pump
         TicNoteDiagLog.log("LIVE",
             "Start streaming sid=\(candidates[0]) (\(candidates.count) candidates: "
-            + candidates.map { String(format: "0x%08X", $0) }.joined(separator: " → ") + ")")
+            + candidates.map { String(format: "0x%08X", $0) }.joined(separator: " → ") + "）")
 
         var sawFirstPacket = false
         let firstDeadline = Date().addingTimeInterval(firstFrameTimeout)
@@ -2639,9 +2643,9 @@ extension TicNoteLink: LiveAudioSource {
             }
 
             if Date() >= nextWriteAt, let request = pump.nextRequest() {
-                // `_ =` 是给编译器的：这条支路本身就是 best-effort（拉流的
-                // 写失败由下一次 `nextFrame` 超时暴露出来，这里无处可报），
-                // 但把 `try?` 的结果丢掉会留一条 "result of 'try?' is unused" 告警。
+                // The `_ =` is for the compiler: this branch is best-effort anyway (the pull-stream's
+                // write failures surface as the next `nextFrame` timeout; there's nowhere to report them here),
+                // but discarding the result of `try?` would leave a "result of 'try?' is unused" warning.
                 _ = try? write(request)
             }
 
@@ -2765,14 +2769,37 @@ extension TicNoteLink: LiveAudioSource {
         guard !raw.isEmpty else {
             throw RecorderLinkError.malformed("live audio is empty")
         }
-        guard TicNoteOpusStream.looksLikeOpus(raw) else {
-            throw RecorderLinkError.malformed(
-                "live audio is not a plaintext 160 B Opus stream (\(raw.count) B)")
+        if TicNoteOpusStream.looksLikeOpus(raw) {
+            guard let ogg = TicNoteOpusStream.oggOpus(from: raw) else {
+                throw RecorderLinkError.malformed("Ogg muxing failed (\(raw.count) B)")
+            }
+            return ogg
         }
-        guard let ogg = TicNoteOpusStream.oggOpus(from: raw) else {
-            throw RecorderLinkError.malformed("Ogg muxing failed (\(raw.count) B)")
+        // ★ 2026-10-23: strict check failed — first **record what actually came
+        // off the card** (one line: alignment/TOC stats, first bytes, OggS probe),
+        // then try to salvage. On the real device a session died here with
+        // 79 680 B (= 160 × 498, length fine) and no way to tell which of
+        // "prefix shifted" / "scattered bad packets" / "not Opus at all" it was.
+        let report = TicNoteOpusStream.malformedReport(raw)
+        TicNoteDiagLog.log("LIVE", "✗ \(report)")
+
+        // Salvage ①: the card handed us a finished Ogg (possible firmware change
+        // from raw packets to containerised audio) — pass it through like D·NOTE.
+        if raw.count > 4, raw.prefix(4) == Data("OggS".utf8) {
+            TicNoteDiagLog.log("LIVE", "salvage: stream is already Ogg — storing as-is")
+            return raw
         }
-        return ogg
+        // Salvage ②: realign + drop bad packets. A 20 ms gap per dropped packet
+        // beats losing the whole take; if too little survives, fall through.
+        if let s = TicNoteOpusStream.salvage(raw) {
+            TicNoteDiagLog.log("LIVE",
+                "salvage: realigned +\(s.alignmentOffset) B, kept \(s.kept)/\(s.total) packets")
+            if let ogg = TicNoteOpusStream.oggOpus(from: s.data) {
+                return ogg
+            }
+        }
+        throw RecorderLinkError.malformed(
+            "live audio is not a plaintext 160 B Opus stream (\(raw.count) B)")
     }
 
     // MARK: Internal

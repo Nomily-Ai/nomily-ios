@@ -3,201 +3,211 @@ import WatchKit
 
 /// Wrist recorder page.
 ///
-/// ★ 2026-10-16 七改（用户原话："类似 Grok Bot 一样，两个眼睛然后你参考一下他会
-/// 自然眨眼做的哪些动画，4 个菜单需要往左或者往右滑在出现，把当前首页的录音按钮
-/// 去掉改成 bot 一样生动的，通过长按点击它的眼睛 2s 才开始录音或者之前的手势
-/// 交互跟摇一摇才开始录音跟停止录音"）：
+/// ★ 2026-10-16 revision seven (user's words: "make it like Grok Bot, two eyes, then look at how they
+/// do the natural-blinking animations; the 4 menus should appear when you swipe left or right; remove the record button from the home screen
+/// and make it alive like the bot; start recording by holding its eyes for 2s, or with the earlier gestures
+/// and shake to start and stop recording"):
 ///
 /// ```
-///   往右滑 ←┊            ┊→ 往左滑
+///   swipe right ←┊            ┊→ swipe left
 ///   ┌────────┐  ┌────────┐  ┌────────┐
-///   │ ◉ 外观 │  │        │  │ ◉ 语言 │
-///   │ ◉ 传输 │  │  ⬤⬤    │  │ ◉ 设置 │
-///   │ ⊕ 编辑 │  │  Bot   │  │ ⊕ 编辑 │
+///   │ ◉ Appearance │  │        │  │ ◉ Language │
+///   │ ◉ Transfers │  │  ⬤⬤    │  │ ◉ Settings │
+///   │ ⊕ Edit │  │  Bot   │  │ ⊕ Edit │
 ///   └────────┘  └────────┘  └────────┘
-///                   2 项待传 ›
+///                   2 pending ›
 /// ```
 ///
 /// ─────────────────────────────────────────────────────────────────────────
-/// ★★ 2026-10-16 八改（用户真机反馈）：
+/// ★★ 2026-10-16 revision eight (user feedback on real hardware):
 ///
-/// > `需要优化，当前眨眼太快，节奏慢点，不要绿色，边框直接就 2 个眼睛，
-/// >  当前的交互需要优化，左右滑不到菜单`
+/// > `needs work, the blinking is too fast right now, slow the rhythm down, no green, just make the frame two eyes,
+/// >  the current interaction needs work, swiping left and right doesn't reach the menus`
 ///
-/// 四条都动了：
+/// All four were changed:
 ///
-/// * **左右滑不到菜单** —— 七改用 `TabView` + `.tabViewStyle(.page)` 做横向分页，
-///   那是照资料判断的，**真机推翻了它**：watchOS 上 `.page` 这个样式存在，却
-///   不给出横向翻页（`VerticalPageTabViewStyle` 是 watchOS 10 才单独分出来的
-///   样式，恰好说明**竖排才是表上的默认**）。现在换成自己控制的横向分页（见
-///   `pageDrag`）：三页摆在一条 `HStack` 里，按手指位移平移、达标才翻页。
-///   好处是方向、阈值、阻尼全在手上，不用再猜系统怎么解释那个样式。
-/// * **"这儿能滑"没人知道** —— 补了一排三个小圆点（`pageDots`）。用户找不到菜单
-///   有很大一部分原因是：屏幕上没有任何东西提示过这里可以滑。
-/// * **眨眼太快 / 节奏慢点** —— `BlinkPhase` 一个周期从 4.63 秒拉到约 8.12 秒，
-///   呼吸从 2.6 秒放到 3.6 秒（账目写在那两处）。
-/// * **不要绿色 / 边框直接就 2 个眼睛** —— Bot 那块圆角方底板整块删掉，只剩两只
-///   眼睛；而且这张脸**不再取色板的任何颜色**，全白（理由见 `WatchBotFace` 顶部）。
-///
-/// ─────────────────────────────────────────────────────────────────────────
-/// ★★ 2026-10-16 九改（用户真机反馈）：
-///
-/// > `手表里面眼睛不要一直眨眼，开始录音的时候就是一条音波跟心率一样的，
-/// >  不是不眨眼，你可以去 grok bot 参考他们的那个表情库，
-/// >  那个手表里的设置颜色则是眼睛 bot 的颜色，取消渐变`
-///
-/// * **眼睛不要一直眨眼**（但"**不是不眨眼**"）—— `BlinkPhase` 一个周期从
-///   8.12 秒再拉到约 **19.12 秒**。结构一格没动（还是"两下里夹一次连眨"），
-///   只把两段静置按比例拉长 —— 要"平静地偶尔眨一下"，不是"死鱼眼"。
-///   ⚠️ **十改把这条推翻了**，见下。
-/// * **录音时换成一条音波**（`WatchVoiceWave`）：尖峰高度取麦克风的**真实电平**
-///   （`WatchRecorderModel` 这一轮才开的 `isMeteringEnabled`，采样率
-///   1Hz → **12.5Hz**），安静时贴底走平。
-///   录音态从此不是"眼睛的变体"，是另一个形态 —— 也正是参考 Grok 那套
-///   "状态不另做指示灯、全交给形象的动作去表达"。
-/// * **颜色回到眼睛上** —— 但只回**一个纯色**（`WatchRingStyle.tint`）。
-///   八改把颜色整条去掉去掉的是底板和渐变，不是颜色本身。
-/// * **取消渐变** —— `WatchRingStyle` 里的 `gradient` 维度整个删掉；外观页少一行；
-///   色块改成纯色圆点；菜单图标也从"色板里循环取"改成同一个颜色
-///   （循环取会让三色盘的第 2 项拿到一道荧光绿 —— 上一轮"绿色"抱怨的来源之一）。
+/// * **Horizontal swiping never reaches the menus** -- revision seven used `TabView` + `.tabViewStyle(.page)` for horizontal paging,
+///   which was a judgement made from the docs, and **the real hardware overturned it**: on watchOS the `.page` style exists but
+///   doesn't give horizontal paging (`VerticalPageTabViewStyle` was only split out as its own
+///   style in watchOS 10, which is exactly the hint that **vertical is the default on the watch**). Now it's our own horizontal paging (see
+///   `pageDrag`): the three pages sit in one `HStack`, translated by the finger's displacement, and only flip once it crosses the threshold.
+///   The upside is that direction, threshold and damping are all in our hands, with no more guessing at how the system interprets that style.
+/// * **Nobody knew "you can swipe here"** -- a row of three little dots was added (`pageDots`). A big part of why users
+///   couldn't find the menus is that nothing on screen ever hinted that you could swipe here.
+/// * **Blinking too fast / slow the rhythm down** -- the `BlinkPhase` cycle stretches from 4.63 seconds to about 8.12 seconds,
+///   and breathing from 2.6 seconds to 3.6 seconds (the accounting is written up in those two places).
+/// * **No green / just make the frame two eyes** -- the Bot's rounded-square plate is deleted outright, leaving only the two
+///   eyes; and this face **no longer takes any color from the palette**, it's all white (reasons at the top of `WatchBotFace`).
 ///
 /// ─────────────────────────────────────────────────────────────────────────
-/// ★★ 2026-10-16 十改（用户真机反馈）：
+/// ★★ 2026-10-16 revision nine (user feedback on real hardware):
 ///
-/// > `他的那个眼睛不是一直眨眼的，不需要一直眨眼，
-/// >  https://github.com/sam70361/aora-bot 你参考这个仓库里面的表情管理，
-/// >  只看眼睛就好，两个眼睛不要一直眨眼，手表里面`
+/// > `inside the watch the eyes shouldn't keep blinking; when recording starts it should be a waveform just like heart rate,
+/// >  not "never blink", you can go look at grok bot and their expression library,
+/// >  and the color in the watch settings should be the color of the eye bot, drop the gradient`
 ///
-/// **这一条直接否掉了八改/九改的整个思路。** 那两改做的是同一件事：
-/// 把"固定眨眼周期"越拉越长（4.63s → 8.12s → 19.12s）。拉到 19 秒还在被说
-/// "不需要一直眨眼"，就说明**根因不是频率**。
+/// * **The eyes shouldn't keep blinking** (but "**not never blink**") -- the `BlinkPhase` cycle stretches from
+///   8.12 seconds out to about **19.12 seconds**. The structure is untouched (still "one rapid double-blink between two rests"),
+///   only the two rest periods are stretched proportionally -- we want "a calm occasional blink", not "a dead-fish stare".
+///   ⚠️ **Revision ten overturns this**, see below.
+/// * **While recording swap in a waveform** (`WatchVoiceWave`): the peak height follows the microphone's **real level**
+///   (`isMeteringEnabled`, only turned on in `WatchRecorderModel` this round; the sample rate
+///   goes 1Hz → **12.5Hz**), and while quiet it runs flat along the bottom.
+///   The recording state is no longer "a variant of the eyes" but another form altogether -- which is exactly following Grok's
+///   "don't give the state its own indicator light; let the character's motion express it all".
+/// * **Color comes back to the eyes** -- but only **a single solid color** (`WatchRingStyle.tint`).
+///   Revision eight's wholesale removal of color removed the plate and the gradient, not color itself.
+/// * **Drop the gradient** -- the `gradient` dimension in `WatchRingStyle` is deleted entirely; the appearance page loses a row;
+///   the swatches become solid-color dots; and the menu icons go from "cycling through the palette" to the same color
+///   (cycling gave the three-color palette's 2nd entry a neon green -- one of the sources of last round's "green" complaint).
 ///
-/// 读了那个仓库（`mood-mates/`、`emotion-ball/` 两套同源引擎，纯 SVG + 原生 JS）
-/// 的待机态之后，问题翻成了四条：固定周期=节拍器、每轮必连眨、眨眼是唯一在动
-/// 的东西、一次开合太慢（450ms）。四条都改掉了，账目写在 `WatchBotFace` 顶部
-/// 的"十改"那段和文件末尾的"眨眼的节奏"。
+/// ─────────────────────────────────────────────────────────────────────────
+/// ★★ 2026-10-16 revision ten (user feedback on real hardware):
 ///
-/// 一句话概括：**把"目光游移"提成待机的主体动作，眨眼降级成偶尔的点缀** ——
-/// 眼睛从不静止之后，"眨眼"就不再是用户会注意到的那件事了。
-/// 顺带算出一件反直觉的事：两边眨眼的总频率其实差不多（都是约 1 次 / 9 秒），
-/// 所以要换的不是快慢，是**规律性**和**动作构成**。
+/// > `those eyes of his aren't blinking all the time, they don't need to keep blinking,
+/// >  https://github.com/sam70361/aora-bot go look at the expression handling in this repo,
+/// >  just the eyes, the two eyes shouldn't keep blinking, inside the watch`
 ///
-/// 三件事一变：
+/// **This one kills the whole approach of revisions eight and nine.** Those two did the same thing:
+/// stretching the "fixed blink cycle" longer and longer (4.63s → 8.12s → 19.12s). Stretching it to 19 seconds and still being told
+/// "they don't need to keep blinking" means **the root cause isn't the frequency**.
 ///
-/// * **中间的圆环按钮换成了一张 Bot 脸**（`WatchBotFace`）。圆环的"点一下就开始录"
-///   在手腕上太容易误触，而且抬手看时间、袖口蹭一下都会录上。现在**长按 2 秒**
-///   才开始 —— 2 秒足够长，长到"抬手看表"永远不会误触发；又足够短，短到真要用
-///   的时候不觉得在等。
-/// * **4 个角标搬到左右两页**（用户："需要往左或者往右滑在出现"）。首页正中
-///   因此彻底腾空给 Bot；原来钉在四角的按钮连"和环抢位置"这个老问题一起消失了
-///   （见 `WatchRingControl` 里那段"0.74 是被角标尺寸反推出来的"）。
-///   放哪几项由用户勾（见 `WatchMenuPreferences`），两页底部各有"编辑"入口。
-/// * **长按有蓄力环**。没有它，用户不知道要按多久、也不知道自己那一下被没被
-///   识别到 —— 一个"按两秒才有反应"的交互，必须有"进度"这层反馈，否则会被
-///   当成"按了没反应"。
+/// After reading that repo (`mood-mates/` and `emotion-ball/`, two engines from the same source, pure SVG + vanilla JS)
+/// and its idle state, the problem turned into four points: a fixed cycle = a metronome, a rapid double-blink every round, blinking is the only thing moving,
+/// and one open-close takes too long (450ms). All four were fixed, with the accounting written up at the top of `WatchBotFace`
+/// in the "revision ten" passage and in "the rhythm of blinking" at the end of the file.
 ///
-/// 三条开始/停止录音的路径**同时有效**，全部落在 `model.toggleRecording()` 上：
-///   1. 长按脸 2 秒（开始）—— 手势长在脸上，见 `WatchBotFace`；
-///   2. 双指互点（开始/停止；watchOS 11+ 有开关，10.x 由系统自动派发）——
-///      同样挂在脸上，见 `PrimaryHandGesture`；
-///   3. 摇一摇（开始/停止）—— 唯一不在脸上的那条，见 `WatchShakeDetector`。
+/// In one line: **promote "gaze drift" to the main idle motion and demote blinking to an occasional garnish** --
+/// once the eyes are never still, "blinking" is no longer the thing the user notices.
+/// It also turned up something counterintuitive: the total blink rate on both sides is about the same (roughly one per 9 seconds),
+/// so what needs changing isn't the speed, it's the **regularity** and the **make-up of the motion**.
 ///
-/// ⚠️ **空闲态轻点不录音**，只弹一下。这是这次要改掉的毛病本身：
-///    "点一下就录"放在手腕上太容易误触。所以手指轻点只在录音中有效（停止）。
-///    要开始，请长按 2 秒、双指互点、或摇一摇。
+/// Three things change at once:
+///
+/// * **The ring button in the middle becomes a Bot face** (`WatchBotFace`). The ring's "one tap starts recording"
+///   misfires far too easily on the wrist, and raising it to check the time or a brush from a cuff would start recording. Now a **2-second hold**
+///   is what starts it -- 2 seconds is long enough that "raise the wrist to check the time" never misfires, yet short enough that when you really want
+///   to record you don't feel like you're waiting.
+/// * **The 4 corner dots move to the left and right pages** (user: "they should appear when you swipe left or right"). The center of the home screen
+///   is therefore cleared completely for the Bot; the buttons that used to be pinned to the four corners take that old "fighting the ring for space" problem with them
+///   (see the "0.74 is derived from the corner dot size" passage in `WatchRingControl`).
+///   Which items go there is up to the user (see `WatchMenuPreferences`), and both pages have an "Edit" entry at the bottom.
+/// * **The hold has a charge ring.** Without it the user doesn't know how long to press, or whether their press
+///   was even recognized -- an interaction that "only reacts after two seconds" must have "progress" feedback, or it reads
+///   as "I pressed and nothing happened".
+///
+/// Three ways to start/stop recording are **all live at once**, all landing on `model.toggleRecording()`:
+///   1. Hold the face for 2 seconds (start) -- the gesture lives on the face, see `WatchBotFace`;
+///   2. Double tap (start/stop; there's a toggle on watchOS 11+, and 10.x dispatches it automatically) --
+///      also attached to the face, see `PrimaryHandGesture`;
+///   3. Shake (start/stop) -- the only one not on the face, see `WatchShakeDetector`.
+///
+/// ⚠️ **A tap while idle does not record**, it just gives a bounce. This is the very habit this revision set out to break:
+///    "one tap records" misfires far too easily on the wrist. So a finger tap only does something while recording (stop).
+///    To start, hold for 2 seconds, double tap, or shake.
 struct WatchRecorderView: View {
     @EnvironmentObject private var model: WatchRecorderModel
     /// Transfer state is read straight off the link rather than snapshotted
     /// into `PendingClip`, so a queue that drains (or a transfer that fails)
     /// re-renders the row without the model having to notice.
     @EnvironmentObject private var link: WatchLink
-    /// 外观偏好。挂成 `@ObservedObject` 而不是每次读 `shared` —— 改颜色之后
-    /// 界面要立刻变，而 `WatchBotFace` 是个普通 `View`，
-    /// SwiftUI 不知道要去重绘（同一个坑见 `RecorderAliasStore` 顶部那段）。
+    /// Appearance preference. Held as an `@ObservedObject` rather than reading `shared` each time -- after changing a color
+    /// the UI must update immediately, and `WatchBotFace` is a plain `View`,
+    /// so SwiftUI would not know to redraw (same pitfall as the top of `RecorderAliasStore`).
     @ObservedObject private var styleStore = WatchRingStyleStore.shared
-    /// 摇一摇 / 双指互点开关。同样要观察：设置页里一拨，这一页得立刻生效。
+    /// Shake / double-tap toggle. It needs observing too: flip it in the settings page and it has to take effect here immediately.
     @ObservedObject private var prefs = WatchRecordingPrefs.shared
-    /// 两侧菜单放哪几项。设置页里一勾，这一页要立刻重排。
+    /// Which items go on the two side menus. Tick one in the settings page and this page has to re-lay-out at once.
     @ObservedObject private var menuPrefs = WatchMenuPreferences.shared
-    /// 首页常驻的表情。**由 iPhone 的设置决定**，经 `WatchLink` 推过来
-    /// （★ 十三改）。挂成 `@ObservedObject` 的理由同上面 `styleStore`：
-    /// 手机推来一个新值之后，这一页必须立刻跟着换，而 `WatchBotFace` 是个
-    /// 普通 `View`，SwiftUI 不会自己知道要去重绘。
+    /// The home screen's resident expression. **Decided by the iPhone's settings** and pushed over via `WatchLink`
+    /// (★ revision thirteen). The reason for `@ObservedObject`, same as `styleStore` above:
+    /// after the phone pushes a new value, this page has to switch along with it immediately, and `WatchBotFace` is a
+    /// plain `View`, so SwiftUI won't know on its own to redraw.
     @ObservedObject private var faceStore = WatchFaceStore.shared
-    /// ⚠️ 必须是 `@State` 而不是 `let`：这个 `View` 结构体每次重绘都会被重新
-    /// 构造，`let` 每次都新建一个检测器（采集刚开就换人，等于一直不生效）。
-    /// `@State` 把它挂在 SwiftUI 的存储里，只初始化一次。
+    /// ⚠️ It has to be `@State`, not `let`: this `View` struct is re-constructed on every redraw,
+    /// and a `let` would create a fresh detector every time (the sampler gets swapped out the moment it starts, so it never takes effect).
+    /// `@State` keeps it in SwiftUI's storage and initializes it only once.
     @State private var shake = WatchShakeDetector()
 
-    /// 横向分页的当前页：0 = 左页菜单，1 = Bot，2 = 右页菜单。
+    /// Current page of the horizontal paging: 0 = left menu page, 1 = Bot, 2 = right menu page.
     ///
-    /// 默认落在 **1**（Bot）—— 抬腕第一眼看到的必须是"能马上开始录"的那一页，
-    /// 而不是一页菜单。
+    /// Defaults to **1** (Bot) -- the first thing you see when you raise your wrist has to be the page that "starts recording right away",
+    /// not a menu page.
     @State private var page: Int = 1
 
-    /// 手指正拖着的那一段位移（pt）。翻页动画期间会回到 0。
+    /// The displacement (pt) the finger is currently dragging. Returns to 0 during the page-flip animation.
     ///
-    /// ★ 八改新增，是**自己实现横向分页**的关键状态：三页并排摆好，整体
-    /// 平移 `-page × 屏宽 + dragX`。`dragX` 让内容在拖动过程中**跟着手指走** ——
-    /// 没有它，就只能"松手之后啪地跳过去"，那不像翻页，像切换。
+    /// ★ Added in revision eight, the key state for **implementing horizontal paging ourselves**: the three pages are laid side by side and the whole thing is
+    /// translated by `-page × screen width + dragX`. `dragX` makes the content **follow the finger** while dragging --
+    /// without it you only get "let go and it snaps over", which doesn't feel like a page turn, it feels like a switch.
     @State private var dragX: CGFloat = 0
 
-    /// 手指得先划出这么远，才承认"这是在翻页"。
+    /// The finger has to travel this far before we accept that "this is a page turn".
     ///
-    /// ⚠️ 必须**大于**轻点的抖动、又**小于** `WatchBotFace.holdSlop`（34）。
-    /// 三者是一条线上的三个点：
-    ///   < 24  → 既没翻页、也没取消长按，纯抖动，忽略；
-    ///   24~34 → 已经不算"按住不动"了，会被判成翻页意图；
-    ///   > 34  → 长按作废。
-    /// 中间那 10pt 是**缓冲带**：手一抖就同时在"开始录音"和"翻页"之间二选一，
-    /// 是这类交互最常见的翻车方式。
+    /// ⚠️ It must be **greater** than the jitter of a tap and **less** than `WatchBotFace.holdSlop` (34).
+    /// The three are three points on one line:
+    ///   < 24  → neither a page turn nor a cancelled hold, pure jitter, ignored;
+    ///   24~34 → no longer counts as "holding still", judged a paging intent;
+    ///   > 34  → the hold is void.
+    /// The 10pt in between is a **buffer zone**: a twitch of the hand and you're choosing between "start recording" and "turn the page",
+    /// which is the most common way this kind of interaction falls apart.
     private static let pageDragSlop: CGFloat = 24
 
-    /// 划够这么远，松手才真的翻页。
+    /// Travel this far and letting go actually turns the page.
     ///
-    /// ⚠️ 比 `pageDragSlop` 大得多（24 → 44）：认出来"他在划"之后还要看他
-    /// **划得够不够**。两个阈值合一的话，稍微蹭一下就翻页，用户会一直翻过头。
+    /// ⚠️ Much larger than `pageDragSlop` (24 → 44): after recognizing "they're swiping" you still have to see whether they
+    /// **swiped far enough**. If the two thresholds were one, a slight brush would turn the page and the user would keep overshooting.
     private static let pageFlipDistance: CGFloat = 44
 
-    /// 空闲态被轻点的次数，转给 `WatchBotFace` 做一次弹跳。
+    /// Number of times it's tapped while idle, handed to `WatchBotFace` for a single bounce.
     @State private var pokeTick = 0
-    /// 摇一摇触发的次数，转给 `WatchBotFace` 让眼睛**转圈圈**。
+    /// Number of times shake fired, handed to `WatchBotFace` to make the eyes **spin in circles**.
     ///
-    /// ★ 十四改新增（用户："摇一摇眼睛会有转圈圈眩晕感"）。
-    /// 计数当触发器的理由同 `pokeTick`。
+    /// ★ Added in revision fourteen (user: "shaking makes the eyes spin in circles with a dizzy feel").
+    /// The reason for using a count as the trigger is the same as `pokeTick`.
     @State private var dizzyTick = 0
-    /// 长按刚触发过的那一刻之前，**吃掉紧接着来的那一下轻点**。
+    /// Just after a hold has fired, **swallow the tap that comes right behind it**.
     ///
-    /// ⚠️ 这是整条交互链最容易翻车的地方：长按手势成功、用户抬手时，
-    /// `Button` 那一下 tap 会跟着来（脸本身就是那个按钮），于是"长按开始录音"
-    /// 当场被"抬手=停止"顶掉，用户根本录不上。用一个短暂的时间闸门把这记
-    /// 抬手吃掉。
+    /// ⚠️ This is where the whole interaction chain is most likely to fall apart: the hold gesture succeeds, and as the user lifts their finger,
+    /// the `Button`'s tap comes right after (the face itself is that button), so "hold to start recording"
+    /// is immediately overridden by "lift = stop" and the user never gets a recording. A brief time gate
+    /// swallows that lift.
     @State private var tapGateUntil = Date.distantPast
 
-    /// 表盘一边的可用长度：实机屏宽扣掉左右各 6pt 内边距。
+    /// ★ 2026-10-20: the "end this take?" confirmation (double-tap / shake while
+    /// recording). Both gestures are misfire-prone, so neither stops outright any more;
+    /// the deliberate hold-to-stop needs no confirmation by construction.
+    @State private var showStopConfirm = false
+    /// ★ 2026-10-22: the confirmation **auto-closes after 2 s** and the take keeps
+    /// rolling — user: "这个地方在 2s 后自动结束…默认不动则继续". A prompt that waits
+    /// forever on a watch either gets answered by accident or leaves the user
+    /// staring at a modal while the recording they wanted keeps running.
+    @State private var stopConfirmTask: Task<Void, Never>?
+
+    /// Usable length of one side of the watch face: the actual screen width minus a 6pt inset on each side.
     ///
-    /// ⚠️ 用 `WKInterfaceDevice` 的**实机**屏宽，不写死 —— 40mm/44mm/45mm/49mm
-    /// 屏宽从 162 到 205pt 不等，写死任何一边都至少在一种表上出错。
+    /// ⚠️ Use `WKInterfaceDevice`'s **actual** screen width, never hard-code it -- the 40mm/44mm/45mm/49mm
+    /// screen widths run from 162 to 205pt, so hard-coding either end is wrong on at least one watch.
     private static var dialSide: CGFloat {
         max(132, WKInterfaceDevice.current().screenBounds.width - 6)
     }
 
-    /// Bot 脸的边长占屏宽的比例。
+    /// Fraction of the screen width taken by the Bot face's side length.
     ///
-    /// ⚠️ 留了余量给两样东西：脸外面那圈蓄力环（1.14 倍）、以及脸下面那行
-    /// 状态字（计时/提示）。0.76 在 40mm 上是 119pt，含环 136pt，
-    /// 加一行字仍在 162×194 的屏幕里。
+    /// ⚠️ It leaves room for two things: the charge ring around the face (1.14×) and the line of
+    /// Status text (timer/hint). 0.76 is 119pt on the 40mm, 136pt including the ring,
+    /// and with a line of text it still fits in a 162×194 screen.
     ///
-    /// ⚠️ 八改从 0.70 提到 0.76：底板删掉之后，那 0.70 的方框里只剩两只眼睛，
-    ///    按原比例整张脸会显得小而空。放大一档刚好补回"没有底板"损失的体量。
+    /// ⚠️ Revision eight raised it from 0.70 to 0.76: once the plate was deleted, the 0.70 box held only the two eyes,
+    ///    and at the original fraction the whole face looked small and empty. One size up exactly makes up the bulk lost with the plate.
     private static let botFraction: CGFloat = 0.76
 
     var body: some View {
-        // ★ 八改：**不用 `TabView`** 了，自己摆一条横排。理由见文件顶部"八改"那段
-        //    —— watchOS 上 `.tabViewStyle(.page)` 不给横向翻页。
+        // ★ Revision eight: **no more `TabView`**, we lay out a horizontal row ourselves. Reasons in the "revision eight" passage at the top of the file
+        //    -- on watchOS, `.tabViewStyle(.page)` doesn't give horizontal paging.
         //
-        // 结构很直白：三页各自占满一屏宽，整条按 `page` 平移，`dragX` 负责
-        // 让它在拖动过程中跟着手指走。
+        // The structure is plain: each of the three pages fills one screen width, the whole row is translated by `page`, and `dragX`
+        // makes it follow the finger while dragging.
         GeometryReader { geo in
             HStack(spacing: 0) {
                 menuPane(menuPrefs.leadingItems)
@@ -210,18 +220,18 @@ struct WatchRecorderView: View {
             .frame(width: geo.size.width * 3, alignment: .leading)
             .offset(x: -CGFloat(page) * geo.size.width + dragX)
         }
-        // 三页并排，但只该看见一页 —— 不裁的话左右两页会压在当前页外面。
+        // Three pages side by side, but only one should be visible -- without clipping, the left and right pages spill over the current one.
         .clipped()
-        // `simultaneousGesture` 而不是 `.gesture`：翻页手势必须与子视图自己的
-        // 手势**并存**。用 `.gesture` 会把 Bot 那颗 `Button` 的长按/轻点顶掉 ——
-        // 那正好是这一页最要紧的交互。
+        // `simultaneousGesture`, not `.gesture`: the paging gesture has to **coexist** with the subviews'
+        // own gestures. `.gesture` would override the Bot `Button`'s hold/tap --
+        // which is exactly this page's most important interaction.
         .simultaneousGesture(pageDrag)
         .overlay(alignment: .bottom) { bottomBar }
-        // 隐藏的是**这一页**的导航条；推入的子页各自有自己的条与返回键。
+        // What's hidden is **this page's** navigation bar; the pushed sub-pages have their own bars and back buttons.
         //
-        // ⚠️ 两条都要：`.toolbar(.hidden, for: .navigationBar)` 收掉导航条本身，
-        // `.persistentSystemOverlays(.hidden)` 收掉 **watchOS 系统叠在最上层
-        // 的那只时钟** —— 系统时钟不属于导航条，只藏导航条它不一定跟着走。
+        // ⚠️ You need both: `.toolbar(.hidden, for: .navigationBar)` hides the navigation bar itself,
+        // and `.persistentSystemOverlays(.hidden)` hides **the watchOS system clock
+        // clock** -- the system clock isn't part of the navigation bar; hiding only the navigation bar won't necessarily take it along.
         .toolbar(.hidden, for: .navigationBar)
         .persistentSystemOverlays(.hidden)
         .alert(
@@ -239,16 +249,16 @@ struct WatchRecorderView: View {
         .onAppear {
             syncShakeDetector()
         }
-        // 离开这一页就停采集：加速度计一直开着是电池账上的大头，
-        // 而这一页是抬腕才会出现在前台的。
+        // Stop sampling when leaving this page: keeping the accelerometer on is a big line on the battery bill,
+        // and this page only comes to the foreground when you raise your wrist.
         .onDisappear { shake.stop() }
         .onChange(of: prefs.shakeToRecord) { _, _ in syncShakeDetector() }
     }
 
-    // MARK: - Bot 首页
+    // MARK: - The Bot home screen
 
-    /// Bot 那张脸。长按开始、轻点停止、双指互点开始/停止**三件事都长在它身上**
-    /// （见 `WatchBotFace` 顶部那段），这里只负责接住它的两个回调。
+    /// That Bot face. Hold to start, tap to stop, double tap to start/stop -- **all three live on it**
+    /// (see the passage at the top of `WatchBotFace`); this is only responsible for catching its two callbacks.
     private var botPane: some View {
         VStack(spacing: 6) {
             Spacer(minLength: 0)
@@ -256,45 +266,73 @@ struct WatchRecorderView: View {
             WatchBotFace(
                 size: Self.dialSide * Self.botFraction,
                 isRecording: model.isRecording,
-                // ★ 十三改：待机摆哪个表情由 iPhone 的设置决定。
+                // ★ Revision thirteen: which expression to wear while idle is decided by the iPhone's settings.
                 style: faceStore.style,
-                tint: styleStore.style.tint,
+                // ★ 2026-10-20: the eye colour now comes from the iPhone when the user picked
+                // one there (`faceStore.colorHex`); only when they haven't (`nil`) does the
+                // watch fall back to its own "Appearance" palette.
+                tint: faceStore.colorHex.map { Color(botHex: $0) } ?? styleStore.style.tint,
                 meter: model.meter,
-                // ★ 十一改：录音时计时贴着波显示（用户："下面附带录音时间"）。
+                // ★ Revision eleven: while recording the timer shows right by the wave (user: "with the recording time attached below").
                 elapsedText: model.isRecording
                     ? WatchFormat.compactDuration(model.elapsed)
                     : nil,
                 pokeTick: pokeTick,
                 dizzyTick: dizzyTick,
                 handGestureEnabled: prefs.pinchToRecord,
+                // ★ 2026-10-20: blink pace / auto-cycling expressions / square frame — all set on the iPhone.
+                blinkSpeed: faceStore.blinkSpeed,
+                autoCycle: faceStore.autoCycle,
+                frameVisible: faceStore.frameVisible,
                 onTap: handleTap,
                 onHold: beginRecordingByHold,
                 onToggle: handleToggle
             )
-            // ⚠️ 九改把颜色接了回来，但**只接一个纯色**：`tint` 就是"外观"页选的
-            //    那个颜色（用户："那个手表里的设置颜色则是眼睛 bot 的颜色，
-            //    取消渐变"）。八改一度整条去掉过 —— 去掉的是**底板和渐变**，
-            //    不是颜色本身；别再把 `style` 整个结构体传进来，那会让
-            //    "这张脸会不会用到呼吸灯"变成一个每次都要重新确认的问题。
+            // ⚠️ Revision nine wired color back in, but **only a single solid color**: `tint` is the color picked on the "appearance"
+            //    page (user: "the color in the watch settings should be the color of the eye bot,
+            //    drop the gradient"). Revision eight removed it wholesale at one point -- what it removed was **the plate and the gradient**,
+            //    not color itself; don't pass the whole `style` struct in again, that would turn
+            //    "does this face use the breathing light" into a question you have to re-confirm every time.
 
             caption
 
-            // 给底部那排页点 + 待传提示留位，免得两者叠在一起。
+            // Leave room for the bottom row of page dots + the pending hint so the two don't overlap.
             Spacer(minLength: 0).frame(height: 22)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // ★ 2026-10-20: double-tap / shake while recording land here instead of
+        // stopping outright. "End" takes the destructive role; "Keep recording" is
+        // the default the user most often wants after a misfire.
+        .alert(L10n.Watch.stopConfirmTitle, isPresented: $showStopConfirm) {
+            Button(L10n.Watch.stopConfirmAction, role: .destructive) {
+                // The 2-second timer must not fire *after* the answer was given.
+                stopConfirmTask?.cancel()
+                tapGateUntil = Date().addingTimeInterval(0.5)
+                model.stop()
+            }
+            Button(L10n.Watch.continueAction, role: .cancel) {
+                stopConfirmTask?.cancel()
+            }
+        } message: {
+            Text(L10n.Watch.stopConfirmMessage)
+        }
     }
 
-    /// 脸下面那行小字。空闲时是用法提示，录音时是**已写下的字节数**。
+    /// The small line below the face. While idle it's a usage hint; while recording it's the **byte count written so far**.
     ///
-    /// ⚠️ 空闲时那行提示**不能省**。"长按 2 秒"是一个**隐形**的交互 ——
-    /// 没有提示的话，第一次用的人只会戳一下、发现没反应、然后放弃。
-    /// ★ 录音计时贴着波显示（见 `WatchBotFace.elapsedText`），这里不再显示时间。
-    /// ⚠️ 字节数是**唯一**一个"录音真的在往盘上写"的硬证据 ——
-    ///   那条波安静时是一条贴底的平线，光看它分不出"没声音"和"坏了"。
+    /// ⚠️ While idle that hint **cannot be dropped**. "Hold for 2 seconds" is an **invisible** interaction --
+    /// without the hint, a first-time user just pokes once, finds nothing happens, and gives up.
+    /// ★ The recording timer sits right below the wave (see `WatchBotFace.elapsedText`), so this line no longer shows time.
+    /// ⚠️ The byte count is the **only** hard evidence that "the recording is really being written to disk" --
+    ///   the wave is a flat line hugging the bottom when things are quiet, and from it alone you can't tell "no sound" from "broken".
     @ViewBuilder
     private var caption: some View {
         if model.isRecording {
+            // ★ 2026-10-22: the "tap refused, long-press to stop" hint is gone —
+            // a tap now asks "End / Keep recording" outright (see `askStopConfirm`),
+            // so there is nothing left for a second, weaker hint to explain. That
+            // line goes back to being the byte counter, which is the only hard
+            // evidence that audio is reaching the file.
             Text(WatchFormat.bytes(model.currentBytes))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(styleStore.style.tint)
@@ -310,45 +348,78 @@ struct WatchRecorderView: View {
         }
     }
 
-    /// 长按满 2 秒（进度环已经由 `WatchBotFace` 自己收掉了）。
+    /// ★ 2026-10-20: a hold while **recording** now ends the take (hold-to-stop).
+    /// The ring the user sees filling is the same transition as starting — symmetric,
+    /// and immune to misfires because a 2-second deliberate press is nothing like a
+    /// cuff brush. Starting a recording still goes through `toggleRecording()`.
     private func beginRecordingByHold() {
-        guard !model.isRecording else { return }
-        // 抬手那一下会被 `Button` 当成轻点（见 `tapGateUntil` 那段）。
+        // The lift is read by the `Button` as a tap (see the `tapGateUntil` passage).
         tapGateUntil = Date().addingTimeInterval(0.5)
-        model.toggleRecording()
+        if model.isRecording {
+            model.stop()
+        } else {
+            model.toggleRecording()
+        }
     }
 
-    /// 轻点。录音中 = 停止；空闲 = 只是戳一下。
+    /// Tap. While idle = poke; **while recording = the "end / keep" prompt**.
     ///
-    /// ⚠️ 空闲态**不开始录音**是刻意的："点一下就录"正是这次要改掉的毛病
-    /// （抬手看表、袖口蹭一下都会录上）。要开始，请长按 2 秒、双指互点、或摇一摇。
+    /// ★ 2026-10-20: a tap used to stop the take, which is exactly the misfire the user
+    /// reported ("录音结束…防止误触中断") — a cuff brush reads as a tap.
     ///
-    /// ★ 十二改之后"戳一下"的内容变了：`pokeTick` 现在会让那张脸**演一个随机
-    /// 表情**（五档抽一个），不再是十改那种只有整体一弹的"单一的眼睛晃动"。
-    /// 这一层不需要知道有哪些表情 —— 它只管把脉冲发出去（见 `WatchBotFace`
-    /// 的 `pokeTick` 那段，那里解释了为什么不直接调方法）。
+    /// ★ 2026-10-22 (user: "如果是手势控制点击了后就弹出结束跟继续录音，…2s 后自动结束…
+    /// 默认不动则继续"): the tap used to be **refused** with a hint line. It now opens the
+    /// same two-button prompt the pinch and the shake use, and that prompt closes
+    /// itself after two seconds with "keep recording" as the answer. Same prompt,
+    /// same default, every gesture — a stray touch can no longer end a take, and it
+    /// no longer needs a second, weaker explanation of what *would*.
     private func handleTap() {
         guard Date() >= tapGateUntil else { return }
         if model.isRecording {
-            model.toggleRecording()
+            WKInterfaceDevice.current().play(.click)
+            askStopConfirm()
         } else {
             pokeTick += 1
         }
     }
 
-    /// 双指互点。开始 / 停止。
-    ///
-    /// 和轻点走同一个 `Button`，由 `WatchBotFace.handlePrimaryAction()` 按
-    /// "这一下有没有伴随触摸"分出来（双指互点是隔空动作，没有触摸）。
-    private func handleToggle() {
-        guard Date() >= tapGateUntil else { return }
-        model.toggleRecording()
+    /// Show "End this recording? / End · Keep recording" and **arm the 2-second
+    /// auto-close**. Every recording-state gesture funnels through here so the three
+    /// of them can never drift apart again.
+    private func askStopConfirm() {
+        stopConfirmTask?.cancel()
+        showStopConfirm = true
+        stopConfirmTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            // Timeout = "keep recording", never "end". The user asked for the
+            // default to be the safe one, and it also matches what the alert's
+            // cancel button does.
+            showStopConfirm = false
+        }
     }
 
-    // MARK: - 两侧滑动菜单
+    /// Double tap. Start / stop-with-confirmation.
+    ///
+    /// Shares the same `Button` as the tap, and `WatchBotFace.handlePrimaryAction()` tells them apart by
+    /// "whether this one came with a touch" (a double tap is an in-air gesture with no touch).
+    ///
+    /// ★ 2026-10-20: while recording the pinch **asks** instead of stopping outright
+    /// (user: "双指捏合…需要弹出一个确定或者继续防止误触中断") — an in-air pinch is easy
+    /// to fire while reaching for something else, and it used to end the take instantly.
+    private func handleToggle() {
+        guard Date() >= tapGateUntil else { return }
+        if model.isRecording {
+            askStopConfirm()
+        } else {
+            model.toggleRecording()
+        }
+    }
 
-    /// 一页菜单。`items` 为空时给一句"去设置里加"，而不是一页空白 ——
-    /// 空白页看起来像坏了。
+    // MARK: - The two side swipe menus
+
+    /// One menu page. When `items` is empty it shows "add some in settings" rather than a blank page --
+    /// a blank page looks broken.
     private func menuPane(_ items: [WatchHomeMenu]) -> some View {
         VStack(spacing: 8) {
             Spacer(minLength: 0)
@@ -382,13 +453,13 @@ struct WatchRecorderView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// 一个菜单项。
+    /// A menu item.
     ///
-    /// ★ 九改：图标颜色从"色板里循环取"改成**全用同一个颜色**
-    /// （`WatchRingStyle.tint`）。原因是这一轮把"一个主题 = 一种颜色"定死了
-    /// （见 `WatchRingStyle` 顶部）—— 循环取色时，三色盘（`activity`）会让
-    /// 第 2 个菜单项拿到那道荧光绿，于是同一个主题下脸上是一种颜色、
-    /// 菜单里是另一种颜色。那正是上一轮用户抱怨"绿色"的来源之一。
+    /// ★ Revision nine: the icon color goes from "cycling through the palette" to **all using the same color**
+    /// (`WatchRingStyle.tint`). The reason is that this round fixed "one theme = one color" solid
+    /// (see the top of `WatchRingStyle`) -- with cycling, the three-color palette (`activity`) would give
+    /// the 2nd menu item that neon green, so under one theme the face is one color while
+    /// the menu is another. That's one of the sources of last round's "green" complaint.
     private func menuTile(_ item: WatchHomeMenu) -> some View {
         HStack(spacing: 8) {
             Image(systemName: item.symbol)
@@ -412,8 +483,8 @@ struct WatchRecorderView: View {
         .accessibilityLabel(item.title)
     }
 
-    /// "编辑快捷菜单"入口。用虚线框和次要色，和上面那几个真菜单项区分开 ——
-    /// 它不是"第 N 个菜单"，是"改菜单的地方"。
+    /// The "edit quick menu" entry. A dashed border and secondary color set it apart from the real menu items above --
+    /// it isn't "the Nth menu", it's "where you edit the menus".
     private var editTile: some View {
         NavigationLink {
             WatchQuickMenuSettingsView()
@@ -444,26 +515,26 @@ struct WatchRecorderView: View {
         .accessibilityLabel(L10n.Watch.quickMenuAdd)
     }
 
-    // MARK: - 横向翻页
+    // MARK: - Horizontal paging
 
-    /// 翻页手势。**自己实现，不走 `TabView`** —— 理由见文件顶部"八改"那段。
+    /// The paging gesture. **Implemented ourselves, not via `TabView`** -- reasons in the "revision eight" passage at the top of the file.
     ///
-    /// 三件事都在这里定：
-    /// * 认不认（`pageDragSlop`）—— 划不到 24pt 就当抖动，不参与；
-    /// * 翻不翻（`pageFlipDistance`）—— 划够 44pt 才真的换页；
-    /// * 方向 —— 只认**明显偏横向**的划动（`abs(dx) > abs(dy)`）。竖直划动是
-    ///   用户在蹭表冠或翻系统层，被这里吃掉会很莫名其妙。
+    /// Three things are decided here:
+    /// * Whether to accept it (`pageDragSlop`) -- under 24pt counts as jitter and is ignored;
+    /// * Whether to flip (`pageFlipDistance`) -- only a full 44pt actually changes page;
+    /// * Direction -- only **clearly horizontal** swipes count (`abs(dx) > abs(dy)`). A vertical swipe is
+    ///   the user brushing the Digital Crown or flipping the system layer; swallowing it here would be baffling.
     private var pageDrag: some Gesture {
         DragGesture(minimumDistance: Self.pageDragSlop)
             .onChanged { value in
-                // ⚠️ 拖动过程必须**关掉动画**：这里是逐帧跟随手指，套上动画会
-                //    变成"慢半拍的橡皮筋"。松手时那一小段归位才需要动画。
+                // ⚠️ Animations **must be off** while dragging: this follows the finger frame by frame, and adding animation
+                //    turns it into "a rubber band a beat behind". Only the short settle on release needs animation.
                 var tx = Transaction()
                 tx.disablesAnimations = true
 
                 let raw = value.translation.width
-                // 已经在头/尾还继续往外划 → 阻尼到 1/4。给一点"拉到头了"的手感，
-                // 否则用户会以为卡住、然后划得更用力。
+                // Already at the start/end and still swiping outward → damp to 1/4. It gives a bit of "you've pulled to the end" feel,
+                // otherwise the user thinks it's stuck and swipes harder.
                 let pastStart = page == 0 && raw > 0
                 let pastEnd = page == 2 && raw < 0
                 let damped = (pastStart || pastEnd) ? raw * 0.25 : raw
@@ -474,29 +545,29 @@ struct WatchRecorderView: View {
                 let dx = value.translation.width
                 let dy = value.translation.height
 
-                // ★ 翻页这一下松手时，`Button` 会在**抬手那一刻**也触发一次它的
-                //   action（这是 `Button` 的定义行为，不是 bug）。不挡掉的话，
-                //   空闲态划一下屏幕，眼睛会莫名其妙弹一下 —— 明明什么都没点。
-                //   复用长按那道的同一扇闸门，两个坑一个解法。
+                // ★ When the paging swipe is released, the `Button` also fires its action at the **moment the finger lifts**
+                //   (that's defined `Button` behavior, not a bug). If we didn't block it,
+                //   swiping the screen while idle would make the eyes bounce for no reason -- with nothing actually tapped.
+                //   Reusing the same gate as the hold path; one fix for two traps.
                 tapGateUntil = Date().addingTimeInterval(0.35)
 
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
                     if abs(dx) > abs(dy), abs(dx) > Self.pageFlipDistance {
                         page = min(2, max(0, page + (dx < 0 ? 1 : -1)))
                     }
-                    // 没达标就归位 —— 这个"弹回去"本身就是"你划得不够"的反馈。
+                    // Below threshold it settles back -- that "spring back" is itself the feedback that "you didn't swipe far enough".
                     dragX = 0
                 }
             }
     }
 
-    // MARK: - 屏幕下沿
+    // MARK: - Bottom edge of the screen
 
-    /// 最下沿那一小摞：页点 + 待传提示。
+    /// The little stack at the very bottom: page dots + pending hint.
     ///
-    /// ⚠️ 两者**必须放在同一个 overlay 里**（而不是各挂一个 overlay）：两个
-    ///    `alignment: .bottom` 的 overlay 会**叠在同一个位置**上，待传条一出现
-    ///    就会盖住页点。
+    /// ⚠️ The two **must go in the same overlay** (not one overlay each): two
+    ///    `alignment: .bottom` overlays **stack in the same place**, so the moment the pending bar appears
+    ///    it covers the page dots.
     private var bottomBar: some View {
         VStack(spacing: 3) {
             pageDots
@@ -505,14 +576,14 @@ struct WatchRecorderView: View {
         .padding(.bottom, 1)
     }
 
-    /// 三个小圆点，标出现在在哪一页。
+    /// Three little dots showing which page you're on.
     ///
-    /// ★ 八改新增。用户报"左右滑不到菜单"，其中一半是功能坏（`.page` 不给横向
-    /// 翻页，已修），另一半是**发现性**：屏幕上从来没有任何东西提示过这里能滑。
-    /// 三个点是最省地方、也最不用解释的说法。
+    /// ★ Added in revision eight. The user reported "swiping left and right doesn't reach the menus"; half of that was broken behavior (`.page` not giving horizontal
+    /// paging, now fixed) and the other half was **discoverability**: nothing on screen ever hinted that you could swipe here.
+    /// Three dots are the least space and the least explanation.
     ///
-    /// ⚠️ 刻意**不做成可点的**：4pt 的点在 40mm 表上几乎点不中，做成按钮只会
-    ///    带来"点了没反应"。它的职责是"告诉你能滑"，不是"替你滑"。
+    /// ⚠️ Deliberately **not tappable**: a 4pt dot is nearly impossible to hit on a 40mm watch, and making it a button would only
+    ///    bring "I tapped and nothing happened". Its job is "tell you that you can swipe", not "swipe for you".
     private var pageDots: some View {
         HStack(spacing: 4) {
             ForEach(0..<3, id: \.self) { index in
@@ -524,12 +595,12 @@ struct WatchRecorderView: View {
         .allowsHitTesting(false)
     }
 
-    // MARK: - 待传提示条
+    // MARK: - The pending hint bar
 
-    /// 屏幕最下沿那条细提示。**只在有待传条目时出现**，高度约一行字。
+    /// The thin hint at the very bottom of the screen. **Only appears when something is pending**, about one line of text tall.
     ///
-    /// 为什么不摊回一列列表：首页正中现在是 Bot，摊开会把它顶上去。
-    /// 详情点进独立一页（`WatchQueueView`），两样都不冲突。
+    /// Why not spread it back into a column: the center of the home screen is the Bot now, and spreading it out would shove it up.
+    /// Details are on a separate page (`WatchQueueView`), so the two don't conflict.
     @ViewBuilder
     private var queueBar: some View {
         if !model.pending.isEmpty {
@@ -557,31 +628,41 @@ struct WatchRecorderView: View {
         }
     }
 
-    // MARK: - 摇一摇
+    // MARK: - Shake
 
-    /// 按当前开关对准采集状态。**幂等** —— `onAppear` 和开关变化两处无脑调用。
+    /// Line the sampling state up with the current toggle. **Idempotent** -- called blindly from both `onAppear` and the toggle change.
     private func syncShakeDetector() {
         guard prefs.shakeToRecord else {
             shake.stop()
             return
         }
         shake.start { [model] in
-            // 触发时给一记震动：这一刻人根本没在看屏幕（抬手就是晃），
-            // 没有反馈就不知道到底录上了没有。用"开始/停止"两种不同手感，
-            // 光靠震动能分辨出是开还是停。
+            // Fire a haptic on trigger: at that moment nobody is looking at the screen (raising the wrist is the shake),
+            // so without feedback you can't tell whether it actually started recording. Two different feels, "start/stop",
+            // let the haptic alone tell start from stop.
             WKInterfaceDevice.current().play(model.isRecording ? .stop : .start)
-            // ★ 十四改：眼睛**转圈圈**（用户："摇一摇眼睛会有转圈圈眩晕感
-            //   增加交互"）。震动给手腕、眩晕给眼睛，两个通道一起才有"收到"。
+            // ★ 2026-10-20: while **recording** the shake asks before acting (user:
+            // "摇一摇也是需要弹出是否确认取消") — a shake is the easiest gesture to
+            // produce by accident while moving, and it used to end the take outright.
+            // (The detector fires on the main queue, so the @State write is safe.)
+            guard !model.isRecording else {
+                // ★ 2026-10-22: same prompt as tap / pinch, and it closes itself
+                // after 2 s with "keep recording" — see `askStopConfirm`.
+                askStopConfirm()
+                return
+            }
+            // ★ Revision fourteen: the eyes **spin in circles** (user: "shaking makes the eyes spin in circles with a dizzy feel
+            //   to add more interaction"). A haptic for the wrist and the dizzy for the eyes; together the two channels say "received".
             dizzyTick += 1
-            // ⚠️ 真正的起停**往后挪 0.45 秒**：不挪的话录音态立刻换上那条波，
-            //    眼睛刚转起来就被换掉了，"眩晕"根本看不见。
-            //    0.45 秒落在转两圈的**前半段**（整段 0.9 秒）：开始录音时能看到
-            //    眼睛先晕半圈、然后颜色漫上来；停止录音时波退场、眼睛带着
-            //    后半圈眩晕回来。两条路都有戏份。
+            // ⚠️ The actual start/stop is **pushed back 0.45 seconds**: without that, the recording state immediately swaps in the waveform
+            //    the moment the eyes start spinning and the "dizzy" is never seen.
+            //    0.45 seconds falls in the **first half** of the two spins (0.9 seconds total): when recording starts you see
+            //    the eyes dizzy through half a turn, then the color floods in; when recording stops the wave exits and the eyes come back
+            //    with the second half of the dizzy. Both directions get their moment.
             //
-            //    这个延迟是**加在感知上**的，但摇一摇本来就有约 0.9 秒的判定窗
-            //    （`WatchShakeDetector.burstWindow`），用户对"摇一摇"的预期本来就
-            //    不是即时的。再长就不行了 —— 那会读成"摇了没反应"。
+            //    The delay is **added on the perception side**, but shake already has about a 0.9-second detection window
+            //    (`WatchShakeDetector.burstWindow`), and the user's expectation for a "shake" was never
+            //    instant anyway. Any longer and it's no good -- that reads as "I shook it and nothing happened".
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 450_000_000)
                 model.toggleRecording()
@@ -590,9 +671,9 @@ struct WatchRecorderView: View {
     }
 }
 
-// MARK: - 待传页
+// MARK: - The pending page
 
-/// 待传列表的独立页（从首页底部那条提示点进来）。
+/// The separate page for the pending list (reached by tapping the hint at the bottom of the home screen).
 struct WatchQueueView: View {
     @EnvironmentObject private var model: WatchRecorderModel
     @EnvironmentObject private var link: WatchLink
@@ -600,9 +681,9 @@ struct WatchQueueView: View {
     var body: some View {
         Group {
             if model.pending.isEmpty {
-                // ★ 2026-10-16 七改：这一页现在能**从菜单直接进来**（它成了一个
-                // 可添加的菜单项），所以"空"是常态，必须给空态 ——
-                // 否则从菜单点进来只会看到一片黑。
+                // ★ 2026-10-16 revision seven: this page can now be **reached straight from the menu** (it became one
+                // of the addable menu items), so "empty" is the normal case and it needs an empty state --
+                // otherwise tapping in from the menu just shows a black screen.
                 VStack(spacing: 5) {
                     Image(systemName: "checkmark.circle")
                         .font(.system(size: 20))

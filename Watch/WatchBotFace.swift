@@ -1,36 +1,36 @@
 import SwiftUI
 
-// MARK: - 首页正中那张"脸"
+// MARK: - The "face" at the center of the home screen
 //
-// ★ 2026-10-16 七改（用户原话："类似 Grok Bot 一样，两个眼睛然后你参考一下他会
-// 自然眨眼做的哪些动画……把当前首页的录音按钮去掉改成 bot 一样生动的，通过长按
-// 点击它的眼睛 2s 才开始录音或者之前的手势交互跟摇一摇才开始录音跟停止录音"）：
+// ★ 2026-10-16 revision seven (user's words: "make it like Grok Bot, two eyes, then look at how they
+// do the natural-blinking animations... Remove the record button from the home screen and make it alive like the bot; start by holding
+// its eyes for 2s to record, or use the previous gestures and shake to start and stop recording"):
 //
-// 首页正中原来是一只圆环按钮，点一下就开始录音。问题是"点一下就开始录"放在
-// 手腕上太容易误触 —— 抬手看时间、袖口蹭一下都会录上。现在换成一个拟人的
-// 小机器人：**长按它 2 秒**才开始，录音中轻点一下停。
+// The center of the home screen used to be a ring button; one tap started recording. The problem with "one tap starts recording" on
+// the wrist is that it misfires far too easily -- raising the wrist to check the time, or a brush from a cuff, would start a recording. Now it is a human-like
+// The little robot: **hold it for 2 seconds** to start, and a tap while recording stops.
 //
 // ─────────────────────────────────────────────────────────────────────────
-// ## 这张脸的构成（四次改动之后的结论）
+// ## How this face is put together (the conclusion after four revisions)
 //
-// ★ 八改：删掉了**圆角方底板**。用户的原话是"不要绿色，边框直接就 2 个眼睛"
-// —— 有那块板子时它是一块彩色方块，把眼睛框在里面，像个 App 图标而不像一张脸。
-// 从 Grok 那边也能印证这一条：他们的机器人是**黑底上两条白杠**，基本结构就是
-// "简单几何形状 + 一双有表情的眼睛"（他们官方设计文里的说法），没有脸框。
+// ★ Revision eight: removed the **rounded-square plate**. The user's exact words were "no green, just make the frame two eyes"
+// -- with that plate it was a colored square framing the eyes, more like an app icon than a face.
+// Grok backs this up too: their robot is **two white bars on a black background**, and the basic structure is
+// "simple geometric shapes + a pair of expressive eyes" (their own words in the official design write-up), with no face frame.
 //
-// ★ 九改：**颜色回到眼睛上，但只回一半** —— 取值仍然是"外观"页选的色板，
-// 然而只取**纯色**（`palette.solid`），不再有渐变（用户："那个手表里的设置颜色
-// 则是眼睛 bot 的颜色，取消渐变"）。所以这一份现在收一个 `tint: Color`，
-// 而不是整个 `WatchRingStyle`：这张脸只需要一个颜色，给它一整个样式结构体
-// 反而会让"它到底会不会用到渐变/呼吸灯"变成一个每次都要重新确认的问题。
+// ★ Revision nine: **color comes back to the eyes, but only halfway** -- the value still comes from the palette chosen on the "Appearance" page,
+// but only as a **solid color** (`palette.solid`), no more gradient (user: "the color set in the watch
+// should be the color of the eye bot, drop the gradient"). So this now takes a `tint: Color`,
+// not a whole `WatchRingStyle`: this face needs only a color, and handing it a whole style struct
+// would turn "will it actually use the gradient / breathing light" into a question to re-confirm every time.
 //
-// ★★ 十改（八改/九改两次放慢都没解决的那个问题）：
-// > `他的那个眼睛不是一直眨眼的，不需要一直眨眼，
-// >  https://github.com/sam70361/aora-bot 你参考这个仓库里面的表情管理，
-// >  只看眼睛就好，两个眼睛不要一直眨眼，手表里面`
+// ★★ Revision ten (the problem that neither of revision eight's nor nine's two slow-downs solved):
+// > `his eyes are not blinking all the time, no need to keep blinking,
+// >  https://github.com/sam70361/aora-bot look at the expression management in this repo,
+// >  just the eyes is enough, the two eyes should not keep blinking, in the watch`
 //
-// 于是去读了那个仓库（`mood-mates/` 与 `emotion-ball/` 两套同源引擎，纯 SVG +
-// 原生 JS），把它的待机（`02 待机放空`）拆开看：
+// So I went and read that repo (the `mood-mates/` and `emotion-ball/` engines, two engines from one source, pure SVG +
+// native JS), and took apart its idle state (`02 idle blank-out`):
 //
 // ```js
 // pool: [0, 8], poolMs: [9000, 16000], blinkMs: [6000, 14000], antics: true,
@@ -41,431 +41,438 @@ import SwiftUI
 // ]
 // ```
 //
-// **★ 这一读把问题整个换了个方向。** 九改的思路是"把眨眼周期越拉越长"，
-// 那条路已经走到头了 —— 因为根因不是**频率**，是下面这四条：
+// **★ That read turned the whole problem in a different direction.** Revision nine's approach was "stretch the blink cycle longer and longer,"
+// and that road had already run out -- because the root cause is not **frequency**, it is these four things below:
 //
-// 1. **节拍器**。九改是**固定 19.12 秒**一轮。固定周期是人眼最擅长抓的规律，
-//    一旦被抓到，每一次眨眼都变成"它又按点眨了"，再慢也还是机械感。
-//    参考实现的 `blinkMs: [6000, 14000]` 是**每次眨完重新抽一个区间内的随机
-//    等待**（`this._blinkNext = now + rand(...)`），永远没有节拍。
-// 2. **每轮必连眨**。九改是"两下里夹一次连眨"—— 一个周期里**必然**有两次开合。
-//    参考实现是 `if (Math.random() < 0.14)` —— **只有 14% 概率**补第二下。
-//    所以参考实现的绝大多数眨眼是**单下、300ms 的一闪**，视觉重量比九改轻一半。
-// 3. **眨眼是唯一的动作**。九改里那 ±1.8% 的呼吸肉眼根本看不见，于是
-//    19 秒里这张脸**完全静止**，然后突然"啪-啪"两下 —— 既死板又吵。
-//    参考实现待机的主体动作是**目光游移**（`lookX` 左右各停留片刻、`lookY`
-//    缓慢起伏），眨眼只是点缀。眼睛**从不静止**，所以"眨眼"根本不会被注意到。
-// 4. **慢**。九改一次开合 0.45 秒（140+90+220）。参考实现总共 300ms，
-//    而且睁眼时**过冲到 1.08 再落回 1** —— 那一下轻快的"弹开"正是"活着"的来源。
+// 1. **A metronome.** Revision nine was a **fixed 19.12 seconds** per round. A fixed period is the pattern the human eye is best at catching,
+//    and once it is caught, every blink becomes "it blinked on schedule again," still mechanical no matter how slow.
+//    The reference implementation's `blinkMs: [6000, 14000]` is **drawing a fresh random wait within a range after every blink**
+//    (`this._blinkNext = now + rand(...)`), so there is never a beat.
+// 2. **A double blink every round.** Revision nine was "one double blink inserted between the singles" -- a cycle **necessarily** has two open-close pairs.
+//    The reference implementation is `if (Math.random() < 0.14)` -- **only a 14% chance** of a second blink.
+//    So the great majority of the reference implementation's blinks are **a single, 300ms flash**, half the visual weight of revision nine.
+// 3. **Blinking is the only motion.** The plus-or-minus 1.8% breathing in revision nine is invisible to the naked eye, so
+//    this face was **completely still** for 19 seconds, then suddenly "snap-snap" twice -- both rigid and noisy.
+//    The reference implementation's main idle motion is **gaze drift** (`lookX` pausing a moment at each side, `lookY`
+//    slowly rising and falling), with blinking only as an accent. The eyes **are never still**, so "blinking" is not noticed at all.
+// 4. **Slow.** Revision nine's open-close took 0.45 seconds (140+90+220). The reference implementation totals 300ms,
+//    and when opening it **overshoots to 1.08 then falls back to 1** -- that light "spring open" is where "alive" comes from.
 //
-// ⚠️ 顺带算出一件反直觉的事：**两边眨眼的总频率其实差不多**。
-//    九改 = 每 19.12 秒 2 次开合 = **1 次 / 9.6 秒**；
-//    参考实现 = 1 次 / 6~14 秒、其中 14% 补一下 ≈ **1 次 / 9 秒**。
-//    ⇒ 所以十改**不需要**再往慢里调，要换的是**规律性**和**动作构成**。
-//    （十改仍然把区间抬到 9~20 秒，比参考实现更静 —— 用户连着两轮说"不要
-//    一直眨"，在"参考机制"与"用户约束"冲突时以用户为准：机制照抄、数值从严。）
-//
-// ─────────────────────────────────────────────────────────────────────────
-// ★★ 2026-10-16 十三改（用户原话："需要在 Nomily AI APP 里面的设置里面增加一个
-//    就是设置手表的首页眼睛的表情，把之前的 github 里面 gork bot 的表情放入到
-//    Nomily ai 的设置里面支持放入他们的表情"）：
-//
-// 十二改那五个表情是**只读**的：轻点一下随机抽一个演一遍，用户挑不了。
-// 这一轮把"表情"从**行为**提成**设置**：
-//
-//   · 表情库（九档）搬到了 `Sources/Services/Watch/BotFaceStyle.swift` ——
-//     一个**两端共用**的文件，于是 iPhone 上那个选择器的预览和表上真正画出来的
-//     那张脸**必然是同一套代码**，不会漂移。
-//   · 这张脸多收一个 `style`：**常驻**的那一档，由用户在 iPhone 上选，
-//     经 `WatchConnectivity` 推过来（见 `WatchFaceStore` / `WatchLink`）。
-//   · 轻点时的池子从"写死的五档"改成"库里除了常驻那档之外的八档"——
-//     抽到和常驻一样的那档等于"点了没反应"，那正是十二改要修掉的那个抱怨。
-//
-// ⚠️ **`EyeMood` 与 `EyeCurve` 两个私有类型整个删掉了**（前者是十二改的只读
-//    表情池，后者是那段弧的形状）。它们的内容现在都在共用文件里，名字分别是
-//    `BotFaceStyle` 与 `BotFaceEyeCurve`。留着旧的那份，就等于允许"表上画的"
-//    和"手机上预览的"各走各的 —— 而两边各写一份几何，那种漂移是最难被发现、
-//    也最伤人的一种（用户在手机上挑了个笑眼，抬腕发现是垂眼）。
+// ⚠️ Which incidentally works out to a counter-intuitive fact: **the overall blink frequency on both sides is actually about the same.**
+//    Revision nine = 2 open-close pairs per 19.12 seconds = **1 per 9.6 seconds**;
+//    reference implementation = 1 per 6~14 seconds, 14% of which add a second ≈ **1 per 9 seconds**.
+//    ⇒ So revision ten **does not** need to go any slower; what has to change is the **regularity** and the **motion make-up**.
+//    (Revision ten still raised the range to 9~20 seconds, quieter than the reference implementation -- the user said "don't
+//    keep blinking" two rounds in a row, and when the "reference mechanism" conflicts with the "user constraint" the user wins: copy the mechanism, tighten the numbers.)
 //
 // ─────────────────────────────────────────────────────────────────────────
-// ★★ 2026-10-16 十五改（用户原话：
-//    "当前点击眼睛不是直接白屏，是那两个眼睛直接扩散全屏"）：
-// 说的就是长按那两秒的画面。十四改画的是一个从眼睛位置长出去的实心圆，
-// 用户读成"两个眼睛在扩散"，他要的是**整块屏幕一起变色**。改成整屏纯色
-// 用透明度当进度。
+// ★★ 2026-10-16 revision thirteen (user's words: "the Nomily AI app's settings need one more
+//    namely a setting for the watch home screen eyes' expression, bringing the expressions of the gork bot on github into
+//    the Nomily ai settings with support for putting in their expressions"):
+//
+// Revision twelve's five expressions are **read-only**: a tap draws one at random and plays it once, and the user cannot choose.
+// This round promoted "expression" from a **behavior** to a **setting**:
+//
+//   · The expression library (nine tiers) moved to `Sources/Services/Watch/BotFaceStyle.swift` --
+//     a file **shared by both ends**, so the preview in the picker on the iPhone and the face actually drawn on the watch
+//     **are necessarily the same code**, and cannot drift.
+//   · This face takes one more `style`: the **persistent** tier, chosen by the user on the iPhone and
+//     pushed over via `WatchConnectivity` (see `WatchFaceStore` / `WatchLink`).
+//   · The pool on a tap goes from "a hard-coded five tiers" to "the eight tiers in the library other than the persistent one" --
+//     drawing a tier the same as the persistent one equals "the tap did nothing," which is exactly the complaint revision twelve was fixing.
+//
+// ⚠️ **The two private types `EyeMood` and `EyeCurve` were deleted outright** (the former was revision twelve's read-only
+//    expression pool, the latter the shape of that arc). Their contents are now in the shared file, named
+//    `BotFaceStyle` and `BotFaceEyeCurve`. Keeping the old copy would be to allow "what is drawn on the watch"
+//    and "what is previewed on the phone" to go their separate ways -- and writing the geometry twice is the kind of drift that is hardest to spot
+//    and does the most harm (the user picks a smiling eye on the phone and, raising their wrist, finds a drooping eye).
 //
 // ─────────────────────────────────────────────────────────────────────────
-// ★★ 2026-10-16 十六改（用户原话：
-//    "我要的是两个眼睛根据我按压下去然后自动根据我按压的地方两个眼睛融在一起，
-//     然后再慢慢扩散整个屏幕然后跳转到录音那边"）：
-// 十五改那片"整屏渐亮"被否了 —— 干净，但**没有来路**：颜色凭空从整块屏幕上
-// 浮起来，和那两只眼睛没有关系。这一轮把顺序补上，长按拆成两段几何：
-// **先融（前 32%）、再扩散（后 68%）**，融的目标点是**手指按下的地方**。
-// 实现全在 `holdLayer`，参数怎么定的写在它上面那段。
-// ─────────────────────────────────────────────────────────────────────────
-// ## 让这张脸"活着"的几件事（十二改之后）
-//
-//   · **目光游移**（`runGazeLoop`，**这是待机的主体动作**）—— 两只眼睛**整体**
-//     轻轻地左右看，到每一边**停留片刻**再换边，周期 4.8 秒。参考实现用
-//     `tanh(2.8·sin)` 的平滑方波表达"停留久、过渡快"，这里用
-//     `withAnimation(.easeInOut(0.9))` + 睡满半个周期等效实现。
-//     ⚠️ 是**整对眼睛一起平移**，不是左右眼各看各的 —— 各看各的就成了斜视。
-//   · **偶尔眨一下眼**（`runBlinkLoop`）—— 快闭（70ms）→ 停 70ms →
-//     睁到 1.08 过冲（80ms）→ 150ms 落回 1。总共 **300ms**，单下为主，
-//     14% 概率在 70ms 后再补一下。间隔走**两档**随机（3.5~6.5 秒为主、
-//     22% 概率插一段 10~18 秒），见 `nextBlinkGap()`。
-//   · **待机长什么样由用户定**（`style`，★ 十三改）—— 九档表情在 iPhone 的
-//     设置里挑（`BotFaceStyle`），选中的那一档常驻在这张脸上。
-//   · **轻点给一个表情**（`BotFaceStyle.tapPool`）—— 从库里抽一档演一遍，
-//     抽完收回常驻档。这是**唯一**一个"眼睛形状真的变了"的动作；
-//     参考实现那 20 个槽位里还有一大半搬不过来，理由写在
-//     `Sources/Services/Watch/BotFaceStyle.swift` 顶部
-//     （简单说：一只圆头竖条能表达的维度只有四个）。
-//   · **呼吸** —— 整对眼睛极缓慢地缩胀（±1.8%，一次 3.6 秒）。幅度必须小：
-//     大了像在跳动；小到"说不上来哪里在动、但它就是活的"才对。
-//   · **录音时换一条音波**（`WatchVoiceWave`）—— 用户："开始录音的时候就是
-//     一条音波跟心率一样的"。所以录音态**不是眼睛的变体**，是另一个形态：
-//     尖峰高度是麦克风的真实电平，安静时靠一个"咚—哒"的底型维持心跳般的节律。
-//   · **长按时的蓄力环** —— 按住不放时眼睛外面走一圈 2 秒进度弧。没有它，
-//     用户不知道要按多久，也不知道自己那一下到底被没被识别到。
-//
-// ⚠️ **为什么不再用 `phaseAnimator`**（八改、九改都用它）：
-//    `phaseAnimator` 的相序列会在**视图重建时重新求值**，所以给不出随机时长
-//    —— 九改注释里那句"这里不能用随机数"说的就是这个限制。而这一轮的核心
-//    恰恰是**随机**（每次眨完重新抽等待时间），所以整条改为 `Task` 循环 +
-//    `withAnimation` 驱动。那个限制是真的、绕不过去，只能换机制。
-//
-// ⚠️ **参考实现里没跟过来的两件事**（有意，不是漏）：
-//   · `lookY` 那条独立的正弦（振幅 2 / 画布 240 = 0.83%，相对眼心距只有 6.7%）
-//     —— 换算到表盘上是 **±1.7pt**，肉眼看不出来。它的作用只是"别让目光是一条
-//     完美的水平滑轨"，所以折成 `runGazeLoop` 里那个很小的纵向分量就够了，
-//     不值得为它再养一个独立的相位。
-//   · 眼形池轮换（`calm` / `calm2` 每 9~16 秒换一次）。那两者的差别是
-//     宽 ×0.96、高 ×1.05 —— 也就是**4% / 5%**，比这里的呼吸还小，
-//     却要多养一层缩放。本文件里叠的缩放已经有呼吸 × 被戳两层了，
-//     再加一层没人算得清总幅度（`figureScale` 那段注释说过这件事）。
-//
-// ⚠️ 上面第二条**被十二改推翻了** —— 但推翻的方式和参考实现不一样：不是
-//    "每 9~16 秒换一个 4% 的差别"（那种换法没人看得见，还要多养一个循环），
-//    而是**轻点的那一下给一个整档、一眼能分辨的表情**，演完就回待机。
-//    所以这里依旧没有"轮换循环"，只有一次性的 `mood`（见 `EyeMood`）。
+// ★★ 2026-10-16 revision fifteen (user's words:
+//    "right now tapping the eyes doesn't go straight to a white screen, it spreads those two eyes across the whole screen"):
+// This is about the picture during those two seconds of holding. Revision fourteen drew a solid circle growing out from the eyes' position,
+// which the user read as "the two eyes spreading," whereas what he wants is **the whole screen changing color at once**. So it became a full-screen solid color
+// Use opacity as the progress.
 //
 // ─────────────────────────────────────────────────────────────────────────
-// ★★ 2026-10-16 十二改（用户原话："当前颜色里面呢没有白色吗手表，然后录音时候
-//    心率起伏需要波动幅度大且占比屏幕大，还有眼睛需轻触它会有各种表情而不是
-//    单一的眼睛晃动，随机眨眼睛频率跟正常人眼渣样一样"）：
+// ★★ 2026-10-16 revision sixteen (user's words:
+//    "what I want is for the two eyes, based on where I press down, to automatically merge together at the place I press,
+//     and then slowly spread across the whole screen and jump over to the recording side"):
+// Revision fifteen's "whole screen brightening" was rejected -- clean, but with **no origin**: the color rose out of thin air across the whole screen
+// with nothing to do with those two eyes. This round adds the sequence back, splitting the hold into two pieces of geometry:
+// **merge first (the first 32%), then spread (the last 68%)**, with the merge target being **where the finger pressed**.
+// The implementation is all in `holdLayer`; how the parameters were chosen is written in the paragraph above it.
+// ─────────────────────────────────────────────────────────────────────────
+// ## The things that make this face "alive" (after revision twelve)
 //
-// 四条里跟这张脸有关的是两条：
+//   · **Gaze drift** (`runGazeLoop`, **this is the main idle motion**) -- the two eyes **as a whole**
+//     look gently left and right, **pausing a moment** at each side before switching, with a 4.8-second period. The reference implementation uses
+//     `tanh(2.8·sin)`, a smooth square wave, to express "long pause, fast transition"; here
+//     `withAnimation(.easeInOut(0.9))` + sleeping out half a period is an equivalent implementation.
+//     ⚠️ It is **the whole pair translating together**, not each eye looking its own way -- doing it separately becomes a squint.
+//   · **Occasionally blink once** (`runBlinkLoop`) -- close fast (70ms) → pause 70ms →
+//     open to a 1.08 overshoot (80ms) → fall back to 1 over 150ms. **300ms** total, mostly single blinks,
+//     14% chance of adding one more after 70ms. The interval draws from **two tiers** at random (mostly 3.5~6.5 seconds,
+//     22% chance of inserting a 10~18 second stretch), see `nextBlinkGap()`.
+//   · **What the idle state looks like is up to the user** (`style`, ★ revision thirteen) -- nine tiers of expressions are chosen
+//     in the iPhone settings (`BotFaceStyle`), and the chosen tier persists on this face.
+//   · **A tap gives an expression** (`BotFaceStyle.tapPool`) -- one tier is drawn from the library and played once,
+//     then withdrawn to the persistent tier. This is the **only** action that "actually changes the eye shape";
+//     there is still well over half of that 20-slot library in the reference implementation that cannot be brought over, for the reason see the top of
+//     `Sources/Services/Watch/BotFaceStyle.swift`
+//     (put simply: a round-tipped vertical bar has only four dimensions it can express).
+//   · **Breathing** -- the whole pair of eyes slowly inflates and deflates (plus or minus 1.8%, once every 3.6 seconds). The amplitude must be small:
+//     any larger and it looks like it is pulsing; it should be small enough that "you can't say what is moving, but it is alive."
+//   · **Swap in a waveform while recording** (`WatchVoiceWave`) -- user: "when recording starts it should be
+//     a waveform just like heart rate." So the recording state is **not a variant of the eyes**, it is another form:
+//     the peak height is the microphone's real level, and when quiet a "thump-tick" base shape keeps a heartbeat-like rhythm.
+//   · **The charge ring while holding** -- while the finger stays down, a 2-second progress arc runs around the outside of the eyes. Without it,
+//     the user does not know how long to press, nor whether that press was even picked up.
 //
-// **1. 轻点要出表情，不只是弹一下。** 十改的 `pokeOnce()` 只做一件事：
-//    整张脸弹 5%。用户把这句读成了"单一的眼睛晃动"—— 是对的，那一下
-//    确实只是一个"我收到了"，没有任何**表情**可言。
-//    现在轻点会**随机抽一个表情演一遍**（`EyeMood`，五档：∩拱笑眼 / ∪垂眼 /
-//    圆睁 / 眯眼 / 斜瞪），进场弹、停约 0.8 秒、松着收回。整体的那一弹留着，
-//    但收到 3% —— 它降级成"贴身的回应"，表情才是主角。
+// ⚠️ **Why `phaseAnimator` is no longer used** (revisions eight and nine both used it):
+//    `phaseAnimator`'s phase list is re-evaluated **whenever the view is rebuilt**, so it cannot give a random duration
+//    -- that limitation is what the line "no random numbers here" in revision nine's comment refers to. And the core of this round
+//    is precisely **randomness** (drawing a fresh wait after every blink), so the whole thing was switched to a `Task` loop +
+//    `withAnimation` driving. That limitation is real and cannot be worked around, so the mechanism had to change.
 //
-// **2. 眨眼频率改回"正常人"。** 十改按用户连着两轮的"不要一直眨眼"从严取了
-//    9~20 秒，均值约 1 次 / 15 秒。用户这一轮明确要"跟正常人一样"，于是换成
-//    **两档**分布（`blinkGapNear` / `blinkGapFar`）—— 理由和算术写在
-//    `nextBlinkGap()` 那边，一句话：人眨眼不是均匀随机的，是"密的里面偶尔
-//    插一段长的"。均值约 1 次 / 7 秒（≈ 8.6 次/分），正好是**人盯着屏幕时**
-//    的那一档，也正是此刻用户看这块表的姿势。
-//    ⚠️ 十改"别再回头调固定周期"那条约束**没有**被违反：改的是区间，机制
-//       仍然是"每次眨完重新抽"，没有任何固定周期。
+// ⚠️ **Two things from the reference implementation that did not come across** (deliberate, not missed):
+//   · The independent sine on `lookY` (amplitude 2 / canvas 240 = 0.83%, only 6.7% relative to the eye-center distance)
+//     -- converted to the watch face it is **±1.7pt**, invisible to the naked eye. Its only job is "keep the gaze from being a
+//     perfectly horizontal rail," so folding it into the very small vertical component in `runGazeLoop` is enough;
+//     it is not worth keeping a separate phase alive for it.
+//   · Rotating the eye-shape pool (`calm` / `calm2` swapping every 9~16 seconds). The difference between those two is
+//     width ×0.96, height ×1.05 -- that is, **4% / 5%**, smaller than the breathing here,
+//     yet it means maintaining one more scale layer. The scale layers already stacked in this file are the two of breathing × poke,
+//     and adding one more means nobody can work out the total amplitude (the `figureScale` comment made this point).
 //
-// ## 手势为什么全在这个类型里，而不是散在首页
-// 长按开始、轻点停止、双指互点开始/停止 —— 三件事的**落点都是这张脸**。
-// 拆成"首页挂长按、脸里管动画"会让"按下时脸该有什么反应"这个问题横跨两个
-// 文件；而且双指互点要求落点是一个真正的 `Button`（`handGestureShortcut`
-// 只对按钮类控件生效），所以这里干脆用 `Button` 把眼睛包起来，
-// 长按挂在同一个 `Button` 上 —— 三件事于是只有一个真相源。
+// ⚠️ The second item above **was reversed by revision twelve** -- but reversed in a different way from the reference implementation: not
+//    "swap a 4% difference every 9~16 seconds" (nobody can see that kind of swap, and it requires maintaining one more loop),
+//    but **a tap giving a whole, instantly distinguishable expression**, returning to idle once it finishes.
+//    So there is still no "rotation loop" here, only a one-shot `mood` (see `EyeMood`).
 //
-// ⚠️ **always-on（`isLuminanceReduced`）时必须全部停掉**：降亮度的表盘上
-// 动画既看不清也费电，而"循环动画"恰好是最费电的那一类。停下时给一张**静态
-// 的睁眼脸** —— 不是藏起来，表盘上还得看得出这是什么。
+// ─────────────────────────────────────────────────────────────────────────
+// ★★ 2026-10-16 revision twelve (user's words: "in the current colors is there no white on the watch, and while recording
+//    the heart-rate rise and fall needs a large amplitude and to take up a big part of the screen, and the eyes need to show various expressions on a light touch rather than
+//    a single eye wobble, and the random blink frequency should be just like a normal person's"):
 //
-// ⚠️ 八改去掉了底板，所以**可点区域必须自己补**（`.contentShape`，见 `body`）。
-//    不补的话命中区会缩到那两只胶囊上 —— 一个"要按住 2 秒"的交互配一个小
-//    命中区，用户会得出"我按住了但没反应"的结论。
+// Two of the four items concern this face:
+//
+// **1. A tap should produce an expression, not just a bounce.** Revision ten's `pokeOnce()` did one thing:
+//    bounce the whole face 5%. The user read that as "a single eye wobble" -- and was right; that bounce
+//    really is just an "I got it," with no **expression** to speak of.
+//    Now a tap **draws a random expression and plays it once** (`EyeMood`, five options: ∩ arched smiling eye / ∪ drooping eye /
+//    wide-open / squint / angry glare), springing in, holding about 0.8 seconds, then relaxing back. The overall bounce stays,
+//    but is pulled in to 3% -- it is demoted to a "close-up response," and the expression is the star.
+//
+// **2. Blink frequency is changed back to "a normal person."** Revision ten had tightened it to
+//    9~20 seconds based on the user's two rounds of "don't keep blinking," averaging about 1 per 15 seconds. This round the user explicitly asked for "like a normal person," so it was changed to a
+//    **two-tier** distribution (`blinkGapNear` / `blinkGapFar`) -- the reasoning and the arithmetic are written over in
+//    `nextBlinkGap()`, in one sentence: human blinking is not uniformly random, it is "short intervals with an occasional
+//    long stretch inserted." The average is about 1 per 7 seconds (≈ 8.6 per minute), exactly the **person staring at a screen**
+//    tier, which is exactly the posture the user is in right now looking at this watch.
+//    ⚠️ Revision ten's constraint "don't go back to tuning the fixed period" **was not** violated: what changed is the range, the mechanism
+//        is still "draw fresh after every blink," with no fixed period of any kind.
+//
+// ## Why all the gestures live in this one type instead of being scattered across the home screen
+// Hold to start, tap to stop, Double Tap to start/stop -- all three **land on this face**.
+// Splitting it into "the home screen owns the hold, the face owns the animations" would make "how should the face react while pressed" span two
+// files; and Double Tap requires the landing point to be a real `Button` (`handGestureShortcut`
+// only works on button-like controls), so here the eyes are simply wrapped in a `Button`,
+// with the hold attached to that same `Button` -- so the three things have just one source of truth.
+//
+// ⚠️ **Under always-on (`isLuminanceReduced`) everything must stop**: on a dimmed watch face
+// animations are both hard to see and power-hungry, and "looping animations" happen to be the hungriest kind. When stopped, show a **static
+// open-eyed face** -- not hide it; the watch face still has to show what this is.
+//
+// ⚠️ Revision eight removed the plate, so **the tap target has to be added back by hand** (`.contentShape`, see `body`).
+//    Without that, the hit area shrinks to the two capsules -- pairing a "hold for 2 seconds" interaction with a small
+//    hit area makes the user conclude "I pressed it but nothing happened."
 struct WatchBotFace: View {
-    /// 这张脸的**名义**边长（不含外面的蓄力环）。
+    /// The face's **nominal** side length (excluding the charge ring outside).
     ///
-    /// ⚠️ 八改之后它不再是"底板边长"（底板没了），而是眼睛/音波的**外接尺寸
-    /// 基准** —— 所有比例仍然按它取，换表不用重算。
+    /// ⚠️ After revision eight it is no longer the "plate side length" (the plate is gone), but the **bounding-size
+    /// reference** for the eyes/waveform -- all proportions are still taken from it, so changing watches needs no recalculation.
     let size: CGFloat
     let isRecording: Bool
-    /// 首页**常驻**的那个表情。用户在 iPhone 的设置里挑，经 WatchConnectivity
-    /// 推过来（★ 十三改新增，见文件顶部那段）。
+    /// The **persistent** expression on the home screen. The user chooses it in the iPhone settings, and it is pushed
+    /// over via WatchConnectivity (★ added in revision thirteen, see the paragraph at the top of the file).
     ///
-    /// ⚠️ 它是"待机长什么样"，**不是**"轻点演什么" —— 后者仍然是一次性的
-    ///    `mood`，见 `playRandomMood()`。
+    /// ⚠️ It is "what the idle state looks like," **not** "what a tap plays" -- the latter is still a one-shot
+    ///    `mood`, see `playRandomMood()`.
     let style: BotFaceStyle
-    /// 眼睛（以及录音时那条音波）的颜色。
+    /// The color of the eyes (and of the waveform while recording).
     ///
-    /// 来源是"外观"页选的色板**纯色**（`WatchRingStyle.palette.solid`）。
-    /// ⚠️ 只传一个颜色、不传整个 `WatchRingStyle`：见文件顶部"九改"那段。
+    /// The source is the **solid color** from the palette chosen on the "Appearance" page (`WatchRingStyle.palette.solid`).
+    /// ⚠️ Pass only a color, not a whole `WatchRingStyle`: see the "revision nine" paragraph at the top of the file.
     let tint: Color
-    /// 录音时的实时电平，转给 `WatchVoiceWave`。
+    /// The live level while recording, forwarded to `WatchVoiceWave`.
     ///
-    /// ⚠️ 空闲态用不上它 —— 它会一路传到 `WatchVoiceWave`，而那个视图只在录音态
-    /// 存在，所以空闲时电平的变化不会拖着这张脸重绘。
+    /// ⚠️ The idle state does not use it -- it is passed all the way to `WatchVoiceWave`, and that view only exists
+    /// in the recording state, so level changes while idle do not drag this face into redrawing.
     let meter: WatchAudioMeter
-    /// 录音中显示在音波**正下方**的计时（`mm:ss`）。空闲态传 `nil`。
+    /// The timer shown **directly below** the waveform while recording (`mm:ss`). Pass `nil` while idle.
     ///
-    /// ★ 十一改新增（用户："下面附带录音时间如果启动录音了的"）。
+    /// ★ Added in revision eleven (user: "attach the recording time below if recording has started").
     ///
-    /// ⚠️ 为什么由外面传字符串进来、而不是把 `TimeInterval` 传进来自己格式化：
-    ///    格式化的规则（小时要不要出现、补不补零）属于首页那份 `WatchFormat`，
-    ///    这里只负责摆位置。传字符串，脸上就仍然不懂"时间"这个概念。
+    /// ⚠️ Why pass a string in from outside rather than passing a `TimeInterval` in and formatting it here:
+    ///    the formatting rules (whether hours appear, whether to pad) belong to the home screen's `WatchFormat`,
+    ///    and this only handles placement. Passing a string means the face still does not understand the concept of "time."
     let elapsedText: String?
-    /// 空闲态被轻点的次数。首页 +1，这里做一次"弹一下"。
+    /// Number of times tapped while idle. The home screen adds 1, and this does one "bounce."
     ///
-    /// ⚠️ 为什么不直接暴露一个 `poke()` 方法给首页调：`WatchBotFace` 是值类型，
-    /// 首页在 `body` 里内联构造它，拿不到那个实例的引用。用一个单调递增的
-    /// 计数当触发器，是 SwiftUI 里"外部给子视图发一次脉冲"的标准做法。
+    /// ⚠️ Why not just expose a `poke()` method for the home screen to call: `WatchBotFace` is a value type,
+    /// and the home screen constructs it inline in `body`, so it cannot get a reference to that instance. Using a monotonically increasing
+    /// counter as the trigger is the standard SwiftUI way to "send a child view one pulse from outside."
     let pokeTick: Int
-    /// 摇一摇触发的次数。首页 +1，这里让眼睛**转圈圈**（见 `playDizzy()`）。
+    /// The number of shake triggers. The home screen adds 1, and this makes the eyes **spin in circles** (see `playDizzy()`).
     ///
-    /// ★ 十四改新增（用户："手表的摇一摇改成摇一摇眼睛会有转圈圈眩晕感
-    /// 增加交互"）。用计数当触发器的理由同 `pokeTick` —— 这张脸是值类型，
-    /// 首页在 `body` 里内联构造它，拿不到实例引用。
+    /// ★ Added in revision fourteen (user: "change the watch's shake so a shake makes the eyes spin in circles with a dizzy feel
+    /// and adds interaction"). The reason for using a counter as the trigger is the same as `pokeTick` -- this face is a value type,
+    /// and the home screen constructs it inline in `body`, so it cannot get a reference to the instance.
     let dizzyTick: Int
-    /// 双指互点能不能开/关录音。由 `WatchRecordingPrefs.pinchToRecord` 拨过来。
+    /// Whether Double Tap can start/stop recording. Toggled in by `WatchRecordingPrefs.pinchToRecord`.
     let handGestureEnabled: Bool
-    /// 轻点（手指真的碰到了脸）。录音中 = 停止；空闲 = 首页决定要不要只是戳一下。
+    /// Blink pace — pushed from the iPhone (★ 2026-10-20). Scales only the gaps
+    /// **between** blinks, never the 300 ms blink keyframes (see `BotBlinkSpeed`).
+    let blinkSpeed: BotBlinkSpeed
+    /// Whether the idle expression **auto-cycles** inside the square frame
+    /// (★ 2026-10-20, user: "the expression should display and change dynamically in the
+    /// square frame"). When on, a background loop springs to a fresh tier from the
+    /// library every few seconds; the tap one-shot (`mood`) still wins while it plays.
+    let autoCycle: Bool
+    /// Whether the rounded-square frame is drawn around the face (★ 2026-10-20,
+    /// user: "according to the square frame"). Revision eight removed the *plate*
+    /// ("no green, just make the frame two eyes"); this is the frame coming back —
+    /// but as a **stroke in the eye colour**, not a filled plate.
+    let frameVisible: Bool
+    /// Tap (a finger actually touched the face). Recording = stop; idle = the home screen decides whether to just poke it.
     let onTap: () -> Void
-    /// 长按满 2 秒。
+    /// The hold reached 2 seconds.
     let onHold: () -> Void
-    /// **双指互点**。开始 / 停止。
+    /// **Double Tap**. Start / stop.
     ///
-    /// ⚠️ 为什么必须和 `onTap` 分开：双指互点（食指拇指捏合）和手指轻点会
-    /// 落到**同一个** `Button` 的 action 上 —— `handGestureShortcut` 的定义
-    /// 就是"把双指互点绑到这个控件的 primary action"（见 `PrimaryHandGesture`）。
-    /// 也就是说这一层拿不到"这次到底是哪种输入"这个事实，只能自己推。
-    /// 推法见 `handlePrimaryAction()`。
+    /// ⚠️ Why it must be separate from `onTap`: Double Tap (pinching index finger and thumb) and a finger tap both
+    /// land on **the same** `Button` action -- the definition of `handGestureShortcut`
+    /// is "bind Double Tap to this control's primary action" (see `PrimaryHandGesture`).
+    /// That is, this layer does not get the fact of "which input this actually was" and has to infer it.
+    /// For the inference, see `handlePrimaryAction()`.
     let onToggle: () -> Void
 
-    /// always-on 降亮度。见文件顶部那段。
+    /// Always-on dimming. See the paragraph at the top of the file.
     @Environment(\.isLuminanceReduced) private var dimmed
 
-    /// 呼吸用。一次 `false → true` 翻转 + `repeatForever`，插值交给渲染服务器。
+    /// For breathing. A single `false → true` flip + `repeatForever`; interpolation is left to the render server.
     @State private var breathe = false
-    /// 眨眼开合度。1 = 全睁，0.05 = 闭合，可以短暂超过 1（过冲）。
+    /// Blink openness. 1 = fully open, 0.05 = closed, may briefly exceed 1 (overshoot).
     ///
-    /// ★ 十改新增。八改/九改用的是 `phaseAnimator` 逐相位驱动，这里改成
-    /// **普通状态 + `Task` 循环里逐个 `withAnimation` 赋值** —— 理由见文件顶部
-    /// "为什么不再用 `phaseAnimator`"（它给不出随机时长）。
+    /// ★ Added in revision ten. Revisions eight/nine drove it phase by phase with `phaseAnimator`; here it was changed to
+    /// **plain state + assigning each one with `withAnimation` inside a `Task` loop** -- for the reason see
+    /// "why `phaseAnimator` is no longer used" at the top of the file (it cannot give a random duration).
     @State private var openness: CGFloat = 1
-    /// 空闲态的目光偏移。整对眼睛一起平移，**不是**左右眼各看各的。
+    /// The idle-state gaze offset. The whole pair translates together, **not** each eye looking its own way.
     @State private var gaze = CGSize.zero
-    /// 待机那两条循环的把手（眨眼 + 目光），各一个。
+    /// The handles for the two idle loops (blink + gaze), one each.
     ///
-    /// ⚠️ 为什么是**两个** `Task` 而不是一个 `withTaskGroup`：`addTask` 的闭包是
-    ///    `@Sendable`，捕获 `self`（一个含若干闭包的视图结构体）会踩并发检查，
-    ///    这个工程是零告警的，不给自己找这个麻烦。
+    /// ⚠️ Why **two** `Task`s rather than one `withTaskGroup`: `addTask`'s closure is
+    ///    `@Sendable`, and capturing `self` (a view struct containing several closures) trips the concurrency checker;
+    ///    this project has zero warnings, and it does not go looking for that trouble.
     ///
-    /// ⚠️ 为什么不用 `.task(id:)`：同理 —— 那个 modifier 的闭包也是 `@Sendable`。
-    ///    这里的 `Task {}` 带 `_inheritActorContext`（本文件 `pokeOnce()` 已在用），
-    ///    捕获 `self` 是继承主 actor 的，顺带也就能主动取消。
+    /// ⚠️ Why not `.task(id:)`: same reason -- that modifier's closure is `@Sendable` too.
+    ///    The `Task {}` here carries `_inheritActorContext` (this file's `pokeOnce()` already uses it),
+    ///    so capturing `self` inherits the main actor and, as a bonus, can be cancelled proactively.
     @State private var idleLoop: Task<Void, Never>?
     @State private var gazeLoop: Task<Void, Never>?
-    /// 被戳一下时的弹起量。0 = 原状。
+    /// The bounce amount when poked. 0 = original state.
     ///
-    /// ⚠️ 十二改把幅度收到 **3%**（原来 5%）：它不再是"被戳"的**全部**表现 ——
-    ///    主戏换成了那个随机表情（`mood`），它只负责给一下贴身的回应。
-    ///    留在 5% 就又会读成用户说的那种"单一的眼睛晃动"（见 `figureScale`）。
+    /// ⚠️ Revision twelve pulled the amplitude in to **3%** (from 5%): it is no longer the **whole** expression of "being poked" --
+    ///    the main act became that random expression (`mood`), and this only gives a close-up response.
+    ///    Leaving it at 5% would read again as the "single eye wobble" the user described (see `figureScale`).
     @State private var poke: CGFloat = 0
-    /// 轻点抽到的那个表情。`nil` = 待机（画 `style` 那一档）。
+    /// The expression drawn on a tap. `nil` = idle (draw the `style` tier).
     ///
-    /// ★ 十二改新增（用户："眼睛需轻触它会有各种表情而不是单一的眼睛晃动"）。
-    /// ★ 十三改：类型从私有的 `EyeMood` 换成共用的 `BotFaceStyle` —— 直接读
-    ///   让它和"设置里选的那一档"是同一个枚举，于是池子可以是"库里除常驻之外
-    ///   的其余几档"，而不是一份要跟着库一起维护的独立名单。
+    /// ★ Added in revision twelve (user: "the eyes need to have various expressions on a light touch rather than a single eye wobble").
+    /// ★ Revision thirteen: the type changed from the private `EyeMood` to the shared `BotFaceStyle` -- reading it directly
+    ///   makes it the same enum as "the tier chosen in settings," so the pool can be "the other tiers in the library besides the persistent one,"
+    ///   rather than a separate list that has to be maintained alongside the library.
     @State private var mood: BotFaceStyle?
-    /// 表情那条 `Task` 的把手。
+    /// The handle for the expression's `Task`.
     ///
-    /// ⚠️ 连点两下时必须**先取消上一条**：两条 `Task` 各自睡 0.8 秒再退场、
-    ///    互不知情，先醒来的那条会把**刚刚进场的新表情**一起抹掉 ——
-    ///    表现为"连点两下反而什么都没出来"。
+    /// ⚠️ When tapping twice in a row it must **cancel the previous one first**: the two `Task`s each sleep 0.8 seconds and then leave,
+    ///    unaware of each other, so the one that wakes first would erase **the new expression that has just come on** --
+    ///    showing up as "tapping twice produced nothing at all."
     @State private var moodTask: Task<Void, Never>?
-    /// 眼睛**转圈圈**转到多少度了。0 = 没在转。
+    /// The tier the **auto-express cycle** currently has on (★ 2026-10-20).
+    /// `nil` = draw the user's persistent tier. Priority: `mood` (a tap's one-shot)
+    /// → `cycleStyle` (the auto cycle) → `style` (what the phone pinned).
+    @State private var cycleStyle: BotFaceStyle?
+    /// The handle for the auto-express loop.
+    @State private var cycleTask: Task<Void, Never>?
+    /// How many degrees the eyes have **spun in circles** so far. 0 = not spinning.
     ///
-    /// ★ 十四改新增，见 `playDizzy()`。
+    /// ★ Added in revision fourteen, see `playDizzy()`.
     @State private var dizzyAngle: Double = 0
-    /// 眩晕那条 `Task` 的把手。连摇两次必须先取消上一条，理由同 `moodTask`。
+    /// The handle for the dizzy `Task`. Shaking twice in a row must cancel the previous one first, for the same reason as `moodTask`.
     @State private var dizzyTask: Task<Void, Never>?
-    /// 长按进度 0...1。
+    /// Hold progress 0...1.
     ///
-    /// ★ 十四改：它驱动的不再是那圈"2 秒进度弧"，而是一片铺满屏幕的颜色。
-    /// ★ 十五改：那片颜色的**透明度**就是它。
-    /// ★★ 十六改：它现在驱动的是**两段几何**（见 `holdLayer`）——
-    ///   前 32% 把两只眼睛揉成一团，后 68% 把那一团扩散到铺满全屏。
+    /// ★ 2026-10-20 (third pass): it drives the **progress ring around the face** again
+    /// (see `holdLayer`) -- revision fourteen had repurposed it into a full-screen colour
+    /// patch, which the user asked to retire ("背面是红色占满全屏还是需要优化").
     @State private var holdProgress: CGFloat = 0
-    /// 手指按下的位置（**这张脸的局部坐标**）。`nil` = 还没按过。
+    /// The switch for the hold ring to **fade out** after the hold has run its course and recording has started.
     ///
-    /// ★★ 十六改新增（用户："两个眼睛自动根据我按压的地方两个眼睛融在一起"）。
-    /// 它只回答"往哪儿融"，不参与任何判断 —— 长按计时仍然完全归
-    /// `LongPressGesture` 管。
-    ///
-    /// ⚠️ 抬手**不清空**：`holdProgress` 回退的那 0.16 秒里，两只眼睛还要按这个
-    ///    点往回走。清空会让它们在回程中途改道去脸中心。下一次按下时覆盖它。
-    @State private var pressPoint: CGPoint?
-    /// 长按走满、录音已经开始之后，那片颜色**淡出**用的开关。
-    ///
-    /// ⚠️ 不能把 `holdProgress` 直接归零：那一刻用户刚松手、画面正要切到
-    ///    录音态，一片已经铺满屏幕的颜色"啪"地消失会闪一下。让它**先铺满、
-    ///    再淡出**（0.5 秒），波就在它淡出的同时接上来 —— 这正是用户要的
-    ///    "占满全屏**然后**显示心率时间波纹"。
-    ///    ⚠️ 十五改把 `holdProgress` 改成了那片颜色的**透明度**；十六改又把它
-    ///    改成**两段几何的进度**，所以"铺满"与"淡出"现在分别由
-    ///    `holdLayer` 的绘制内容和这一层的 `sweepFading` 各管各的。
+    /// ⚠️ `holdProgress` cannot simply be zeroed: at that moment the user has just released and the screen is about to switch to the
+    ///    recording state, and a completed ring vanishing with a "snap" would flash. Let it **complete first, then fade out**
+    ///    (0.4 seconds), and the wave picks up as it recedes.
     @State private var sweepFading = false
-    /// 手指是否正按在眼睛上。由 `LongPressGesture.updating` 驱动。
+    /// Whether a finger is currently pressed on the eyes. Driven by `LongPressGesture.updating`.
     @GestureState private var holding = false
-    /// 最近一次"手指真的碰到了脸"的时刻（按下或抬起都会更新）。
+    /// The most recent moment "a finger actually touched the face" (updated on both press and release).
     ///
-    /// ★ 这是区分**手指轻点**和**双指互点**的唯一依据 —— 见
-    /// `handlePrimaryAction()`。双指互点是**隔空**动作，整个过程不会产生任何
-    /// 触摸事件，所以"刚刚有过触摸"就等于"这是手指点的"。
+    /// ★ This is the only basis for telling **a finger tap** from **Double Tap** -- see
+    /// `handlePrimaryAction()`. Double Tap is an **in-air** gesture; the whole action produces no
+    /// touch events, so "there was a touch just now" equals "this was a finger tap."
     @State private var lastTouchAt = Date.distantPast
 
-    /// 长按多久才开始录音。
+    /// How long the hold must be before recording starts.
     ///
-    /// 2 秒是用户点名的数字。它也正好落在"不容易误触"和"不觉得在等"之间：
-    /// 抬手看表那一下通常 1 秒内就结束了，够不着 2 秒。
+    /// 2 seconds is the number the user named. It also sits right between "not easy to misfire" and "doesn't feel like waiting":
+    /// raising the wrist to check the watch usually ends within a second, nowhere near 2 seconds.
     static let holdSeconds: TimeInterval = 2.0
-    /// 长按期间允许的手指抖动（pt）。超过就判定为"在滑页"而不是"在按住"。
+    /// Allowed finger slop (pt) during a hold. Beyond it, the gesture is judged to be "paging" rather than "holding."
     ///
-    /// ⚠️ 八改从 26 调到 **34**：首页现在是自己实现的横向翻页（见
-    /// `WatchRecorderView.pageDrag`），它要划出 24pt 才认。两个阈值必须**分开**
-    /// —— 24 到 34 这一段是"既不算翻页、也不算取消长按"的缓冲带。
-    /// 如果两个数撞一起，手一抖就会在"开始录音"和"翻页"之间二选一。
+    /// ⚠️ Revision eight raised it from 26 to **34**: the home screen now implements horizontal paging itself (see
+    /// `WatchRecorderView.pageDrag`), and it requires a 24pt swipe to register. The two thresholds must stay **separate**
+    /// -- the 24-to-34 band is the buffer where "neither paging nor cancelling the hold" applies.
+    /// If the two numbers collided, one twitch of the hand would have to choose between "start recording" and "page."
     private static let holdSlop: CGFloat = 34
 
-    // MARK: 待机的节奏（十二改）
+    // MARK: The idle rhythm (revision twelve)
     //
-    // 数值来源见文件顶部"十改"与"十二改"那两段：机制照抄 `aora-bot` 的待机，
-    // 数值按用户的实际反馈走 —— 十改从严（"不要一直眨眼"），
-    // 十二改回到"正常人"（"随机眨眼睛频率跟正常人一样"）。
+    // For where the numbers come from see the "revision ten" and "revision twelve" paragraphs at the top of the file: the mechanism is copied from `aora-bot`'s idle state,
+    // and the numbers follow the user's actual feedback -- revision ten tightened them ("don't keep blinking"),
+    // revision twelve went back to "a normal person" ("random blink frequency like a normal person").
     //
-    // ⚠️ 为什么是"**每次重新抽**"而不是一个固定周期：见顶部第 1 条。
-    //    固定周期=节拍器，再长也会被读出来。这里 `Task.sleep` 睡一个随机值，
-    //    醒过来眨一下、再抽下一个 —— 结构上就没有节拍可言。
-    /// 两次眨眼之间的间隔（秒）—— **两档**，不是一档。
+    // ⚠️ Why "**draw fresh every time**" rather than a fixed period: see item 1 at the top.
+    //    A fixed period = a metronome, and no matter how long it is it still gets read out. Here `Task.sleep` sleeps a random value,
+    //    wakes up, blinks once, then draws the next -- structurally there is no beat to speak of.
+    /// The interval between two blinks (seconds) -- **two tiers**, not one.
     ///
-    /// ★ 十二改：原来只有一档 `9 ... 20`，现在拆成"近"和"远"两档
-    /// （用户："随机眨眼睛频率跟正常人眼渣样一样"）。
+    /// ★ Revision twelve: there used to be only one tier, `9 ... 20`; now it is split into "near" and "far"
+    /// (user: "random blink frequency just like a normal person's").
     ///
-    /// ## 为什么必须是两档
-    /// 人眨眼**不是均匀随机**的：绝大多数间隔挤在几秒内，但会时不时插进一段
-    /// 十几秒的长间隔（走神、专注、思考时眨眼会明显变少）。用一个均匀区间去
-    /// 拟合这种分布，无论把区间调到哪儿都只能命中一半 ——
-    /// 调密了像在用秒表，调疏了像死鱼眼。两档正好把"密的多数"和"疏的少数"
-    /// 分开表达。
+    /// ## Why it must be two tiers
+    /// Human blinking is **not uniformly random**: the vast majority of intervals bunch within a few seconds, but now and then a
+    /// long interval of a dozen-plus seconds gets inserted (blinking drops noticeably when spacing out, concentrating, or thinking). Fitting that distribution
+    /// with a single uniform range can only hit half of it no matter where you set the range --
+    /// tuned dense it is like using a stopwatch, tuned sparse it is like dead-fish eyes. Two tiers express exactly
+    /// "the dense majority" and "the sparse minority" separately.
     ///
-    /// ## 数值怎么来的
-    /// | 状态 | 次数/分 | 间隔 |
+    /// ## Where the numbers come from
+    /// | state | times/min | interval |
     /// |---|---|---|
-    /// | 放松交谈 | 15~20 | 3.0~4.0s |
-    /// | **盯着屏幕 / 专注** | **5~7** | **8.6~12s** |
-    /// | 静息均值 | 12~15 | 4.0~5.0s |
+    /// | relaxed conversation | 15~20 | 3.0~4.0s |
+    /// | **staring at a screen / focused** | **5~7** | **8.6~12s** |
+    /// | resting average | 12~15 | 4.0~5.0s |
     ///
-    /// ⇒ 近档取 **3.5~6.5**（≈ 人的静息那一档）、远档取 **10~18**
-    ///   （≈ 盯着屏幕那一档）、22% 概率走远档。
-    ///   加权均值 ≈ 0.78 × 5 + 0.22 × 14 ≈ **7.0 秒 ≈ 8.6 次/分**。
+    /// ⇒ the near tier takes **3.5~6.5** (≈ the human resting tier), the far tier takes **10~18**
+    ///   (≈ the staring-at-a-screen tier), with a 22% chance of the far tier.
+    ///   Weighted average ≈ 0.78 × 5 + 0.22 × 14 ≈ **7.0 seconds ≈ 8.6 per minute**.
     ///
-    /// ⚠️ 十改那条"别再回头去调那个固定周期"的约束**没有被违反**：改的是
-    ///    **随机的区间与其分布**，机制仍然是"每次眨完重新抽一个值"，
-    ///    结构上不存在任何固定周期。任何"固定时长 + `repeatForever`"都仍然是
-    ///    禁的（那正是八改变成节拍器的原因）。
-    /// ⚠️ 两档在视觉上各有一件别干的事：近档**不要**压到 2 秒以内（那就成了
-    ///    抖动，而不是眨眼），远档**不要**拉到 20 秒以上（那就退回十改那种
-    ///    "死鱼眼"观感了 —— 十改收到的就是这条反馈）。
+    /// ⚠️ Revision ten's constraint "don't go back to tuning that fixed period" **was not violated**: what changed is
+    ///    **the random range and its distribution**; the mechanism is still "draw a fresh value after every blink,"
+    ///    and structurally there is no fixed period. Any "fixed duration + `repeatForever`" is still
+    ///    forbidden (that is exactly why revision eight turned into a metronome).
+    /// ⚠️ Each tier has one thing it must not do visually: the near tier **must not** drop below 2 seconds (that becomes
+    ///    a jitter, not a blink), and the far tier **must not** stretch past 20 seconds (that falls back to revision ten's
+    ///    "dead-fish eyes" look -- this is the feedback revision ten received).
     private static let blinkGapNear: ClosedRange<Double> = 3.5 ... 6.5
     private static let blinkGapFar: ClosedRange<Double> = 10 ... 18
-    /// 走"远"档的概率。22% ≈ 平均每四五次眨眼插一段长的。
+    /// The chance of taking the "far" tier. 22% ≈ inserting a long one about every four or five blinks.
     private static let blinkGapFarChance: Double = 0.22
-    /// 眨完之后再补一下的概率。参考实现的 `Math.random() < 0.14`。
+    /// The chance of adding one more after a blink. The reference implementation's `Math.random() < 0.14`.
     ///
-    /// ⚠️ 这个数**不要往上调**。九改是"每轮必连眨"（= 100%），那正是
-    ///    "一直在眨眼"观感的一半来源 —— 连眨应该是例外，不是节拍。
+    /// ⚠️ Do **not** raise this number. Revision nine was "a double blink every round" (= 100%), and that is half the source
+    ///    of the "always blinking" look -- a double blink should be the exception, not the beat.
     private static let doubleBlinkChance: Double = 0.14
-    /// 目光在一边停多久、换边用多久（秒）。参考实现 `lookX` 周期 4800ms，
-    /// 其中约 1.4 秒停在一边、约 1.0 秒过渡 —— 这里 1.5 + 0.9，基本一致。
+    /// How long the gaze holds on one side and how long it takes to switch (seconds). The reference implementation's `lookX` has a 4800ms period,
+    /// about 1.4 seconds holding on one side and about 1.0 second in transition -- here 1.5 + 0.9, essentially the same.
     private static let gazeHold: Double = 2.4
     private static let gazeShift: Double = 0.9
-    /// 目光左右能走多远（相对 `size`）。
+    /// How far the gaze can travel left and right (relative to `size`).
     ///
-    /// 参考实现 `amp 10` / 眼心距中线 `30` = **1/3**。本文件眼心距是
-    /// `0.235 × size`，照搬会到 ±0.078 × size（40mm 上约 ±9pt），
-    /// 在表盘上太晃。取它 **约 55%**：40mm 上 ±5.3pt、49mm 上 ±6.8pt，
-    /// 看得出在"看来看去"、又不会像在找东西。
+    /// The reference implementation's `amp 10` / eye-center-to-midline `30` = **1/3**. This file's eye-center distance is
+    /// `0.235 × size`, and copying that directly would reach ±0.078 × size (about ±9pt on 40mm),
+    /// which wobbles too much on a watch face. Take **about 55%** of it: ±5.3pt on 40mm, ±6.8pt on 49mm --
+    /// you can tell it is "looking around," without looking like it is searching for something.
     private var gazeAmpX: CGFloat { size * 0.045 }
-    /// 目光的纵向分量。只为了让移动不是一条**完美的水平滑轨** ——
-    /// 这么小是看不出来的，见文件顶部"参考实现里没跟过来的两件事"。
+    /// The vertical component of the gaze. Only so the motion is not a **perfectly horizontal rail** --
+    /// it is too small to see; see "two things from the reference implementation that did not come across" at the top of the file.
     private var gazeAmpY: CGFloat { size * 0.011 }
 
-    // MARK: 比例
+    // MARK: Proportions
     //
-    // ★ 十三改：眼睛的尺寸与间距**搬去了 `BotFaceMetrics`**（共用文件
+    // ★ Revision thirteen: the eyes' size and spacing **moved to `BotFaceMetrics`** (the shared file
     // `Sources/Services/Watch/BotFaceStyle.swift`）。
     //
-    // ⚠️ 搬家的理由不是整理，是**必须**：iPhone 上那个表情选择器要摆预览，
-    //    而"预览里那只眼睛多大"和"表上那只眼睛多大"必须是**同一个算式** ——
-    //    各写一份的话，用户挑的表情和真机看到的就不成比例，而这种不一致
-    //    在两张不同尺寸的屏幕上极难被发现。
+    // ⚠️ The reason for the move is not tidying up, it is **necessary**: the expression picker on the iPhone has to lay out a preview,
+    //    and "how big the eye in the preview is" and "how big the eye on the watch is" must be **the same formula** --
+    //    written separately, the user's chosen expression and what they see on real hardware would not be in proportion, and that kind of inconsistency
+    //    is extremely hard to spot across two screens of different sizes.
     //
-    // ℹ️ 八改曾经把眼睛整体放大过一档（宽 0.185 → 0.235、高 0.285 → 0.375）：
-    //    原来那组尺寸是配着圆角方底板算的，底板一去掉，眼睛就是这张脸的全部，
-    //    按原尺寸会显得又小又空。那组数现在是 `BotFaceMetrics` 的默认值。
+    // ℹ️ Revision eight once enlarged the eyes by one step (width 0.185 → 0.235, height 0.285 → 0.375):
+    //    the old sizes were calculated to go with the rounded-square plate, and once the plate was gone the eyes were the whole face,
+    //    so at the old size they looked small and empty. Those numbers are now `BotFaceMetrics`'s defaults.
 
     var body: some View {
-        // 用 `Button` 而不是裸视图：`handGestureShortcut`（双指互点）
-        // 只对按钮类控件生效 —— 见文件顶部那段。
+        // Use a `Button` instead of a bare view: `handGestureShortcut` (Double Tap)
+        // only works on button-like controls -- see the paragraph at the top of the file.
         //
-        // ⚠️ 这一个 action **同时**收两种输入：手指轻点、以及双指互点。
-        //    所以得靠 `handlePrimaryAction()` 再分一次 —— 不能直接把某一种
-        //    的行为写在这儿。
+        // ⚠️ This one action receives **both** kinds of input: a finger tap and a Double Tap.
+        //    So it has to be split apart again by `handlePrimaryAction()` -- you cannot write one kind's
+        //    behavior directly here.
         Button(action: handlePrimaryAction) {
             ZStack {
+                // ★ 2026-10-20: the square frame is back (user: "按照方框动态显示变动") --
+                // but as a **stroke in the eye colour**, not the filled plate revision eight
+                // removed ("no green"). The expression cycles *inside* it.
+                // ★★ 2026-10-20 (third pass, user: "录音页面则不要展示方框了"): the frame is
+                // an **idle-state** element only. While recording the waveform owns the
+                // whole face at full size -- the frame around a wave read as clutter, and
+                // it was the reason the wave had to shrink and the timer lift at all.
+                if frameVisible, !isRecording {
+                    BotFaceFrame(size: size, tint: tint)
+                        .scaleEffect(figureScale)
+                }
                 figure
                     .scaleEffect(figureScale)
-                    // 长按期间把位置让给 `holdLayer` 里那两只（见 `figureOpacity`）。
-                    .opacity(figureOpacity)
                     .animation(.spring(response: 0.34, dampingFraction: 0.62), value: isRecording)
-                // ★ 十五改：那片颜色画在**最上层**（十四改它在最下层）。
-                // ★★ 十六改：它同时负责"把两只眼睛揉成一团"和"扩散满屏"，
-                //    所以从按住的第一帧就要接管眼睛 —— 于是 `figure` 那两只
-                //    必须让位（`figureOpacity`）。
+                // ★ 2026-10-20 (third pass): the hold indicator is a **progress ring around
+                // the face** again (the pre-revision-fourteen look). The eyes stay visible
+                // under it -- the ring no longer replaces them, so there is no hand-off.
                 holdLayer
             }
-            // 外层这个 frame 就是这张脸的**名义**边界（`BotFaceMetrics` 都按它取比例）。
-            // ⚠️ 它**不裁**内容 —— 长按那片颜色要漫到屏幕边缘，靠的就是这一点。
+            // This outer frame is the face's **nominal** boundary (all of `BotFaceMetrics` derives its proportions from it).
+            // ⚠️ It **does not clip** its content -- the hold ring rides exactly on this boundary and must not be cut.
             .frame(width: size * 1.14, height: size * 1.14)
-            // ★ 八改新增，**不能省**：底板没了之后，`Button` 默认只把画出来的
-            //   形状当命中区，也就是那两只胶囊（录音时则是那条波）。
-            //   长按 2 秒本来就要按稳，命中区缩成这样，用户会觉得
-            //   "明明按住了却没反应"。
-            //   补一个方形命中区，把整个 `frame` 都变成可点。
+            // ★ Added in revision eight, **not optional**: with the plate gone, `Button` by default treats only the drawn
+            //   shape as the hit area, i.e. those two capsules (or that wave while recording).
+            //   A 2-second hold needs a steady press, and with the hit area shrunk like that the user feels
+            //   "I clearly pressed it but nothing happened."
+            //   Add a square hit area that makes the whole `frame` tappable.
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        // 长按与"轻点"**同时**识别：轻点要求快速抬起，长按要求按住不动，
-        // 两者本来就不会撞在同一串动作上。用 `simultaneousGesture` 而不是
-        // `.gesture`，免得长按把 `Button` 自己的 tap 顶掉（那会让"轻点停止"
-        // 在长按识别期间失效 —— 正好是用户最需要它的时候）。
+        // The hold and the "tap" are recognized **simultaneously**: a tap requires a quick release, a hold requires staying pressed,
+        // so the two never collide on the same sequence of motion anyway. Use `simultaneousGesture` rather than
+        // `.gesture`, so the hold does not displace the `Button`'s own tap (which would make "tap to stop"
+        // fail during hold recognition -- exactly when the user needs it most).
         .simultaneousGesture(holdGesture)
-        // ★★ 十六改：只用来回答"手指按在哪儿"。
-        // ⚠️ 必须和长按**并列**（`simultaneousGesture`），不能串进 `holdGesture`
-        //    里：`LongPressGesture` 不给坐标，而"按下去的那一刻手指在哪儿"
-        //    只有拖拽手势知道 —— 串起来就得等长按结束才拿得到，那时眼睛
-        //    早就该融完了。
-        .simultaneousGesture(pressLocation)
-        // ★ 双指互点（食指拇指捏合）= 开/关录音。
+        // ★ Double Tap (pinching index finger and thumb) = start/stop recording.
         //
-        // ⚠️ 关掉开关时必须**显式** `isEnabled: false`，不能"不管" ——
-        //    watchOS 11 上系统仍会把双指互点派给主按钮，用户关了也照触发。
-        //    10.1~10.x 上系统自己派发、没有 API 可关（见 `PrimaryHandGesture`）。
+        // ⚠️ When the switch is off you must **explicitly** pass `isEnabled: false`, not "leave it alone" --
+        //    on watchOS 11 the system still routes Double Tap to the main button, so it fires even with the switch off.
+        //    On 10.1~10.x the system routes it itself; there is no API to turn it off (see `PrimaryHandGesture`).
         .modifier(PrimaryHandGesture(enabled: handGestureEnabled))
         .accessibilityLabel(isRecording ? L10n.Watch.stop : L10n.Watch.record)
         .accessibilityValue(isRecording ? L10n.Watch.recordingBusy : L10n.Watch.holdToRecord)
@@ -473,86 +480,88 @@ struct WatchBotFace: View {
         .onChange(of: pokeTick) { _, _ in pokeOnce() }
         .onChange(of: dizzyTick) { _, _ in playDizzy() }
         .onChange(of: holding) { _, pressing in
-            // ★ 无论按下还是抬起都记一笔：Button 的 action 是在**抬起**那一刻
-            //   才触发的，只记按下的话，"按住一会儿再松手"这串动作会因为
-            //   时间差过大而被误判成双指互点（那会让"按 1 秒又放弃"变成
-            //   "开始录音"）。
+            // ★ Record a timestamp on both press and release: the Button's action fires at the moment of **release**,
+            //   so recording only the press would make "hold for a moment then let go" be misjudged
+            //   as a Double Tap because of the large time gap (which would turn "pressed for 1 second and gave up" into
+            //   "start recording").
             lastTouchAt = Date()
 
-            // 录音中长按不点亮进度 —— 否则用户会以为"再按两秒能再开始一次"。
-            guard !isRecording else { return }
+            // ★ 2026-10-20 (fourth pass): a hold while recording **does** light the ring
+            // now — stopping is hold-to-stop (anti-mistouch, user request), and the ring
+            // is its progress indicator, mirroring the start transition. The old rule
+            // ("a hold while recording does not light up the progress") died with it:
+            // back then a hold during recording had no meaning at all.
             if pressing {
-                // ★ 十四改：先把上一轮的残留清掉（**不带动画**），再从头长出来。
-                //    上一次长按结束时 `holdProgress` 停在 1、`sweepFading` 是 true
-                //    （那片颜色只是淡出了、尺寸没变）。不清的话，这一按就直接从
-                //    "铺满全屏"开始 —— 用户看到的不是"颜色在长"，而是一闪。
+                // First clear away the residue from the previous round (**without animation**), then grow it back from scratch.
+                //    The last time the hold ended, `holdProgress` was left at 1 and `sweepFading` was true
+                //    (the ring had only faded out; its arc extent was unchanged). Without clearing it, this press
+                //    starts straight from "a complete ring" -- what the user sees is not progress growing, just a flash.
                 var reset = Transaction()
                 reset.disablesAnimations = true
                 withTransaction(reset) {
                     holdProgress = 0
                     sweepFading = false
                 }
-                // 进度走满正好是 2 秒，和手势的 minimumDuration 对齐。
-                // 两者一旦不一致，就会出现"颜色还没铺满就开录"或者
-                // "铺满了却不开录"—— 两种都会让用户不再信任这个动作。
+                // The progress filling up is exactly 2 seconds, aligned with the gesture's minimumDuration.
+                // Once the two disagree, you get either "recording starts before the ring is complete" or
+                // "the ring is complete but recording never starts" -- both make the user stop trusting this action.
                 withAnimation(.linear(duration: Self.holdSeconds)) { holdProgress = 1 }
             } else {
-                // ⚠️ 长按**成功**那一路不要在这里收：`onEnded` 已经用 0.5 秒的
-                //    淡出接过了这件事。这里再收一遍（0.16 秒）会把那片颜色在
-                //    0.16 秒里抽掉 —— 用户要的"铺满全屏**然后**再看波"就变成
-                //    "闪一下白"。
-                //    残留的 `holdProgress` / `sweepFading` 不用管：下一次按下时
-                //    那个 `if pressing` 分支会**不带动画**地把它们清零。
+                // ⚠️ Do not collapse the **successful** hold path here: `onEnded` has already taken that over
+                //    with a 0.4-second fade-out. Collapsing it again here (0.16 seconds) would yank the completed
+                //    ring away over 0.16 seconds -- "ring completes → wave appears" would become "a flash of nothing."
+                //    The leftover `holdProgress` / `sweepFading` need no attention: on the next press
+                //    that `if pressing` branch zeroes them **without animation**.
                 guard !sweepFading else { return }
                 withAnimation(.easeOut(duration: 0.16)) { holdProgress = 0 }
             }
         }
         .onChange(of: isRecording) { _, _ in
-            // ⚠️ 十改：两个分支都调 `startIdleMotion()`，不再各写各的。
-            //    因为"录音时要做什么"已经不只是"把呼吸停平"—— 现在还有两条
-            //    `Task` 循环要收。让唯一的开关去判断，比在这里复制一份判断条件安全
-            //    （复制的那份迟早会漏掉新加的那条循环）。
+            // ⚠️ Revision ten: both branches now call `startIdleMotion()`, no longer each writing their own.
+            //    Because "what to do while recording" is no longer just "park the breathing flat" -- there are now two
+            //    `Task` loops to shut down. Letting the single switch decide is safer than duplicating the condition here
+            //    (the duplicated copy will eventually miss a newly added loop).
             //
-            //    顺带：录音态那条音波有自己的节律（心跳），再叠一层缓慢缩胀
-            //    就成了两种周期打架 —— `startIdleMotion()` 会把 `breathe` 停平。
+            //    Incidentally: the recording state's waveform has its own rhythm (a heartbeat), and stacking another slow inflate-deflate
+            //    makes two cycles fight -- `startIdleMotion()` parks `breathe` flat.
             //
-            // ⚠️ 九改之前这里还起了一个 `sway`（眼睛左右错相位浮动）。录音态
-            //    现在整条换成音波，眼睛根本不在场，那个状态跟着一起删了。
+            // ⚠️ Before revision nine there was also a `sway` here (the two eyes drifting out of phase). The recording state
+            //    is now swapped entirely for a waveform, the eyes are simply absent, and that state was deleted along with it.
             startIdleMotion()
         }
         .onChange(of: dimmed) { _, _ in
-            // 降亮度：全部停到静止位。见文件顶部那段。同样的理由 —— 交给唯一的开关。
+            // Dimmed: stop everything at the rest position. See the paragraph at the top of the file. Same reasoning -- leave it to the single switch.
             startIdleMotion()
         }
         .onDisappear {
-            // 离开首页时把循环收掉。不收的话这一对 `Task` 会一直挂着，
-            // 而它们每一轮都在写一个已经没人看的 `@State`。
+            // Close the loops when leaving the home screen. If you do not, this pair of `Task`s keeps hanging around,
+            // and each round they write a `@State` nobody is looking at any more.
             idleLoop?.cancel()
             gazeLoop?.cancel()
-            // ★ 十二改：表情那条也要收 —— 同上。
+            // ★ Revision twelve: the expression one has to be shut down too -- same as above.
             moodTask?.cancel()
-            // ★ 十四改：眩晕那条同样要收。
+            // ★ Revision fourteen: the dizzy one has to be cancelled too.
             dizzyTask?.cancel()
         }
     }
 
-    // MARK: - 手势
+    // MARK: - Gestures
 
-    /// 那个 `Button` 的 action。**一次收两种输入，这里再分一次**。
+    /// The `Button`'s action. **It receives two kinds of input at once, and splits them apart here.**
     ///
-    /// * **手指轻点** —— 刚刚一定有按下/抬起，`lastTouchAt` 就在几毫秒前。
-    ///   走 `onTap`（录音中 = 停止；空闲 = 戳一下）。
-    /// * **双指互点** —— 食指与拇指在**空中**捏合，整个过程不产生任何触摸事件，
-    ///   `lastTouchAt` 停在很久以前。走 `onToggle`（开始/停止）。
+    /// * **A finger tap** -- there must have just been a press/release, and `lastTouchAt` is only milliseconds ago.
+    ///   It goes to `onTap` (recording = stop; idle = poke).
+    /// * **Double Tap** -- index finger and thumb pinch **in the air**, producing no touch events at all,
+    ///   so `lastTouchAt` is stuck in the distant past. It goes to `onToggle` (start/stop).
     ///
-    /// ## 为什么用时间窗而不是别的判据
-    /// 没有别的判据可用：两种输入在 SwiftUI 这一层就是同一个闭包，系统不给
-    /// 来源信息。"最近 0.4 秒内有没有触摸过"是唯一可靠的区分 ——
-    /// 双指互点是隔空动作，这一点是**物理事实**，不是启发式猜测。
+    /// ## Why a time window rather than some other criterion
+    /// No other criterion is available: at this SwiftUI layer the two inputs are the same closure, and the system gives no
+    /// source information. "Was there a touch in the last 0.4 seconds" is the only reliable distinction --
+    /// Double Tap is an in-air gesture, and that is a **physical fact**, not a heuristic guess.
     ///
-    /// ⚠️ 阈值不能太小：手指抬起与 action 触发之间隔着一两帧。0.4 秒对这两者
-    ///    都足够宽（正常间隔 < 50ms），又远小于"用户隔空捏一下再点屏幕"的最短
-    ///    间隔（人做不到 0.4 秒内先捏再点）。
+    /// ⚠️ The threshold cannot be too small: a frame or two separates the finger lifting from the action firing. 0.4 seconds is ample
+    ///    for both (the normal gap is < 50ms), and far smaller than the shortest gap of "the user pinches in the air and then taps the screen"
+    ///    (a person cannot pinch and then tap within 0.4 seconds).
     private func handlePrimaryAction() {
         let touched = Date().timeIntervalSince(lastTouchAt) < 0.4
         if touched {
@@ -566,72 +575,57 @@ struct WatchBotFace: View {
         LongPressGesture(minimumDuration: Self.holdSeconds, maximumDistance: Self.holdSlop)
             .updating($holding) { current, state, _ in state = current }
             .onEnded { _ in
-                // ★ 十四改：颜色**先铺满、再淡出**，而不是"环收掉"。
-                //    十三改之前这里把进度弧在 0.12 秒里收掉，因为一圈"已走满"的弧
-                //    留着会和录音态的辉光打架。现在换成整片颜色：它淡出的那 0.5 秒
-                //    正好盖住"眼睛 → 波"这个切换，读起来就是
-                //    "颜色漫过屏幕 → 波在颜色退去后亮起来"。
-                withAnimation(.easeOut(duration: 0.5)) { sweepFading = true }
+                // ★ 2026-10-20 (third pass): the ring **completes first, then fades out**,
+                //    rather than collapsing. Its 0.4-second fade-out exactly covers the
+                //    "eyes → wave" switch, so it reads as
+                //    "the ring closes at 12 o'clock → the wave lights up as the ring recedes."
+                withAnimation(.easeOut(duration: 0.4)) { sweepFading = true }
                 onHold()
             }
     }
 
-    /// 只负责回答"手指按在哪儿"。不做判断、不参与计时。
+    /// Starts and stops **all** idle motion: breathing + gaze drift + blinking + expression.
     ///
-    /// ★★ 十六改新增（用户："两个眼睛自动根据我按压的地方两个眼睛融在一起"）。
+    /// ★ Before revision ten this only handled breathing, with blinking run by `phaseAnimator` itself (blinking as long as the view was around).
+    /// Now blinking and gaze are both `Task` loops, and someone has to **explicitly start and explicitly stop** them -- so this
+    /// became the single switch: dimming, recording, leaving the page, all shut down from here.
+    /// ★ After revision twelve there is one more managed object: the expression (`moodTask`). It is **not** a loop,
+    /// it is a one-shot `Task`; but "invalidated the moment recording starts" is exactly the same as the two loops,
+    /// so it is hung on this switch all the same -- rather than adding another cancel line in `onChange(of: isRecording)`,
+    /// better to let the single switch shut it all down (the duplicated copy will eventually miss something newly added).
     ///
-    /// ## 为什么是 `minimumDistance: 0` 的拖拽
-    /// * 轻点（`SpatialTapGesture`）要等**抬手**才给坐标，而我们要的是
-    ///   "按下去的那一刻手指在哪儿"；
-    /// * `LongPressGesture` 压根不给坐标。
+    /// ⚠️ Every time it is entered it **cancels the old ones first** before deciding whether to start new ones. Not cancelling would stack them:
+    ///    `isRecording` and `dimmed` can each change twice in a row, and every loop is a
+    ///    "sleep a while → blink once" endless loop, so stacking them doubles the blink rate.
     ///
-    /// ## 为什么只在第一帧记一次
-    /// 手指按住 2 秒不可能完全不动。每一帧都更新的话，那两只眼睛会跟着手指
-    /// 一点点漂 —— 看起来像黏手，而不是"朝按下的地方融过去"。
-    private var pressLocation: some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                guard pressPoint == nil else { return }
-                pressPoint = value.startLocation
-            }
-    }
-
-    /// 起停**全部**空闲动作：呼吸 + 目光游移 + 眨眼 + 表情。
-    ///
-    /// ★ 十改之前这里只管呼吸，眨眼由 `phaseAnimator` 自己跑（视图在就一直在眨）。
-    /// 现在眨眼和目光都是 `Task` 循环，必须有人**显式起、显式停** —— 于是这里
-    /// 成了唯一的开关：降亮度、录音中、离开页面，都从这里收。
-    /// ★ 十二改之后又多了一个被管的对象：表情（`moodTask`）。它**不是**循环，
-    /// 是一次性的 `Task`；但"录音一开始就作废"这件事和那两个循环完全一样，
-    /// 所以照样挂在这个开关上 —— 与其在 `onChange(of: isRecording)` 里再补一句
-    /// 取消，不如让唯一的开关统一收（复制的那份迟早会漏掉新加的东西）。
-    ///
-    /// ⚠️ 每一次进来都**先取消旧的**再决定要不要起新的。不取消就会叠：
-    ///    `isRecording` 与 `dimmed` 都可能连着变两次，而每个循环都是
-    ///    "睡一会儿 → 眨一下"的死循环，叠起来的观感是眨眼频率翻倍。
-    ///
-    /// ⚠️ 八改把一次"吸—呼"从 2.6 秒放慢到 **3.6 秒**（用户："节奏慢点"）。
-    ///    十改之后呼吸**不再是**这张脸最持续的动作了（最持续的是目光），
-    ///    但快一点照样会被读成"在喘"，而且会和目光、眨眼叠起来显得很忙。
+    /// ⚠️ Revision eight slowed one "inhale-exhale" from 2.6 seconds to **3.6 seconds** (user: "slow the rhythm down").
+    ///    After revision ten, breathing is **no longer** this face's most constant motion (the most constant is gaze),
+    ///    but any faster still reads as "panting," and it stacks with gaze and blinking to look busy.
     private func startIdleMotion() {
         idleLoop?.cancel()
         idleLoop = nil
         gazeLoop?.cancel()
         gazeLoop = nil
-        // ★ 十二改：表情那条 `Task` 也归这里管。录音开始 / 降亮度时要把正在演的
-        //   表情当场收掉 —— 它改的是眼睛的尺寸和形状，而录音态眼睛根本不在场，
-        //   挂着它会等录音结束之后突然蹦出来一个上上个动作的表情。
+        // ★ Revision twelve: the expression's `Task` is managed here too. When recording starts / when dimmed, the expression currently being played has to be
+        //   shut down on the spot -- it changes the eyes' size and shape, and in the recording state the eyes are simply absent,
+        //   so leaving it hanging would make an expression from two actions ago suddenly pop up after recording ends.
         moodTask?.cancel()
         moodTask = nil
+        // ★ 2026-10-20: the auto-express cycle is managed by the same single switch —
+        //   it changes the eye shape exactly like `mood` does, so it must vanish the
+        //   moment recording starts or the face dims.
+        cycleTask?.cancel()
+        cycleTask = nil
 
         guard !dimmed, !isRecording else {
-            // 回到静止位。降亮度要一张静态睁眼脸，录音态眼睛根本不在场 ——
-            // 两种都靠这四行把状态摆平，不留半路停住的目光、也不留半路演完的表情。
+            // Back to the rest position. Dimming wants a static open-eyed face, and in the recording state the eyes are simply absent --
+            // Both are handled by these four lines, leaving no gaze stopped halfway and no expression half-played.
             withAnimation(.linear(duration: 0.2)) {
                 breathe = false
                 openness = 1
                 gaze = .zero
                 mood = nil
+                cycleStyle = nil
             }
             return
         }
@@ -639,33 +633,66 @@ struct WatchBotFace: View {
         withAnimation(.easeInOut(duration: 3.6).repeatForever(autoreverses: true)) {
             breathe = true
         }
-        // ★ 眼睛一进场就从"正在往右看"的位置开始，而不是从正中起步 ——
-        //   从正中起步的话，用户抬腕看到的第一秒是一段"眼睛从中间滑出去"，
-        //   像是刚刚被唤醒。参考实现的 lookX 也是常驻的、没有起始位。
+        // ★ The eyes start, on entering, from the "looking right" position rather than from dead center --
+        //   starting from dead center means the first second after the user raises their wrist is "the eyes sliding out from the middle,"
+        //   as if just woken up. The reference implementation's lookX is also always-on, with no starting position.
         gaze = CGSize(width: gazeAmpX, height: gazeAmpY)
         idleLoop = Task { await runBlinkLoop() }
         gazeLoop = Task { await runGazeLoop() }
+        if autoCycle {
+            cycleTask = Task { await runExpressCycle() }
+        }
     }
 
-    // MARK: - 待机循环
-    //
-    // 两条循环并排跑，互不干涉：
-    //   · `runGazeLoop`  每 4.8 秒换一次边（眼睛的**持续**动作）
-    //   · `runBlinkLoop` 睡一个随机间隔（近档 3.5~6.5s / 远档 10~18s）→ 眨一下 → 再抽
-    //
-    // ⚠️ 两个周期**刻意不相等**（4.8 vs 两档随机），这样它们的相对相位永远
-    //    在变 —— 两条等周期的动作会锁相，锁相之后整张脸会开始"打拍子"，
-    //    比单一的节拍器更明显。参考实现里 lookX(4.8s) / lookY(4.1s) 也是
-    //    刻意取了不同的周期。
+    /// The **auto-express cycle** (★ 2026-10-20, user: "the expression should display and
+    /// change dynamically in the square frame"). Every few seconds the face springs to a
+    /// fresh tier drawn from the library — the square frame stays put and the expression
+    /// inside it keeps changing.
+    ///
+    /// ## The rules
+    /// * The next tier is drawn from `tapPool(excluding:)` — never the same tier twice in
+    ///   a row (a "swap" to the same shape reads as the loop being broken), never `calm`
+    ///   (drawing the idle state = nothing happened).
+    /// * The wait is **drawn fresh** from `blinkSpeed.expressCycle` each time — the same
+    ///   "no metronome" rule the blink loop lives by.
+    /// * There is no "return to base": the cycle *is* the idle look while it's on. That's
+    ///   what "动态显示变动" asks for — the face keeps changing, rather than playing
+    ///   one shot and snapping back.
+    /// * A tap still wins: `mood` sits above `cycleStyle` in `shownStyle`, and the tap's
+    ///   one-shot expires back into whatever the cycle is currently wearing.
+    private func runExpressCycle() async {
+        while !Task.isCancelled {
+            let wait = Double.random(in: blinkSpeed.expressCycle)
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            let current = cycleStyle ?? style
+            let pool = BotFaceStyle.tapPool(excluding: current)
+            guard let next = pool.randomElement() else { return }
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.66)) {
+                cycleStyle = next
+            }
+        }
+    }
 
-    /// 目光：在左右两边各停留片刻，快速换边。参考实现的 `glance`（`tanh(2.8·sin)`）。
+    // MARK: - The idle loops
+    //
+    // Two loops run side by side, independent of each other:
+    //   · `runGazeLoop`  switches sides every 4.8 seconds (**persistent** eye motion)
+    //   · `runBlinkLoop` sleeps a random interval (near tier 3.5~6.5s / far tier 10~18s) → blinks once → draws again
+    //
+    // ⚠️ The two periods are **deliberately unequal** (4.8 vs the two-tier random), so their relative phase is always
+    //    changing -- two motions with equal periods phase-lock, and once phase-locked the whole face starts "tapping out a beat,"
+    //    more obvious than a single metronome. In the reference implementation lookX(4.8s) / lookY(4.1s) were likewise
+    //    deliberately given different periods.
+
+    /// Gaze: pause a moment on each of the left and right, then switch quickly. The reference implementation's `glance` (`tanh(2.8·sin)`).
     private func runGazeLoop() async {
         var rightSide = true
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: UInt64(Self.gazeHold * 1_000_000_000))
             guard !Task.isCancelled else { return }
             rightSide.toggle()
-            // 纵向只走很小一段，而且是**跟着横向前后**的 —— 见 `gazeAmpY`。
+            // The vertical travels only a very short distance, and it **follows the horizontal back and forth** -- see `gazeAmpY`.
             withAnimation(.easeInOut(duration: Self.gazeShift)) {
                 gaze = CGSize(
                     width: rightSide ? gazeAmpX : -gazeAmpX,
@@ -675,27 +702,27 @@ struct WatchBotFace: View {
         }
     }
 
-    /// 眨眼。**等待时间是每次重新抽的**，这是十改的核心 —— 见文件顶部第 1 条。
+    /// Blinking. **The wait is drawn fresh every time**, and that is the core of revision ten -- see item 1 at the top of the file.
     ///
-    /// ⚠️ 参考实现是从"这一下眨眼的**开始**时刻"往后排下一次
-    ///    （`this._blinkNext = now + rand(...)`）。这里是从**眨完之后**往后排。
-    ///    差别只在连眨那一下（约 0.8 秒），量级上无所谓，但有意选"眨完之后"
-    ///    —— 这样"两次眨眼之间"的口径是干净的：用户感知的间隔本来也不包含
-    ///    眨眼本身占掉的那 300ms。
+    /// ⚠️ The reference implementation schedules the next blink from the **start** moment of this blink
+    ///    (`this._blinkNext = now + rand(...)`). Here it is scheduled from **after the blink finishes**.
+    ///    The difference is only the double blink (about 0.8 seconds), negligible in magnitude, but "after the blink finishes" was chosen deliberately
+    ///    -- so that the measure of "between two blinks" is clean: the interval the user perceives does not include
+    ///    the 300ms the blink itself takes.
     ///
-    /// ★ 十二改只换了一件事：`Double.random(in: blinkWait)` → `nextBlinkGap()`。
-    ///    循环结构、连眨概率、`blinkOnce()` 的关键帧**一格没动**。
+    /// ★ Revision twelve changed only one thing: `Double.random(in: blinkWait)` → `nextBlinkGap()`.
+    ///    The loop structure, the double-blink chance and `blinkOnce()`'s keyframes **did not move a single cell**.
     private func runBlinkLoop() async {
         while !Task.isCancelled {
-            let wait = Self.nextBlinkGap()
+            let wait = nextBlinkGap()
             try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             guard !Task.isCancelled else { return }
 
             await blinkOnce()
 
             if Double.random(in: 0 ..< 1) < Self.doubleBlinkChance {
-                // 70ms 后补一下。参考实现是 `{at: t+370}`，而这边的第一下
-                // 300ms 就结束了 —— 所以间隔同样是 70ms。
+                // Add one more after 70ms. The reference implementation is `{at: t+370}`, and this side's first blink
+                // is done in 300ms -- so the gap is likewise 70ms.
                 try? await Task.sleep(nanoseconds: 70_000_000)
                 guard !Task.isCancelled else { return }
                 await blinkOnce()
@@ -703,15 +730,15 @@ struct WatchBotFace: View {
         }
     }
 
-    /// 眨一次。关键帧照抄参考实现的 `_blinkNow`：
-    /// `合上 → 停 70ms → 睁到 1.08 过冲 → 300ms 落回 1`。
+    /// Blink once. The keyframes are copied from the reference implementation's `_blinkNow`:
+    /// `close → pause 70ms → open to a 1.08 overshoot → fall back to 1 over 300ms`.
     ///
-    /// ⚠️ **总时长 300ms，不要拉长。** 九改那次开合是 450ms（140+90+220），
-    ///    在表上停留得越久越容易被注意到 —— "一直在眨眼"里有它一份。
-    ///    真人闭眼 100~150ms、整个眨眼 200~400ms，300ms 正是自然那一档。
+    /// ⚠️ **Total 300ms, do not stretch it.** Revision nine's open-close was 450ms (140+90+220),
+    ///    and the longer it lingers on the watch the more likely it is to be noticed -- "always blinking" had a share of it.
+    ///    A real human's eye closing is 100~150ms, a whole blink 200~400ms, and 300ms is exactly the natural range.
     ///
-    /// ⚠️ **过冲 1.08 那一下是灵魂**：睁到底之后再多开一点点再落回来，
-    ///    眼睛就有了"弹开"的劲。少了它，纯三段式的开合看着像机械闸门。
+    /// ⚠️ **That 1.08 overshoot is the soul of it**: after opening all the way it opens a touch more then falls back,
+    ///    which gives the eye its "spring open." Without it, a plain three-stage open-close looks like a mechanical shutter.
     private func blinkOnce() async {
         withAnimation(.easeIn(duration: 0.07)) { openness = 0.05 }
         try? await Task.sleep(nanoseconds: 70_000_000)
@@ -725,56 +752,69 @@ struct WatchBotFace: View {
         try? await Task.sleep(nanoseconds: 150_000_000)
     }
 
-    /// 抽下一个"两次眨眼之间的间隔"。
+    /// Draw the next "interval between two blinks."
     ///
-    /// ★ 十二改新增。这就是"跟正常人一样"的全部实现 —— 先按概率决定这一轮
-    /// 属于"密"还是"疏"，再在那一档里随机。两段的数值依据写在常量那边。
+    /// ★ Added in revision twelve. This is the whole implementation of "like a normal person" -- first decide by probability whether this round
+    /// is "dense" or "sparse," then randomize within that tier. The numbers for the two tiers are documented over at the constants.
     ///
-    /// ⚠️ 为什么抽**两次**而不是"一个偏斜分布"：`Double.random` 只有均匀分布，
-    ///    要在它上面凑一个偏斜分布就得写个逆变换，为了两个数不值得。两档写法
-    ///    反而把意图摆在明面上 —— 读代码的人一眼看到"主流是几秒、偶尔十几秒"。
-    private static func nextBlinkGap() -> Double {
-        let far = Double.random(in: 0 ..< 1) < blinkGapFarChance
-        return Double.random(in: far ? blinkGapFar : blinkGapNear)
+    /// ⚠️ Why draw **twice** rather than use "a skewed distribution": `Double.random` only has a uniform distribution,
+    ///    and building a skewed distribution on top of it would need an inverse transform, not worth it for two numbers. The two-tier approach
+    ///    instead puts the intent out in the open -- whoever reads the code immediately sees "mostly a few seconds, occasionally a dozen-plus."
+    /// Draw the next "interval between two blinks."
+    ///
+    /// ★ Added in revision twelve. This is the whole implementation of "like a normal person" -- first decide by probability whether this round
+    /// is "dense" or "sparse," then randomize within that tier. The numbers for the two tiers are documented over at the constants.
+    ///
+    /// ⚠️ Why draw **twice** rather than use "a skewed distribution": `Double.random` only has a uniform distribution,
+    ///    and building a skewed distribution on top of it would need an inverse transform, not worth it for two numbers. The two-tier approach
+    ///    instead puts the intent out in the open -- whoever reads the code immediately sees "mostly a few seconds, occasionally a dozen-plus."
+    ///
+    /// ★ 2026-10-20: the tiers' *product* is scaled by `blinkSpeed` — the shape of the
+    /// distribution (two tiers, 22 % far, 14 % double) is untouched; only the clock runs
+    /// faster or slower. The blink keyframes stay 300 ms at every setting.
+    private func nextBlinkGap() -> Double {
+        let far = Double.random(in: 0 ..< 1) < Self.blinkGapFarChance
+        let base = Double.random(in: far ? Self.blinkGapFar : Self.blinkGapNear)
+        return base * blinkSpeed.gapMultiplier
     }
 
-    /// 三层缩放的乘积：呼吸 × 被戳 × 录音。
+    /// The product of three scale layers: breathing × poke × recording.
     ///
-    /// 乘起来而不是叠三个 `.scaleEffect` —— 叠三层时改任何一层都要同时改
-    /// 另外两层的量级才能对上观感，很快就没人算得清总幅度了。
+    /// Multiply rather than stack three `.scaleEffect`s -- with three stacked layers, changing any one means also changing
+    /// the magnitude of the other two to match the look, and soon nobody can work out the total amplitude.
     ///
-    /// ⚠️ 呼吸的幅度八改收到 ±1.8%（原来 ±3.5%）。周期放慢之后，同样的幅度
-    ///    在一秒里走过的距离变短、但停留时间长，观感上反而更"胀"；两个一起
-    ///    调才是"慢而稳"，只放慢周期会变成"慢慢鼓起来"。
+    /// ⚠️ Revision eight pulled the breathing amplitude in to plus or minus 1.8% (from plus or minus 3.5%). With the cycle slowed, the same amplitude
+    ///    covers less distance per second but lingers longer, so it actually looks more "swollen"; adjusting both together
+    ///    is what keeps it "slow and steady," while slowing only the cycle turns it into "slowly swelling."
     ///
-    /// ⚠️ 录音态是 1（不缩不放）。七改那版录音时会再放大 1.06，那是为了
-    ///    "眼睛睁大一号"；九改录音态换成音波之后，那条波的高度**就是电平本身**，
-    ///    再乘一个系数会让"看到的幅度"和"真实音量"不再是一回事。
+    /// ⚠️ The recording state is 1 (no shrink, no grow). Revision seven's version grew another 1.06 while recording, which was for
+    ///    "open the eyes one size larger"; after revision nine swapped the recording state for a waveform, that wave's height **is the level itself**,
+    ///    and multiplying by another factor would make "the amplitude you see" and "the real volume" stop being the same thing.
     ///
-    /// ⚠️ 被戳那一下十二改从 5% 收到 **3%**：它现在只是配菜（主戏是 `mood`）。
-    ///    这里仍然只有**三层**，表情的变形不在这个乘积里 —— 表情改的是眼睛
-    ///    自己的尺寸与形状（`eye(mirrored:)`），跟整张脸的缩胀是两码事，
-    ///    混进这个乘积就会变成"表情多大取决于当时呼吸到哪儿了"。
+    /// ⚠️ Revision twelve pulled the poke from 5% in to **3%**: it is now just a side dish (the main act is `mood`).
+    ///    There are still only **three layers** here, and the expression's deformation is not in this product -- the expression changes the eyes'
+    ///    own size and shape (`eye(mirrored:)`), which is a different matter from the whole face's inflate-deflate,
+    ///    and mixing it into this product would turn into "how big the expression is depends on where the breathing happened to be."
     private var figureScale: CGFloat {
         var s: CGFloat = (dimmed || isRecording) ? 1 : (breathe ? 1.028 : 0.992)
         s *= 1 + poke * 0.03
         return s
     }
 
-    /// 空闲态被轻点：**弹一下 + 演一个随机表情**。
+    /// Tapped while idle: **bounce once + play a random expression**.
     ///
-    /// ⚠️ 开始录音仍然不是它 —— 开始录音是长按 2 秒、双指互点、或摇一摇。
+    /// ⚠️ Starting recording is still not this -- starting recording is a 2-second hold, a Double Tap, or a shake.
     ///
-    /// 为什么要有反馈：点了完全没动静，用户会以为"是不是得要长按才行"于是
-    /// 开始乱试。所以这一下必须"我收到了"。
+    /// Why there has to be feedback: if a tap does nothing at all, the user assumes "maybe I have to hold it," so
+    /// they start trying random things. So this one has to say "I got it."
     ///
-    /// ★ 十二改（用户："眼睛需轻触它会有各种表情而不是单一的眼睛晃动"）：
-    /// 十改之前这里只有整体的那一弹，用户把那一弹形容成"单一的眼睛晃动"
-    /// —— 准确。现在弹只是**回应**，**表情**才是内容：
-    /// 五档随机抽一个（∩拱笑眼 / ∪垂眼 / 圆睁 / 眯眼 / 斜瞪），演一遍收回。
+    /// ★ Revision twelve (user: "the eyes need to have various expressions on a light touch rather than a single eye wobble"):
+    /// before revision ten there was only the overall bounce here, and the user described that bounce as "a single eye wobble"
+    /// -- accurate. Now the bounce is only the **response**, and the **expression** is the content:
+    /// one of five is drawn at random (∩ arched smiling eye / ∪ drooping eye / wide-open / squint / angry glare), played once and withdrawn.
     ///
-    /// ⚠️ 两者**同时**发生是有意的（不是顺手叠的）：纯表情变化没有"点到了"
-    ///    这个物理感，纯弹跳又没有表情 —— 用户抱怨的正是"只有后者"。
+    /// ⚠️ Their **happening at once** is deliberate (not casually stacked): a pure expression change has no "I was tapped" feel,
+    ///    and a pure bounce has no expression -- what the user complained about was exactly "only the latter."
     private func pokeOnce() {
         guard !isRecording, !dimmed else { return }
         withAnimation(.spring(response: 0.22, dampingFraction: 0.5)) { poke = 1 }
@@ -785,26 +825,26 @@ struct WatchBotFace: View {
         playRandomMood()
     }
 
-    /// 摇一摇的"眩晕"：整对眼睛绕自己的中心**转两圈**，然后停回原位。
+    /// The shake "dizzy": the whole pair of eyes **spins twice** around its own center, then settles back in place.
     ///
-    /// ★★ 十四改新增（用户："手表的摇一摇改成摇一摇眼睛会有转圈圈眩晕感
-    /// 增加交互"）。摇一摇原来的反馈只有一下震动 —— 身体感受到的、
-    /// 眼睛没参与。现在眼睛跟着"晕"一下，摇这个动作才算被**这张脸**收到。
+    /// ★★ Added in revision fourteen (user: "change the watch's shake so a shake makes the eyes spin in circles with a dizzy feel
+    /// and adds interaction"). The shake's feedback used to be a single vibration -- felt by the body,
+    /// with the eyes taking no part. Now the eyes "go dizzy" along with it, and only then does the shake register on **this face**.
     ///
-    /// ## 节奏怎么定的
-    /// * **0.9 秒转 720°**（两圈）。一圈太快像在扇风，三圈以上在 40mm 的
-    ///   小屏上会糊成一团。0.9 秒也正好是 `WatchShakeDetector` 那个
-    ///   "0.9 秒窗内两次撞击"的判定窗 —— 眼睛转完，判定也刚落地。
-    /// * **`timingCurve(0.3, 0, 0.4, 1)`**：慢起 → 中段最快 → 收尾放缓。
-    ///   "越转越快然后停住"才有"晕"的感觉；匀速转两圈是电风扇，不是眩晕。
-    /// * **之后必须把角度归零，且不带动画**：带着 720° 的角度停在那里，
-    ///   下一次转就要从 720° 出发；而带动画归零会让眼睛在停下之后
-    ///   又倒转两圈回去 —— 那是"倒带"，不是"晕完"。
+    /// ## How the rhythm was set
+    /// * **720° in 0.9 seconds** (two turns). One turn is so fast it looks like fanning the air, and three or more on a 40mm
+    ///   little screen blur into a single smudge. 0.9 seconds is also exactly the window for
+    ///   the "two impacts within a 0.9-second window" test in `WatchShakeDetector` -- the eyes finish spinning just as the test lands.
+    /// * **`timingCurve(0.3, 0, 0.4, 1)`**: slow start → fastest in the middle → easing off at the end.
+    ///   Only "spinning faster and faster and then stopping" feels "dizzy"; two turns at a constant speed is an electric fan, not dizziness.
+    /// * **Afterwards the angle must be reset to zero, and without animation**: parked there at 720°,
+    ///   the next spin would have to start from 720°; and animating the reset to zero makes the eyes, after stopping,
+    ///   spin two turns backwards again -- that is a "rewind," not "finished being dizzy."
     ///
-    /// ⚠️ **只在眼睛可见时有意义**。首页在摇一摇触发后约 0.45 秒才真正
-    ///    起停录音（见 `WatchRecorderView.syncShakeDetector`），所以开始录音
-    ///    时前半段眩晕看得见；停止录音时眼睛在 0.45 秒后回来，
-    ///    正好接上后半段。两条路都有戏份，不是白转。
+    /// ⚠️ **It only means anything while the eyes are visible**. After a shake trigger the home screen does not actually
+    ///    start or stop recording for about 0.45 seconds (see `WatchRecorderView.syncShakeDetector`), so when recording starts
+    ///    the first half of the dizzy is visible; when recording stops the eyes return after 0.45 seconds,
+    ///    picking up exactly the second half. Both paths get their moment; the spin is not wasted.
     private func playDizzy() {
         dizzyTask?.cancel()
         guard !dimmed else { return }
@@ -820,25 +860,25 @@ struct WatchBotFace: View {
         }
     }
 
-    /// 抽一个表情演一遍：进场 0.26 秒 → 停约 0.8 秒 → 退场 0.34 秒。
+    /// Play one expression once: 0.26 seconds coming in → hold about 0.8 seconds → 0.34 seconds leaving.
     ///
-    /// ⚠️ 每次都**先取消上一条** `Task`（见 `moodTask` 那段）：连点两下时，
-    ///    先醒来的那条会把刚进场的新表情一起抹掉。
+    /// ⚠️ Every time it **cancels the previous** `Task` first (see the `moodTask` paragraph): on a double tap,
+    ///    the one that wakes first erases the new expression that has just come on.
     ///
-    /// ⚠️ 退场用 `easeOut` 而不是 `spring`：进场要弹一下（"被逗了"），
-    ///    退场要**松**着回去。两头都用 spring 会让"收回表情"看起来像被弹回去。
+    /// ⚠️ The exit uses `easeOut` rather than `spring`: the entrance should spring ("got amused"),
+    ///    and the exit should go back **loosely**. Using spring at both ends makes "withdrawing the expression" look like it is being sprung back.
     ///
-    /// ⚠️ 0.8 秒是"看得清"和"不挡事"之间的那档。低于 0.5 秒会像闪了一下，
-    ///    高于 1.2 秒用户会开始等它回去（这张脸随时可能被长按，不能长时间
-    ///    挂着一个表情）。
+    /// ⚠️ 0.8 seconds is the level between "clearly visible" and "not in the way." Below 0.5 seconds it looks like a flash,
+    ///    above 1.2 seconds the user starts waiting for it to go back (this face can be held at any moment, so it cannot hang
+    ///    an expression for a long time).
     private func playRandomMood() {
         moodTask?.cancel()
-        // ★ 十三改：池子 = **表情库减去常驻那一档**（`BotFaceStyle.tapPool`）。
+        // ★ Revision thirteen: the pool = **the expression library minus the persistent tier** (`BotFaceStyle.tapPool`).
         //
-        // ⚠️ 十二改那份名单是写死的五档；现在库变成九档、而且用户能自己选常驻
-        //    哪一档，写死的名单会立刻出问题：用户选了 `shy` 常驻，池子里却仍然
-        //    只有那五档 —— 于是 `shy` 永远演不出来，而"抽到和常驻一样的那档"
-        //    （那一下看起来就是没反应）反而有可能。从库里算就不会有这两种毛病。
+        // ⚠️ Revision twelve's list was a hard-coded five tiers; now the library is nine tiers and the user can choose which one is persistent,
+        //    so a hard-coded list would immediately go wrong: the user picks `shy` as persistent, but the pool still
+        //    has only those five tiers -- so `shy` can never be played, while "drawing the same tier as the persistent one"
+        //    (which looks like nothing happened) becomes possible instead. Computing it from the library avoids both problems.
         let pool = BotFaceStyle.tapPool(excluding: style)
         guard let next = pool.randomElement() else { return }
         moodTask = Task {
@@ -849,31 +889,35 @@ struct WatchBotFace: View {
         }
     }
 
-    // MARK: - 脸
+    // MARK: - The face
 
-    /// 这张脸**当前是哪个形态**。
+    /// **Which form this face is currently in**.
     ///
-    /// 只有两个分支、而且互斥 —— 这正是 Grok 那套"一个形象、几种状态，
-    /// 不给状态另做指示灯"的做法：待命是眼睛，录音是一条音波。
-    /// 表盘上没有地方再摆一行"录音中"，这个切换本身就是那行字。
+    /// Only two branches, and they are mutually exclusive -- this is exactly Grok's approach of "one figure, several states,
+    /// no separate indicator light for the state": idle is eyes, recording is a waveform.
+    /// There is nowhere on the watch face to put another "recording" line; this switch is itself that line.
     ///
-    /// ★ 十一改：录音态从"光一条波"变成"波 + 正下方一行计时"。用户要的是
-    /// "下面附带录音时间" —— 计时必须**贴着波**，而不是隔着半张脸落在首页
-    /// 那行小字里。所以它归到这里来渲染，不再是首页 `caption` 的一部分。
+    /// ★ Revision eleven: the recording state goes from "just a wave" to "wave + a timer line directly below." What the user wants is
+    /// "attach the recording time below" -- the timer must **hug the wave**, not sit half a face away in the
+    /// home screen's little caption line. So it is rendered here instead, no longer part of the home screen's `caption`.
     ///
-    /// ⚠️ 用 `VStack` 会让整组在脸框里重新居中，也就是波比原来**略高一点点**
-    /// （多出来的那行字占了约 8pt）。这个位移只在"眼睛 → 波"这个切换的**同时**
-    /// 发生，而那一刻画面本来就在整个换掉，所以看不出来。不要为了抹掉它去
-    /// 写一堆 offset —— 那会让"波到底在哪儿"变成一个要算的问题。
+    /// ⚠️ Using a `VStack` re-centers the whole group inside the face frame, which means the wave sits **slightly higher** than before
+    /// (the extra line takes about 8pt). This shift happens only **at the same moment** as the "eyes → wave" switch,
+    /// and at that moment the whole picture is being swapped anyway, so it is invisible. Do not write a pile of offsets just to erase it
+    /// -- that would turn "where exactly is the wave" into something you have to compute.
     @ViewBuilder
     private var figure: some View {
         if isRecording {
+            // ★ 2026-10-20 (third pass): the frame is **idle-only** now, so the recording
+            // figure owns the whole face again — full-size wave, no lift. (The second-pass
+            // shrink/lift existed only to keep the wave and timer inside the frame; with
+            // the frame gone during recording, that constraint disappears with it.)
             VStack(spacing: 6) {
                 WatchVoiceWave(meter: meter, size: size, tint: tint)
 
                 if let elapsedText {
                     Text(elapsedText)
-                        // 等宽数字：不然秒数从 9 跳到 10 时整行会左右抖一下。
+                        // Monospaced digits: otherwise the whole line jitters left and right when the seconds go from 9 to 10.
                         .monospacedDigit()
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(tint)
@@ -884,217 +928,143 @@ struct WatchBotFace: View {
         }
     }
 
-    /// 两只眼睛。
+    /// The two eyes.
     ///
-    /// ★ 十改：这一对眼睛**整体**会轻轻地游移（`gaze`）—— 这是待机时的**主体
-    /// 动作**，也是"不要一直眨眼"真正成立的原因：眼睛从不静止，眨眼就退化成
-    /// 一个偶尔的点缀，而不是唯一在发生的事（见文件顶部第 3 条）。
+    /// ★ Revision ten: this pair of eyes **as a whole** drifts gently (`gaze`) -- this is the **main
+    /// motion** of the idle state, and it is why "don't keep blinking" actually holds: the eyes are never still, so blinking degrades into
+    /// an occasional accent rather than the only thing happening (see item 3 at the top of the file).
     ///
-    /// ⚠️ 是**整对一起平移**，不是左右眼各看各的。各看各的就不是"在看"，
-    ///    是"斜视"—— 参考实现 `_blinkNow` 外面的 `lookX` 也是加到两只眼上的
-    ///    同一个值。
+    /// ⚠️ It is **the whole pair translating together**, not each eye looking its own way. Doing it separately is not "looking,"
+    ///    it is "a squint" -- the reference implementation's `lookX`, outside `_blinkNow`, is likewise the same value
+    ///    added to both eyes.
     ///
-    /// ⚠️ 八改删掉了"录音时错相位浮动"那套（那时录音态还是眼睛的变体）。
-    ///    九改录音态整条换成音波，眼睛根本不在场，`sway` 那个状态跟着一起删了
-    ///    —— 不是忘了接。
+    /// ⚠️ Revision eight deleted the "out-of-phase drift while recording" scheme (back then the recording state was still a variant of the eyes).
+    ///    Revision nine swapped the whole recording state for a waveform, the eyes are simply absent, and the `sway` state was deleted along with it
+    ///    -- not forgotten.
     ///
-    /// ★★ 十三改：对眼睛的**画法**整个搬进了 `BotFacePair`（共用文件）。
-    ///    这里只剩两件"这张脸自己才知道"的事：抬高一点（`eyeRise`），
-    ///    以及往目光方向平移（`gaze`）。
-    ///    ⚠️ 画法搬走是必须的 —— iPhone 上那个选择器要用同一段代码摆预览。
-    ///      两边各写一份的话，"手机上挑的笑眼"和"表上画的笑眼"迟早会不一样。
+    /// ★★ Revision thirteen: the whole **drawing method** for the eyes moved into `BotFacePair` (the shared file).
+    ///    Only two things "only this face knows" are left here: rise it a little (`eyeRise`),
+    ///    and translate it toward the gaze (`gaze`).
+    ///    ⚠️ The drawing method had to move -- the picker on the iPhone has to lay out the preview with the same code.
+    ///      Written separately, "the smiling eye chosen on the phone" and "the smiling eye drawn on the watch" would eventually differ.
+    /// Which tier the idle eyes are wearing right now: a tap's one-shot first, then the
+    /// auto-express cycle's current pick, then the tier the phone pinned (★ 2026-10-20).
+    private var shownStyle: BotFaceStyle { mood ?? cycleStyle ?? style }
+
     private var eyes: some View {
         BotFacePair(
-            // 轻点演的那一档优先，没有就回落用户选的常驻档。
-            style: mood ?? style,
+            // The tier played by a tap takes priority; if there is none, fall back to the user's chosen persistent tier.
+            style: shownStyle,
             size: size,
             tint: tint,
             openness: openness
         )
-            // ★ 十四改：摇一摇的"眩晕"。整对眼睛绕自己的中心转两圈。
+            // ★ Revision fourteen: the shake "dizzy." The whole pair of eyes spins twice around its own center.
             .rotationEffect(.degrees(dizzyAngle), anchor: .center)
-        // 眼睛整体略高于几何中心。正好居中会显得"低着头"——
-        // 人脸的眼睛本来就在中线之上。
+        // As a group the eyes sit a little above the geometric center. Exactly centered looks "head down" --
+        // the eyes on a human face sit above the midline anyway.
         .offset(y: BotFaceMetrics.eyeRise(size))
-        // 目光。叠加在上面那行的"抬高"之上（两个 `offset` 是相加的）。
+        // Gaze. Stacked on top of the "rise" on the line above (the two `offset`s are added).
         .offset(x: gaze.width, y: gaze.height)
     }
 
-    /// 待机、以及"不换形状"那几种表情的眼睛：一只圆头竖条。
+    /// The eyes for the idle state, and for the expressions that "do not change shape": a round-tipped vertical bar.
     ///
-    /// ⚠️ 十三改：这一对方法（`eyeShape` / `eyeArc`）**整个搬去了
-    ///    `BotFaceEye`**（共用文件 `Sources/Services/Watch/BotFaceStyle.swift`），
-    ///    连同"用 `opacity` 交叉淡化而不是 `if/else` 二选一"那个决定。
-    ///    搬家的理由见 `eyes` 那段 —— iPhone 上的选择器要用同一段代码摆预览。
+    /// ⚠️ Revision thirteen: this pair of methods (`eyeShape` / `eyeArc`) **moved entirely to
+    ///    `BotFaceEye`** (the shared file `Sources/Services/Watch/BotFaceStyle.swift`),
+    ///    along with the decision to "cross-fade via `opacity` rather than pick one with `if/else`."
+    ///    For the reason for the move see the `eyes` paragraph -- the picker on the iPhone has to lay out the preview with the same code.
 
-    // MARK: - 长按：眼睛融合 → 扩散满屏
+    // MARK: - Hold: a progress ring around the face
 
-    /// ★★ 2026-10-16 十六改（用户原话：
-    ///   "我要的是两个眼睛根据我按压下去然后自动根据我按压的地方两个眼睛融在一起，
-    ///    然后再慢慢扩散整个屏幕然后跳转到录音那边"）。
+    /// ★★ 2026-10-20 (third pass, user's words:
+    ///   "长按手表的表情背面是红色占满全屏还是需要优化" and
+    ///   "长按后还是按照之前圆圈的动效做过渡动画到录音界面好点").
     ///
-    /// ## 两版都被否掉了，这一版要的是"有来路"
-    /// * 十四改：从眼睛外接圆长出去的实心圆 → 用户读成"两个眼睛在扩散"；
-    /// * 十五改：整屏纯色用透明度渐显 → 干净了，但**没有来路** ——
-    ///   颜色凭空从整块屏幕上浮起来，和那两只眼睛没有关系。
-    /// 用户这次把顺序讲清楚了：**先融，再扩散**。所以这一版是两段几何，
-    /// 前一段的主角是那两只眼睛，后一段才是满屏。
+    /// ## What was wrong with the previous look
+    /// Revision sixteen's hold animation (eyes merge at the press point → the blob
+    /// spreads until the tint covers the whole screen) filled the watch with a solid
+    /// colour for two seconds on every recording start. The user asked to go back to
+    /// the **circular** transition revision thirteen and earlier had: a progress arc
+    /// that fills around the face while the hold lasts, then hands over to the wave.
     ///
-    /// ## 两段（`holdProgress` 0 → 1）
-    /// | 段 | 占比 | 在做什么 |
-    /// |---|---|---|
-    /// | 融合 | 前 **32%** | 两只眼睛各自朝**手指按下的那个点**滑过去，同时从"竖条"长成"圆"，最后在按点重叠成一团 |
-    /// | 扩散 | 后 **68%** | 那一团从按点开始长圆，一直长到盖住整块屏幕 |
-    ///
-    /// * 融合段的终点尺寸取 **`0.47 × size` 的圆**：这个数不是拍的 ——
-    ///   两只眼睛的面积是 `2 × 0.235 × 0.375 ≈ 0.176 size²`，而直径 `d` 的圆
-    ///   面积是 `0.785 d²`，令两者相等得 `d ≈ 0.47`。也就是**融完之后那团东西
-    ///   和融之前一样大**，看起来是"合并"，不是"缩小"或"膨胀"。
-    /// * 两段都过一遍 `smoothstep`（`3x² − 2x³`）：线性插值在起点和终点各有一个
-    ///   折角，眼睛会像被硬拽一下。平滑之后是"起步轻、中间快、收尾轻"。
-    /// * 扩散段终点半径 **`2.0 × size`**：按点最远只可能在脸的方框的角上
-    ///   （离脸心 `0.57√2 ≈ 0.81 size`），屏幕最远角离脸心约 `1.06 size`，
-    ///   所以从按点到最远角最多 `1.87 size`。2.0 留了一点余量。
-    ///
-    /// ## 为什么用 `Canvas` 自己画，而不是 `Rectangle` + 两个 `Capsule`
-    /// 融合段要的是"眼睛**一边移动一边变圆**"，而 `BotFaceEye` 画的是胶囊
-    /// （宽高比固定、还带着 `BotFaceStyle` 的 `arc` 分支）。要在 SwiftUI 里把
-    /// 那个形状连续变形到圆，得把 `BotFaceStyle` 那条几何重写一遍 —— 而
-    /// 那一份正是两端共用的、绝不能分叉的东西。`Canvas` 里画**圆角矩形**
-    /// 就不用碰它：宽=高时圆角矩形**就是**圆，变形是同一个 `Path` 的两个参数
-    /// 在插值，没有第二套几何。
-    ///
-    /// ## 三个必须
-    /// * `allowsHitTesting(false)` —— 它盖在整块屏幕上，能点的话这一页就没法用了。
-    /// * 画布 `4.2 × size`：`Canvas` **只在它自己的边界内绘制**，所以它必须比
-    ///   屏幕大得多（40mm 上 500pt 见方，屏幕只有 162×194）。
-    ///   那把圆裁掉的那一圈落在屏幕之外，看不见。
-    /// * 淡出交给 `sweepFading`，**不动 `holdProgress`** —— 几何与退场是两件事，
-    ///   混在一个状态里，"先铺满再退场"就写不出来了。
+    /// ## This version
+    /// * A `Circle().trim` arc on the face's **nominal boundary** (`1.14 × size` — the
+    ///   same ring the charge/hold indicator used to ride). `holdProgress` 0 → 1 over
+    ///   exactly the gesture's `minimumDuration`, so the arc completing and the hold
+    ///   firing are the same event.
+    /// * The eyes **stay visible** the whole time — the ring is an indicator, not a
+    ///   replacement. That removes the old duplicate-eye hand-off entirely.
+    /// * On success (`sweepFading`) the arc fades out in 0.4 s, exactly covering the
+    ///   "eyes → wave" switch: the ring completes → the wave lights up as the ring
+    ///   recedes. On an early release the arc simply recedes with `holdProgress`.
+    /// * `allowsHitTesting(false)` — it rides the whole face; tappable would break the page.
+    /// Stroke width of the hold ring.
+    private var holdRingWidth: CGFloat { max(4, size * 0.06) }
+
     @ViewBuilder
     private var holdLayer: some View {
         if holdProgress > 0.002 {
-            Canvas { context, canvasSize in
-                let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-
-                // 按压点从"脸的局部坐标"换到"画布坐标"：两个视图同心
-                // （都在同一个 ZStack 里居中），所以只差一个平移。
-                let faceSide = size * 1.14
-                let press = pressPoint ?? CGPoint(x: faceSide / 2, y: faceSide / 2)
-                let target = CGPoint(
-                    x: center.x + (press.x - faceSide / 2),
-                    y: center.y + (press.y - faceSide / 2)
-                )
-
-                let merge = Self.smoothstep(min(1, holdProgress / Self.mergeShare))
-                let spread = Self.smoothstep(
-                    max(0, (holdProgress - Self.mergeShare) / (1 - Self.mergeShare))
-                )
-
-                // 起点：和待机那两只眼睛**逐项对齐**（同一套 `BotFaceMetrics`、
-                // 同一个 `style` 的形变）。差一点就会在按住的第一帧看到眼睛跳一下。
-                let geo = style.geometry
-                let restW = BotFaceMetrics.eyeWidth(size) * geo.scaleX
-                let restH = BotFaceMetrics.eyeHeight(size) * geo.scaleY
-                let restGap = (BotFaceMetrics.eyeWidth(size) + BotFaceMetrics.eyeGap(size)) / 2
-                let restY = BotFaceMetrics.eyeRise(size)
-                let blobD = size * 0.47
-
-                for side in [CGFloat(-1), 1] {
-                    let rest = CGPoint(x: center.x + side * restGap, y: center.y + restY)
-                    let eye = CGPoint(
-                        x: rest.x + (target.x - rest.x) * merge,
-                        y: rest.y + (target.y - rest.y) * merge
-                    )
-                    let w = restW + (blobD - restW) * merge
-                    let h = restH + (blobD - restH) * merge
-                    let rect = CGRect(x: eye.x - w / 2, y: eye.y - h / 2, width: w, height: h)
-                    context.fill(
-                        Path(roundedRect: rect, cornerRadius: min(w, h) / 2),
-                        with: .color(tint)
-                    )
-                }
-
-                if spread > 0 {
-                    let from = blobD / 2
-                    let r = from + (size * 2.0 - from) * spread
-                    context.fill(
-                        Path(ellipseIn: CGRect(
-                            x: target.x - r, y: target.y - r, width: r * 2, height: r * 2
-                        )),
-                        with: .color(tint)
-                    )
-                }
-            }
-            .frame(width: size * 4.2, height: size * 4.2)
-            // 一点点模糊。融合和扩散都是"液体"的事，硬边会读成"两个几何图形
-            // 叠在一起"。半径跟着 `size` 走，40mm 上约 5pt。
-            .blur(radius: size * 0.045)
-            .opacity(sweepFading ? 0 : 1)
-            .animation(.easeOut(duration: 0.5), value: sweepFading)
-            .allowsHitTesting(false)
+            // ★ 2026-10-22 ("那个红色的圈底部是被遮挡了"): the ring used to be drawn
+            // on a `1.14 × size` path while the layout box was **also** `1.14 × size`.
+            // A stroked circle is centred on its path, so `lineWidth / 2` (≈ 3.6 pt on
+            // a 40 mm, 4.5 pt on a 49 mm) hung **outside** the box — and the only side
+            // without slack was the bottom, where the caption line sits 6 pt below.
+            // The result was the ring's 6-o'clock edge disappearing under the byte
+            // counter. Shrinking the path by exactly `lineWidth` puts the stroke's
+            // outer edge back on the box boundary: no layout change, no clipping
+            // change, 6 pt of real clearance under the ring on every size.
+            Circle()
+                .trim(from: 0, to: holdProgress)
+                .stroke(tint, style: StrokeStyle(lineWidth: holdRingWidth, lineCap: .round))
+                .frame(width: size * 1.14 - holdRingWidth,
+                       height: size * 1.14 - holdRingWidth)
+                .rotationEffect(.degrees(-90)) // start at 12 o'clock, like the old ring
+                .opacity(sweepFading ? 0 : 1)
+                .animation(.easeOut(duration: 0.4), value: sweepFading)
+                .allowsHitTesting(false)
         }
     }
 
-    /// 融合段占 `holdProgress` 的比例。剩下的都给扩散段。
-    ///
-    /// ⚠️ 0.32 是有配比的：融合太快（<0.2）会像"眼睛闪了一下就没了"，
-    ///    太慢（>0.45）则扩散只有一半时间，会长得很仓促 —— 用户要的是
-    ///    "**慢慢**扩散整个屏幕"。
-    private static let mergeShare: CGFloat = 0.32
-
-    /// 平滑插值：`3x² − 2x³`。两端导数为 0，所以眼睛起步和收尾都不是"被拽一下"。
-    private static func smoothstep(_ x: CGFloat) -> CGFloat {
-        let t = min(1, max(0, x))
-        return t * t * (3 - 2 * t)
-    }
-
-    /// 按住期间，`figure` 那两只眼睛让位的程度。
-    ///
-    /// ⚠️ **必须有这一段交接**：`holdLayer` 在 ZStack 里是上层，从按住的第一帧
-    ///    就画着两只眼睛（用的是同一套几何）。不让 `figure` 退场，就是两对眼睛
-    ///    重叠 —— 基础档（纯胶囊）看不出来，但 `BotFaceStyle` 里带 `arc` 的
-    ///    那几档（`happy` / `sad`）会露出来：底下是弧、上面是直条。
-    ///    0.06 个进度 ≈ 0.12 秒，快到看不出这是一个"换手"。
-    private var figureOpacity: Double {
-        guard holdProgress > 0.002 else { return 1 }
-        return Double(max(0, 1 - holdProgress / 0.06))
-    }
+    /// ★ 2026-10-20 (third pass): the old `figureOpacity` hand-off is **gone**. The hold
+    /// indicator is a ring around the face, not a patch that takes over from the eyes,
+    /// so the figure stays at full opacity for the entire hold — no yielding, no
+    /// duplicate-eye cross-fade. The merge-and-spread patch died with this change.
 }
 
-// MARK: - 表情（★ 2026-10-16 十二改新增，十三改搬走）
+// MARK: - Expressions (★ 2026-10-16 added in revision twelve, moved away in revision thirteen)
 //
-// 十二改的五个表情（`EyeMood`）和那段弧的形状（`EyeCurve`）都**搬到共用文件**
-// `Sources/Services/Watch/BotFaceStyle.swift` 里去了，现在叫 `BotFaceStyle`
-// 与 `BotFaceEyeCurve`，而且从五档扩到九档。
+// Revision twelve's five expressions (`EyeMood`) and the shape of that arc (`EyeCurve`) both **moved to the shared file**
+// `Sources/Services/Watch/BotFaceStyle.swift`, and are now called `BotFaceStyle`
+// and `BotFaceEyeCurve`, expanded from five tiers to nine.
 //
-// ⚠️ 搬家的理由不是整理，是**必须**：iPhone 的设置里多了一个表情选择器，
-//    它要摆预览；预览和真机必须是**同一段代码**。各写一份的话，用户会在
-//    手机上看到一个笑眼、抬腕发现是垂眼 —— 而这种漂移最难被发现。
-//    素材来源、为什么只搬得动九个、以及挑的时候守的三条，全部写在那个文件里。
+// ⚠️ The reason for the move is not tidying up, it is **necessary**: a new expression picker was added to the iPhone settings,
+//    and it has to lay out a preview; the preview and real hardware must be **the same code**. Written separately, the user would see
+//    a smiling eye on the phone and, raising their wrist, find a drooping eye -- and that kind of drift is the hardest to spot.
+//    Where the assets come from, why only nine could be brought over, and the three rules kept when choosing, are all written in that file.
 
-// MARK: - 双指互点
+// MARK: - Double Tap
 //
-// ★ 2026-10-16 七改：从 `WatchRingControl.swift` 搬过来的（那边留了说明）。
-// 搬家的原因不是它变了，而是**落点**变了：首页正中不再是圆环按钮，
-// 而是上面这张 Bot 脸。这个 modifier 本来就是"把手势绑到当前页的主控件上"，
-// 属于**控件**的事，不属于**环**的事。
+// ★ 2026-10-16 revision seven: moved over from `WatchRingControl.swift` (a note was left there).
+// The reason for the move is not that it changed, but that its **landing point** changed: the center of the home screen is no longer a ring button
+// but the Bot face above. This modifier was always "bind the gesture to the current page's main control,"
+// which is a **control** concern, not a **ring** concern.
 //
-/// 把**双指互点**（食指与拇指捏合，Apple 叫 Double Tap）绑到页面的主按钮上。
+/// Binds **Double Tap** (pinching index finger and thumb, which Apple calls Double Tap) to the page's main button.
 ///
-/// ## 为什么单独一个 `ViewModifier`
-/// `.handGestureShortcut(_:isEnabled:)` 是 **watchOS 11.0** 才有的 API，而本
-/// 工程的 `WATCHOS_DEPLOYMENT_TARGET` 是 **10.0**。拆成 modifier 就能在
-/// 一个明确的 `#available` 分支里说清两件事：
+/// ## Why a separate `ViewModifier`
+/// `.handGestureShortcut(_:isEnabled:)` is an API that appeared only in **watchOS 11.0**, while this
+/// project's `WATCHOS_DEPLOYMENT_TARGET` is **10.0**. Splitting it into a modifier lets one explicit
+/// `#available` branch spell out two things:
 ///
-/// * **11 及以上**：显式声明这个按钮就是手势的落点，并且**受开关控制**
-///   （`isEnabled`）。这里必须显式写 `isEnabled: false` 而不是"不管" ——
-///   只把开关读进来却不动 modifier 的话，系统仍然会把双指互点派给这一页的
-///   主按钮，用户关了开关照样触发。
-/// * **10.x**：什么都不做。watchOS 10.1 起系统就会把双指互点自行派给页面上
-///   那个唯一的主按钮（首页正中只有这张眼睛一个 `Button`；两侧菜单是
-///   `NavigationLink`，不参与 primary action 的判定），所以那个版本上手势
-///   本来就能用 —— 没有 API 也就**没有开关**，这是系统限制，不是漏做。
+/// * **11 and above**: explicitly declare that this button is the gesture's landing point, and that it is **controlled by the switch**
+///   (`isEnabled`). Here you must explicitly write `isEnabled: false` rather than "leave it alone" --
+///   if you only read the switch in without touching the modifier, the system still routes Double Tap to this page's
+///   main button, so it fires even with the switch off.
+/// * **10.x**: do nothing. From watchOS 10.1 the system routes Double Tap by itself to the page's
+///   the single main button (the center of the home screen has only this eye as a `Button`; the two side menus are
+///   `NavigationLink`s and do not take part in primary-action determination), so on that version the gesture
+///   works anyway -- no API means **no switch**, which is a system limitation, not an omission.
 struct PrimaryHandGesture: ViewModifier {
     let enabled: Bool
 
@@ -1107,54 +1077,54 @@ struct PrimaryHandGesture: ViewModifier {
     }
 }
 
-// MARK: - 眨眼的节奏（五个版本，账目留在这里）
+// MARK: - The blink rhythm (five versions, the ledger stays here)
 //
-// | 版本 | 眨眼节奏 | 用户反馈 |
+// | version | blink rhythm | user feedback |
 // |---|---|---|
-// | 七改 | 固定 4.63s，每轮必连眨两下 | 初版 |
-// | 八改 | 固定 8.12s，每轮必连眨 | "眨眼太快，节奏慢点" |
-// | 九改 | 固定 19.12s，每轮必连眨 | "眼睛不要一直眨眼"…"**不是不眨眼**" |
-// | 十改 | 9~20s 随机、每次重抽；单下为主，14% 补一下 | "**不需要一直眨眼**" |
-// | **十二改** | **两档随机：3.5~6.5s 为主、22% 概率 10~18s；单下为主，14% 补一下** | "**随机眨眼睛频率跟正常人眼渣样一样**" |
+// | revision seven | fixed 4.63s, a double blink in every round | first version |
+// | revision eight | fixed 8.12s, a double blink every round | "the blinking is too fast, slow the rhythm down" |
+// | revision nine | fixed 19.12s, a double blink every round | "the eyes should not keep blinking"... "**not no blinking**" |
+// | revision ten | 9~20s random, redrawn each time; mostly single blinks, 14% add one | "**no need to keep blinking**" |
+// | **revision twelve** | **two-tier random: mostly 3.5~6.5s, 22% chance of 10~18s; mostly single blinks, 14% add one** | "**random blink frequency just like a normal person's**" |
 //
-// ★ 七改到九改是**同一条路走了三步：把固定周期越拉越长**。走到 19 秒的时候
-// 用户还在说"不需要一直眨眼"—— 这就说明这条路本身是错的。
+// ★ Revision seven through nine is **one road walked three steps: stretching the fixed cycle longer and longer**. By the time it reached 19 seconds
+// the user was still saying "no need to keep blinking" -- which shows the road itself is wrong.
 //
-// 真正的问题有三个，前三个版本一个都没碰：
+// The real problem is three things, and the first three versions touched none of them:
 //
-// 1. **固定周期 = 节拍器。** 人眼抓规律的能耐远超直觉：19 秒的周期照样会被
-//    抓住，抓住之后每次眨眼都读成"它又按点眨了"。**慢不等于自然**。
-//    十改改成每次眨完重新抽一个区间内的随机值，结构上就没有周期可言。
-// 2. **每轮必连眨。** 七/八/九改都是 `100%` 连眨 —— 每个周期里必然两次开合。
-//    真人不是这样：参考实现（`aora-bot`）是 `Math.random() < 0.14`。
-//    十改照抄 0.14 ⇒ 绝大多数眨眼成了单下、300ms 的一闪。
-// 3. **眨眼是唯一在动的东西。** 九改那 ±1.8% 的呼吸肉眼看不见，于是 19 秒里
-//    这张脸完全静止，然后突然"啪-啪"。十改把**目光游移**提成待机的主体动作
-//    （`runGazeLoop`），眼睛从不静止 —— 眨眼于是降级成点缀，不再是被注意到
-//    的那件事。这一条才是"不需要一直眨眼"真正的解法。
+// 1. **A fixed period = a metronome.** The human eye is far better at catching patterns than intuition suggests: a 19-second cycle
+//    still gets caught, and once caught every blink reads as "it blinked on schedule again." **Slow is not the same as natural.**
+//    Revision ten changed it to drawing a fresh random value in a range after every blink, so structurally there is no period to speak of.
+// 2. **A double blink every round.** Revisions seven/eight/nine were all `100%` double blinks -- two open-close pairs necessarily in every cycle.
+//    Real people are not like that: the reference implementation (`aora-bot`) is `Math.random() < 0.14`.
+//    Revision ten copies 0.14 ⇒ the great majority of blinks become a single, 300ms flash.
+// 3. **Blinking is the only thing moving.** The plus-or-minus 1.8% breathing in revision nine is invisible to the naked eye, so for 19 seconds
+//    this face was completely still, then suddenly "snap-snap." Revision ten promotes **gaze drift** to the main idle motion
+//    (`runGazeLoop`), the eyes are never still -- so blinking degrades into an accent, no longer the
+//    thing that gets noticed. This one is the real solution to "no need to keep blinking."
 //
-// ★★ 十二改是**这条线第一次往反方向走**（更密）。十改把区间从严取到 9~20，
-// 依据是用户连着两轮的"不要一直眨眼"；用户这一轮明确改口要"跟正常人一样"，
-// 于是按人的实测频率重新取了一遍，并且从**一档均匀**换成**两档**：
-// 人眨眼是"密的里面偶尔插一段长的"，不是均匀分布 —— 算术见 `nextBlinkGap()`
-// 上面那张表和 `blinkGapNear` / `blinkGapFar` 的注释。加权均值 ≈ 1 次 / 7 秒
-// （≈ 8.6 次/分），落在"人盯着屏幕"那一档。
+// ★★ Revision twelve is **the first time this line went the other way** (denser). Revision ten had tightened the range to 9~20,
+// based on the user's two rounds of "don't keep blinking"; this round the user explicitly changed their mind and asked for "like a normal person,"
+// so it was redrawn against the measured human frequency and switched from **one uniform tier** to **two tiers**:
+// human blinking is "short intervals with an occasional long stretch inserted," not a uniform distribution -- for the arithmetic see the table
+// above `nextBlinkGap()` and the comments on `blinkGapNear` / `blinkGapFar`. The weighted average ≈ 1 per 7 seconds
+// (≈ 8.6 per minute), landing in the "person staring at a screen" tier.
 //
-// ⚠️ 这条线上唯一**从来没被推翻过**的是：不能有固定周期。
-//    · 想更静 → 调 `blinkGapFar`（远档上限）；
-//    · 想更密 → 调 `blinkGapNear` / 降 `blinkGapFarChance`。
-//    任何"固定时长 + `repeatForever`"的组合都会退回节拍器（八改就是那么翻车的）。
+// ⚠️ The only thing on this line that **has never been reversed** is: no fixed period.
+//    · want it quieter → tune `blinkGapFar` (the far tier's upper bound);
+//    · want it denser → tune `blinkGapNear` / lower `blinkGapFarChance`.
+//    Any combination of "fixed duration + `repeatForever`" falls back into a metronome (that is how revision eight crashed).
 //
-// ⚠️ 三个不变量，别在改数值的时候顺手破坏：
-//    · 眨眼总时长 **300ms**（九改是 450ms —— 停留越久越显眼）；
-//    · 睁眼**过冲到 1.08** 再落回 1（少了它像机械闸门）；
-//    · 闭合停在 **0.05**，不写 0（写到 0 再放大回来时，`scaleEffect` 在极薄
-//      的尺寸上会露一条比线宽还细的缝，看起来像"眼睛掉了一下"）。
+// ⚠️ Three invariants; do not casually break them while changing numbers:
+//    · blink total duration **300ms** (revision nine was 450ms -- the longer it lingers the more conspicuous);
+//    · the eyes **overshoot to 1.08** then fall back to 1 (without it, it looks like a mechanical shutter);
+//    · the closed value sits at **0.05**, not 0 (when you go to 0 and then scale back up, `scaleEffect` at extremely thin
+//      sizes shows a gap thinner than the line width, which looks like "the eye dropped for a frame").
 //
-// ⚠️ 目光的周期（4.8s）和眨眼的间隔（两档随机）**刻意不等**，见
-//    `startIdleMotion` 下面那段"待机循环"的注释：两条等周期的动作会锁相。
+// ⚠️ The gaze period (4.8s) and the blink interval (two-tier random) are **deliberately unequal**, see
+//    the "idle loops" comment below `startIdleMotion`: two motions with equal periods phase-lock.
 //
-// ⚠️ 实现已经不在这个文件末尾了 —— 十改把逐相位的 `BlinkPhase` 整条删掉，
-//    换成了 `runBlinkLoop()` / `blinkOnce()`（在 `startIdleMotion()` 下面）。
-//    原因见文件顶部"为什么不再用 `phaseAnimator`"。
-//    十二改只改了"抽间隔"那一步（`nextBlinkGap()`），循环结构一格没动。
+// ⚠️ The implementation is no longer at the end of this file -- revision ten deleted the phase-by-phase `BlinkPhase` outright,
+//    replacing it with `runBlinkLoop()` / `blinkOnce()` (below `startIdleMotion()`).
+//    For the reason see "why `phaseAnimator` is no longer used" at the top of the file.
+//    Revision twelve changed only the "draw the interval" step (`nextBlinkGap()`); the loop structure did not move a single cell.

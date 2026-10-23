@@ -1,73 +1,73 @@
 import SwiftUI
 
-/// 回收站页（设置 → 回收站）。
+/// The trash page (Settings → Trash).
 ///
-/// ## 为什么这个功能在手机上
-/// 用户原话是"需要在设置里面增加一个回收站的功能防止误删，30 天的保护期"。
-/// 删除动作本来就发生在手机上（资料库多选删整条、详情页删音频/转录/摘要），
-/// 只有把回收站放在这一侧才盖得住所有入口。手表那边能删的只有录音卡上的
-/// 文件，"保护"不了手机上已经收下来的那一份。
+/// ## Why this feature lives on the phone
+/// The user's words were "need to add a trash feature in Settings to protect against accidental deletion, with a 30-day protection period".
+/// Deletions happen on the phone anyway (multi-select in the library to delete a whole item, the detail page to delete audio/transcription/summary),
+/// and only putting the trash on this side covers every entry point. On the watch the only thing you can delete is
+/// the files on the recorder card, which can't "protect" the copy already pulled down to the phone.
 ///
-/// ## 这里有三个动作，别混
-/// * **恢复** —— 文件搬回资料库，设备下载的那条凭据也补回去（否则列表里
-///   来源标识会变成"导入"）。
-/// * **永久删除** —— 只删这一条。
-/// * **清空** —— 全删。两个删除都带二次确认，恢复不需要（它是无损的）。
+/// ## There are three actions here, don't mix them up
+/// * **Restore** — the files move back to the library and the device-download credential is put back too (otherwise the list's
+///   source label becomes "Imported").
+/// * **Delete permanently** — deletes just this one.
+/// * **Empty** — deletes everything. Both deletions carry a confirmation prompt; restore doesn't need one (it's lossless).
 ///
-/// ★ 2026-10-15 二改：三个动作现在都**在行里摆着按钮**，滑动只是捷径。
-/// 一改时恢复只有左滑、永久删除只有右滑，用户进来看到的是一行行"删得掉"
-/// 的记录，于是反馈"怎么只有删除"。同一行还补上了**来源**。
+/// ★ Second revision, 2026-10-15: all three actions now **have buttons sitting in the row**; swiping is just a shortcut.
+/// In the first revision restore was only a left swipe and permanent delete only a right swipe, so what users saw on entering was rows and rows of "deletable"
+/// records, and they fed back "why is there only delete". The same row also gained a **source**.
 ///
-/// ★★ 2026-10-16 十四改（用户："回收站支持多选全选选择恢复或者是删除"）：
+/// ★★ Fourteenth revision, 2026-10-16 (user: "trash supports multi-select and select-all to restore or delete"):
 ///
-/// 多选模式是**一颗按钮显式进出的**，不是"长按进入" —— 资料库那边长按进多选
-/// 是因为它的行**短**、长按不冲突；回收站每一行都摆着两颗按钮，长按的手势
-/// 识别会和按钮抢，而且这一页的行**高**（四行内容），误按成本也更高。
+/// Multi-select mode is **entered and left with an explicit button**, not "long-press to enter" — the library enters multi-select on a long press
+/// because its rows are **short** and a long press doesn't conflict; every trash row carries two buttons, so the long-press
+/// recogniser would fight the buttons, and this page's rows are **tall** (four lines of content), so a mis-tap costs more.
 ///
-/// * 工具栏：非多选时是"选择"（左）+ "清空"（右）；多选时是
-///   "全选 / 全不选"（左）+ "完成"（右）——"清空"在多选里**收起来**，
-///   它和多选的功能重叠，而且两个破坏性入口同时摆着只会互相干扰。
-/// * 底部：恢复（无损，不做二次确认）+ 删除（**带**二次确认，条数写进弹窗）。
-/// * 行：多选时**整行可点**（切换勾选），行内那两颗按钮与滑动动作都收起来 ——
-///   在多选里还摆着"恢复这一条"会让人误以为勾选没生效。
+/// * Toolbar: outside multi-select it's "Select" (left) + "Empty" (right); in multi-select it's
+///   "Select all / Deselect all" (left) + "Done" (right) — "Empty" is **tucked away** in multi-select,
+///   since it overlaps with multi-select's function, and having two destructive entry points side by side only interferes.
+/// * Bottom: restore (lossless, no confirmation) + delete (**with** a confirmation that states the count in the dialog).
+/// * Row: in multi-select the **whole row is tappable** (toggles the check), and the two in-row buttons and the swipe actions are tucked away —
+///   leaving "restore this one" in place during multi-select makes people think the check didn't register.
 struct TrashView: View {
     @EnvironmentObject private var env: AppEnvironment
     @ObservedObject private var trash = ClipTrash.shared
 
-    /// 待确认的操作。用一个可选值承载"哪一条"，而不是 `Bool` + 另外一个
-    /// 存 item 的 `@State` —— 后者在弹窗出现到点确认之间可以被改写。
+    /// The pending action. An optional carries "which item" rather than a `Bool` plus a separate
+    /// `@State` holding the item — the latter can be overwritten between the dialog appearing and the confirmation tap.
     @State private var pendingPurge: ClipTrash.TrashedItem?
     @State private var showPurgeAll = false
     @State private var restoreFailed = false
 
-    // MARK: 多选状态（★ 十四改）
+    // MARK: Multi-select state (★ fourteenth revision)
 
-    /// 是否处于多选模式。
+    /// Whether multi-select mode is active.
     @State private var isSelecting = false
-    /// 勾选了哪些。存 `TrashedItem.id`（就是被删那条的文件名），不存对象 ——
-    /// 列表会因 `purgeExpired()` / 别的入口随时变，存对象会拿到一份过期快照。
+    /// Which ones are checked. Stores `TrashedItem.id` (the deleted item's file name), not objects —
+    /// the list changes at any moment from `purgeExpired()` / other entry points, and storing objects would capture a stale snapshot.
     @State private var selected: Set<String> = []
-    /// 批量永久删除的二次确认。
+    /// The confirmation for batch permanent deletion.
     @State private var showPurgeSelected = false
 
-    /// 勾选的那几条，**按列表顺序**（不是勾选顺序）。
+    /// The checked items, in **list order** (not the order they were checked).
     ///
-    /// ⚠️ 必须过滤一遍：`selected` 里可能留着已经被清掉的 id（比如刚点了
-    /// "清空"，或者 30 天保护期到了自动清了）。不滤的话批量操作会拿到
-    /// 不存在的条目，`purge` 那边虽然安全，但"恢复 3 条"实际只恢复 2 条
-    /// 这种账就对不上了。
+    /// ⚠️ It must filter once: `selected` may hold ids that have already been purged (say, right after tapping
+    /// "Empty", or auto-purged when the 30-day period expired). Without filtering, a batch operation would get
+    /// non-existent entries; `purge` is safe on that side, but the books wouldn't add up when "restore 3"
+    /// actually restores 2.
     private var selectedItems: [ClipTrash.TrashedItem] {
         trash.items.filter { selected.contains($0.id) }
     }
 
-    /// 是不是"全选了"。空列表不算全选 —— 那颗按钮此时应该显示"全选"。
+    /// Whether everything is "selected". An empty list doesn't count as all-selected — the button should read "Select all" then.
     private var allSelected: Bool {
         !trash.items.isEmpty && selected.count == trash.items.count
     }
 
-    /// ★ 2026-10-16 十三改：跟着 **App 语言**走（`AppLocale`），不是设备语言。
-    /// 原来是个 `static let`，locale 默认取 `Locale.current` —— 在 App 里选英文
-    /// 之后这一列时间仍然是中文（"语音的年月日"那条反馈的另一处来源）。
+    /// ★ Thirteenth revision, 2026-10-16: follows the **app language** (`AppLocale`), not the device language.
+    /// It used to be a `static let`, with locale defaulting to `Locale.current` — after choosing English in the app
+    /// this column of times was still Chinese (another source of that "voice year/month/day" feedback).
     private static var dateFormatter: DateFormatter {
         AppLocale.formatter("trash.row_date") { f in
             f.dateStyle = .medium
@@ -101,27 +101,27 @@ struct TrashView: View {
         }
         .navigationTitle(L10n.Trash.title)
         .navigationBarTitleDisplayMode(.inline)
-        // ★ 十四改：多选模式的底部操作条。
+        // ★ Fourteenth revision: the bottom action bar for multi-select mode.
         .safeAreaInset(edge: .bottom) { selectionBar }
         .toolbar { toolbarContent }
-        // 进这一页就清一次过期的 —— 这是"30 天后自动删除"的第二个触发点
-        // （第一个在 App 启动时）。没有后台任务可挂，只能靠用户还会打开它。
+        // Entering this page purges expired items once — this is the second trigger for "auto-delete after 30 days"
+        // (the first is at app launch). There's no background task to hook onto, so it relies on the user still opening it.
         //
-        // ⚠️ 它会**改** `trash.items`，所以勾选集里可能从此留下孤儿 id ——
-        //    `selectedItems` 已经按"先过滤"处理了，这里不用额外收。
+        // ⚠️ It **mutates** `trash.items`, so orphan ids may be left behind in the selection set —
+        //    `selectedItems` already handles it by "filter first", so nothing extra is needed here.
         .onAppear { trash.purgeExpired() }
-        // 离开这一页就把多选收掉：回来时看到的应该是普通列表，
-        // 而不是一个"勾了一半、又不知道勾了什么"的多选模式。
+        // Leaving this page closes multi-select: coming back should show an ordinary list,
+        // not a multi-select mode "half checked with no idea what's checked".
         .onDisappear {
             isSelecting = false
             selected.removeAll()
         }
         .onChange(of: trash.items) { items in
-            // ★ 十四改：列表变了就同步勾选集（`purgeExpired` / 别的入口清掉条目时）。
-            //    直接用"交集"赋值，顺带把孤儿 id 清掉。
+            // ★ Fourteenth revision: sync the selection set when the list changes (when `purgeExpired` / another entry point purges items).
+            //    Assign the intersection directly, which clears orphan ids on the way.
             let live = Set(items.map(\.id))
             selected.formIntersection(live)
-            // 一条不剩时退出多选 —— 留在一个空的多选模式里只会让人困惑。
+            // Exit multi-select when nothing is left — staying in an empty multi-select mode only confuses people.
             if isSelecting, items.isEmpty { isSelecting = false }
         }
         .alert(
@@ -146,8 +146,8 @@ struct TrashView: View {
         } message: {
             Text(L10n.Trash.emptyAllMessage(trash.items.count))
         }
-        // ★ 十四改：批量永久删除的确认。条数必须写进弹窗 —— 删除是不可逆的，
-        //   用户得在点下去之前知道"到底删几条"。
+        // ★ Fourteenth revision: the confirmation for batch permanent deletion. The count must be in the dialog — deletion is irreversible,
+        //   and users have to know "how many am I deleting" before they tap.
         .alert(L10n.Trash.deleteSelectedTitle, isPresented: $showPurgeSelected) {
             Button(L10n.Trash.deleteSelected(selectedItems.count), role: .destructive) {
                 purgeSelected()
@@ -163,9 +163,9 @@ struct TrashView: View {
         }
     }
 
-    // MARK: - 工具栏（★ 十四改）
+    // MARK: - Toolbar (★ fourteenth revision)
 
-    /// 两种形态：普通 = 选择 + 清空；多选 = 全选/全不选 + 完成。
+    /// Two forms: normal = Select + Empty; multi-select = Select all/Deselect all + Done.
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         if !trash.items.isEmpty {
@@ -199,12 +199,12 @@ struct TrashView: View {
         }
     }
 
-    // MARK: - 多选的底部操作条（★ 十四改）
+    // MARK: - Multi-select bottom action bar (★ fourteenth revision)
 
-    /// 只在多选模式**且确实勾了东西**时出现。
+    /// Appears only in multi-select mode **and only when something is actually checked**.
     ///
-    /// ⚠️ 用 `safeAreaInset` 而不是 `overlay(alignment: .bottom)`：前者会把
-    ///   列表的可用高度**让出来**，最后一行不会被这条挡住（`overlay` 会盖上去）。
+    /// ⚠️ Uses `safeAreaInset` rather than `overlay(alignment: .bottom)`: the former **gives up**
+    ///   the list's available height so the last row isn't hidden by this bar (`overlay` would cover it).
     @ViewBuilder
     private var selectionBar: some View {
         if isSelecting, !selectedItems.isEmpty {
@@ -236,24 +236,24 @@ struct TrashView: View {
         }
     }
 
-    // MARK: - 一行
+    // MARK: - One row
 
-    /// 一行。
+    /// One row.
     ///
-    /// ★ 2026-10-15 二改（用户："回收站里面怎么只有删除，还需要增加这音频的
-    /// 来源，还需要增加恢复当前录音"）：
+    /// ★ Second revision, 2026-10-15 (user: "why is there only delete in the trash, and there also needs to be the source of the
+    /// audio, plus restoring the current recording"):
     ///
-    /// * **来源** —— 加在标题下面一行小字。数据是**删除那一刻**记下来的
-    ///   （`TrashedItem.source`），因为 `move` 一执行就把 manifest 里那条
-    ///   记录注销了，之后再问 `Library` 只会得到"导入"。
-    /// * **恢复做成显式按钮**。原来只有**左滑**才有恢复，右滑是永久删除 ——
-    ///   两边的滑动方向还只有一句注释知道。用户只看到一行行"删得掉"的记录，
-    ///   自然觉得"这里怎么只有删除"。现在两个动作都在行里摆着：
-    ///   恢复（绿、描边）在外侧、永久删除（红）在最右，滑动照旧保留。
+    /// * **Source** — added as a small line under the title. The data was recorded **at the moment of deletion**
+    ///   (`TrashedItem.source`), because the moment `move` runs it unregisters that
+    ///   manifest entry, and asking `Library` afterwards only yields "Imported".
+    /// * **Restore became an explicit button**. Originally only a **left swipe** offered restore, while a right swipe was permanent delete —
+    ///   and the swipe directions on either side were known only to a single comment. Users saw only rows of "deletable" records
+    ///   and naturally thought "why is there only delete here". Now both actions sit in the row:
+    ///   restore (green, outlined) on the outside, permanent delete (red) on the far right, with swiping kept as before.
     private func row(_ item: ClipTrash.TrashedItem) -> some View {
         rowContent(item)
-            // 滑动动作照旧保留 —— 手势是给熟手的捷径，按钮是给所有人的入口，
-            // 两者不冲突。（多选模式用的是 `selectableRow`，不挂这套。）
+            // The swipe actions stay as before — a gesture is a shortcut for the experienced, a button is an entry point for everyone,
+            // The two don't conflict. (Multi-select mode uses `selectableRow`, which doesn't attach this.)
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                 Button {
                     restore(item)
@@ -269,30 +269,30 @@ struct TrashView: View {
             }
     }
 
-    /// 一行的**内容**（不带滑动动作）。
+    /// A row's **content** (without the swipe actions).
     ///
-    /// ★ 十四改拆出来的：多选模式要复用这份排版（`selectableRow`），
-    /// 但**不能**带滑动动作 —— 滑动手势会和"整行可点"的勾选抢，
-    /// 而且多选里已经有批量入口了。
+    /// ★ Split out in the fourteenth revision: multi-select mode has to reuse this layout (`selectableRow`),
+    /// but it **must not** carry swipe actions — a swipe gesture would fight the "whole row is tappable" check
+    /// and multi-select already has batch entry points.
     ///
-    /// ★ 2026-10-15 二改（用户："回收站里面怎么只有删除，还需要增加这音频的
-    /// 来源，还需要增加恢复当前录音"）：
+    /// ★ Second revision, 2026-10-15 (user: "why is there only delete in the trash, and there also needs to be the source of the
+    /// audio, plus restoring the current recording"):
     ///
-    /// * **来源** —— 加在标题下面一行小字。数据是**删除那一刻**记下来的
-    ///   （`TrashedItem.source`），因为 `move` 一执行就把 manifest 里那条
-    ///   记录注销了，之后再问 `Library` 只会得到"导入"。
-    /// * **恢复做成显式按钮**。原来只有**左滑**才有恢复，右滑是永久删除 ——
-    ///   两边的滑动方向还只有一句注释知道。用户只看到一行行"删得掉"的记录，
-    ///   自然觉得"这里怎么只有删除"。现在两个动作都在行里摆着：
-    ///   恢复（绿、描边）在外侧、永久删除（红）在最右，滑动照旧保留。
+    /// * **Source** — added as a small line under the title. The data was recorded **at the moment of deletion**
+    ///   (`TrashedItem.source`), because the moment `move` runs it unregisters that
+    ///   manifest entry, and asking `Library` afterwards only yields "Imported".
+    /// * **Restore became an explicit button**. Originally only a **left swipe** offered restore, while a right swipe was permanent delete —
+    ///   and the swipe directions on either side were known only to a single comment. Users saw only rows of "deletable" records
+    ///   and naturally thought "why is there only delete here". Now both actions sit in the row:
+    ///   restore (green, outlined) on the outside, permanent delete (red) on the far right, with swiping kept as before.
     private func rowContent(_ item: ClipTrash.TrashedItem) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(item.title)
                 .font(.body)
                 .lineLimit(2)
 
-            // 来源。老索引里没有这个字段（`decodeIfPresent` 给到 nil）时整行不显示，
-            // 而不是补一句"未知来源" —— 那对用户没有任何信息量。
+            // The source. When an old index has no such field (`decodeIfPresent` gives nil) the whole line is hidden,
+            // rather than filling in "unknown source" — which tells the user nothing at all.
             if let source = item.source, !source.isEmpty {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.triangle.branch")
@@ -304,8 +304,8 @@ struct TrashView: View {
                 .foregroundStyle(.secondary)
             }
 
-            // 里面还剩什么。**必须显示**：回收站里可能躺着一条"只删了转录"
-            // 的记录，光看标题会以为整条都没了。
+            // What's left inside. **It must be shown**: the trash may hold an item "with only the transcription deleted",
+            // and by the title alone you'd think the whole thing is gone.
             HStack(spacing: 6) {
                 if item.hasAudio { chip(L10n.Trash.artefactAudio, "waveform") }
                 if item.hasTranscript { chip(L10n.Trash.artefactTranscript, "text.bubble") }
@@ -324,8 +324,8 @@ struct TrashView: View {
             .font(.caption2)
             .foregroundStyle(.secondary)
 
-            // 两个动作都摆出来。恢复放在前面（主操作），永久删除退到后面 ——
-            // 恢复是无损的，永久删除不是。
+            // Show both actions. Restore comes first (the primary action), permanent delete is pushed to the back —
+            // restore is lossless, permanent delete is not.
             HStack(spacing: 8) {
                 Button {
                     restore(item)
@@ -351,23 +351,23 @@ struct TrashView: View {
             .padding(.vertical, 4)
     }
 
-    /// 恢复一条。
+    /// Restore one item.
     ///
-    /// 抽成函数是因为现在有**两个**入口（行内按钮 + 左滑）—— 两处各写一遍
-    /// 迟早会漏掉其中一处该发的通知。那句 `libraryDidChange` 是必须的：
-    /// `LibraryView` 的 `.task` 只在从详情页返回时重跑，回收站是另一条路径。
+    /// Pulled out into a function because there are now **two** entry points (the in-row button + left swipe) — writing it twice
+    /// would sooner or later miss the notification from one of them. That `libraryDidChange` is essential:
+    /// `LibraryView`'s `.task` only re-runs when returning from the detail page, and the trash is another path.
     private func restore(_ item: ClipTrash.TrashedItem) {
         if !trash.restore(item, library: env.library) { restoreFailed = true }
         NotificationCenter.default.post(name: .libraryDidChange, object: nil)
     }
 
-    // MARK: - 多选（★ 十四改）
+    // MARK: - Multi-select (★ fourteenth revision)
 
-    /// 多选模式下的一行：**整行可点**，左边一枚勾选圈，行内的按钮与滑动全部收起。
+    /// A row in multi-select mode: **the whole row is tappable**, with a check circle on the left and all in-row buttons and swipes tucked away.
     ///
-    /// ⚠️ 用的还是 `row` 的**内容**（标题 / 来源 / 徽标 / 时间），只是外面套了一层
-    ///   按钮。复制一份排版的话，两边迟早会长得不一样 —— 而这一页的行本来就
-    ///   四层内容，是最不该复制的那种。
+    /// ⚠️ It still uses `row`'s **content** (title / source / badge / time), just wrapped in a
+    ///   button. Copy the layout and the two will sooner or later look different — and this page's rows were already
+    ///   four layers of content, the kind least worth copying.
     private func selectableRow(_ item: ClipTrash.TrashedItem) -> some View {
         Button {
             toggle(item)
@@ -376,13 +376,13 @@ struct TrashView: View {
                 Image(systemName: selected.contains(item.id)
                         ? "checkmark.circle.fill" : "circle")
                     .font(.body)
-                    .foregroundStyle(selected.contains(item.id) ? Color.accentColor : Color.secondary)
-                    // 勾选圈贴着首行，不贴整行 —— 行有四层内容，居中会漂。
+                    .foregroundStyle(selected.contains(item.id) ? Color.appAccent : Color.secondary)
+                    // The check circle hugs the first line rather than the whole row — the row has four layers of content and centring would drift.
                     .padding(.top, 2)
 
                 row(item)
-                    // 行内那两颗按钮在多选里没有意义（下面有批量入口），
-                    // 整行都变成"切换勾选"的了。
+                    // The two in-row buttons are meaningless in multi-select (there are batch entry points below),
+                    // and the whole row becomes "toggle the check".
                     .allowsHitTesting(false)
             }
             .contentShape(Rectangle())
@@ -400,11 +400,11 @@ struct TrashView: View {
         }
     }
 
-    /// 批量恢复。**没有二次确认** —— 恢复是无损的（文件搬回资料库），
-    /// 弹一个"确定要恢复吗"只会让人觉得这一页在防备一件好事。
+    /// Batch restore. **No confirmation** — restoring is lossless (files move back to the library),
+    /// and popping up "are you sure you want to restore" only makes this page look like it's guarding against a good thing.
     ///
-    /// 通知只在**整批做完之后**发一次：`LibraryView` 重跑一次 `.task` 就够，
-    /// 每条发一次只会让它重跑 N 遍。
+    /// The notification fires only once, **after the whole batch is done**: one re-run of `LibraryView`'s `.task` is enough,
+    /// and firing per item would just make it re-run N times.
     private func restoreSelected() {
         var anyFailed = false
         for item in selectedItems {
@@ -415,10 +415,10 @@ struct TrashView: View {
         NotificationCenter.default.post(name: .libraryDidChange, object: nil)
     }
 
-    /// 批量永久删除。弹窗在 `body` 里（条数要写进确认文案）。
+    /// Batch permanent deletion. The dialog is in `body` (the count has to be written into the confirmation text).
     ///
-    /// ⚠️ 遍历的是 `selectedItems` —— 那是**过滤过、按列表顺序**的一份快照，
-    ///   循环里 `trash.items` 怎么变都不影响它。
+    /// ⚠️ It iterates `selectedItems` — a **filtered, list-ordered** snapshot,
+    ///   so however `trash.items` changes during the loop, it's unaffected.
     private func purgeSelected() {
         for item in selectedItems {
             trash.purge(item)

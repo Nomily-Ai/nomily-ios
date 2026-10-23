@@ -9,8 +9,17 @@ struct LiveView: View {
     @EnvironmentObject private var bluetooth: BluetoothCoordinator
     @EnvironmentObject private var env: AppEnvironment
     @StateObject private var model = LiveModel()
+    /// Observed so this tab re-evaluates when the PLAUD card connects /
+    /// disconnects — otherwise `showsPlaudLive` would read a stale phase and the
+    /// screen would stay on "no device connected" after the card came up.
+    @ObservedObject private var plaud = PlaudDirectService.shared
     @State private var clipItem: LibraryItem?
     @State private var clipMissing = false
+    /// ★ 2026-10-22 (任务一): the「实时」tab now also offers **phone-microphone**
+    /// recording with live captions, as a sibling of the device paths. The
+    /// PLAUD card keeps owning the whole tab when it is the device in play
+    /// (build 99 decision) — the picker appears only on the non-PLAUD paths.
+    @State private var phoneMode = false
 
     /// Which device this live session should capture audio from.
     ///
@@ -41,27 +50,59 @@ struct LiveView: View {
         Binding(get: { clipItem != nil }, set: { if !$0 { clipItem = nil } })
     }
 
+    /// Whether this tab should show the PLAUD card's live transcript.
+    ///
+    /// Rules, in order:
+    /// * an A1 / D·NOTE source exists → that one wins (full ASR pipeline);
+    /// * a PLAUD card is **connected** → yes;
+    /// * a PLAUD card is merely **paired** → yes as well: the screen then shows
+    ///   the connect hint and the transcript of the last take, which is more
+    ///   useful than "no device connected" for someone who owns only that card.
+    private var showsPlaudLive: Bool {
+        guard liveSource == nil else { return false }
+        return plaud.phase.isConnected || plaud.pairedSN != nil
+    }
+
     var body: some View {
         // The outermost container must be a **stable host** like VStack, not Group: Group is a transparent container,
         // so modifiers are dispatched to the current branch. When `bluetooth.client` changes, the branch switches,
         // and the pushed detail page loses the navigation bar's safe-area layout — this is the phenomenon
         // where "the navigation bar overlaps the body when entering the detail page from the real-time page" (u7y9w25). The path in the database works correctly precisely because the outermost container of RecordingsView is a VStack.
         VStack(spacing: 0) {
-            if let source = liveSource {
-                LiveContent(model: model, source: source, config: env.config, library: env.library) { item in
-                    // nil = The recording is no longer in the database; provide a prompt instead of silently swallowing it
-                    if let item { clipItem = item } else { clipMissing = true }
-                }
-            } else if !model.finalSegments.isEmpty || model.savedClipName != nil {
-                disconnectedResults
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(uiColor: .systemGroupedBackground))
+            // ★ 2026-10-22: the PLAUD card owns this tab when it is the device in
+            // play. Its audio is raw PCM, which the Opus-based ASR chain cannot
+            // take, so `PlaudLiveScreen` renders the card's own live transcript,
+            // clock, level and record button instead of `LiveContent`.
+            // The card wins only when no A1/D·NOTE source is available — those
+            // have the full pipeline (translation, save-to-library) and must keep
+            // it.
+            if showsPlaudLive {
+                PlaudLiveScreen()
+            } else if phoneMode {
+                // ★ 任务一 (2026-10-22): phone-mic recording + live captions.
+                PhoneRecordScreen()
             } else {
-                EmptyStateView(
-                    L10n.Live.noDeviceConnected,
-                    systemImage: "dot.radiowaves.left.and.right",
-                    message: L10n.Live.noDeviceMessage
-                )
+                sourcePicker
+                if let source = liveSource {
+                    LiveContent(model: model, source: source, config: env.config, library: env.library) { item in
+                        // nil = The recording is no longer in the database; provide a prompt instead of silently swallowing it
+                        if let item { clipItem = item } else { clipMissing = true }
+                    }
+                } else if model.linkRecovering || model.isRunning {
+                    // Session alive, link down — see `LiveModel.recoverStream`. Without this branch
+                    // the screen jumped straight to "no device" and the session looked finished.
+                    reconnectingState
+                } else if !model.finalSegments.isEmpty || model.savedClipName != nil {
+                    disconnectedResults
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(uiColor: .systemGroupedBackground))
+                } else {
+                    EmptyStateView(
+                        L10n.Live.noDeviceConnected,
+                        systemImage: "dot.radiowaves.left.and.right",
+                        message: L10n.Live.noDeviceMessage
+                    )
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -73,6 +114,24 @@ struct LiveView: View {
         }
         .alert(L10n.Live.clipNotInLibrary, isPresented: $clipMissing) {
             Button(L10n.Common.ok, role: .cancel) {}
+        }
+        .onAppear {
+            // ★ (2026-10-18) Let the model re-resolve its source after a BLE drop.
+            //
+            // `liveSource` is computed from `bluetooth.recorderLink`, and the coordinator
+            // **replaces** that object after reconnecting. The model therefore cannot keep the
+            // instance it started with; it asks this closure again and gets the new link.
+            // Without it, one hiccup ended the whole live session.
+            model.liveSourceResolver = { [weak bluetooth = env.bluetooth] in
+                guard let bluetooth else { return nil }
+                if let card = bluetooth.recorderLink as? any LiveAudioSource, card.isAvailable {
+                    return card
+                }
+                if let client = bluetooth.client {
+                    return DnoteLiveSource(client: client)
+                }
+                return nil
+            }
         }
         .onDisappear {
             if model.isRunning, let source = liveSource {
@@ -86,6 +145,41 @@ struct LiveView: View {
             env.isStreaming = running
             UIApplication.shared.isIdleTimerDisabled = running
         }
+    }
+
+    /// 「设备 | 手机」segment picker (任务一). Phone mode needs no device at all,
+    /// so it stays reachable even with nothing connected.
+    private var sourcePicker: some View {
+        Picker("", selection: $phoneMode) {
+            Text(L10n.Phone.modeDevice).tag(false)
+            Text(L10n.Phone.modePhone).tag(true)
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal)
+        .padding(.top, 8)
+    }
+
+    /// The session is still alive but the card is out of reach.
+    ///
+    /// Deliberately **not** an error screen: the card keeps recording by itself during the gap, so
+    /// the honest message is "reconnecting", with the elapsed time still ticking.
+    private var reconnectingState: some View {
+        VStack(spacing: 14) {
+            Spacer()
+            ProgressView()
+                .controlSize(.large)
+            Text(model.largeDurationLabel)
+                .font(.system(size: 34, weight: .medium, design: .monospaced))
+                .monospacedDigit()
+            Text(L10n.Live.reconnectingHint)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(uiColor: .systemGroupedBackground))
     }
 
     @ViewBuilder
@@ -147,6 +241,13 @@ private struct LiveContent: View {
     @State private var pendingSourceLang: String?
     @State private var pendingTargetLang: String?
     @State private var showSwitchConfirm = false
+    /// Brief "mark added" state on the running bar's left button.
+    @State private var markJustAdded = false
+    /// One-shot toast after the card's voice key auto-started this page (2026-10-19).
+    @State private var voiceKeyNotice = false
+    /// One-shot toast after the voice-key recording **ended** — the AI-memo beat:
+    /// the clip is saved and runs through auto-transcribe → auto-summarize.
+    @State private var voiceKeyMemoNotice = false
 
     init(model: LiveModel, source: any LiveAudioSource, config: ConfigService, library: Library,
          onNavigateToClip: @escaping (LibraryItem?) -> Void) {
@@ -158,7 +259,12 @@ private struct LiveContent: View {
     }
 
     private var activeProviderName: String {
-        config.config.defaults.asr.primary
+        // ★ 2026-10-23: the language lists follow the engine that will actually
+        // run these captions — the pinned live engine wins over the file-order
+        // primary (Aliyun can't stream, so its language list would mislead).
+        let defaults = config.config.defaults.asr
+        if let live = defaults.liveProvider, !live.isEmpty { return live }
+        return defaults.primary
     }
 
     private var azureConfigured: Bool {
@@ -222,6 +328,17 @@ private struct LiveContent: View {
             if model.repairState != .idle {
                 repairBanner
             }
+            if voiceKeyNotice {
+                voiceKeyBanner
+            }
+            if voiceKeyMemoNotice {
+                voiceKeyMemoBanner
+            }
+            // ★ 2026-10-18: DingTalk-style recording header — big timer, status, level bars.
+            // It only occupies the layout while a session runs, so the idle page keeps its hint.
+            if model.isRunning {
+                recordingHeader
+            }
             transcriptBody
             Divider()
             controlBar
@@ -257,6 +374,33 @@ private struct LiveContent: View {
         }
         .onChange(of: activeProviderName) { _ in
             adaptSourceLang()
+        }
+        // ★ Voice-key linkage (2026-10-19): the card's own hardware key started a recording —
+        // mirror DingTalk's Minutes page by auto-attaching this live page to it. `model.start` re-guards
+        // `isRunning`/`isStarting`, so a late or double notification cannot start a second session.
+        .onReceive(NotificationCenter.default.publisher(for: .recorderCardDidStartRecording)) { _ in
+            guard !model.isRunning else { return }
+            voiceKeyNotice = true
+            Task {
+                await model.start(source: source, config: config, library: library)
+                // ★ Tag the saved clip as an AI voice memo (voice key, not the record button).
+                model.voiceMemo = true
+                // Hold the banner long enough to be read, then fade it away.
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                voiceKeyNotice = false
+            }
+        }
+        // ★ Push-to-talk tail (2026-10-19): the voice key was released — close the session the
+        // same way the stop button would, and let the saved clip flow into the normal
+        // auto-transcribe → auto-summarize chain. That chain *is* the AI voice memo.
+        .onReceive(NotificationCenter.default.publisher(for: .recorderCardDidStopRecording)) { _ in
+            guard model.isRunning else { return }
+            voiceKeyMemoNotice = true
+            Task {
+                await model.stop(source: source)
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                voiceKeyMemoNotice = false
+            }
         }
         .sheet(isPresented: $showSourcePicker) {
             LanguagePickerSheet(
@@ -321,6 +465,42 @@ private struct LiveContent: View {
         } message: {
             Text(L10n.Live.startUnknownMessage)
         }
+    }
+
+    /// Toast after the card's voice key started a recording and this page auto-attached
+    /// (★ 2026-10-19). Same soft style as `translationNoticeBanner`.
+    private var voiceKeyBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "waveform")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(L10n.Live.voiceKeyAutoStarted)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+        .background(Color(uiColor: .secondarySystemBackground).opacity(0.6))
+    }
+
+    /// Toast after the voice key's **release** ended the recording — the clip is saved and
+    /// flows into auto-transcribe → auto-summarize (the AI voice memo). ★ 2026-10-19.
+    private var voiceKeyMemoBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(L10n.Live.voiceKeyMemoSaved)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+        .background(Color(uiColor: .secondarySystemBackground).opacity(0.6))
     }
 
     /// The translation channel's **soft** warning banner (★ 2026-10-14).
@@ -459,7 +639,7 @@ private struct LiveContent: View {
                         env.openDeviceSheetForPairing = true
                     }
                     .buttonStyle(.borderedProminent)
-                } else if !config.config.asrProviders.hasConfiguredProvider {
+                } else if !config.config.asrProviders.hasConfiguredProvider && !config.config.onDeviceASREnabled {
                     Button(L10n.ASR.openProviderSettings) {
                         env.navigateToASRProviders = true
                         NotificationCenter.default.post(name: .navigateToSettings, object: nil)
@@ -478,6 +658,15 @@ private struct LiveContent: View {
                     Text(L10n.Live.listening)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                    // Recording continues without a speech service — say so instead of leaving
+                    // an empty transcript that reads as a broken feature.
+                    if let notice = model.serviceNotice {
+                        Text(notice)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                    }
                     Spacer()
                 }
             } else {
@@ -502,17 +691,22 @@ private struct LiveContent: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(Array(model.finalSegments.enumerated()), id: \.offset) { idx, seg in
-                            if let translation = seg.translation {
-                                BilingualRow(source: seg.text, translation: translation)
-                                    .id(idx)
-                            } else {
-                                Text(seg.text)
-                                    .font(.body)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .id(idx)
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Text(Self.clock(seg.timestamp))
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.tertiary)
+                                    .frame(minWidth: 42, alignment: .leading)
+                                if let translation = seg.translation {
+                                    BilingualRow(source: seg.text, translation: translation)
+                                } else {
+                                    Text(seg.text)
+                                        .font(.body)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
                             }
+                            .id(idx)
                         }
 
                         partialRow
@@ -586,19 +780,126 @@ private struct LiveContent: View {
                 isPartial: true
             )
         } else if !model.partialText.isEmpty {
-            Text(model.partialText)
-                .font(.body)
-                .italic()
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(Self.clock(model.capturedDuration))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                    .frame(minWidth: 42, alignment: .leading)
+                Text(model.partialText)
+                    .font(.body)
+                    .italic()
+                    .foregroundColor(.accentColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         } else {
             Color.clear.frame(height: 0)
         }
     }
 
+    // MARK: - Recording header (DingTalk-style)
+
+    /// Big timer + status + level bars, the part of DingTalk's Minutes page that makes a
+    /// recording feel alive. Every element is real state: the timer counts the bytes the card
+    /// actually streamed, the bars are RMS of the decoded PCM, the pill is the live provider.
+    private var recordingHeader: some View {
+        VStack(spacing: 14) {
+            Text(model.largeDurationLabel)
+                .font(.system(size: 44, weight: .medium, design: .monospaced))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .contentTransition(.numericText())
+                .animation(.linear(duration: 0.2), value: model.largeDurationLabel)
+
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(model.isPaused ? Color.orange : (model.linkRecovering ? Color.orange : Color.red))
+                    .frame(width: 8, height: 8)
+                Text(model.isPaused
+                     ? L10n.Live.paused
+                     : (model.linkRecovering ? L10n.Live.reconnecting : L10n.Live.streaming))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                if !model.activeProvider.isEmpty {
+                    Text(model.activeProvider.capitalized)
+                        .font(.caption2.bold())
+                        .foregroundColor(model.wsConnected ? .green : .orange)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule().fill(
+                                (model.wsConnected ? Color.green : Color.orange).opacity(0.12)
+                            )
+                        )
+                }
+            }
+
+            LevelBars(levels: model.audioLevels, isPaused: model.isPaused)
+                .frame(height: 44)
+                .padding(.horizontal, 32)
+
+            // Honest status instead of an empty transcript: either no recogniser is attached,
+            // or audio is flowing and the first words simply haven't landed yet.
+            if let hint = recordingHint {
+                Text(hint)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 16)
+        .padding(.bottom, 4)
+    }
+
+    private var recordingHint: String? {
+        guard model.isRunning else { return nil }
+        if !model.asrIsOpen { return L10n.Live.asrOffline }
+        // 400 packets ≈ 8 s of audio: enough time for authorisation + model load, so past
+        // this point "no words yet" is worth admitting rather than hiding.
+        if model.frames > 400, model.segmentCount == 0 { return L10n.Live.waitingForText }
+        return nil
+    }
+
     // MARK: - Control bar
 
+    @ViewBuilder
     private var controlBar: some View {
+        if model.isRunning {
+            runningControlBar
+        } else {
+            idleControlBar
+        }
+    }
+
+    /// While recording, the controls mirror DingTalk's Minutes page: three big round buttons,
+    /// centre = pause, right = finish, left = mark (A1 only — marks are that card's concept).
+    private var runningControlBar: some View {
+        HStack(spacing: 0) {
+            Group {
+                if canMark {
+                    markButton
+                } else {
+                    Color.clear.frame(width: 64, height: 64)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            pauseResumeButton
+                .frame(maxWidth: .infinity)
+
+            stopButton
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private var idleControlBar: some View {
         HStack(spacing: 16) {
             if !model.activeProvider.isEmpty {
                 Text(model.activeProvider.capitalized)
@@ -654,7 +955,7 @@ private struct LiveContent: View {
                 }
             }
         } label: {
-            circleIcon(
+            largeCircleIcon(
                 systemImage: model.isPaused ? "play.fill" : "pause.fill",
                 tint: .accentColor
             )
@@ -669,7 +970,7 @@ private struct LiveContent: View {
                 env.isStreaming = false
             }
         } label: {
-            circleIcon(systemImage: "stop.fill", tint: .red)
+            largeCircleIcon(systemImage: "stop.fill", tint: .red, filled: true)
         }
         .buttonStyle(.plain)
     }
@@ -695,6 +996,64 @@ private struct LiveContent: View {
                 .font(.system(size: 20, weight: .medium))
                 .foregroundColor(tint)
         }
+    }
+
+    /// The 64 pt buttons of the running bar (DingTalk's controls are thumb-sized, the old
+    /// 48 pt ones read as secondary actions).
+    private func largeCircleIcon(systemImage: String, tint: Color, filled: Bool = false) -> some View {
+        ZStack {
+            Circle()
+                .fill(filled ? tint : tint.opacity(0.15))
+                .frame(width: 64, height: 64)
+            Image(systemName: systemImage)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundColor(filled ? .white : tint)
+        }
+    }
+
+    private var canMark: Bool {
+        source is DingTalkA1Link
+    }
+
+    private var markButton: some View {
+        Button {
+            // The mark itself is silent (a row appears in the detail page later), so give the
+            // press an immediate, local answer: haptic + a 1 s "added" state on the label.
+            let added = model.addAppMark()
+            UIImpactFeedbackGenerator(style: added ? .medium : .rigid).impactOccurred()
+            if added {
+                withAnimation(.easeOut(duration: 0.15)) { markJustAdded = true }
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    withAnimation(.easeOut(duration: 0.2)) { markJustAdded = false }
+                }
+            }
+        } label: {
+            VStack(spacing: 4) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.accentColor.opacity(markJustAdded ? 0.9 : 0.5), lineWidth: 1.5)
+                        .background(
+                            Circle().fill(Color.accentColor.opacity(markJustAdded ? 0.12 : 0))
+                        )
+                        .frame(width: 56, height: 56)
+                    Image(systemName: markJustAdded ? "flag.fill" : "flag")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(.accentColor)
+                }
+                Text(markJustAdded ? L10n.Live.markAdded : L10n.Live.mark)
+                    .font(.caption2)
+                    .foregroundStyle(markJustAdded ? Color.accentColor : .secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(markJustAdded ? 0.94 : 1)
+    }
+
+    /// m:ss from a session-relative second count (transcript rows carry the same stamp).
+    private static func clock(_ interval: TimeInterval) -> String {
+        let secs = max(0, Int(interval))
+        return String(format: "%d:%02d", secs / 60, secs % 60)
     }
 
     private var switchConfirmMessage: String {
@@ -816,6 +1175,45 @@ private struct BilingualRow: View {
                 Divider()
             }
         }
+    }
+}
+
+// MARK: - Level bars
+
+/// The waveform strip on the recording screen. Bars come from the model (`audioLevels`, real
+/// decoded loudness); slots that have no sample yet render as a quiet baseline so the strip has
+/// a fixed width from the first frame instead of growing in from the left.
+private struct LevelBars: View {
+    let levels: [Double]
+    var isPaused = false
+
+    private let slotCount = 28
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 4) {
+            ForEach(0..<slotCount, id: \.self) { index in
+                Capsule()
+                    .fill(fill)
+                    .frame(width: 4, height: barHeight(at: index))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .animation(.easeOut(duration: 0.3), value: levels)
+    }
+
+    private var fill: Color {
+        if isPaused { return Color.secondary.opacity(0.35) }
+        if levels.isEmpty { return Color.accentColor.opacity(0.2) }
+        return Color.accentColor
+    }
+
+    private func barHeight(at index: Int) -> CGFloat {
+        // Newest sample must sit at the **right** edge, so the strip scrolls leftwards like a
+        // real meter. Anchoring on `levels.count` instead of `slotCount` used to left-align a
+        // partially filled strip — samples appeared to slide in from the wrong side.
+        let offset = index - (slotCount - min(levels.count, slotCount))
+        guard offset >= 0, offset < levels.count else { return 6 }
+        return 6 + CGFloat(min(max(levels[offset], 0), 1)) * 34
     }
 }
 

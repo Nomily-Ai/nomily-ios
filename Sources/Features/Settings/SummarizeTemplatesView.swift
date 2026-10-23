@@ -1,27 +1,45 @@
 import SwiftUI
 
+/// Summary template management, rebuilt 2026-10-19 to match DingTalk's Minutes template picker:
+///
+/// * **Top chip row filters the grid** — Recommended / Custom / one chip per category. Before this the
+///   page was "one section header per category, stacked"; with 20+ templates finding one meant
+///   scrolling through every category (the user: "filter from the top so the list below matches and I can find it fast").
+/// * **Cards carry an icon, name and one-line "what is this for"** — the description used to live
+///   only behind a tap.
+/// * **Set as default** — the summary picker pre-selects the template marked here (see
+///   `AppConfig.summaryTemplateKey` and the preselect in `SummarizeSheet`).
 struct SummarizeTemplatesView: View {
     @StateObject private var store = SummarizeTemplateStore()
+    @EnvironmentObject private var env: AppEnvironment
     @State private var viewingTemplate: SummarizeTemplate?
     @State private var editingTemplate: SummarizeTemplate?
     @State private var showAddSheet = false
     @State private var showResetConfirm = false
     @State private var pendingDelete: SummarizeTemplate?
-    /// ★ 2026-10-15 七改：模板一多（内置 20 + 采用库 65），块状网格比列表更长，
-    /// 没有搜索就只能靠一屏屏滚。这里和"选模板"那一页用同一套口径。
+    /// The card the user tapped — the "Set as default" button applies to it.
+    @State private var selectedKey: String?
+    @State private var defaultJustSet = false
+    /// ★ 2026-10-15 seventh revision: once templates pile up (20 built-in + 65 adopted from the library), a block grid runs longer than a list,
+    /// and without search you can only scroll screen by screen. This and the "select a template" page use the same approach.
     @State private var search = ""
 
+    /// Chip = one filter. `.recommended` is the curated built-in set; `.custom` is everything
+    /// the user made or adopted; `.category` is one exact category.
+    private enum Filter: Hashable {
+        case recommended
+        case custom
+        case category(String)
+    }
+
+    @State private var filter: Filter = .recommended
+
     var body: some View {
-        // ★ 2026-10-15 七改：`List + 一行 = 图标 + 名字 + 100 字预览` 改成块状网格。
-        //
-        // 和 `SummarizeSheet` 的选择页改的是同一件事（用户原话："摘要模板里面
-        // 不要直接文字，建议按照块显示当前结构，然后点击进去就是一个总体的
-        // 概览"）。两处必须一起改 —— 只在一边改，用户会看到"同一个模板"
-        // 在两个入口长得完全不一样。
-        //
-        // 点块进去仍是原有的只读预览页（`TemplatePreviewView`），它已经就是
-        // 那个"总体的概览"：分类 + Markdown 渲染 + 原文切换 + 克隆/编辑入口。
-        templateGrid
+        VStack(spacing: 0) {
+            filterChips
+            templateGrid
+            defaultBar
+        }
         .navigationTitle(L10n.Settings.summarizeTemplates)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $search, prompt: L10n.Summarize.searchTemplates)
@@ -55,6 +73,11 @@ struct SummarizeTemplatesView: View {
             Button(L10n.Common.delete, role: .destructive) {
                 if let t = pendingDelete {
                     store.templates.removeAll { $0.id == t.id }
+                    if selectedKey == t.storeKey { selectedKey = nil }
+                    if env.config.config.summaryTemplateKey == t.storeKey {
+                        env.config.config.summaryTemplateKey = nil
+                        env.config.scheduleSave()
+                    }
                     store.save()
                 }
                 pendingDelete = nil
@@ -66,6 +89,7 @@ struct SummarizeTemplatesView: View {
         .alert(L10n.Summarize.restoreDefaultsTitle, isPresented: $showResetConfirm) {
             Button(L10n.Summarize.restoreDefaults, role: .destructive) {
                 store.resetToDefaults()
+                selectedKey = nil
             }
             Button(L10n.Common.cancel, role: .cancel) {}
         } message: {
@@ -113,123 +137,196 @@ struct SummarizeTemplatesView: View {
             ) { newTemplate in
                 store.templates.append(newTemplate)
                 store.save()
+                filter = .custom
             }
         }
     }
 
-    // MARK: - 块状网格（★ 七改）
+    // MARK: - Chip row (top filter)
 
-    @ViewBuilder
-    private var templateGrid: some View {
-        if visibleCategories.isEmpty {
-            // 搜不到东西时**必须**说话：网格搜空之后整页是白的，
-            // 用户第一反应是"页面坏了"，而不是"我搜的词不对"。
-            EmptyStateView(
-                L10n.Summarize.noMatchingTemplates,
-                systemImage: "magnifyingglass",
-                message: L10n.Summarize.searchTemplates
-            )
-        } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 20) {
-                    ForEach(visibleCategories, id: \.self) { category in
-                        VStack(alignment: .leading, spacing: 10) {
-                            categoryHeader(category)
-                            LazyVGrid(
-                                columns: [GridItem(.adaptive(minimum: 148), spacing: 10)],
-                                spacing: 10
-                            ) {
-                                ForEach(templatesIn(category)) { template in
-                                    templateCard(template)
-                                }
-                            }
-                        }
-                    }
+    private var filterChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                chip(.recommended, L10n.Summarize.chipRecommended)
+                chip(.custom, L10n.Summarize.chipCustom)
+                ForEach(store.categories, id: \.self) { category in
+                    chip(.category(category), SummarizeTemplate.localizedCategoryName(category))
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 28)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
+        .background(Color(uiColor: .systemGroupedBackground))
     }
 
-    /// 保持 `store.categories` 的既有顺序（自定义分类在前），只是把搜空的分类去掉。
-    private var visibleCategories: [String] {
-        store.categories.filter { !templatesIn($0).isEmpty }
+    private func chip(_ value: Filter, _ title: String) -> some View {
+        let isOn = filter == value
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) { filter = value }
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(isOn ? .semibold : .regular))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(isOn ? Color.appAccent : Color(uiColor: .secondarySystemBackground)))
+                .foregroundStyle(isOn ? Color.white : Color.primary)
+        }
+        .buttonStyle(.plain)
     }
 
-    private func templatesIn(_ category: String) -> [SummarizeTemplate] {
-        let all = store.templates(in: category)
-        guard !search.isEmpty else { return all }
+    // MARK: - Grid
+
+    private var visibleTemplates: [SummarizeTemplate] {
+        let base: [SummarizeTemplate]
+        switch filter {
+        case .recommended:
+            // Curated in the order the defaults declare — that order *is* the curation.
+            base = store.templates.filter(\.isBuiltIn)
+        case .custom:
+            base = store.templates.filter { !$0.isBuiltIn }
+        case .category(let category):
+            base = store.templates(in: category)
+        }
+        guard !search.isEmpty else { return base }
         let q = search.lowercased()
-        return all.filter {
+        return base.filter {
             $0.name.lowercased().contains(q)
             || $0.category.lowercased().contains(q)
             || ($0.localizedSummary?.lowercased().contains(q) ?? false)
         }
     }
 
-    private func categoryHeader(_ category: String) -> some View {
-        HStack(spacing: 6) {
-            Text(SummarizeTemplate.localizedCategoryName(category))
-                .font(.subheadline.weight(.semibold))
-            Text(L10n.Summarize.templateCount(templatesIn(category).count))
-                .font(.caption2)
-                .monospacedDigit()
-                .foregroundStyle(.tertiary)
-            Spacer(minLength: 0)
+    private var sectionTitle: String? {
+        if !search.isEmpty { return nil }
+        switch filter {
+        case .recommended: return L10n.Summarize.chipRecommended
+        case .custom: return L10n.Summarize.chipCustom
+        case .category(let c): return SummarizeTemplate.localizedCategoryName(c)
         }
     }
 
-    /// 一个模板块。块上**只放名字**：说明与提示词都在点进去的概览页里。
+    @ViewBuilder
+    private var templateGrid: some View {
+        if visibleTemplates.isEmpty {
+            // When a search/filter finds nothing it **must** say so: once the grid empties out the whole page is blank,
+            // and the user's first reaction is "the page is broken", not "my filter was wrong".
+            EmptyStateView(
+                L10n.Summarize.noMatchingTemplates,
+                systemImage: "magnifyingglass",
+                message: L10n.Summarize.searchTemplates
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if let sectionTitle {
+                        Text(sectionTitle)
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.top, 12)
+                    }
+                    LazyVGrid(
+                        columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
+                        spacing: 10
+                    ) {
+                        ForEach(visibleTemplates) { template in
+                            templateCard(template)
+                        }
+                        if filter == .custom {
+                            newTemplateCard
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+        }
+    }
+
+    /// A template card, DingTalk-style: icon top-left, expand affordance top-right,
+    /// name + one-line description, and a checkmark when it *is* the default.
     ///
-    /// ⚠️ 从 `List` 搬到网格之后，原来的 `.swipeActions` 没了 —— 网格里的 item
-    /// 没有左滑这回事。自定义模板的删除改用长按菜单，二次确认照旧（删除不可
-    /// 撤销，绝不能变成"点一下就没了"）。
+    /// Tap = **select** (the bottom bar acts on the selection); the corner arrow opens the
+    /// read-only preview. The old behaviour (tap = preview) made "set as default" impossible
+    /// without a modal round-trip per template.
     private func templateCard(_ template: SummarizeTemplate) -> some View {
-        Button {
-            // Custom templates also start with a read‑only preview
-            // (Markdown / source toggle), with the edit entry on the
-            // preview page: opening straight into a plain‑text editor
-            // hides how the template’s formatting will actually look.
-            viewingTemplate = template
+        let isSelected = selectedKey == template.storeKey
+        let isDefault = env.config.config.summaryTemplateKey == template.storeKey
+        return Button {
+            withAnimation(.easeInOut(duration: 0.12)) {
+                selectedKey = (selectedKey == template.storeKey) ? nil : template.storeKey
+            }
         } label: {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: template.isBuiltIn ? "doc.text" : "pencil.and.outline")
-                        .font(.caption)
-                        .foregroundStyle(template.isBuiltIn ? Color.secondary : Color.accentColor)
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: template.effectiveIcon)
+                        .font(.body)
+                        .foregroundStyle(template.isBuiltIn ? Color.appAccent : Color.secondary)
+                        .frame(width: 30, height: 30)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.appAccent.opacity(0.12))
+                        )
                     Spacer(minLength: 0)
+                    // Corner affordance: opens the preview without losing the selection.
+                    Button {
+                        viewingTemplate = template
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .padding(4)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text(template.localizedName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(template.pickerSubtitle(limit: 60))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(minHeight: 30, alignment: .top)
+                HStack(spacing: 4) {
                     if !template.isBuiltIn {
                         Text(L10n.Summarize.customBadge)
                             .font(.system(size: 9, weight: .semibold))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.accentColor.opacity(0.16)))
-                            .foregroundStyle(Color.accentColor)
+                            .background(Capsule().fill(Color.appAccent.opacity(0.16)))
+                            .foregroundStyle(Color.appAccent)
+                    }
+                    Spacer(minLength: 0)
+                    if isDefault {
+                        Label(L10n.Summarize.defaultBadge, systemImage: "checkmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Color.appAccent)
                     }
                 }
-                Text(template.localizedName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, minHeight: 88, maxHeight: .infinity, alignment: .topLeading)
             .padding(12)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color(uiColor: .secondarySystemBackground))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+                    .strokeBorder(
+                        isSelected ? Color.appAccent : Color.primary.opacity(0.07),
+                        lineWidth: isSelected ? 1.5 : 1
+                    )
             )
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button {
+                setDefault(template)
+            } label: {
+                Label(L10n.Summarize.setDefault, systemImage: "star")
+            }
             if !template.isBuiltIn {
                 Button(role: .destructive) {
                     pendingDelete = template
@@ -238,6 +335,73 @@ struct SummarizeTemplatesView: View {
                 }
             }
         }
+    }
+
+    /// The ＋ card at the end of Custom — same placement as DingTalk's picker.
+    private var newTemplateCard: some View {
+        Button {
+            showAddSheet = true
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .font(.title2)
+                    .foregroundStyle(Color.appAccent)
+                Text(L10n.Summarize.addTemplate)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 120)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground).opacity(0.6))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Default bar (bottom)
+
+    private var defaultBar: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 12) {
+                Button {
+                    guard let key = selectedKey,
+                          let template = store.templates.first(where: { $0.storeKey == key }) else { return }
+                    setDefault(template)
+                } label: {
+                    Text(L10n.Summarize.setDefault)
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            Capsule().fill(Color.appAccent.opacity(defaultJustSet ? 1 : 0.14))
+                        )
+                        .foregroundStyle(defaultJustSet ? Color.white : Color.appAccent)
+                }
+                .buttonStyle(.plain)
+                .disabled(selectedKey == nil)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+    }
+
+    private func setDefault(_ template: SummarizeTemplate) {
+        let key = template.storeKey
+        // Tapping the default's card again clears it — the same toggle DingTalk's checkmark has.
+        let next = (env.config.config.summaryTemplateKey == key) ? nil : key
+        env.config.config.summaryTemplateKey = next
+        env.config.scheduleSave()
+        selectedKey = next
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        defaultJustSet = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { defaultJustSet = false }
     }
 }
 

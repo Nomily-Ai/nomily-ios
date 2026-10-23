@@ -15,23 +15,23 @@ struct PendingClip: Identifiable {
     var displayTitle: String { RecordingName.displayTitle(for: name) }
 }
 
-/// 录音时那条音波要用的实时电平。
+/// The live level the waveform needs while recording.
 ///
-/// ★ 2026-10-16 九改新增（用户："开始录音的时候就是一条音波跟心率一样的"）。
+/// ★ added in the 2026-10-16 ninth revision (user: "when recording starts it should be a waveform like the heart rate").
 ///
-/// ## 为什么不是两个独立的值
-/// 本来可以拆成 `level: Float` + `tick: Int` 两个 `@Published`，但那样每滴答一次
-/// 会发两轮对象变更。合成一个 `Equatable` 结构体，视图侧一句
-/// `onChange(of: meter)` 就够了。
+/// ## Why not two separate values
+/// It could have been split into `level: Float` + `tick: Int` as two `@Published`s, but then every tick
+/// would fire two rounds of object changes. Combining them into one `Equatable` struct means the view side needs just one
+/// `onChange(of: meter)`.
 ///
-/// ## ⚠️ `tick` 不是多余的
-/// **安静的时候 `level` 恒等于 0，`onChange(of: level)` 一次都不会触发** ——
-/// 于是那条波会冻在那里，"心跳"也就没了。带上单调递增的 `tick`，波形每收到
-/// 一次滴答就前进一格，安静时照样在走。
+/// ## ⚠️ `tick` isn't superfluous
+/// **When quiet, `level` is always 0, so `onChange(of: level)` never fires at all** —
+/// and the waveform would freeze there, killing the "heartbeat". With a monotonically increasing `tick`, the waveform advances
+/// one slot per tick and keeps moving even when quiet.
 struct WatchAudioMeter: Equatable {
-    /// 归一化到 0...1 的瞬时电平。
+    /// The instantaneous level normalised to 0...1.
     var level: Float = 0
-    /// 单调递增的采样序号。见上面那段 —— 它存在的唯一理由就是让安静时也"有变化"。
+    /// A monotonically increasing sample index. See the block above — its only reason to exist is so that "something changes" even when quiet.
     var tick: Int = 0
 }
 
@@ -48,8 +48,8 @@ final class WatchRecorderModel: NSObject, ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var currentBytes: Int64 = 0
-    /// 录音时的实时电平，给首页那条音波用。**只有录音中才在变** ——
-    /// 停止时会清零，所以空闲态不会每秒推着视图重绘十几次。
+    /// The live level while recording, for the home screen's waveform. **It only changes while recording** —
+    /// it's zeroed on stop, so the idle state doesn't push the view to redraw a dozen times a second.
     @Published private(set) var meter = WatchAudioMeter()
     @Published private(set) var pending: [PendingClip] = []
     @Published var errorMessage: String?
@@ -60,23 +60,32 @@ final class WatchRecorderModel: NSObject, ObservableObject {
     private var intentObserver: NSObjectProtocol?
     private var startedAt: Date?
     private var lastPush = Date.distantPast
+    /// `true` between "the system interrupted our audio" and "the interruption ended".
+    ///
+    /// ★ 2026-10-20: while this is set the recorder is **paused**, not stopped —
+    /// `AVAudioRecorder.pause()` keeps the file and the clock (`currentTime` freezes,
+    /// so elapsed time excludes the interruption automatically).
+    private var interrupted = false
+    /// Installed once per model lifetime. Re-registering per recording would stack
+    /// observers (each delivering the first interruption N times).
+    private var interruptionHandlersInstalled = false
 
     /// How often the phone is re-told a take is still running. Slow enough to
     /// be free, frequent enough that the phone can call the state stale after
     /// three missed beats and still be talking about seconds, not minutes.
     private static let heartbeatInterval: TimeInterval = 10
 
-    /// 电平表的采样间隔 —— 12.5Hz。
+    /// The level meter's sampling interval — 12.5Hz.
     ///
-    /// ★ 2026-10-16 九改：原来这个表是 **1 秒**一跳（只为刷计时）。1 秒的刷新率
-    /// 画不出音波：那条波每格才动一次，看起来是幻灯片不是声音。
+    /// ★ 2026-10-16 revision nine: this meter used to tick at **1 second** (just to refresh the timer). A 1-second refresh rate
+    /// can't draw a waveform: the waveform would only move one slot per tick, looking like a slideshow rather than sound.
     ///
-    /// ⚠️ 12.5Hz 是权衡过的：再快（30Hz）在 40mm 表上肉眼分辨不出，却把重绘
-    /// 开销翻一倍还多；再慢就开始有"一格一格跳"的顿挫感。
+    /// ⚠️ 12.5Hz is a considered trade-off: faster (30Hz) is indistinguishable to the eye on a 40mm watch, yet more than
+    /// doubles the redraw cost; slower starts to feel juddery, "jumping a slot at a time".
     private static let meterInterval: TimeInterval = 0.08
 
-    /// `meterInterval` 的倒数。用来把"每秒一次"那部分活儿（计时、字节数）
-    /// 从 12.5Hz 的滴答里择出来。
+    /// The reciprocal of `meterInterval`. Used to pick the "once a second" part of the work (timer, byte count)
+    /// out of the 12.5Hz tick.
     private static let meterTicksPerSecond = 12
 
     /// Felt, not heard. `.start` / `.stop` are the workout-style haptics, and
@@ -162,12 +171,28 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         do {
             // `.spokenAudio` is a playback mode and returns paramErr (-50)
             // against the record-only category on watch hardware.
-            try session.setCategory(.record, mode: .default, options: [])
+            //
+            // ★ 2026-10-20: category upgraded from `.record` to **`.playAndRecord`
+            //   + `.mixWithOthers`** for two measured reasons:
+            //   ① Background survival — the user's recordings were being killed
+            //      shortly after the app went to the background. The audio background
+            //      entitlement was in place, but `.record`-only sessions are the
+            //      configuration field reports single out as unreliable for
+            //      background continuation on watchOS; `.playAndRecord` is the
+            //      category Apple's own background-recording guidance and every
+            //      production watch recorder settles on.
+            //   ② `.mixWithOthers` — without it, activating the session interrupts
+            //      any other audio (music, podcasts), and other audio activations
+            //      interrupt *us*. Mixing keeps both directions peaceful: a call or
+            //      an alarm still interrupts (that's a hard interruption), but a
+            //      music app no longer ends the take.
+            try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
         } catch {
             fail(error)
             return
         }
+        installInterruptionHandlers()
 
         do {
             let url = makeClipURL()
@@ -178,8 +203,8 @@ final class WatchRecorderModel: NSObject, ObservableObject {
                 AVEncoderBitRateKey: 48_000,
                 AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
             ])
-            // ★ 2026-10-16 九改：开电平表。不开的话 `averagePower` 恒返回 -160，
-            //   首页那条音波就是一条死线 —— 而它唯一的用处恰恰是证明"在录"。
+            // ★ 2026-10-16 revision nine: enable the level meter. Left off, `averagePower` always returns -160,
+            //   the home screen's waveform becomes a dead line — when its one job is exactly to prove "it's recording".
             newRecorder.isMeteringEnabled = true
             guard newRecorder.record() else { throw RecorderError.couldNotStart }
             recorder = newRecorder
@@ -198,7 +223,10 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         }
     }
 
-    private func stop() {
+    /// ★ 2026-10-20: no longer `private` — the hold-to-stop path in `WatchRecorderView`
+    /// ends the take directly (a deliberate 2-second hold needs no extra confirmation,
+    /// unlike tap / double-tap / shake, which are all misfire-prone).
+    func stop() {
         guard let recorder else { return }
         let url = recorder.url
         recorder.stop()
@@ -206,8 +234,9 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         timer?.invalidate()
         timer = nil
         isRecording = false
-        // 归零而不是留着最后一格：停止之后首页要立刻切回眼睛，
-        // 留着一个电平值会让那条波在消失前闪一下。
+        interrupted = false
+        // Zero it rather than leave the last slot: after stopping, the home screen must switch back to the eyes immediately,
+        // and keeping a level value would make the waveform flash once before it disappears.
         meter = WatchAudioMeter()
         startedAt = nil
         try? AVAudioSession.sharedInstance().setActive(false)
@@ -217,6 +246,95 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         // After `reloadPending`, so the phone hears "not recording, one clip on
         // the way" in a single push rather than flickering through "idle".
         pushState()
+    }
+
+    // MARK: - audio interruptions (★ 2026-10-20)
+
+    /// Registers the two system notifications that can end a background take.
+    ///
+    /// ## Why this exists
+    /// The user's background recordings were dying silently. The audio background
+    /// entitlement keeps the **process** alive, but it does not shield the audio
+    /// session: an incoming call, Siri, a timer alarm (anything that grabs the mic)
+    /// delivers an **interruption**, and without a handler `AVAudioRecorder` simply
+    /// stops while the app sits suspended in the background — from the user's side,
+    /// "the recording got killed".
+    ///
+    /// ## What each notification does here
+    /// * `interruptionNotification` — `.began` **pauses** the recorder (file and
+    ///   clock preserved); `.ended` tries to resume. Resume inside a live session
+    ///   works; resume from a *suspended background* app is refused by watchOS
+    ///   (Apple engineer, forum 750432: background resume must be user-initiated).
+    ///   When the resume attempt fails we **stop gracefully** instead of pretending:
+    ///   the bytes recorded so far are transferred to the phone exactly like a
+    ///   manual stop, and the state push tells the phone what happened.
+    /// * `mediaServicesWereResetNotification` — the media server daemon crashed and
+    ///   every audio object was invalidated. Nothing can be salvaged in place; the
+    ///   take is stopped the same graceful way.
+    ///
+    /// Both handlers hop to the main actor because every state write here is
+    /// `@MainActor`-isolated and the notifications arrive on an arbitrary queue.
+    private func installInterruptionHandlers() {
+        guard !interruptionHandlersInstalled else { return }
+        interruptionHandlersInstalled = true
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil, queue: .main
+        ) { [weak self] note in
+            Task { @MainActor in self?.handleInterruption(note) }
+        }
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.mediaServicesWereResetNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleMediaServicesReset() }
+        }
+    }
+
+    private func handleInterruption(_ note: Notification) {
+        let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+        guard let type = AVAudioSession.InterruptionType(rawValue: raw ?? 0) else { return }
+        switch type {
+        case .began:
+            guard let recorder, isRecording, !interrupted else { return }
+            log.warning("audio interruption began — pausing the take")
+            recorder.pause()
+            interrupted = true
+            WKInterfaceDevice.current().play(Self.confirmation)
+
+        case .ended:
+            guard isRecording, interrupted else { return }
+            interrupted = false
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch {
+                log.error("session re-activate after interruption failed: \(error.localizedDescription, privacy: .public)")
+            }
+            // `.shouldResume` is the system's own opinion that the take may go on;
+            // `record()` on a paused recorder appends to the same file.
+            let rawOpts = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
+            let opts = AVAudioSession.InterruptionOptions(rawValue: rawOpts ?? 0)
+            if opts.contains(.shouldResume), let recorder, recorder.record() {
+                log.info("recording resumed after interruption")
+            } else {
+                // Background resume is an OS-level refusal, not a bug we can fix.
+                // Save what exists: the partial file rides the normal stop path.
+                log.warning("cannot resume after interruption — stopping gracefully")
+                errorMessage = L10n.Watch.recordingInterrupted
+                stop()
+            }
+
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleMediaServicesReset() {
+        guard isRecording else { return }
+        log.error("media services were reset — ending the take with what is on disk")
+        errorMessage = L10n.Watch.recordingInterrupted
+        interrupted = false
+        stop()
     }
 
     /// Re-states the whole recorder in one payload. Cheap enough to call from
@@ -232,9 +350,9 @@ final class WatchRecorderModel: NSObject, ObservableObject {
 
     private func startTimer() {
         timer?.invalidate()
-        // ⚠️ 这个计数是**给闭包用的**：滴答频率是 12.5Hz，但计时和字节数
-        //    只需要 1 秒一次（`size(of:)` 要 stat 一次文件，白跑 12 次很浪费，
-        //    而且显示的粒度本来就是秒）。
+        // ⚠️ This counter is **for the closure**: the tick rate is 12.5Hz, but the timer and byte count
+        //    only need to be once a second (`size(of:)` does a stat on the file, and running it 12 times for nothing is wasteful,
+        //    and the displayed granularity is seconds anyway).
         var ticks = 0
         timer = Timer.scheduledTimer(
             withTimeInterval: Self.meterInterval,
@@ -254,18 +372,18 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         }
     }
 
-    /// 读一次电平，写进 `meter`。
+    /// Read the level once and write it into `meter`.
     ///
-    /// ## 为什么 dBFS 要砍在 -50
-    /// `averagePower` 给的是 **dBFS**（0 = 满量程，负得越多越轻）。表盘上离嘴
-    /// 几十厘米的轻声说话大约落在 -50dB 附近，而安静房间的底噪在 -65dB 以下。
-    /// 把地板放在 -50，底噪就画不出波 —— 否则这条线会一直在抖，用户会以为
-    /// 麦克风在收到什么。
+    /// ## Why dBFS is clamped at -50
+    /// `averagePower` gives **dBFS** (0 = full scale, the more negative the quieter). On the watch, talking softly
+    /// from tens of centimetres away lands around -50dB, while a quiet room's noise floor is below -65dB.
+    /// Putting the floor at -50 keeps the noise floor from drawing any wave — otherwise the line would jitter constantly and the user would think
+    /// the microphone is picking something up.
     ///
-    /// ## 为什么上升快、下降慢
-    /// 说话的第一个字必须**立刻**顶上去（不然用户会怀疑没录上），但如果在
-    /// 80ms 内就掉回去，一个音节会被撕成好几段噪点。所以上升直接跟，下降按
-    /// 固定速度滑 —— 每格 0.14，从满量程滑回底约 0.6 秒。
+    /// ## Why it rises fast and falls slow
+    /// The first syllable of speech must shoot up **immediately** (or the user will suspect nothing was recorded), but if it
+    /// fell back within 80ms a single syllable would be torn into several fragments of noise. So the rise follows directly, and the fall slides
+    /// at a fixed speed — 0.14 per slot, about 0.6 seconds to slide from full scale back to the floor.
     private func sampleMeter(_ recorder: AVAudioRecorder, tick: Int) {
         recorder.updateMeters()
         let db = recorder.averagePower(forChannel: 0)

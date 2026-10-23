@@ -1,101 +1,101 @@
 import SwiftUI
 
-// MARK: - 录音时那条音波
+// MARK: - The waveform while recording
 //
-// 这条波只有**一个**输入：麦克风电平（`meter.level`，12.5Hz）。
-// 基线贴画布底部，尖峰高度就是电平，所以纵向行程是整张画布。
+// This wave has **one** input: the mic level (`meter.level`, 12.5Hz).
+// The baseline sits at the bottom of the canvas and spike height is the level, so the whole canvas is vertical travel.
 //
-// ⚠️ 安静时就是一条贴底的平线，光看它分不出"没声音"和"坏了"。
-//    兜底靠基线那条淡轴、以及波下面的录音计时和首页那行字节数。
+// ⚠️ When quiet it is a flat line hugging the bottom; from it alone you can't tell "no sound" from "broken".
+//    The fallback is the faint baseline axis, the recording timer below the wave, and the byte count on the home screen.
 //
 // ─────────────────────────────────────────────────────────────────────────
-// ★★ 2026-10-16 十六改（用户原话：
-//    "录音那边在生动一点，参考手表里面的移动心电图软件里面的粒子特效当音波图
-//     而不是当前简单的一条线"）。
+// ★★ 2026-10-16 revision sixteen (user's words:
+//    "make the recording side a little more alive; use the particle effects in the watch's mobile ECG app as the waveform
+//     instead of the current simple line").
 //
-// ## 参考物是 Apple Watch 的「心电图」App
-// 它好看不在于"曲线画得准"，在于三件事：
-//   ① **一条滚动得很顺的迹**（不是每 80ms 跳一格 —— 那是我改造前的样子）；
-//   ② **迹本身有辉光**，不是一根 1pt 的细线；
-//   ③ **笔尖有一颗亮的点**，跟着最新那一格走，像示波器的光标。
-// 用户把这三件合起来叫作"粒子特效"。所以这一轮加的是这么几层：
+// ## The reference is the Apple Watch's "ECG" app
+// What makes it look good isn't "the curve is drawn accurately", it's three things:
+//   ① **a very smoothly scrolling trace** (not jumping a slot every 80ms — that's how it was before my rework);
+//   ② **the trace itself glows**, not a single 1pt thin line;
+//   ③ **the head has a bright dot**, following the newest slot, like an oscilloscope's cursor.
+// The user calls these three together "particle effects". So this round adds these layers:
 //
-// | 层 | 作用 |
+// | layer | job |
 // |---|---|
-// | 面积填充（`0.14`） | 让"现在有多响"变成一个**面**，而不是一根线的高度 |
-// | **上升粒子** | 从每一格"真的有声音"的位置往上冒，越高越淡 —— 这是"粒子"那两个字最直接的落点 |
-// | 两层辉光描边 | 心电图那条迹的发光质感（宽而淡 + 中等宽，最后才是主线） |
-// | 笔尖光斑 | 停在最新那一格上，外圈一层淡光晕 |
+// | area fill (`0.14`) | turns "how loud it is right now" into a **surface**, not the height of a line |
+// | **rising particles** | rise from each slot where there "really is sound", fading with height — this is the most direct landing spot for the word "particles" |
+// | two glow strokes | the ECG trace's glowing feel (wide and faint + medium width, the main line last) |
+// | head glow | rests on the newest slot, with a faint halo around it |
 //
-// ## ① 平滑滚动是这一轮真正的技术改动
-// 电平是 **12.5Hz** 来的（`WatchRecorderModel.meterInterval = 0.08`）。
-// 改造前每次 tick 整条左移一格 —— 在 131pt 宽的画布上是每 80ms 跳 4pt，
-// 肉眼就是"一格一格地挪"。现在用 `TimelineView(.animation)` 以 **30fps** 重绘，
-// 并在两格之间按**时间**插一个 `phase ∈ [0,1)`，把整条迹左移 `phase × 格宽`：
-// 迹在两次采样之间是**连续滑动**的，新采样到的那一刻正好滑满一格，
-// 于是看不出接缝（右端用"笔尖"补上最新的高度，不留空档）。
+// ## ① Smooth scrolling is the real technical change this round
+// The level arrives at **12.5Hz** (`WatchRecorderModel.meterInterval = 0.08`).
+// Before the rework each tick shifted the whole thing one slot left — on a 131pt-wide canvas that's a 4pt jump every 80ms,
+// which the eye reads as "shuffling slot by slot". Now it redraws at **30fps** via `TimelineView(.animation)`,
+// and interpolates a `phase ∈ [0,1)` between the two slots **by time**, shifting the whole trace left by `phase × slot width`:
+// the trace **slides continuously** between two samples, and the moment a new sample arrives it has slid exactly one slot,
+// so no seam is visible (the right end uses the "head" to add the newest height, leaving no gap).
 //
-// ## ② 粒子必须是**确定性**的
-// `Canvas` 每帧重画。用 `random()` 的话每帧位置都不同，看起来是**噪点闪烁**，
-// 不是粒子。所以每个粒子的相位/速度/漂移都来自 `noise(index, salt)` ——
-// 一个纯函数哈希，同一个粒子在连续帧里算出来的永远是同一条轨迹，
-// 只有时间在推进。这是"粒子在飞"和"屏幕在噪"的分界。
+// ## ② The particles must be **deterministic**
+// `Canvas` redraws every frame. With `random()` the position differs every frame and it looks like **flickering noise**,
+// not particles. So each particle's phase/speed/drift comes from `noise(index, salt)` —
+// a pure-function hash, so the same particle always computes the same trajectory across consecutive frames,
+// with only time advancing. That's the line between "particles flying" and "the screen is noisy".
 //
-// ## ③ 粒子的上升高度**受画布余量限制**
-// 满量程的尖峰顶在画布上沿，它上方一点余量都没有。硬让它往上冲就是被 `Canvas`
-// 的边界切掉（切掉的地方 alpha 还不是 0，看起来是"被削平"）。
-// 所以上升距离取 `min(余量, 该有多高)` —— 于是"越响喷得越高"一直成立，
-// 直到真的顶到天花板为止，永远不会被削。
+// ## ③ A particle's rise height is **limited by the canvas headroom**
+// A full-scale spike sits at the top edge of the canvas with not a bit of headroom above it. Forcing it upward just gets it clipped by `Canvas`'s
+// boundary (and where it's clipped the alpha isn't 0, so it looks "shaved flat").
+// So the rise distance takes `min(headroom, how high it should go)` — and then "the louder, the higher it sprays" always holds,
+// right up to actually hitting the ceiling, and it's never shaved.
 //
-// ⚠️ 这一层是**纯装饰**，它不改任何数值：高度、面积、笔尖位置全部严格等于
-//    真实电平。这一点从九改起就是这个文件的红线（"假的波形在'确认它在录'
-//    这个用途上是负资产"），粒子再多也不能越。
+// ⚠️ This layer is **purely decorative** and changes no values: height, area and head position all equal
+//    the real level exactly. This has been this file's red line since revision 9 ("a fake waveform is a
+//    liability for 'confirming it's recording'"), and no amount of particles may cross it.
 //
-// ⚠️ **降亮度（Always-On）时整条时间线暂停**（`paused: reduced`）。
-//    30fps 重绘在手里是看得见的电池开销，而表盘降亮度时用户根本没在看它。
-//    暂停之后画面会停在一帧上 —— 与降亮度时"整表静止"的观感一致。
+// ⚠️ **The whole timeline pauses in dimmed mode (Always-On)** (`paused: reduced`).
+//    30fps redraws are a visible battery cost on the wrist, and when the face is dimmed the user isn't looking at it anyway.
+//    Once paused, the picture freezes on one frame — consistent with the "whole face is still" feel when dimmed.
 // ─────────────────────────────────────────────────────────────────────────
-// ## 为什么自己存一段历史，而不是只画瞬时值
-// 音波是"一条随时间往左滚的线"，不是一根上下乱跳的柱子。所以要有一小段
-// 历史（`sampleCount` 格），每滴答一次在右端追加一格。
+// ## Why keep a short history instead of drawing only the instantaneous value
+// A waveform is "a line that scrolls left over time", not a bar jumping up and down. So you need a little
+// history (`sampleCount` slots), appending one slot at the right on each tick.
 struct WatchVoiceWave: View {
-    /// 当前电平。`level` 决定这一格多高；`tick` 用来驱动前进 ——
-    /// 理由见 `WatchAudioMeter` 顶部那段（安静时 `level` 恒等于 0，
-    /// `onChange(of: level)` 一次都不会触发，靠 `tick` 才知道该走）。
+    /// The current level. `level` decides how tall this slot is; `tick` drives the advance —
+    /// see the block at the top of `WatchAudioMeter` (when quiet `level` is constantly 0,
+    /// `onChange(of: level)` never fires once, and `tick` is how we know to move).
     let meter: WatchAudioMeter
-    /// 这张脸的名义边长，跟眼睛共用一套比例。
+    /// The nominal side length of this face, sharing one set of proportions with the eyes.
     let size: CGFloat
-    /// 波的颜色。跟着"外观"页选的那个颜色走（和眼睛同一个来源）。
+    /// The wave's colour. It follows the colour chosen on the "Appearance" page (the same source as the eyes).
     let tint: Color
 
-    /// 滚动窗口里的电平历史，最右边是最新的一格。
+    /// The level history inside the scrolling window, with the newest slot on the right.
     @State private var samples: [CGFloat]
-    /// 最后一格是什么时候进来的。用来算两次采样之间滑到哪儿了（见"十六改 ①"）。
+    /// When the last slot came in. Used to work out how far it has slid between two samples (see "revision 16 ①").
     @State private var lastTickAt = Date()
-    /// 降亮度时把整条时间线停掉（见"十六改"末尾那条 ⚠️）。
+    /// Stops the whole timeline when dimmed (see the ⚠️ at the end of "revision 16").
     @Environment(\.isLuminanceReduced) private var reduced
 
-    /// 一屏显示多少格。34 格 ÷ 12.5Hz ≈ 2.7 秒。
+    /// How many slots fit on one screen. 34 slots ÷ 12.5Hz ≈ 2.7 seconds.
     ///
-    /// ⚠️ 太多了会让"滚"的感觉消失（一屏塞进几十秒，几乎看不出在动），
-    ///    太少了又会显得很吵。34 是"一眼看得出起伏、又确实在往左走"的那档。
+    /// ⚠️ Too many and the sense of "scrolling" disappears (tens of seconds crammed into one screen barely looks like it's moving),
+    ///    too few and it looks noisy. 34 is the setting where "you can see the rises and falls at a glance, and it really is moving left".
     private static let sampleCount = 34
 
-    /// 一次采样之间的间隔。与 `WatchRecorderModel.meterInterval` 必须一致 ——
-    /// 插值那一步拿它当分母。
+    /// The interval between samples. Must match `WatchRecorderModel.meterInterval` —
+    /// the interpolation step uses it as the denominator.
     private static let tickInterval: TimeInterval = 0.08
 
-    /// 重绘频率。
+    /// The redraw rate.
     ///
-    /// ⚠️ 30fps 是权衡过的：粒子流动在 24fps 以下能看出台阶，而 60fps 在
-    ///    40mm 的表上肉眼分辨不出、开销却翻倍。
+    /// ⚠️ 30fps is a weighed choice: particle motion shows stepping below 24fps, while 60fps
+    ///    is indistinguishable to the eye on a 40mm watch yet doubles the cost.
     private static let frameInterval: TimeInterval = 1.0 / 30.0
 
-    /// 电平高过这个值才算"真的有声音"，才从那一格冒粒子。
+    /// Only a level above this value counts as "there really is sound", and only then do particles rise from that slot.
     ///
-    /// ⚠️ 不能去掉这一关：安静时整条波贴底，配上一圈往上冒的粒子会变成
-    ///    一个**假的"它很忙"**的信号 —— 而这条波存在的全部意义就是
-    ///    "分清它在跳"和"麦克风真的收到声音了"。
+    /// ⚠️ This gate can't be removed: when quiet the whole wave hugs the bottom, and a ring of rising particles would become
+    ///    a **fake "it's busy"** signal — and the entire point of this wave's existence is
+    ///    "tell 'it's beating' from 'the mic really picked up sound'".
     private static let particleGate: CGFloat = 0.06
 
     init(meter: WatchAudioMeter, size: CGFloat, tint: Color) {
@@ -116,32 +116,32 @@ struct WatchVoiceWave: View {
                 )
             }
         }
-        // ★★ 十三改：`1.06 × 0.44` → **`1.10 × 0.68`**。
+        // ★★ Revision 13: `1.06 × 0.44` → **`1.10 × 0.68`**.
         //
-        // ⚠️ 宽度上限由 `WatchBotFace` 的外框卡死（那张脸的外框是 `size × 1.14`），
-        //    1.10 只剩约 3.5% 的余量，**这一项已经到头了**。还想更宽，该动的是
-        //    `WatchRecorderView.botFraction`（整张脸的占比），不是这一个数。
+        // ⚠️ The width cap is set hard by the `WatchBotFace` frame (that face's frame is `size × 1.14`),
+        //    1.10 leaves only about 3.5% of headroom, **this one is maxed out**. Want it wider? What should change is
+        //    `WatchRecorderView.botFraction` (the whole face's share), not this one number.
         .frame(width: size * 1.10, height: size * 0.68)
-        // ⚠️ 十六改把原来挂在这里的 `.shadow(color:radius:)` **删掉了**：
-        //    辉光改成在 `Canvas` 里用两层更宽的描边画（见 `render`）。
-        //    理由是这个视图现在 30fps 重绘，而 `.shadow` 是每一帧一次离屏渲染；
-        //    `Canvas` 内部多描两笔便宜得多，而且能控制每一层的不透明度。
+        // ⚠️ Revision 16 **deleted** the `.shadow(color:radius:)` that used to hang here:
+        //    the glow is now drawn inside `Canvas` with two wider strokes (see `render`).
+        //    The reason is that this view now redraws at 30fps, and `.shadow` is one offscreen render per frame;
+        //    two extra strokes inside `Canvas` are far cheaper, and let you control each layer's opacity.
         .onChange(of: meter) { _, new in advance(using: new) }
         .accessibilityHidden(true)
     }
 
-    /// 两次采样之间滑到哪儿了，`0 ..< 1`。
+    /// How far it has slid between two samples, `0 ..< 1`.
     ///
-    /// ★ 十六改新增，见文件顶部"十六改 ①"。
+    /// ★ Added in revision 16, see "revision 16 ①" at the top of the file.
     private func scrollPhase(at date: Date) -> Double {
         let elapsed = date.timeIntervalSince(lastTickAt)
         guard elapsed > 0 else { return 0 }
         return min(1, elapsed / Self.tickInterval)
     }
 
-    /// 前进一格。**由 `tick` 驱动**，不是由 `level` —— 见 `WatchAudioMeter` 那段。
+    /// Advance one slot. **Driven by `tick`**, not by `level` — see the `WatchAudioMeter` block.
     ///
-    /// 这一格的高度**就是**电平，没有第二项。
+    /// This slot's height **is** the level, with no second term.
     private func advance(using meter: WatchAudioMeter) {
         var next = samples
         next.append(CGFloat(meter.level))
@@ -152,7 +152,7 @@ struct WatchVoiceWave: View {
         lastTickAt = Date()
     }
 
-    // MARK: - 画
+    // MARK: - Draw
 
     private func render(
         into context: inout GraphicsContext,
@@ -162,12 +162,12 @@ struct WatchVoiceWave: View {
     ) {
         let lineWidth = Self.lineWidth(for: size)
 
-        // ★★ 十三改：基线从**中线**挪到**画布底部**。
+        // ★★ Revision 13: the baseline moves from the **centre line** to the **bottom of the canvas**.
         //
-        // 0.75 个线宽是给圆头笔帽留的：不留的话，贴底那条线会被自己的
-        // 端点切掉一半（圆头是以线宽为直径画的半圆）。
+        // 0.75 of a line width is left for the round pen cap: without it, the bottom-hugging line would be
+        // half-clipped by its own end cap (the round cap is a semicircle drawn with the line width as its diameter).
         let baseline = canvas.height - lineWidth * 0.75
-        // 同样扣掉两头，免得满幅的尖峰被圆头切平。
+        // Same deduction at both ends, so a full-scale spike isn't flattened by the round cap.
         let reach = max(1, canvas.height - lineWidth * 1.5)
 
         let count = samples.count
@@ -175,9 +175,9 @@ struct WatchVoiceWave: View {
         let step = canvas.width / CGFloat(count - 1)
         let shift = CGFloat(phase) * step
 
-        // 一条很淡的基线。它不是装饰 —— 有了它，"现在没有声音"和
-        // "这东西坏了不动了"才分得开（前者是贴着基线的一条平线，后者是一片空）。
-        // 它是这张画布上唯一的静态参照物。
+        // A very faint baseline. It isn't decoration — with it, "there's no sound right now" and
+        // "this thing is broken and stuck" can be told apart (the former is a flat line hugging the baseline, the latter is a blank).
+        // It is the only static reference on this canvas.
         var axis = Path()
         axis.move(to: CGPoint(x: 0, y: baseline))
         axis.addLine(to: CGPoint(x: canvas.width, y: baseline))
@@ -187,14 +187,14 @@ struct WatchVoiceWave: View {
             style: StrokeStyle(lineWidth: max(1, lineWidth * 0.4), lineCap: .round)
         )
 
-        // 点位。★ 十六改：整体左移一个 `phase`，让它在两次采样之间连续滑动；
-        // 末尾再补一个"笔尖"，把最新那一格拉到画布右沿，右边不留空档。
+        // The points. ★ Revision 16: shift the whole thing left by one `phase` so it slides continuously between two samples;
+        // then append a "head" at the end to pull the newest slot to the canvas's right edge, leaving no gap on the right.
         var points: [CGPoint] = []
         points.reserveCapacity(count + 1)
         for (index, value) in samples.enumerated() {
             let x = CGFloat(index) * step - shift
-            // 先把值夹到 0...1：电平理论上就在这个区间，但还是夹一道，
-            // 免得任何一处算错都变成一条画出框的线。
+            // Clamp the value to 0...1 first: the level is theoretically in that range, but clamp once anyway,
+            // so no single miscalculation turns into a line drawn outside the canvas.
             let clamped = min(1, max(0, value))
             points.append(CGPoint(x: x, y: baseline - clamped * reach))
         }
@@ -206,22 +206,22 @@ struct WatchVoiceWave: View {
             trace.addLine(to: point)
         }
 
-        // 曲线下面那层填充。
+        // The fill layer below the curve.
         //
-        // ⚠️ 它的高度**严格等于真实电平**，没有引入任何假数据 —— 差别只在
-        //    "它是面，不是线"。用闭合路径手写，而不是拼两个 `Path`：
-        //    `fill` 会把**没闭合**的路径自动连回起点，那条边很容易画歪。
+        // ⚠️ Its height **equals the real level exactly**, introducing no fake data — the only difference is
+        //    "it's a surface, not a line". Hand-write a closed path rather than putting together two `Path`s:
+        //    `fill` will automatically connect an **unclosed** path back to its start, and that edge is easily drawn crooked.
         var area = trace
         area.addLine(to: CGPoint(x: canvas.width, y: baseline))
         area.addLine(to: CGPoint(x: points[0].x, y: baseline))
         area.closeSubpath()
         context.fill(area, with: .color(tint.opacity(0.14)))
 
-        // 粒子压在辉光**下面**：辉光叠在粒子上会把它们洗淡。
+        // Particles sit **under** the glow: a glow over the particles would wash them out.
         drawParticles(into: &context, points: Array(points.prefix(count)), canvas: canvas, time: time)
 
-        // 两层辉光 + 主线，从宽到窄。这就是心电图那种"迹本身在发光"的质感
-        // （十六改之前只有最后那一层）。
+        // Two glow layers + the main line, wide to narrow. This is the ECG's "the trace itself is glowing" feel
+        // (before revision 16 there was only the last layer).
         context.stroke(
             trace,
             with: .color(tint.opacity(0.22)),
@@ -238,7 +238,7 @@ struct WatchVoiceWave: View {
             style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
         )
 
-        // 笔尖。停在最新那一格上，跟着一起滑 —— 示波器的那个光标。
+        // The head. It rests on the newest slot and slides along — an oscilloscope's cursor.
         let head = points[count - 1]
         let headRadius = lineWidth * 1.5
         context.fill(
@@ -257,17 +257,17 @@ struct WatchVoiceWave: View {
         )
     }
 
-    /// 上升的粒子。**只从"真的有声音"的那几格冒**。
+    /// The rising particles. **They only rise from the slots where "there really is sound"**.
     ///
-    /// ★ 十六改新增（用户："参考手表里面的移动心电图软件里面的粒子特效"）。
+    /// ★ Added in revision 16 (user: "reference the particle effects in the watch's mobile ECG app").
     ///
-    /// ## 每个粒子怎么算
-    /// `noise(index, salt)` 给三样东西：速度（决定多久走一轮）、相位（错开起跳
-    /// 时刻）、横向漂移。它们在连续帧里是**同一个值** —— 所以同一个粒子会沿着
-    /// 一条固定的线往上飞，而不是每帧乱跳（见文件顶部"十六改 ②"）。
+    /// ## How each particle is computed
+    /// `noise(index, salt)` gives three things: speed (how long a cycle takes), phase (staggering the launch
+    /// moment), and lateral drift. Across consecutive frames these are **the same value** — so the same particle flies up along
+    /// a fixed line, rather than jumping around every frame (see "revision 16 ②" at the top of the file).
     ///
-    /// ## 上升高度为什么取 `min(余量, 该有多高)`
-    /// 见文件顶部"十六改 ③"：满量程的尖峰顶上没有空间，硬冲就是被画布切掉。
+    /// ## Why the rise height takes `min(headroom, how high it should go)`
+    /// See "revision 16 ③" at the top of the file: a full-scale spike has no space above it, and forcing it up just gets it clipped by the canvas.
     private func drawParticles(
         into context: inout GraphicsContext,
         points: [CGPoint],
@@ -281,11 +281,11 @@ struct WatchVoiceWave: View {
             guard value > Self.particleGate else { continue }
 
             let origin = points[index]
-            // 到画布上沿还剩多少地方可去。
+            // How much room is left up to the canvas's top edge.
             let room = origin.y - lineWidth
             guard room > 2 else { continue }
 
-            // 越响喷得越多：大声时一格两粒，小声一粒。
+            // The louder, the more it sprays: two per slot when loud, one when quiet.
             let particles = value > 0.35 ? 2 : 1
             for salt in 0..<particles {
                 let seed = Self.noise(index, salt)
@@ -312,12 +312,12 @@ struct WatchVoiceWave: View {
         }
     }
 
-    /// 一个纯函数哈希，给区间 `[0, 1)`。
+    /// A pure-function hash, giving the interval `[0, 1)`.
     ///
-    /// ⚠️ 参数是 `index` + `salt` **而不是一个单调序号**：粒子的身份必须只由
-    ///    "它从哪一格来"和"它是那一格的第几粒"决定，这样同一格的粒子在整个
-    ///    生命周期里算出来的速度/相位都是同一个值。改成一个全局递增的序号，
-    ///    每来一格新采样都会把整条轨迹重新洗一遍 —— 那就退化成噪点了。
+    /// ⚠️ The parameters are `index` + `salt`, **not a monotonic ordinal**: a particle's identity must be determined only by
+    ///    "which slot it came from" and "which particle of that slot it is", so a particle from a given slot computes
+    ///    the same speed/phase throughout its whole lifetime. Switch to a globally incrementing ordinal
+    ///    and every new sample reshuffles the whole trajectory — which degrades into noise.
     private static func noise(_ index: Int, _ salt: Int) -> Double {
         var x = UInt64(truncatingIfNeeded: index &* 73_856_093 &+ salt &* 19_349_663)
         x ^= x >> 33
@@ -326,10 +326,10 @@ struct WatchVoiceWave: View {
         return Double(x % 100_000) / 100_000
     }
 
-    /// 线宽按 `size` 取，不写死 —— 40mm 到 49mm 差 40pt，写死会在某一种表上出错。
+    /// The line width is derived from `size`, not hard-coded — 40mm to 49mm differ by 40pt, and a hard-coded value would be wrong on one of them.
     ///
-    /// ★ 十二改：0.024 → **0.028**（40mm 上 2.9pt → 3.3pt）。画布放大之后同样的
-    /// 线宽在画面上会显得更细，跟着加一档才保住原来那点"笔触感"。
+    /// ★ Revision 12: 0.024 → **0.028** (2.9pt → 3.3pt on 40mm). Once the canvas is enlarged the same
+    /// line width looks thinner on screen, so it goes up a notch to keep that bit of "brushstroke" feel.
     private static func lineWidth(for size: CGFloat) -> CGFloat {
         max(2, size * 0.028)
     }

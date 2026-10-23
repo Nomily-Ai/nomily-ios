@@ -1,28 +1,84 @@
 import SwiftUI
 
+/// Add-device sheet. ★ 2026-10-21 redesign (user request): pick a **device
+/// type first**, then scan — instead of one mixed BLE list. The PLAUD card
+/// opens its own SDK flow and Apple Watch opens an install guide; the other
+/// three start a scan filtered to that family only.
 struct ScannerSheet: View {
     @EnvironmentObject private var bluetooth: BluetoothCoordinator
     @EnvironmentObject private var configService: ConfigService
     @Environment(\.dismiss) private var dismiss
     let onConnected: () -> Void
 
+    /// Device families offered on the pick page. PLAUD is handled as its own
+    /// sheet action (official SDK, separate radio session) and Apple Watch is
+    /// an install guide, so neither is a scan target here.
+    enum AddCategory: String, CaseIterable, Identifiable {
+        case vobot
+        case ticnote
+        case dingtalkA1
+        case appleWatch
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .vobot: return L10n.Scanner.categoryVobot
+            case .ticnote: return L10n.Scanner.categoryTicnote
+            case .dingtalkA1: return L10n.Scanner.categoryA1
+            case .appleWatch: return L10n.Scanner.categoryWatch
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .vobot, .ticnote, .dingtalkA1: return L10n.Scanner.actionScan
+            case .appleWatch: return L10n.Scanner.actionWatch
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .vobot: return "hifispeaker.2"
+            case .ticnote: return "waveform.circle"
+            case .dingtalkA1: return "key.horizontal"
+            case .appleWatch: return "applewatch"
+            }
+        }
+    }
+
+    @State private var category: AddCategory?
     @State private var connecting: DiscoveredPeripheral?
     @State private var connectError: String?
     /// Recording cards that are currently connecting (non D·NOTE). Separate from `connecting` because after connecting it goes into
     /// another flow (`RecorderSheet`), not the D·NOTE device page.
     @State private var connectingRecorder: DiscoveredRecorder?
     @State private var openedRecorder: DiscoveredRecorder?
+    @State private var showPlaudAdd = false
+    @State private var showWatchGuide = false
 
     var body: some View {
         NavigationStack {
-            content
-                .navigationTitle(L10n.Scanner.scan)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button(L10n.Common.done) { dismiss() }
-                    }
+            Group {
+                if category == nil {
+                    categoryGrid
+                } else {
+                    scanContent
+                }
+            }
+            .navigationTitle(category == nil ? L10n.Scanner.addTitle : L10n.Scanner.scan)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if category != nil {
                     ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            category = nil
+                            bluetooth.stopScan()
+                        } label: {
+                            Image(systemName: "chevron.backward")
+                        }
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
                         if bluetooth.isScanning {
                             ProgressView()
                         } else {
@@ -31,9 +87,19 @@ struct ScannerSheet: View {
                         }
                     }
                 }
-                .alert(L10n.Scanner.connectionFailed, isPresented: errorBinding, actions: {
-                    Button(L10n.Common.ok, role: .cancel) { connectError = nil }
-                }, message: { Text(connectError ?? "") })
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(L10n.Common.done) { dismiss() }
+                }
+            }
+            .alert(L10n.Scanner.connectionFailed, isPresented: errorBinding, actions: {
+                Button(L10n.Common.ok, role: .cancel) { connectError = nil }
+            }, message: { Text(connectError ?? "") })
+            .sheet(isPresented: $showPlaudAdd) {
+                PlaudAddSheet()
+            }
+            .sheet(isPresented: $showWatchGuide) {
+                WatchAddGuideSheet()
+            }
         }
         // ★ 2026-10-14: Pass `.deviceInfo` — user quote
         //   > "When adding a device, do not show recording time; directly display device information,
@@ -46,53 +112,124 @@ struct ScannerSheet: View {
         //
         // ⚠️ Do not casually change this line to the default value: it would cause users to see a flood of recording times again.
         //    The home entry (`RecordingsView`) should keep `.recordings`.
+        // ★ 2026-10-20: `onFinish` — after adding a card, "Done" must land the user back
+        //   on the **home page**, not leave them on the scan list where tapping the same
+        //   device again looks like it would add it a second time. This mirrors the
+        //   D·NOTE path, where `onConnected` already closes this sheet.
         .sheet(item: $openedRecorder) { recorder in
-            RecorderSheet(recorder: recorder, mode: .deviceInfo)
+            RecorderSheet(recorder: recorder, mode: .deviceInfo, onFinish: {
+                openedRecorder = nil
+                dismiss()
+            })
         }
         .onAppear {
-            bluetooth.startScan()
+            // Scanning starts only once a family is picked — the pick page
+            // itself must not burn radio time for a type the user doesn't want.
+            if category != nil { bluetooth.startScan() }
         }
         .onDisappear {
             bluetooth.stopScan()
         }
     }
 
+    // MARK: - Category pick page
+
+    private var categoryGrid: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(L10n.Scanner.pickHint)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    ForEach(AddCategory.allCases) { cat in
+                        Button {
+                            pick(cat)
+                        } label: {
+                            CategoryCard(icon: cat.icon, title: cat.title, subtitle: cat.subtitle)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Button {
+                        showPlaudAdd = true
+                    } label: {
+                        CategoryCard(
+                            icon: "waveform",
+                            title: L10n.Scanner.categoryPlaud,
+                            subtitle: L10n.Scanner.actionSDK
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal)
+            }
+            .padding(.vertical, 10)
+        }
+    }
+
+    private func pick(_ cat: AddCategory) {
+        switch cat {
+        case .appleWatch:
+            showWatchGuide = true
+        default:
+            category = cat
+            connectError = nil
+            bluetooth.startScan()
+        }
+    }
+
+    // MARK: - Scan (filtered by the picked category)
+
+    /// D·NOTE units matching the picked family (only the `.vobot` family scans them).
+    private var filteredAvailable: [DiscoveredPeripheral] {
+        category == .vobot ? newAvailable : []
+    }
+
+    /// Recorder cards matching the picked family.
+    private var filteredRecorders: [DiscoveredRecorder] {
+        switch category {
+        case .ticnote: return newRecorders.filter { $0.protocolID == "ticnote" }
+        case .dingtalkA1: return newRecorders.filter { $0.protocolID == "dingtalk-a1" }
+        default: return []
+        }
+    }
+
     @ViewBuilder
-    private var content: some View {
+    private var scanContent: some View {
         if let message = bluetooth.adapter.userMessage {
             EmptyStateView(
                 L10n.Scanner.bluetoothUnavailable,
                 systemImage: "wifi.slash",
                 message: message
             )
-        } else if bluetooth.discovered.isEmpty && bluetooth.discoveredRecorders.isEmpty {
-            EmptyStateView(
-                L10n.Scanner.lookingForDevices,
-                systemImage: "antenna.radiowaves.left.and.right",
-                message: L10n.Scanner.lookingMessage
-            )
+        } else if filteredAvailable.isEmpty && filteredRecorders.isEmpty {
+            // ★ 2026-10-20: the emptiness is judged on the **filtered** lists — when only
+            // already-added devices are nearby the list would otherwise render as an empty
+            // shell. The two messages distinguish "radio quiet" from "everything seen is
+            // already added" so the screen never looks like a hung scan.
+            if sortedDiscovered.isEmpty && bluetooth.discoveredRecorders.isEmpty {
+                EmptyStateView(
+                    L10n.Scanner.lookingForDevices,
+                    systemImage: "antenna.radiowaves.left.and.right",
+                    message: L10n.Scanner.lookingMessage
+                )
+            } else {
+                EmptyStateView(
+                    L10n.Scanner.noNewInCategory(category?.title ?? ""),
+                    systemImage: "checkmark.seal",
+                    message: L10n.Scanner.lookingMessage
+                )
+            }
         } else {
             List {
-                if !available.isEmpty {
+                if !filteredAvailable.isEmpty {
                     Section(L10n.Scanner.sectionAvailable) {
-                        ForEach(available) { row($0) }
+                        ForEach(filteredAvailable) { row($0) }
                     }
                 }
-                // Already‑added devices are listed as a separate section with a label, so users can distinguish new devices.
-                // Do not hide the whole section: when `connectKnown` fails, the scan list is the only reconnection entry point.
-                // Tapping it will not add duplicates — `rememberDevice` overwrites the same record based on peripheral ID.
-                if !alreadyAdded.isEmpty {
-                    Section(L10n.Scanner.sectionAdded) {
-                        ForEach(alreadyAdded) { row($0, isAdded: true) }
-                    }
-                }
-                // Recording cards (TicNote, etc., non D·NOTE devices identified by the registry).
-                // A separate section rather than merged with the above two: their connection flow and subsequent pages are completely different
-                // (do not go to the device page, go directly to `RecorderSheet`), mixing them would make people think
-                // "The content seen after tapping should be the same".
-                if !bluetooth.discoveredRecorders.isEmpty {
+                if !filteredRecorders.isEmpty {
                     Section("Recorders") {
-                        ForEach(sortedRecorders) { recorderRow($0) }
+                        ForEach(filteredRecorders) { recorderRow($0) }
                     }
                 }
             }
@@ -102,6 +239,18 @@ struct ScannerSheet: View {
 
     private var sortedRecorders: [DiscoveredRecorder] {
         bluetooth.discoveredRecorders.sorted(by: { $0.identityHex < $1.identityHex })
+    }
+
+    /// Recording cards that are **not** in the device ledger yet.
+    private var newRecorders: [DiscoveredRecorder] {
+        sortedRecorders.filter { !isRecorderAdded($0) }
+    }
+
+    /// A recorder counts as added when its peripheral UUID is in the ledger — the same
+    /// key `connectRecorder` writes via `rememberDevice` (comment there for why the
+    /// peripheral UUID, not the SN, is the ledger key).
+    private func isRecorderAdded(_ recorder: DiscoveredRecorder) -> Bool {
+        configService.config.devices[recorder.id.uuidString] != nil
     }
 
     @ViewBuilder
@@ -193,8 +342,11 @@ struct ScannerSheet: View {
         configService.config.devices[peripheral.id.uuidString] != nil
     }
 
-    private var available: [DiscoveredPeripheral] { sortedDiscovered.filter { !isAdded($0) } }
-    private var alreadyAdded: [DiscoveredPeripheral] { sortedDiscovered.filter { isAdded($0) } }
+    /// ★ 2026-10-20: only **new** D·NOTE units are listed; added ones are hidden from the
+    /// scan list entirely (see the section comment in `content`).
+    private var newAvailable: [DiscoveredPeripheral] {
+        sortedDiscovered.filter { !isAdded($0) }
+    }
 
     @ViewBuilder
     private func row(_ peripheral: DiscoveredPeripheral, isAdded: Bool = false) -> some View {
@@ -242,6 +394,64 @@ struct ScannerSheet: View {
             } catch {
                 connecting = nil
                 connectError = error.localizedDescription
+            }
+        }
+    }
+}
+
+/// One pickable family card on the category grid.
+private struct CategoryCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 30))
+                .foregroundStyle(Color.appAccent)
+                .frame(height: 36)
+            VStack(spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
+        .padding(.horizontal, 8)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+/// Apple Watch "add" = installing the watch app from iOS. Recordings made on
+/// the wrist sync into the library automatically (watch transport).
+struct WatchAddGuideSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Label(L10n.WatchAdd.step1, systemImage: "1.circle")
+                    Label(L10n.WatchAdd.step2, systemImage: "2.circle")
+                    Label(L10n.WatchAdd.step3, systemImage: "3.circle")
+                } header: {
+                    Text(L10n.WatchAdd.title)
+                } footer: {
+                    Text(L10n.WatchAdd.note)
+                }
+            }
+            .navigationTitle(L10n.Scanner.categoryWatch)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(L10n.Common.done) { dismiss() }
+                }
             }
         }
     }

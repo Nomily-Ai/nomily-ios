@@ -44,6 +44,18 @@ enum StorageLocations {
         )
     }
 
+    /// Renamed speakers for one clip (`<base>.speakers.json`).
+    ///
+    /// ★ 2026-10-22 ("还要支持修改说话人的名称"): the diarization ids ("1", "2", …)
+    /// are the ASR vendor's labels, not anything the user should have to read.
+    /// Their chosen names live **next to the transcript**, not in the transcript:
+    /// re-running the transcription replaces `.asr.json`, and a name the user typed
+    /// must survive that — it describes the person, not the run.
+    static func speakerNamesURL(for audioName: String) -> URL {
+        let base = (audioName as NSString).deletingPathExtension
+        return decryptedDir.appendingPathComponent("\(base).speakers.json")
+    }
+
     static func translationURLs(for audioName: String) -> (txt: URL, json: URL) {
         let base = (audioName as NSString).deletingPathExtension
         return (
@@ -55,6 +67,22 @@ enum StorageLocations {
     static func summaryURL(for audioName: String) -> URL {
         let base = (audioName as NSString).deletingPathExtension
         return decryptedDir.appendingPathComponent("\(base).summary.md")
+    }
+
+    /// ★ 2026-10-23 ("页面模板", Plaud parity): the manifest of a clip's **note
+    /// pages** (`<base>.notes.json`). See `NotePage` — page id "summary" *is*
+    /// the classic summary file below, so nothing pre-existing moves.
+    static func notePagesURL(for audioName: String) -> URL {
+        let base = (audioName as NSString).deletingPathExtension
+        return decryptedDir.appendingPathComponent("\(base).notes.json")
+    }
+
+    /// Body file of one note page. The primary page maps to the classic
+    /// `<base>.summary.md`; extra pages get `<base>.note.<id>.md`.
+    static func notePageURL(for audioName: String, pageID: String) -> URL {
+        guard pageID != NotePage.primaryID else { return summaryURL(for: audioName) }
+        let base = (audioName as NSString).deletingPathExtension
+        return decryptedDir.appendingPathComponent("\(base).note.\(pageID).md")
     }
 
     static func summaryTranslatedURL(for audioName: String) -> URL {
@@ -71,28 +99,28 @@ enum StorageLocations {
         root.appendingPathComponent("summarize_templates.json", isDirectory: false)
     }
 
-    /// 待办转录队列（跨启动存活）。
+    /// The pending-transcription queue (survives across launches).
     ///
-    /// 落在 `root` 而不是 `decryptedDir`：它不是某条录音的产物，而是"还没
-    /// 干完的活"的清单。放在 `decryptedDir` 里会被"删录音"顺手带走，而队列
-    /// 本身会自己校验对应的音频还在不在 —— 让删录音与删队列各管各的。
+    /// Lives in `root` rather than `decryptedDir`: it isn't the product of a recording but the list of "work not yet
+    /// finished". Placed in `decryptedDir` it would get swept away by "delete recording", whereas the queue
+    /// validates for itself whether the corresponding audio still exists — so deleting recordings and deleting the queue each mind their own business.
     static var transcriptionQueueURL: URL {
         root.appendingPathComponent("transcription-queue.json", isDirectory: false)
     }
 
-    /// 摘要 / 翻译 / 导出三类长任务的落盘台账（跨启动存活）。
+    /// The on-disk ledger of the three kinds of long jobs — summary / translation / export (survives across launches).
     ///
-    /// ★ 2026-10-16 十二改：与 `transcriptionQueueURL` **并列**而不是合并 ——
-    /// 转录那条队列有自己的 624 行管线与一套已经跑通的语义，把它并进来是拿
-    /// "唯一能用的那条路"去换一个更漂亮的抽象；见 `JobQueue` 顶部那段。
+    /// ★ 2026-10-16 twelfth revision: **parallel** to `transcriptionQueueURL`, not merged —
+    /// the transcription queue has its own 624-line pipeline and a working set of semantics; merging it in is trading
+    /// "the only path that works" for a prettier abstraction; see the block at the top of `JobQueue`.
     ///
-    /// 落点选在 `root`（同 `transcriptionQueueURL`）：它是"还没干完的活"的
-    /// 清单，不是某条录音的产物 —— 放进 `decryptedDir` 会被"删录音"顺手带走。
+    /// Its location is `root` (same as `transcriptionQueueURL`): it's the list of "work not yet finished",
+    /// not the product of a recording — placed in `decryptedDir` it would get swept away by "delete recording".
     static var jobsQueueURL: URL {
         root.appendingPathComponent("jobs-queue.json", isDirectory: false)
     }
 
-    /// 落盘诊断流水的落点。
+    /// Where the on-disk diagnostic log goes.
     ///
     /// ⚠️ Deliberately **not via `root`** (that is the app group container). `--domain-type` of `xcrun devicectl`
     /// separates "app sandbox" and "app group container" into two kinds; landing in the sandbox's

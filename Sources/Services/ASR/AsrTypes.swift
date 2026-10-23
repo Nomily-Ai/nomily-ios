@@ -29,6 +29,13 @@ enum AsrError: LocalizedError {
     case decoding(Error)
     case empty
     case tooShort(duration: Double, minimum: Double)
+    /// Async cloud tasks (Aliyun file transcription) that are still running past
+    /// our wait cap. **Not retriable**: resubmitting would bill the same audio
+    /// twice — the server-side task keeps going, a later manual retry is right.
+    case stillRunning(minutes: Int)
+    /// The async cloud task itself failed server-side (e.g. the project's model
+    /// doesn't match the audio's language/sample rate). Not retriable.
+    case taskFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -49,18 +56,32 @@ enum AsrError: LocalizedError {
         case .empty:
             return L10n.ASR.transcriptEmpty
         case .tooShort(let duration, let minimum):
-            return String(format: "Clip is %.1fs (under the %.0fs minimum). Adjust min_transcribe_duration in Settings to transcribe shorter clips.", duration, minimum)
+            return L10n.ASR.clipTooShort(duration, minimum)
+        case .stillRunning(let minutes):
+            return L10n.ASR.stillRunning(minutes)
+        case .taskFailed(let detail):
+            return L10n.ASR.taskFailed(detail)
         }
     }
 }
 
 /// Speaker labels are short codes from the provider (Azure = "1","2",…).
 extension AsrSegment {
-    func formatted() -> String {
+    /// `speakerNames` lets the caller substitute the user's own names
+    /// (`SpeakerNameStore`). ★ 2026-10-22 ("还要支持修改说话人的名称"): a summary written
+    /// after renaming must say "张伟", not "Speaker 1" — this is the one place the
+    /// speaker is written into text handed to the model, so the map goes in here
+    /// rather than being patched into every caller.
+    func formatted(speakerNames: [String: String] = [:]) -> String {
         let stamp = String(format: "[%7.1fs - %7.1fs]", start, end)
         if let speaker = speaker, !speaker.isEmpty {
-            return "\(stamp) Speaker \(speaker): \(text)"
+            let name = speakerNames[speaker].flatMap { $0.isEmpty ? nil : $0 } ?? speaker
+            return "\(stamp) \(name): \(text)"
         }
         return "\(stamp) \(text)"
+    }
+
+    func formatted() -> String {
+        formatted(speakerNames: [:])
     }
 }

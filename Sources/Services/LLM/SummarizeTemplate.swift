@@ -10,6 +10,10 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
     var summary: String?
     var prompt: String
     var isBuiltIn: Bool
+    /// SF Symbol shown on the template card. `nil` = derive from the category
+    /// (see `effectiveIcon`); custom templates without an explicit choice get
+    /// the "custom" glyph.
+    var icon: String?
 
     init(
         id: UUID = UUID(),
@@ -17,7 +21,8 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
         name: String,
         summary: String? = nil,
         prompt: String,
-        isBuiltIn: Bool = true
+        isBuiltIn: Bool = true,
+        icon: String? = nil
     ) {
         self.id = id
         self.category = category
@@ -25,7 +30,20 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
         self.summary = summary
         self.prompt = prompt
         self.isBuiltIn = isBuiltIn
+        self.icon = icon
     }
+
+    /// The glyph the card shows. Per-category defaults so every built-in gets
+    /// a recognisable mark without touching 20 template definitions; the
+    /// mapping lives next to `categoryKeys` on purpose.
+    var effectiveIcon: String {
+        if let icon { return icon }
+        return Self.categoryIcons[category] ?? (isBuiltIn ? "doc.text" : "square.and.pencil")
+    }
+
+    /// Identity that survives relaunches (UUIDs on built-ins are regenerated
+    /// every launch, so the persisted "default template" is keyed by this).
+    var storeKey: String { "\(category)\u{1F}\(name)" }
 
     var localizedName: String {
         isBuiltIn ? Self.localizedTemplateName(name) : name
@@ -35,15 +53,25 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
         Self.localizedCategoryName(category)
     }
 
+    /// `NSLocalizedString` returns the **key itself** when a table lacks the
+    /// entry — on the languages that never got a translation that would render
+    /// a raw key like `template_prompt.case_record` into the UI. Every lookup
+    /// therefore falls back to the stored (English) text on a miss, which lets
+    /// a language ship partial prompt translations without leaking keys.
+    private static func localized(_ key: String, fallback: String) -> String {
+        let value = NSLocalizedString(key, comment: "")
+        return value == key ? fallback : value
+    }
+
     var localizedSummary: String? {
         guard let summary else { return nil }
         guard isBuiltIn, let key = Self.summaryKeys[name] else { return summary }
-        return NSLocalizedString(key, comment: "")
+        return Self.localized(key, fallback: summary)
     }
 
     var localizedPrompt: String {
         guard isBuiltIn, let key = Self.promptKeys[name] else { return prompt }
-        return NSLocalizedString(key, comment: "")
+        return Self.localized(key, fallback: prompt)
     }
 
     /// The second line of a picker row. The adopted library ships a one-line
@@ -56,6 +84,31 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
     }
 
     static let promptMaxCharacters = 4_000
+
+    /// Card glyph per category — kept beside `categoryKeys` so a new category
+    /// gets both its label and its icon in one edit.
+    static let categoryIcons: [String: String] = [
+        "Meeting Notes": "calendar",
+        "Action Items": "checklist",
+        "General Summary": "doc.text",
+        "Professional": "briefcase",
+        "Academic": "graduationcap",
+        "Creative": "paintbrush",
+        "Speech": "waveform",
+        "Call": "phone",
+        "Interview": "person.text.rectangle",
+        "Medical": "cross.case",
+        "Sales": "chart.line.uptrend.xyaxis",
+        "Consulting": "lightbulb",
+        "Education": "books.vertical",
+        "Construction": "hammer",
+        "IT & Engineering": "cpu",
+        "Legal": "scale.3d",
+        "Real Estate": "building.2",
+        "Finance": "banknote",
+        "Utility": "wrench.and.screwdriver",
+        "Workplace": "person.2",
+    ]
 
     private static let categoryKeys: [String: String] = [
         "Meeting Notes": "template_cat.meeting_notes",
@@ -97,9 +150,66 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
         "Research Discussion": "template_prompt.research_discussion",
         "Brainstorm Synthesis": "template_prompt.brainstorm_synthesis",
         "Interview Summary": "template_prompt.interview_summary",
+        // The library adopted from Vobot Recorder — prompts localized per
+        // language where the .lproj ships `template_prompt.<slug>`; other
+        // languages fall back to the stored English prompt (see `localized`).
+        "Detailed Summary": "template_prompt.detailed_summary",
+        "Meeting Report": "template_prompt.meeting_report",
+        "Key Points, Decisions, Tasks, Deadlines, and Actions": "template_prompt.key_points_decisions_tasks_deadlines_and_actions",
+        "Meeting Minutes+": "template_prompt.meeting_minutes",
+        "Lecture Summary": "template_prompt.lecture_summary",
+        "Keynote Speech Summary": "template_prompt.keynote_speech_summary",
+        "Training Overview": "template_prompt.training_overview",
+        "Phone Discussion Notes": "template_prompt.phone_discussion_notes",
+        "Manager/Employee 1:1 Meeting": "template_prompt.manager_employee_1_1_meeting",
+        "Customer Call Summary/Analysis": "template_prompt.customer_call_summary_analysis",
+        "Business Call": "template_prompt.business_call",
+        "Interview Notes": "template_prompt.interview_notes",
+        "Panel Discussion": "template_prompt.panel_discussion",
+        "Case Record": "template_prompt.case_record",
+        "Psychotherapy Session Record": "template_prompt.psychotherapy_session_record",
+        "Medical Consultation": "template_prompt.medical_consultation",
+        "BANT Customer Analysis": "template_prompt.bant_customer_analysis",
+        "Sales Call / Customer Outreach": "template_prompt.sales_call_customer_outreach",
+        "Sales Discovery Call": "template_prompt.sales_discovery_call",
+        "Client Needs": "template_prompt.client_needs",
+        "Discussion with Expert": "template_prompt.discussion_with_expert",
+        "Senior Management Consultant": "template_prompt.senior_management_consultant",
+        "University Lecture": "template_prompt.university_lecture",
+        "University Course Compilation": "template_prompt.university_course_compilation",
+        "Seminar / Lecture: Detailed Summary and Notes": "template_prompt.seminar_lecture_detailed_summary_and_notes",
+        "Acceptance Checklist": "template_prompt.acceptance_checklist",
+        "Engineering Project Meeting Minutes": "template_prompt.engineering_project_meeting_minutes",
+        "Site Inspection": "template_prompt.site_inspection",
+        "Multi-Participant Project Team Meeting": "template_prompt.multi_participant_project_team_meeting",
+        "IT Knowledge Transfer Meeting": "template_prompt.it_knowledge_transfer_meeting",
+        "Troubleshooting Summary": "template_prompt.troubleshooting_summary",
+        "Court Stenographer": "template_prompt.court_stenographer",
+        "Meeting Secretary (Legal)": "template_prompt.meeting_secretary_legal",
+        "Client Consultation": "template_prompt.client_consultation",
+        "Owners Committee General Meeting": "template_prompt.owners_committee_general_meeting",
+        "Business Meeting / Real Estate Project Template": "template_prompt.business_meeting_real_estate_project_template",
+        "Real Estate Property Acquisition": "template_prompt.real_estate_property_acquisition",
+        "Client Review Summary": "template_prompt.client_review_summary",
+        "Investment Consultation": "template_prompt.investment_consultation",
+        "Stock Market Discussion": "template_prompt.stock_market_discussion",
+        "Listed Company Research": "template_prompt.listed_company_research",
+        "From Chaos to Clarity: Tagged Daily Review": "template_prompt.from_chaos_to_clarity_tagged_daily_review",
+        "Daily Log": "template_prompt.daily_log",
+        "Key Data Points": "template_prompt.key_data_points",
+        "Meeting Highlights": "template_prompt.meeting_highlights",
+        "Work Report Summary": "template_prompt.work_report_summary",
+        "Email Thread Summary": "template_prompt.email_thread_summary",
+        "Long Article to Slide Deck Outline": "template_prompt.long_article_to_slide_deck_outline",
+        "Turning Scattered Notes into a To-Do List": "template_prompt.turning_scattered_notes_into_a_to_do_list",
     ]
 
     private static let nameKeys: [String: String] = [
+        // ★ 2026-10-23: the Plaud-style four (PlaudTemplateLibrary).
+        "Plaud Summary": "template.plaud_summary",
+        "Plaud Meeting Minutes": "template.plaud_meeting_minutes",
+        "Plaud Key Points": "template.plaud_key_points",
+        "Plaud To-Do List": "template.plaud_todo_list",
         "Formal Meeting Minutes": "template.formal_minutes",
         "Structured Minutes": "template.structured_minutes",
         "Executive Brief": "template.executive_brief",
@@ -168,6 +278,11 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
     ]
 
     private static let summaryKeys: [String: String] = [
+        // ★ 2026-10-23: the Plaud-style four (PlaudTemplateLibrary).
+        "Plaud Summary": "template_desc.plaud_summary",
+        "Plaud Meeting Minutes": "template_desc.plaud_meeting_minutes",
+        "Plaud Key Points": "template_desc.plaud_key_points",
+        "Plaud To-Do List": "template_desc.plaud_todo_list",
         "Detailed Summary": "template_desc.detailed_summary",
         "Meeting Report": "template_desc.meeting_report",
         "Key Points, Decisions, Tasks, Deadlines, and Actions": "template_desc.key_points_decisions_tasks_deadlines_and_actions",
@@ -221,12 +336,12 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
 
     static func localizedCategoryName(_ category: String) -> String {
         guard let key = categoryKeys[category] else { return category }
-        return NSLocalizedString(key, comment: "")
+        return Self.localized(key, fallback: category)
     }
 
     static func localizedTemplateName(_ name: String) -> String {
         guard let key = nameKeys[name] else { return name }
-        return NSLocalizedString(key, comment: "")
+        return Self.localized(key, fallback: name)
     }
 }
 
@@ -695,7 +810,10 @@ final class SummarizeTemplateStore: ObservableObject {
         ),
     ]
 
-    /// Everything the picker offers out of the box: the hand-written
-    /// originals plus the library adopted from Vobot Recorder.
-    static let defaults: [SummarizeTemplate] = builtInDefaults + VobotTemplateLibrary.templates
+    /// Everything the picker offers out of the box: the Plaud-style four first
+    /// (★ 2026-10-23 — `defaults.first` is also the **auto-summary** template, so
+    /// "Plaud Summary" replaced the Vobot skeleton that filled empty slots with
+    /// placeholders), then the hand-written originals, then the Vobot library.
+    static let defaults: [SummarizeTemplate] =
+        PlaudTemplateLibrary.templates + builtInDefaults + VobotTemplateLibrary.templates
 }

@@ -50,7 +50,14 @@ final class WatchSyncService: NSObject, ObservableObject {
     @Published private(set) var isWatchRecording = false
     @Published private(set) var watchRecordingSince: Date?
     @Published private(set) var isWatchTransferring = false
+    /// When the wrist first told us a transfer was pending — drives the elapsed
+    /// counter and the give-up timer on the status strip.
+    @Published private(set) var watchTransferSince: Date?
     @Published private(set) var lastWatchHeartbeat: Date?
+    /// Set when a pending transfer was declared dead, so the strip can say why
+    /// instead of vanishing without a word.
+    @Published private(set) var watchTransferNotice: String?
+    private var transferWatchdog: Timer?
 
     private let config: ConfigService
     private let library: Library
@@ -184,35 +191,146 @@ final class WatchSyncService: NSObject, ObservableObject {
     private func apply(watchState context: [String: Any]) {
         guard let beat = context[WatchLinkMessage.heartbeatKey] as? Double else { return }
         isWatchRecording = context[WatchLinkMessage.recordingKey] as? Bool ?? false
-        isWatchTransferring = context[WatchLinkMessage.transferPendingKey] as? Bool ?? false
+        let transferring = context[WatchLinkMessage.transferPendingKey] as? Bool ?? false
+        if transferring, !isWatchTransferring {
+            watchTransferSince = Date()
+            watchTransferNotice = nil
+        }
+        if !transferring {
+            watchTransferSince = nil
+        }
+        isWatchTransferring = transferring
         watchRecordingSince = (context[WatchLinkMessage.recordingSinceKey] as? Double)
             .map(Date.init(timeIntervalSince1970:))
         lastWatchHeartbeat = Date(timeIntervalSince1970: beat)
+        updateTransferWatchdog()
     }
 
-    // MARK: - 首页表情（★ 2026-10-16 十三改）
+    // MARK: - Transfer watchdog (2026-10-21: "一直卡在 Apple Watch 传输上")
 
-    /// 用户在设置里换了"手表首页眼睛的表情" —— 立刻推给手表。
+    /// The wrist sets `transferPending` from its own WatchConnectivity queue and
+    /// only clears it after the phone's store-ack. Two things can leave that
+    /// flag stuck for ever: the wrist going out of range mid-transfer (its
+    /// application context freezes, and a frozen `true` looks identical to a
+    /// live one), or the file sitting in the daemon queue while this app is
+    /// suspended. In both cases the strip used to spin forever with no way out.
     ///
-    /// ⚠️ **刻意不判可达性**（`session.isReachable`）：不可达时
-    ///    `updateApplicationContext` 会把这份 context 留在 daemon 里，
-    ///    等表下一次醒来再交出去。判了可达性反而会把"手表此刻在后台"当成失败，
-    ///    于是用户改完设置、抬腕发现没变。
-    func sendFaceStyle(_ tag: String) {
-        pushFaceStyle(tag)
+    /// Two escapes:
+    /// · 90 s of heartbeat silence → we stop *claiming* a live transfer and say
+    ///   the watch is offline (the file itself is not lost: it lands whenever
+    ///   the watch reconnects).
+    /// · 5 minutes of a beating watch still saying "pending" → declare it dead
+    ///   and clear, because WatchConnectivity would have moved a healthy
+    ///   transfer by then.
+    private func updateTransferWatchdog() {
+        guard isWatchTransferring else {
+            transferWatchdog?.invalidate()
+            transferWatchdog = nil
+            return
+        }
+        guard transferWatchdog == nil else { return }
+        transferWatchdog = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkTransferHealth() }
+        }
     }
 
-    /// 手表上正在用的那一档 —— 激活时重推一次，把"手表侧存的和手机侧不一致"
-    /// 这个窗口关掉（用户换过手机、手表重装过、或上一次推送没送到）。
-    private func pushFaceStyle(_ tag: String) {
+    private func checkTransferHealth() {
+        guard isWatchTransferring else {
+            transferWatchdog?.invalidate()
+            transferWatchdog = nil
+            return
+        }
+        let since = watchTransferSince ?? lastWatchHeartbeat ?? Date()
+        let elapsed = Date().timeIntervalSince(since)
+        let beatAge = lastWatchHeartbeat.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
+        if beatAge > 90 || elapsed > 300 {
+            // Honest, not silent: the clip is still on the wrist and will be
+            // re-offered, so "gave up on the status" must not read as "lost".
+            watchTransferNotice = beatAge > 90
+                ? L10n.Watch.transferWatchOffline
+                : L10n.Watch.transferGaveUp
+            isWatchTransferring = false
+            watchTransferSince = nil
+            transferWatchdog?.invalidate()
+            transferWatchdog = nil
+        }
+    }
+
+    /// The user closed the transfer strip by hand. Only the *status* is
+    /// dismissed — a file that does arrive is still imported and acked.
+    func dismissTransferNotice() {
+        isWatchTransferring = false
+        watchTransferSince = nil
+        watchTransferNotice = nil
+        transferWatchdog?.invalidate()
+        transferWatchdog = nil
+    }
+
+    // MARK: - Home-screen expression (★ 2026-10-16 thirteenth revision)
+
+    /// The user changed the "watch home-screen eye expression" in Settings — push it to the watch at once.
+    ///
+    /// ⚠️ **Deliberately doesn't check reachability** (`session.isReachable`): when unreachable,
+    ///    `updateApplicationContext` leaves this context in the daemon
+    ///    and hands it over the next time the watch wakes. Checking reachability would instead treat "the watch is in the background right now" as a failure,
+    ///    so the user changes the setting, raises their wrist, and finds nothing changed.
+    func sendFaceStyle(_ tag: String) {
+        pushFaceSettings(style: tag)
+    }
+
+    /// The user changed one of the other face settings (colour / blink pace /
+    /// auto-cycle / frame) — push the whole face-settings bundle at once.
+    ///
+    /// ⚠️ All five keys travel in **one** `updateApplicationContext`: that call
+    ///    *replaces* the previous context wholesale, so pushing only the changed
+    ///    key would wipe the other four off the watch.
+    func sendFaceSettings(
+        style: String,
+        colorHex: String?,
+        blinkSpeed: String?,
+        autoCycle: Bool,
+        frameVisible: Bool
+    ) {
+        pushFaceSettings(
+            style: style,
+            colorHex: colorHex,
+            blinkSpeed: blinkSpeed,
+            autoCycle: autoCycle,
+            frameVisible: frameVisible
+        )
+    }
+
+    /// The style in use on the watch — re-pushed once on activation, closing the window where
+    /// "what's stored on the watch differs from the phone" (the user switched phones, reinstalled the watch app, or a previous push never arrived).
+    private func pushFaceSettings(
+        style: String,
+        colorHex: String? = nil,
+        blinkSpeed: String? = nil,
+        autoCycle: Bool? = nil,
+        frameVisible: Bool? = nil
+    ) {
         guard WCSession.isSupported() else { return }
+        // Missing settings fall back to their defaults here so the context is
+        // always complete — the watch then never has to distinguish "key
+        // absent" from "set to default".
+        var context: [String: Any] = [
+            WatchLinkMessage.faceStyleKey: style,
+            WatchLinkMessage.faceAutoCycleKey: autoCycle ?? true,
+            WatchLinkMessage.faceFrameKey: frameVisible ?? true,
+        ]
+        if let colorHex {
+            context[WatchLinkMessage.faceColorKey] = colorHex
+        }
+        if let blinkSpeed {
+            context[WatchLinkMessage.blinkSpeedKey] = blinkSpeed
+        }
         do {
-            try WCSession.default.updateApplicationContext([WatchLinkMessage.faceStyleKey: tag])
-            log.info("face style pushed: \(tag, privacy: .public)")
+            try WCSession.default.updateApplicationContext(context)
+            log.info("face settings pushed: style=\(style, privacy: .public) color=\(colorHex ?? "-", privacy: .public) speed=\(blinkSpeed ?? "-", privacy: .public) auto=\(autoCycle ?? true, privacy: .public) frame=\(frameVisible ?? true, privacy: .public)")
         } catch {
-            // 会话还没激活时会走到这里。激活回调里还会再推一次，所以这一次
-            // 失败并不致命 —— 记一笔就够了，不要弹任何东西给用户。
-            log.error("face style push failed: \(String(describing: error), privacy: .public)")
+            // You reach here when the session hasn't activated yet. The activation callback pushes again, so this time
+            // failing isn't fatal — a log line is enough; don't show the user anything.
+            log.error("face settings push failed: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -223,6 +341,10 @@ final class WatchSyncService: NSObject, ObservableObject {
         // watch's own push about it ever arrives. Recording state is left
         // alone: the wrist may already be on to the next take.
         isWatchTransferring = false
+        watchTransferSince = nil
+        watchTransferNotice = nil
+        transferWatchdog?.invalidate()
+        transferWatchdog = nil
         NotificationCenter.default.post(name: .libraryDidChange, object: nil)
         NotificationCenter.default.post(name: .watchClipDidArrive, object: nil)
         log.info("watch clip stored: \(url.lastPathComponent, privacy: .public) (\(size) bytes)")
@@ -232,10 +354,10 @@ final class WatchSyncService: NSObject, ObservableObject {
         // swallowed because the user accepted the duration floor when they
         // turned the toggle on.
         Task.detached { @MainActor in
-            // ★ 2026-10-15：改走**队列**并等它出队。
-            //   走队列 ⇒ 先落盘再开跑，App 被杀掉后下次启动会照这份清单续上；
-            //   等出队 ⇒ 下面那句 `libraryDidChange` 仍是在转录真的落地之后
-            //   才发，资料库列表才能一次就把转录文本带出来。
+            // ★ 2026-10-15: switched to going through the **queue** and waiting for it to dequeue.
+            //   Going through the queue ⇒ persist to disk then start, so after the app is killed the next launch picks up from this list;
+            //   waiting for dequeue ⇒ the `libraryDidChange` below still fires only after the transcription actually lands,
+            //   so the Library list can bring out the transcript in one pass.
             await self.transcription.enqueueAndWait(fileURL: url, enforceMinDuration: true)
             NotificationCenter.default.post(name: .libraryDidChange, object: nil)
         }
@@ -262,10 +384,17 @@ extension WatchSyncService: WCSessionDelegate {
             self.isWatchAppInstalled = installed
             self.isReachable = reachable
             self.apply(watchState: pending)
-            // ★ 十三改：顺手把"首页表情"重推一次。手机的这份设置**只**存在
-            //   手机这边，手表没有别的途径拿到它；而手表可能刚重装、刚换机、
-            //   或者上一次推送时它不在。激活是"两边现在确实通着"的唯一时刻。
-            self.pushFaceStyle(self.config.config.watchFaceStyle ?? BotFaceStyle.calm.rawValue)
+            // ★ Thirteenth revision: re-push the "home-screen expression" while we're at it. This phone-side setting exists **only**
+            //   on the phone side; the watch has no other way to get it, and the watch may have just been reinstalled, just switched phones,
+            //   or been absent during the last push. Activation is the one moment when "the two sides are actually connected right now".
+            //   ★ 2026-10-20: the other face settings (colour / blink pace / auto-cycle / frame) ride along in the same context.
+            pushFaceSettings(
+                style: config.config.watchFaceStyle ?? BotFaceStyle.calm.rawValue,
+                colorHex: config.config.watchEyeColor,
+                blinkSpeed: config.config.watchBlinkSpeed,
+                autoCycle: config.config.watchFaceAutoCycle,
+                frameVisible: config.config.watchFaceFrame
+            )
             log.info("session activated: paired=\(paired) installed=\(installed) reachable=\(reachable)")
         }
     }

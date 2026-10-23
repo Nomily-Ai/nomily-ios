@@ -10,6 +10,9 @@ import UniformTypeIdentifiers
 /// `TranscriptionService`.
 struct LibraryView: View {
     @EnvironmentObject private var library: Library
+    /// ★ 2026-10-20: only read for `pendingClipOpen` — the tail end of the "transcript
+    /// ready" banner's deep link. See `consumePendingClipOpen()`.
+    @EnvironmentObject private var env: AppEnvironment
     @StateObject private var model = LibraryListModel()
     /// Solely so that "after a card is renamed, the source badge in the list follows along."
     ///
@@ -18,56 +21,56 @@ struct LibraryView: View {
     /// it needs to redraw — the comment at the top of `RecorderAliasStore` records the same pitfall
     /// (that's exactly how `DiscoveredRecorder.displayName` fell into it).
     @ObservedObject private var recorderAliases = RecorderAliasStore.shared
-    /// 未读红点靠它。必须挂成被观察的：`isUnread` 是一次**字典查询**，
-    /// 打开详情把名字写进去之后，SwiftUI 不会自己知道要重绘（同一个坑见
-    /// 上面 `recorderAliases` 那段注释）。
+    /// The unread red dot relies on it. It must be hooked up as observed: `isUnread` is a **dictionary lookup**,
+    /// and after opening detail and writing the name in, SwiftUI won't know to redraw on its own (the same pitfall appears in
+    /// the `recorderAliases` comment above).
     @ObservedObject private var readStore = ClipReadStore.shared
-    /// 「上一份导出已经备好、还没分享」的那本账。挂成被观察的：
-    /// 导出是在一个 detached 的 `Task` 里完成的，SwiftUI 不会自己知道
-    /// 要重绘横幅（同上面 `readStore` 那个坑）。
+    /// The ledger for "the last export is ready but not yet shared". Hooked up as observed:
+    /// the export completes in a detached `Task`, and SwiftUI won't know on its own
+    /// to redraw the banner (the same pitfall as `readStore` above).
     @ObservedObject private var exportCenter = ExportCenter.shared
     @State private var showImportConfirm = false
     @State private var showImporter = false
     @State private var importError: String?
     @State private var pendingMerge: MergePair?
 
-    /// 忙的时候显示的那层遮罩上的文案；`nil` = 不显示。
+    /// The caption on the overlay shown while busy; `nil` = don't show it.
     ///
-    /// 合并 / 导出暂存 / 批量删除三件事共用一层遮罩 —— 它们都短则几百毫秒、
-    /// 长则几十秒（导出要逐个 copy 音频），期间**必须挡住点击**：
-    /// 不然用户能在删除进行到一半时又点一次导出。
+    /// Merge / export staging / batch delete all share one overlay — each takes anywhere from a few hundred milliseconds
+    /// to tens of seconds (export copies the audio one file at a time), and during that time **taps must be blocked**:
+    /// otherwise the user can tap export again halfway through a delete.
     @State private var busyMessage: String?
     @State private var mergeError: String?
-    /// 批量导出失败的详情（标题固定是 `L10n.Library.exportFailed`）。
+    /// Details of a batch-export failure (the title is always `L10n.Library.exportFailed`).
     ///
-    /// 和 `mergeError` / `importError` 一样是"一个字符串就是一个弹窗"的写法：
-    /// 弹窗标题在 `.alert(_:isPresented:)` 上是固定的，所以**导出和删除必须
-    /// 分开两个状态**，不然失败理由会顶着另一个动作的标题弹出来。
+    /// Like `mergeError` / `importError`, this is the "one string is one alert" style:
+    /// the alert title is fixed with `.alert(_:isPresented:)`, so **export and delete must
+    /// be two separate states**, or a failure reason pops up under another action's title.
     @State private var exportError: String?
     @State private var deleteError: String?
 
-    // MARK: 多选（★ 2026-10-15，用户要求"长按选择 + 批量导出/删除"）
+    // MARK: Multi-select (★ 2026-10-15, user asked for "long-press to select + batch export/delete")
     //
-    // 结构与 `RecorderSheet` 的那套**刻意一致**（`isSelecting` + `selectedIDs`
-    // + 底部 selectionBar），差别只在：那边是"传选中"，这边是"导出/删除选中"。
-    // 表盘/手机上同一个动作长得一样，用户不用重新学。
+    // The structure is **deliberately identical** to `RecorderSheet`'s set (`isSelecting` + `selectedIDs`
+    // + a bottom selectionBar); the only difference is: there it's "transfer the selection", here it's "export/delete the selection".
+    // The same action looks the same on the watch/phone, so the user doesn't have to relearn it.
     @State private var isSelecting = false
     @State private var selectedIDs: Set<String> = []
     @State private var showBatchDeleteConfirm = false
-    /// 程序化导航的目标。**不用 `NavigationLink`** 的原因见 `row(_:)`。
+    /// The target for programmatic navigation. For why **`NavigationLink` isn't used**, see `row(_:)`.
     @State private var detailItem: LibraryItem?
 
-    // MARK: 知识库检索
+    // MARK: Knowledge-base search
     @State private var query = ""
     @State private var scope: LibrarySearchScope = .knowledge
-    /// `base -> 命中片段`。空 = 没在搜，或者这条正文没命中。
+    /// `base -> matched snippet`. Empty = not searching, or this entry's body didn't match.
     @State private var snippets: [String: String] = [:]
     @State private var isSearching = false
-    /// 导出暂存的顶层目录（交给系统分享面板的那个）。
+    /// The top-level export staging directory (the one handed to the system share sheet).
     @State private var exportURL: URL?
     @State private var showExportSheet = false
 
-    /// 只看某台设备。`nil` = 全部。值是 `deviceKey(_:)` 给出的那把键。
+    /// Show only one device. `nil` = all. The value is the key given by `deviceKey(_:)`.
     @State private var deviceFilter: String?
 
     private struct MergePair: Identifiable {
@@ -85,19 +88,20 @@ struct LibraryView: View {
 
     var body: some View {
         content
-        // ★ 2026-10-15 七改：设备筛选条**钉在列表顶上**，不再藏进工具栏菜单。
+        // ★ 2026-10-15 revision 7: the device filter bar is **pinned to the top of the list**, no longer hidden in a toolbar menu.
         //
-        // 用 `safeAreaInset` 而不是把它塞进 `List` 的第一个 section：塞进去会跟着
-        // 列表一起滚走 —— 而"现在筛的是哪台设备"恰恰是滚动时最需要一直看得见的信息。
+        // Use `safeAreaInset` rather than stuffing it into `List`'s first section: stuffed in, it scrolls away with
+        // the list — and "which device is being filtered right now" is exactly the information you most need to keep in sight while scrolling.
         //
-        // 放在 `.searchable` 下面一层：搜索栏归搜索，筛选条归筛选，两个都在顶上，
-        // 互不遮挡。
+        // Put it one layer below `.searchable`: the search bar is for search, the filter bar for filtering, both at the top,
+        // not covering each other.
         .safeAreaInset(edge: .top, spacing: 0) {
             deviceFilterBar
         }
         .task {
             await model.refresh()
             dropStaleDeviceFilter()
+            consumePendingClipOpen()
         }
         // A watch recording can land while this list is on screen; the file
         // arrives outside any SwiftUI lifecycle, so it has to say so.
@@ -107,9 +111,13 @@ struct LibraryView: View {
                 dropStaleDeviceFilter()
             }
         }
-        // 知识库检索。`.task(id:)` 是关键：查询或作用域一变，SwiftUI 会把
-        // **上一次整条取消**，于是打字很快时也不会同时跑好几轮读盘。
+        // Knowledge-base search. `.task(id:)` is the key: change the query or the scope and SwiftUI will
+        // **cancel the previous run entirely**, so fast typing doesn't have several rounds of disk reading running at once.
         .task(id: searchKey) { await runSearch() }
+        // ★ 2026-10-20: if the deep-link intent arrives while this list is already on
+        // screen (user was browsing the library when the banner was tapped), consume it
+        // right here; the `.task` above covers the fresh-mount path.
+        .onChange(of: env.pendingClipOpen) { _ in consumePendingClipOpen() }
         .searchable(
             text: $query,
             placement: .navigationBarDrawer(displayMode: .always),
@@ -139,9 +147,9 @@ struct LibraryView: View {
                             selectedIDs = []
                             isSelecting = true
                         }
-                        // 搜索期间不给进多选：结果集会随输入变化，
-                        // 已经勾上的条目可能在你敲下一个字时从屏幕上消失，
-                        // 而选中集合还留着它 —— 那时"已选 3 条"和屏幕对不上。
+                        // Multi-select isn't allowed during a search: the result set changes with the input,
+                        // an already-ticked entry may vanish from the screen as you type the next character,
+                        // while the selection set still holds it — then "3 selected" won't match the screen.
                         .disabled(model.items.isEmpty || isSearchActive)
 
                         Button { showImportConfirm = true } label: {
@@ -205,8 +213,8 @@ struct LibraryView: View {
         } message: { msg in
             Text(msg)
         }
-        // 批量删除的二次确认。用的是 `.alert` 而不是 `.confirmationDialog`：
-        // 它要带一句说清"会连带删掉转录和摘要、不可撤销"的副文案。
+        // The batch-delete confirmation. Uses `.alert` rather than `.confirmationDialog`:
+        // it needs a line spelling out that it "also deletes the transcript and summary, and can't be undone".
         .alert(L10n.Library.deleteSelectedTitle, isPresented: $showBatchDeleteConfirm) {
             Button(L10n.Common.delete, role: .destructive) {
                 Task { await runBatchDelete() }
@@ -239,8 +247,8 @@ struct LibraryView: View {
         } message: { msg in
             Text(msg)
         }
-        // 导出走系统分享面板：存到"文件"、AirDrop、发给别人都是它。
-        // 给的是**目录**（每条一个子目录），不是压缩包 —— 见 `runBatchExport`。
+        // Export goes through the system share sheet: saving to "Files", AirDrop, sending to someone — all of it.
+        // What's handed over is a **directory** (one subdirectory per clip), not an archive — see `runBatchExport`.
         .sheet(isPresented: $showExportSheet, onDismiss: { exportURL = nil }) {
             if let exportURL { ShareSheet(items: [exportURL]) }
         }
@@ -321,13 +329,13 @@ struct LibraryView: View {
     /// instead of listing the suffixes a second time: forgetting an artefact
     /// in one of the two copies leaves orphan files after a merge.
     ///
-    /// ★ 2026-10-15：合并时被顶替掉的两条源录音也**进回收站**。合并出来的
-    /// M4A 要是听着不对（串了、缺了一半），两条源录音还能原样捞回来 ——
-    /// 而这一步恰恰是"用户看不见文件、却真的没了"的典型场景。
+    /// ★ 2026-10-15: the two source recordings displaced by a merge also **go to the trash**. If the merged
+    /// M4A sounds wrong (garbled, missing half), the two source recordings can still be recovered as they were —
+    /// and this is exactly the classic case of "the user can't see the files, but they're really gone".
     ///
-    /// ⚠️ **不带 download 凭据**：注销 manifest 会让这两条在设备列表里
-    /// 重新变回"未下载"，而它们其实就在用户手机上（现在还在回收站里）。
-    /// 合并本来也不改 manifest，这里保持一致。
+    /// ⚠️ **No download credential**: deregistering the manifest would make these two show up in the device list
+    /// as "not downloaded" again, when they're actually on the user's phone (and in the trash right now).
+    /// Merging doesn't touch the manifest anyway; this stays consistent with that.
     private func deleteSourceArtefacts(for item: LibraryItem) {
         ClipTrash.shared.move(
             [ClipTrash.Payload(
@@ -363,13 +371,13 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: - 列表 / 空态
+    // MARK: - List / empty state
 
-    /// 四选一：空库 / 检索中 / 筛完没命中 / 正片。
+    /// Four choices: empty library / searching / filtered with no match / the actual content.
     ///
-    /// 单独拆出来不是为了好看：`body` 上挂着 `.searchable` + 作用域 + 5 个
-    /// `.alert` + sheet + overlay，再把这四层分支塞进去，类型检查器就要
-    /// 超时（实测 "unable to type-check this expression in reasonable time"）。
+    /// Split out separately not for looks: `body` has `.searchable` + scopes + 5
+    /// `.alert`s + a sheet + an overlay hanging off it, and cramming these four branches in makes the type checker
+    /// time out (observed: "unable to type-check this expression in reasonable time").
     @ViewBuilder
     private var content: some View {
         if model.items.isEmpty {
@@ -379,12 +387,12 @@ struct LibraryView: View {
                 message: L10n.Recordings.noClipsMessage
             )
         } else if isSearchActive, sections.isEmpty, isSearching {
-            // 第一次检索要先读盘建索引（库里几百条有正文时会有一小会儿）。
-            // 这期间**不能**报"没找到" —— 那是假话，而且用户会以为搜错了。
+            // The first search has to read from disk and build the index (a brief moment when the library has hundreds of entries with bodies).
+            // During that time we **must not** report "nothing found" — that's a lie, and the user will think the search is wrong.
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if sections.isEmpty {
-            // 走到这里只可能是"筛/搜完没命中"（库本身非空，见上面两个分支）。
+            // Reaching here can only mean "filtered/searched with no match" (the library itself is non-empty, see the two branches above).
             EmptyStateView(
                 L10n.Library.searchEmptyTitle,
                 systemImage: "magnifyingglass",
@@ -395,18 +403,18 @@ struct LibraryView: View {
         }
     }
 
-    /// 一个 `Section` = 一个（时间 × 设备）。桶标题只在同桶的第一个分节头上
-    /// 出现（见 `LibrarySection.showsBucketTitle`），于是读下来就是
-    /// "今天 → 三台设备 → 昨天 → ……"的两层结构，而不是给每个设备都重复
-    /// 一遍"今天"。
+    /// One `Section` = one (time × device). The bucket title appears only on the first section header in its bucket
+    /// (see `LibrarySection.showsBucketTitle`), so reading down you get
+    /// a two-level "Today → three devices → Yesterday → …" structure, rather than repeating
+    /// "Today" once for every device.
     private var listContent: some View {
         List {
-            // ★ 2026-10-15 六改：导出已就绪的横幅，**放在最上面**。
+            // ★ 2026-10-15 revision 6: the export-ready banner, **placed at the very top**.
             //
-            // 用户原话："导出音频对于大文件音频需要等待很久这个需要挂在后台，
-            // 也支持等 App 完成后来点击传输，防止退出需要重新等待"。
-            // 大文件导出能等到用户去干别的事甚至切出 App；回来时如果页面上
-            // 没有任何线索，用户唯一能想到的就是**再导一次**，于是又等一遍。
+            // User's words: "exporting audio for large files takes a long wait, this needs to run in the background,
+            // and also support tapping to transfer after the App finishes, so quitting doesn't mean waiting again".
+            // A large-file export can outlast the user going off to do something else or even switching out of the App; if there's
+            // no clue on the page when they come back, the only thing they can think of is to **export again**, and wait all over again.
             if let staged = exportCenter.ready {
                 exportReadySection(staged)
             }
@@ -421,11 +429,11 @@ struct LibraryView: View {
         .environment(\.defaultMinListHeaderHeight, 0)
     }
 
-    /// 上一份导出已经备好、还没分享出去。
+    /// The last export is ready but not yet shared.
     ///
-    /// 两个动作：整行点一下 = 分享（唯一的正向动作，所以让整行都可点），
-    /// 右侧垃圾桶 = 清掉这份中转文件释放空间（**不动**用户的资料库，
-    /// 删的只是导出时复制出来的那一份副本）。
+    /// Two actions: tap the whole row = share (the only forward action, so the whole row is tappable),
+    /// the trash can on the right = clear this staging file to free up space (**doesn't touch** the user's library,
+    /// it only deletes the copy made during export).
     private func exportReadySection(_ item: ExportCenter.Ready) -> some View {
         Section {
             HStack(spacing: 10) {
@@ -477,31 +485,32 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: - 列表行
+    // MARK: - List rows
 
-    /// 一行。点开详情、长按进多选、右滑合并。
+    /// One row. Tap to open detail, long-press to enter multi-select, swipe right to merge.
     ///
-    /// 用 `LongPressGesture.exclusively(before: TapGesture())` 而不是
-    /// "Button + onLongPressGesture"：后者两个手势是**各自独立**识别的，
-    /// 长按松手时 Button 的 action 有可能照样触发一次 —— 表现就是"长按选了，
-    /// 顺带还跳进了详情页"。`exclusively` 把优先级写死：长按成立，点按就不认。
+    /// Use `LongPressGesture.exclusively(before: TapGesture())` rather than
+    /// "Button + onLongPressGesture": in the latter the two gestures are recognised **independently**,
+    /// so when you release a long press the Button's action may still fire once — which shows as "long-pressed to select,
+    /// and it jumped into the detail page along the way". `exclusively` hard-codes the priority: if the long press wins, the tap isn't recognised.
     ///
-    /// `unread` 由分节时**一并算好**传进来，行里不再回头查账本：
-    /// 一次 `isUnread` 是一次字典查询，1900 行每次重绘都查一遍没必要。
+    /// `unread` is **computed along the way** while sectioning and passed in; rows don't go back to the ledger:
+    /// one `isUnread` is a dictionary lookup, and 1900 rows querying it on every redraw is unnecessary.
     private func row(_ item: LibraryItem, at index: Int, unread: Bool) -> some View {
         let isSelected = selectedIDs.contains(item.name)
         return HStack(spacing: 10) {
             if isSelecting {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(isSelected ? Color.appAccent : Color.secondary)
                     .transition(.scale.combined(with: .opacity))
             }
             LibraryRow(
                 item: item,
                 source: library.source(forLocalName: item.name),
                 snippet: snippets[item.base],
-                isUnread: unread
+                isUnread: unread,
+                isVoiceMemo: library.isVoiceMemo(forLocalName: item.name)
             )
             if !isSelecting {
                 Image(systemName: "chevron.right")
@@ -509,7 +518,7 @@ struct LibraryView: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        // 没有 Button 之后，命中区域不再自动铺满整行 —— 只有文字能点。
+        // Without a Button, the hit area no longer fills the whole row automatically — only the text is tappable.
         .contentShape(Rectangle())
         .accessibilityAddTraits(.isButton)
         .gesture(
@@ -529,9 +538,9 @@ struct LibraryView: View {
                 )
         )
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            // 搜索态下不给合并：屏幕上只有命中的那几条，而"相邻"是按**整库**
-            // 的时间序算的 —— 那条邻居此刻根本不在列表里，合并完会让人以为
-            // "把别的东西吃掉了"。
+            // No merging in search mode: only the matches are on screen, while "adjacent" is computed over the **whole library**'s
+            // time order — that neighbour isn't in the list at all right now, and after merging it looks like
+            // "it swallowed something else".
             if !isSelecting, !isSearchActive, let older = adjacentOlder(at: index) {
                 Button {
                     pendingMerge = MergePair(older: older, newer: item)
@@ -543,12 +552,12 @@ struct LibraryView: View {
         }
     }
 
-    /// 分节头：第一行是时间桶，第二行是设备。
+    /// Section header: the first line is the time bucket, the second the device.
     ///
-    /// 桶标题只在同桶的第一个分节上出现一次（同桶后面几台设备不再重复写
-    /// "今天"）—— 这就是两层归类的样子。桶那一行右侧挂的是**整桶**的
-    /// 条数与大小，不是单个分节的，否则"今天"下面三台设备各写一遍数字，
-    /// 反而看不出今天一共多少。
+    /// The bucket title appears once, on the first section of its bucket (the later devices in the same bucket don't repeat
+    /// "Today") — that's what two-level grouping looks like. The right side of the bucket row carries the **whole bucket**'s
+    /// count and size, not a single section's, or under "Today" three devices each write the numbers once,
+    /// and you can't tell how many there were today in total.
     @ViewBuilder
     private func sectionHeader(_ section: LibrarySection) -> some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -584,29 +593,29 @@ struct LibraryView: View {
                 }
             }
         }
-        // 列表默认会把这些字转成大写、染成灰色；我们要自己的层级。
+        // The list uppercases and greys these by default; we want our own hierarchy.
         .textCase(nil)
         .accessibilityElement(children: .combine)
     }
 
-    // MARK: - 派生状态
+    // MARK: - Derived state
 
     private var isSearchActive: Bool {
         !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// 列表上真实可见的条目（已过设备筛选 + 搜索），分节之前的样子。
-    /// 全选、条数这类"整屏"判断用它，而不是 `model.items`。
+    /// The entries actually visible in the list (after device filtering + search), before sectioning.
+    /// "Whole screen" judgements like select-all and counts use it, not `model.items`.
     private var visibleEntries: [LibraryEntry] {
         sections.flatMap(\.entries)
     }
 
-    /// 把当前可见条目按 **时间 → 设备** 两层归类。
+    /// Group the currently visible entries into two levels: **time → device**.
     ///
-    /// 一次遍历同时干三件事：过筛（设备 + 搜索）、记下每条在**整库**里的下标
-    /// （`adjacentOlder` 要按整库的时间序找邻居）、按桶和设备归位。
-    /// 分开写会变成三次 1900 条的遍历，而且 "显示的是什么" 会散在两处，
-    /// 将来加一个筛选项必定漏改一处。
+    /// One pass does three things at once: filter (device + search), record each entry's index in the **whole library**
+    /// (`adjacentOlder` needs the whole library's time order to find neighbours), and slot them by bucket and device.
+    /// Written separately it'd be three 1900-entry passes, and "what's displayed" would be scattered across two places,
+    /// so adding one more filter later would inevitably miss one of them.
     private var sections: [LibrarySection] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let searching = !needle.isEmpty
@@ -616,15 +625,15 @@ struct LibraryView: View {
         let now = Date()
         let startOfToday = cal.startOfDay(for: now)
         let startOfYesterday = cal.date(byAdding: .day, value: -1, to: startOfToday) ?? startOfToday
-        // 「本周」= 本自然周的第一天。用 `dateInterval` 而不是"减 7 天"：
-        // 这样跟随系统区域的周首日（中文一般是周一），而且"本周"就该是
-        // 本周，不是"最近七天"。
+        // "This week" = the first day of the current calendar week. Use `dateInterval`, not "minus 7 days":
+        // that follows the system locale's first day of the week (usually Monday in Chinese), and "this week" should be
+        // this week, not "the last seven days".
         let weekStart = cal.dateInterval(of: .weekOfYear, for: now)?.start ?? startOfToday
         let monthStart = cal.dateInterval(of: .month, for: now)?.start ?? startOfToday
 
         func bucket(of date: Date) -> LibraryTimeBucket {
-            // 设备 RTC 没对表时可能给出**未来**时间；那种一律并进"今天"，
-            // 否则列表最上面会冒出一个谁也没见过的月份。
+            // When a device's RTC isn't set it may give a **future** time; those always join "Today",
+            // otherwise a month nobody has seen before pops up at the top of the list.
             if date >= startOfToday { return .today }
             if date >= startOfYesterday { return .yesterday }
             if date >= weekStart { return .thisWeek }
@@ -633,9 +642,9 @@ struct LibraryView: View {
             return .month((c.year ?? 1970) * 100 + (c.month ?? 1))
         }
 
-        // 1) 过筛 + 归位。`model.items` 本身是时间倒序，所以按顺序往每个
-        //    (桶, 设备) 里追加，桶内和组内天然就是倒序；设备组的先后 = 该设备
-        //    最新一条的先后，也不用额外排序。
+        // 1) Filter + slot. `model.items` is already newest-first, so appending in order to each
+        //    (bucket, device) keeps buckets and groups naturally newest-first too; the device groups' order = that device's
+        //    newest clip's order, with no extra sorting needed.
         var perBucket: [LibraryTimeBucket: [String: [LibraryEntry]]] = [:]
         var deviceOrder: [LibraryTimeBucket: [String]] = [:]
         var deviceNames: [String: String] = [:]
@@ -649,7 +658,7 @@ struct LibraryView: View {
                 case .knowledge:
                     if !inBody { continue }
                 case .all:
-                    // 「全部」比「知识库」多的就是这条：还没转录、只有名字的录音。
+                    // This is the one thing "All" has that "Knowledge base" doesn't: recordings not yet transcribed, with only a name.
                     if !inBody, !item.matchesName(needle) { continue }
                 }
             }
@@ -665,7 +674,7 @@ struct LibraryView: View {
             ))
         }
 
-        // 2) 按时间倒序输出（今天 → 昨天 → 本周 → 本月 → 各月从新到旧）。
+        // 2) Output newest-first (Today → Yesterday → This week → This month → months newest to oldest).
         var monthCache: [Int: String] = [:]
         func title(of b: LibraryTimeBucket) -> String {
             switch b {
@@ -708,26 +717,26 @@ struct LibraryView: View {
         return out
     }
 
-    /// 「2026年8月」/「August 2026」。用系统的模板化格式按区域拼，
-    /// 自己接"年""月"两个字在另外 10 种语言里全是错的。
+    /// "August 2026" / "2026-08". Assemble it per locale from the system's template format;
+    /// gluing on the words "year" and "month" yourself is wrong in all 10 other languages.
     ///
-    /// ★ 2026-10-16 十三改：locale 从 `AppLocale` 取（**先设 locale 再调模板**）。
+    /// ★ 2026-10-16 revision 13: the locale comes from `AppLocale` (**set the locale first, then call the template**).
     ///
-    /// ⚠️ 这里原来是个 `static let`，有两个独立的问题叠在一起：
-    ///    ① locale 默认是 `Locale.current`（设备语言），App 里选英文不管用；
-    ///    ② `setLocalizedDateFormatFromTemplate` 会在**调用那一刻**用
-    ///       formatter 当时的 locale 把模板**烘死**成具体格式串 ——
-    ///       所以即使后来把 locale 改了，模板也不会重算。必须重建 formatter，
-    ///       这正是 `AppLocale.formatter(_:_:)` 按语言代次缓存要做的事。
+    /// ⚠️ This used to be a `static let`, and two independent problems stacked up:
+    ///    ① the locale defaulted to `Locale.current` (the device language), so choosing English in the App had no effect;
+    ///    ② `setLocalizedDateFormatFromTemplate` **bakes** the template into a concrete format string at the
+    ///       **moment of the call**, using the formatter's locale at the time —
+    ///       so even if the locale is changed later the template isn't recomputed. The formatter must be rebuilt,
+    ///       which is exactly what `AppLocale.formatter(_:_:)`'s per-language-generation caching is for.
     private static var monthFormatter: DateFormatter {
         AppLocale.formatter("library.bucket_month") { $0.setLocalizedDateFormatFromTemplate("yMMMM") }
     }
 
-    // MARK: - 设备筛选
+    // MARK: - Device filter
 
-    /// 分组 / 筛选用的设备键。**两张卡必须是两组**，所以 SN 进键；
-    /// 而展示名可以是用户改过的别名 —— 两者绝不能混用（别名会变，
-    /// 一变分组就散架）。
+    /// The device key used for grouping / filtering. **Two cards must be two groups**, so the SN goes into the key;
+    /// the display name can be a user-changed alias — and the two must never be mixed up (aliases change,
+    /// and the grouping falls apart the moment they do).
     private func deviceKey(for item: LibraryItem) -> String {
         let source = library.source(forLocalName: item.name)
         switch source.kind {
@@ -740,7 +749,7 @@ struct LibraryView: View {
         library.source(forLocalName: item.name).displayName
     }
 
-    /// 库里出现过的设备，按条数从多到少。给筛选项用。
+    /// The devices that have appeared in the library, by count, most to least. Used for the filter items.
     private var availableDevices: [(key: String, name: String, count: Int, bytes: Int64)] {
         var order: [String] = []
         var names: [String: String] = [:]
@@ -760,18 +769,18 @@ struct LibraryView: View {
             .sorted { $0.count > $1.count }
     }
 
-    /// 选中的设备**此刻还在不在库里**。不在就当作"全部"。
+    /// Whether the selected device is **still in the library right now**. If not, treat it as "All".
     ///
-    /// 为什么要这一层而不是在刷新后清 `deviceFilter`：把最后一条某设备的
-    /// 录音删掉之后，列表必须立刻回到"全部"，而不是卡在一个空列表上等
-    /// 用户自己去菜单里改回来。
+    /// Why this layer rather than clearing `deviceFilter` after a refresh: after deleting the last recording of a
+    /// device, the list must return to "All" immediately, rather than being stuck on an empty list waiting for
+    /// the user to change it back in the menu themselves.
     private var effectiveDeviceFilter: String? {
         guard let deviceFilter else { return nil }
         return availableDevices.contains { $0.key == deviceFilter } ? deviceFilter : nil
     }
 
-    /// 库里没有这台设备了就清掉选择。纯计算层已经兜住了显示，这里只是
-    /// 让菜单里的勾也跟着消失。
+    /// Clear the selection once the device is no longer in the library. The pure computation layer already covers the display; this
+    /// just makes the tick in the menu disappear too.
     private func dropStaleDeviceFilter() {
         guard let deviceFilter else { return }
         if !availableDevices.contains(where: { $0.key == deviceFilter }) {
@@ -779,20 +788,20 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: - 设备筛选条（★ 2026-10-15 七改）
+    // MARK: - Device filter bar (★ 2026-10-15 revision 7)
     //
-    // 原来是工具栏上的一个 `Menu`。用户原话："那个设备筛选做的不够让人理解，
-    // 全部勾选不方便人选择，优化一下"。老写法有三个具体问题：
-    //   1. 不进菜单就**看不见有哪些设备**，也看不见**现在筛的是哪台**；
-    //   2. 菜单里"全部设备"和各台设备并排摆着，读起来像一组复选框
-    //      （"全部"看着像"全被勾上了"）—— 而它其实是**单选**；
-    //   3. 每项后面拖着"· 12 条 · 2.3 GB"，一行太长，被系统截断。
-    // 改成横向胶囊条后三件事一次摊开：有哪些、各多少条、现在选的是哪个。
+    // It used to be a `Menu` on the toolbar. User's words: "that device filter isn't clear enough to understand,
+    // ticking all isn't convenient for choosing; optimise it". The old design had three concrete problems:
+    //   1. without entering the menu you **can't see which devices exist**, nor **which one is being filtered**;
+    //   2. in the menu "All devices" sits side by side with each device, reading like a set of checkboxes
+    //      ("All" looks like "everything is ticked") — when it's actually a **single choice**;
+    //   3. each item drags "· 12 clips · 2.3 GB" behind it, and the line is too long and gets truncated by the system.
+    // Switched to a horizontal pill bar, three things are laid out at once: what exists, how many each, and which is selected.
 
-    /// 只有一台设备时不显示筛选条 —— 没什么可筛的，多一条只会挤占列表。
+    /// Don't show the filter bar with only one device — there's nothing to filter, and one more row just crowds the list.
     ///
-    /// 库里通常只有 TicNote 卡和手机两来源，`availableDevices` 为 1 意味着
-    /// 所有录音都来自同一处，此时筛选是**空操作**。
+    /// The library usually has just two sources, the TicNote card and the phone; `availableDevices` being 1 means
+    /// all recordings come from the same place, and filtering is then a **no-op**.
     private var showsDeviceBar: Bool { availableDevices.count > 1 }
 
     @ViewBuilder
@@ -825,11 +834,11 @@ struct LibraryView: View {
         }
     }
 
-    /// 一颗筛选胶囊。选中态是**实心 accent**，未选中是浅灰底 —— 对比足够强，
-    /// 扫一眼就知道筛的是哪台（老菜单里那条勾只有 14pt，几乎看不见）。
+    /// One filter pill. Selected is a **solid accent**, unselected a light grey background — strong enough contrast that
+    /// a glance tells you which one is filtered (the old menu's tick was only 14pt, nearly invisible).
     ///
-    /// 条数做成胶囊里的小圆角标签而不是跟在名字后面的灰字：设备名长短不一
-    /// （"TicNote Card · 3F2A" 能占满半屏），跟字的话条数会飘到看不见的地方。
+    /// The count is a small rounded tag inside the pill rather than grey text after the name: device names vary in length
+    /// ("TicNote Card · 3F2A" can fill half the screen), and following the text the count would drift out of sight.
     private func deviceFilterChip(
         title: String, count: Int, selected: Bool, action: @escaping () -> Void
     ) -> some View {
@@ -853,7 +862,7 @@ struct LibraryView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(
-                Capsule().fill(selected ? Color.accentColor : Color(uiColor: .secondarySystemBackground))
+                Capsule().fill(selected ? Color.appAccent : Color(uiColor: .secondarySystemBackground))
             )
             .overlay(
                 Capsule().stroke(selected ? Color.clear : Color.primary.opacity(0.08), lineWidth: 1)
@@ -863,31 +872,31 @@ struct LibraryView: View {
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
-    // MARK: - 全选 / 派生
+    // MARK: - Select all / derived
 
-    /// `.task(id:)` 的键：作用域 + 目录指纹 + 查询词。
+    /// The `.task(id:)` key: scope + directory fingerprint + query term.
     ///
-    /// 带上指纹是必要的：库里"有什么"变了（新录一条、刚给某条生成摘要）之后
-    /// 检索必须重跑。而且指纹正是 `LibraryKnowledgeIndex` 的缓存失效键 ——
-    /// 同一个值同时管着"要不要重搜"和"正文缓存还算不算数"，不会出现
-    /// "索引刷新了但屏幕上还是旧结果"。
+    /// Including the fingerprint is necessary: once what's in the library changes (a new recording, a summary just generated for one),
+    /// the search has to re-run. And the fingerprint is exactly `LibraryKnowledgeIndex`'s cache-invalidation key —
+    /// the same value governs both "should we re-search" and "is the body cache still valid", so you never get
+    /// "the index refreshed but the screen still shows old results".
     private var searchKey: String {
         let stamp = model.signature
             .map { "\($0.entryCount)@\($0.newestEntry.timeIntervalSince1970)" } ?? "-"
         return "\(scope.rawValue)|\(stamp)|\(query)"
     }
 
-    /// 勾选出来的条目，按**列表顺序**（时间倒序）给出。
+    /// The ticked entries, given in **list order** (newest first).
     ///
-    /// 按 `model.items` 的顺序而不是 `selectedIDs` 的哈希序：导出目录里的
-    /// 排序、删除失败时的报错顺序都跟着屏幕走，出问题时能一眼对上。
-    /// 也不按 `visibleEntries`：勾完再改筛选条件不该把已勾的悄悄丢掉。
+    /// In `model.items` order, not `selectedIDs`' hash order: the ordering in the export directory
+    /// and the error order on a failed delete both follow the screen, so when something goes wrong you can match them up at a glance.
+    /// And not by `visibleEntries` either: changing the filter after ticking shouldn't quietly drop what's ticked.
     private var selectedItems: [LibraryItem] {
         model.items.filter { selectedIDs.contains($0.name) }
     }
 
-    /// 「全选」= 选中**屏幕上这一屏**（可能是搜出来的子集、也可能是筛过的
-    /// 单台设备），不是整个库。
+    /// "Select all" = select **what's on this screen** (which may be a searched subset, or a filtered
+    /// single device), not the whole library.
     private var allItemsSelected: Bool {
         let names = Set(visibleEntries.map(\.item.name))
         return !names.isEmpty && names.isSubset(of: selectedIDs)
@@ -897,7 +906,7 @@ struct LibraryView: View {
         selectedIDs = Set(visibleEntries.map(\.item.name))
     }
 
-    // MARK: - 多选
+    // MARK: - Multi-select
 
     private func enterSelection(with item: LibraryItem) {
         selectedIDs = [item.name]
@@ -922,12 +931,12 @@ struct LibraryView: View {
     private var selectionBar: some View {
         VStack(spacing: 10) {
             HStack {
-                // ★ 七改：按钮上直接写"会勾上几条"。
+                // ★ Revision 7: the button spells out "how many will be ticked".
                 //
-                // 用户原话"全部勾选不方便人选择"。原来的按钮只说"全选"，而全选的范围
-                // 是**屏幕上这一屏**（可能已经按设备筛过、按词搜过），用户点之前完全
-                // 不知道会勾多少条；点完才在下面看到"已选 12 条"。把数字搬到按钮上，
-                // 点与不点的后果一眼可见。
+                // User's words: "ticking all isn't convenient for choosing". The old button only said "Select all", while select-all's scope
+                // is **what's on this screen** (possibly already device-filtered and word-searched), and before tapping the user has no
+                // idea how many will be ticked; only after tapping do they see "12 selected" below. Moving the number onto the button
+                // makes the consequence of tapping or not visible at a glance.
                 Button {
                     if allItemsSelected {
                         selectedIDs.removeAll()
@@ -967,8 +976,8 @@ struct LibraryView: View {
                 }
                 .buttonStyle(.bordered)
             }
-            // 一条都没勾时两个动作都无从下手（导出空目录、删 0 条）——
-            // 一起置灰，而不是等点了才弹一句"请先选择"。
+            // With nothing ticked neither action has anything to do (export an empty directory, delete 0 clips) —
+            // so grey both out together, rather than waiting for a tap and then popping "please select something".
             .disabled(selectedItems.isEmpty)
         }
         .padding(.horizontal, 16)
@@ -976,45 +985,63 @@ struct LibraryView: View {
         .background(.bar)
     }
 
-    // MARK: - 知识库检索
+    // MARK: - Knowledge-base search
 
     private func runSearch() async {
         guard isSearchActive else {
-            // 退格到空 = 退出搜索，命中集合必须一起清掉，
-            // 否则重新打一个字时会先闪一下**上一次**的结果。
+            // Backspacing to empty = leaving search, and the match set must be cleared with it,
+            // otherwise typing one character again flashes the **previous** results first.
             snippets = [:]
             isSearching = false
             return
         }
-        // 只有带正文的条目才值得读盘（`hasText` 由扫描器在目录列举里判定，
-        // 零额外 syscall）。「全部」也多读不了几个 —— 菜单/标题是内存里的比对。
+        // Only entries with a body are worth reading from disk (`hasText` is determined by the scanner in the directory listing,
+        // zero extra syscalls). "All" doesn't read many more either — the menu/title is an in-memory comparison.
         let bases = model.items.filter(\.hasText).map(\.base)
         isSearching = true
         let hits = await LibraryKnowledgeIndex.shared.search(
             query, bases: bases, stamp: model.signature
         )
-        // 打字快的时候上一次会被 `.task(id:)` 整条取消；取消的那次别再写
-        // `snippets` —— 否则旧结果会盖掉新一轮的。
+        // With fast typing the previous run is cancelled entirely by `.task(id:)`; the cancelled run must not write
+        // `snippets` again — otherwise old results overwrite the new round's.
         guard !Task.isCancelled else { return }
         snippets = hits
         isSearching = false
     }
 
-    // MARK: - 批量导出
+    // MARK: - Deep link from the transcript-ready banner
 
-    // ⚠️ 暂存目录**已经不在这里了**。原先是一个固定的
-    // `FileManager.default.temporaryDirectory/nomily-export`，2026-10-15
-    // 六改时整个搬到了 `ExportCenter`，两个原因：
-    //   1. `tmp` 会被 iOS 随时清掉，而"导完切走、回来再分享"正是要支持的路径；
-    //   2. 需要一个地方记住"上一份备好了什么"，否则用户回来只有"从头再等"。
-    // 取目录请用 `ExportCenter.shared.beginNewStaging()`。
-
-    /// 一条录音在导出目录里的文件夹名：用**显示标题**（用户改过的名字）而不是
-    /// 文件名 —— 导出是给人看的。
+    /// ★ 2026-10-20: consume `env.pendingClipOpen` — the last layer of the deep link
+    /// started by tapping the "transcript ready" toast (RootView switched tabs,
+    /// `RecordingsView` switched segments; this list actually opens the clip).
     ///
-    /// 去 `:` 是必须的：iOS 上冒号是 HFS 的老分隔符，写路径时会被**悄悄**换成
-    /// `/`，于是"记录 10:30"这种标题会凭空多出一层目录。
-    /// 重名（两条都叫"会议"）按 `会议 (2)` 顺延，绝不覆盖。
+    /// The scanned item is preferred (it carries the list's freshly computed flags);
+    /// the single-entry disk read is the fallback for the common race where the banner
+    /// fired while `model.refresh()` was still running and the clip isn't in `items`
+    /// yet. Either way the intent is cleared first, so a failed open never loops back.
+    private func consumePendingClipOpen() {
+        guard let name = env.pendingClipOpen else { return }
+        env.pendingClipOpen = nil
+        guard let item = model.items.first(where: { $0.name == name })
+            ?? LibraryItem.readFromDisk(name: name, duration: nil) else { return }
+        detailItem = item
+    }
+
+    // MARK: - Batch export
+
+    // ⚠️ The staging directory **is no longer here**. It used to be a fixed
+    // `FileManager.default.temporaryDirectory/nomily-export`，2026-10-15
+    // one that moved wholesale to `ExportCenter` in revision 6, for two reasons:
+    //   1. `tmp` can be cleared by iOS at any time, and "export, switch away, come back and share" is exactly the path we need to support;
+    //   2. we need somewhere to remember "what the last one prepared", or the user comes back to "wait from scratch again".
+    // To get a directory use `ExportCenter.shared.beginNewStaging()`.
+
+    /// A clip's folder name in the export directory: use the **display title** (the name the user changed) rather than
+    /// the filename — the export is for people to read.
+    ///
+    /// Stripping `:` is mandatory: on iOS the colon is HFS's old separator and gets **quietly** turned into
+    /// `/` when writing a path, so a title like "Note 10:30" would sprout an extra directory level out of nowhere.
+    /// Duplicate names (two clips both called "Meeting") go to `Meeting (2)`, never overwriting.
     private static func exportFolderName(
         for item: LibraryItem, taken: inout Set<String>
     ) -> String {
@@ -1034,16 +1061,16 @@ struct LibraryView: View {
         return candidate
     }
 
-    /// 一条录音的**文本**旁车：`(磁盘位置, 导出时的名字)`。
+    /// A clip's **text** sidecars: `(disk location, name at export time)`.
     ///
-    /// 刻意**不含** `.asr.json` / `.translated.json`：那是给 App 自己回读的中间
-    /// 格式（带时间轴、置信度、说话人），导出去对人没用。用户要的是
-    /// "音频 + 转录/摘要**文本**"。
+    /// Deliberately **excludes** `.asr.json` / `.translated.json`: those are intermediate formats for the App to
+    /// read back itself (with timeline, confidence, speaker), and are useless to a person. What the user wants is
+    /// "audio + transcript/summary **text**".
     ///
-    /// 导出名写成能直读的英文（`Transcript.txt`）而不是落盘名
-    /// （`20240101010101.txt`）：文件夹已经用标题命名了，里面再放一串时间戳
-    /// 就白取了。一个文件夹只装一条录音，所以这几个名字不会撞。
-    private static func textArtefacts(for item: LibraryItem) -> [(source: URL, name: String)] {
+    /// The export name is written as readable English (`Transcript.txt`) rather than the on-disk name
+    /// (`20240101010101.txt`): the folder is already named by title, so another timestamp inside
+    /// would be a waste. One folder holds one clip, so these names never collide.
+    private nonisolated static func textArtefacts(for item: LibraryItem) -> [(source: URL, name: String)] {
         let dir = StorageLocations.decryptedDir
         func url(_ suffix: String) -> URL {
             dir.appendingPathComponent(item.base + suffix)
@@ -1056,26 +1083,26 @@ struct LibraryView: View {
         ]
     }
 
-    /// 把勾选的条目**原样复制**到一个临时目录，然后交给系统分享面板。
+    /// **Copy the ticked entries as-is** into a temporary directory, then hand it to the system share sheet.
     ///
-    /// 为什么不做 zip：`UIActivityViewController` 拿目录一样能"存储到文件"和
-    /// AirDrop，省掉一次把几十 GB 再写一遍的复制 —— 导出 20 条会议录音时
-    /// 那一下要几十秒，而且期间设备空间会翻倍占用。
+    /// Why not zip: `UIActivityViewController` can "Save to Files" and AirDrop a directory just as well,
+    /// saving one copy of tens of GB being written again — exporting 20 meeting recordings
+    /// takes tens of seconds as it is, and during that the device's space use doubles.
     private func runBatchExport() async {
         let items = selectedItems
         guard !items.isEmpty else { return }
         busyMessage = L10n.Library.exportPreparing
         defer { busyMessage = nil }
-        // ★ 2026-10-15 六改：导出（大文件时的复制 / 重编码）整段占住后台保活。
-        // 用户原话是"导出音频对于大文件音频需要等待很久这个需要挂在后台"。
-        // 与转录、摘要共用同一套机制，不另起一份。
+        // ★ 2026-10-15 revision 6: export (copying / re-encoding for large files) holds a background task alive for its whole duration.
+        // User's words: "exporting audio for large files takes a long wait, this needs to run in the background".
+        // Shares the same mechanism as transcription and summarisation; no separate one.
         BackgroundKeeper.shared.acquire(.export)
         defer { BackgroundKeeper.shared.release(.export) }
 
         let fm = FileManager.default
-        // ⚠️ 暂存目录**不再写 `tmp`**。`tmp` 会被 iOS 随时清掉，而"导完切走、
-        //    回来再分享"恰恰是本轮要支持的路径 —— 存在 App 容器里，并把
-        //    "备好了哪一份"落盘（`ExportCenter`）。开新的会顺手删掉上一份。
+        // ⚠️ The staging directory **no longer writes to `tmp`**. `tmp` can be cleared by iOS at any time, and "export, switch away,
+        //    come back and share" is exactly the path this round needs to support — it lives in the App container, and
+        //    "which one is prepared" is persisted to disk (`ExportCenter`). Starting a new one deletes the last one along the way.
         let root: URL
         do {
             root = try ExportCenter.shared.beginNewStaging()
@@ -1088,45 +1115,40 @@ struct LibraryView: View {
         var staged = 0
         var bytes: Int64 = 0
         var taken = Set<String>()
-        do {
-            for item in items {
-                let dir = root.appendingPathComponent(
-                    Self.exportFolderName(for: item, taken: &taken), isDirectory: true
-                )
-                try fm.createDirectory(at: dir, withIntermediateDirectories: true)
 
-                // 音频保留**原始文件名**（扩展名 .opus / .m4a / .mp3 是播放器
-                // 认它的唯一依据，改不得）。
-                if let url = item.url, fm.fileExists(atPath: url.path) {
-                    do {
-                        let dest = dir.appendingPathComponent(item.name)
-                        try fm.copyItem(at: url, to: dest)
-                        bytes += Self.fileSize(dest)
-                        staged += 1
-                    } catch {
-                        failures.append("\(item.displayTitle): \(error.localizedDescription)")
-                    }
-                }
-                for artefact in Self.textArtefacts(for: item)
-                where fm.fileExists(atPath: artefact.source.path) {
-                    do {
-                        let dest = dir.appendingPathComponent(artefact.name)
-                        try fm.copyItem(at: artefact.source, to: dest)
-                        bytes += Self.fileSize(dest)
-                        staged += 1
-                    } catch {
-                        failures.append("\(item.displayTitle): \(error.localizedDescription)")
-                    }
-                }
+        // ★ 2026-10-20 speed revision: the copy loop is **off the main actor** now.
+        //
+        // The whole View is MainActor-isolated (SwiftUI's View protocol is), so the previous
+        // in-place loop copied GBs of bytes **on the main thread** — the entire app stuttered
+        // for the whole batch, which is exactly the "导出太慢/卡" complaint. The structure now:
+        //   · per item: folder naming + directory creation stay on the main actor (cheap string work,
+        //     and `taken` is mutated here);
+        //   · the actual byte copies (audio + text sidecars) run in a detached task — one hop per
+        //     item, not per buffer, so the overhead is nil;
+        //   · between items the busy overlay reports "exporting k/n: title" so a long batch no
+        //     longer looks like a hang.
+        for (index, item) in items.enumerated() {
+            busyMessage = L10n.Library.exportProgress(index + 1, items.count, item.displayTitle)
+            let dir = root.appendingPathComponent(
+                Self.exportFolderName(for: item, taken: &taken), isDirectory: true
+            )
+            do {
+                try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            } catch {
+                exportError = error.localizedDescription
+                return
             }
-        } catch {
-            exportError = error.localizedDescription
-            return
+            let copied = await Task.detached(priority: .userInitiated) { () -> (staged: Int, bytes: Int64, failures: [String]) in
+                Self.copyArtefacts(of: item, into: dir)
+            }.value
+            staged += copied.staged
+            bytes += copied.bytes
+            failures += copied.failures
         }
 
-        // 有真的 I/O 报错就如实说，不弹分享面板：让用户对着一个缺了内容的
-        // 目录去"存储到文件"，比直接告诉他哪几条没导出更糟。
-        // （没音频的纯文本条目**不算失败** —— 它本来就没有音频可导。）
+        // If there's a real I/O error, say so honestly and don't show the share sheet: making the user "Save to Files"
+        // a directory that's missing content is worse than telling them outright which clips failed to export.
+        // (A text-only entry with no audio **doesn't count as a failure** — it had no audio to export anyway.)
         if !failures.isEmpty {
             exportError = failures.joined(separator: "\n")
             return
@@ -1146,24 +1168,67 @@ struct LibraryView: View {
         showExportSheet = true
     }
 
-    private static func fileSize(_ url: URL) -> Int64 {
+    /// One item's copies (audio + text sidecars) into its staging folder.
+    ///
+    /// ★ 2026-10-20 speed revision: deliberately `static` and pure I/O so it can run inside a
+    /// detached task — nothing here touches view state. Per-item granularity (not per-buffer)
+    /// keeps the hop overhead at zero while the multi-GB `copyItem` calls no longer block the UI.
+    ///
+    /// ⚠️ Must be `nonisolated`: the View's isolation would otherwise bleed into this static
+    /// through protocol conformance, quietly putting the copies **back on the main actor** —
+    /// the exact freeze this revision removes (and a hard error in Swift 6 mode).
+    ///
+    /// The audio keeps its **original filename** (the .opus / .m4a / .mp3 extension is how a player
+    /// recognises it, so it can't be changed).
+    private nonisolated static func copyArtefacts(
+        of item: LibraryItem, into dir: URL
+    ) -> (staged: Int, bytes: Int64, failures: [String]) {
+        let fm = FileManager.default
+        var staged = 0
+        var bytes: Int64 = 0
+        var failures: [String] = []
+        if let url = item.url, fm.fileExists(atPath: url.path) {
+            do {
+                let dest = dir.appendingPathComponent(item.name)
+                try fm.copyItem(at: url, to: dest)
+                bytes += fileSize(dest)
+                staged += 1
+            } catch {
+                failures.append("\(item.displayTitle): \(error.localizedDescription)")
+            }
+        }
+        for artefact in textArtefacts(for: item)
+        where fm.fileExists(atPath: artefact.source.path) {
+            do {
+                let dest = dir.appendingPathComponent(artefact.name)
+                try fm.copyItem(at: artefact.source, to: dest)
+                bytes += fileSize(dest)
+                staged += 1
+            } catch {
+                failures.append("\(item.displayTitle): \(error.localizedDescription)")
+            }
+        }
+        return (staged, bytes, failures)
+    }
+
+    private nonisolated static func fileSize(_ url: URL) -> Int64 {
         Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
     }
 
-    // MARK: - 批量删除
+    // MARK: - Batch delete
 
-    /// 整条删掉：音频 + 转录 + 摘要 + 译文 + 自定义标题，外加在 `Library` 里
-    /// 注销掉这条记录。
+    /// Delete the whole clip: audio + transcript + summary + translation + custom title, plus deregistering
+    /// the record in `Library`.
     ///
-    /// ★ 2026-10-15：文件**不再真删**，而是整组搬进回收站（`ClipTrash`），
-    /// 保护 30 天。所以这一趟只负责"把该带走的东西列全"，搬家和记账都在
-    /// `ClipTrash.move` 里做 —— 那里也是"先搬文件、再注销 manifest"的顺序，
-    /// 理由同下。
+    /// ★ 2026-10-15: files are **no longer really deleted**, but moved as a whole group into the trash (`ClipTrash`),
+    /// protected for 30 days. So this pass only handles "listing everything that should come along"; the moving and accounting happen in
+    /// `ClipTrash.move` — which is also the "move the files first, then deregister the manifest" order,
+    /// for the same reason as below.
     ///
-    /// ⚠️ **顺序不能反** —— 必须"先删文件、再清 manifest"。反过来的话
-    /// `LibraryScanner` 会在"manifest 已清、文件还在"的那个窗口里把这条按
-    /// **导入文件**重新建出来（manifest 里没记录 = 用户自己导的），
-    /// 用户看到的就是"删了没删掉"。
+    /// ⚠️ **The order can't be reversed** — it must be "delete the files first, then clear the manifest". Reverse it and
+    /// `LibraryScanner` will, in the window where "the manifest is cleared but the files remain", rebuild this entry as an
+    /// **imported file** (no manifest record = the user imported it themselves),
+    /// and what the user sees is "deleted but not deleted".
     private func runBatchDelete() async {
         let items = selectedItems
         guard !items.isEmpty else { return }
@@ -1175,24 +1240,24 @@ struct LibraryView: View {
                 localName: item.name,
                 title: item.displayTitle,
                 urls: Self.deleteURLs(for: item),
-                // 整条都走，所以"已从设备下过"的凭据必须一起注销 —— 漏了它，
-                // 同一条录音再也下载不回来（设备列表里它永远是"已下载"）。
+                // The whole clip goes, so the "was downloaded from the device" credential must be deregistered too — miss it and
+                // the same clip can never be downloaded again (in the device list it stays "downloaded" forever).
                 download: ClipTrash.downloadRecord(forLocalName: item.name, in: library),
-                // ★ 2026-10-15：来源在**删除这一刻**定死。`move` 会顺手注销
-                // manifest 里那条记录，之后就再也查不出这条录音是从哪来的了。
+                // ★ 2026-10-15: the source is fixed **at the moment of deletion**. `move` deregisters the record
+                // in the manifest along the way, and after that you can no longer find out where this recording came from.
                 source: ClipTrash.sourceLabel(forLocalName: item.name, in: library)
             )
         }
         let moved = ClipTrash.shared.move(payloads, library: library)
-        // 清理这个动作**自己报不报错**由这里判定：搬成功的组一定能移走全部
-        // 文件，搬失败的组已经被 `move` 原样退回。所以看"哪个还剩文件"最准。
+        // Whether the cleanup action **itself reports an error** is decided here: a group that moved successfully is guaranteed to have moved all its
+        // files, and a group that failed was rolled back as-is by `move`. So "which one still has files left" is the most accurate test.
         let stuck = moved < payloads.count
             ? payloads.filter { $0.urls.contains { FileManager.default.fileExists(atPath: $0.path) } }
             : []
         let failures = stuck.map(\.title)
 
-        // 已读账本里也要清 —— 不清的话表会随着"删了又下"无限长，而且同名
-        // 文件重新下载回来会莫名带着"已读"，用户再也等不到那颗红点。
+        // The read ledger has to be cleared too — otherwise the table grows forever with "delete then download again", and a same-named
+        // file downloaded again comes back mysteriously marked "read", and the user never sees that red dot again.
         readStore.forget(names: items.map(\.name))
         exitSelection()
         await model.refresh(force: true)
@@ -1202,16 +1267,16 @@ struct LibraryView: View {
         }
     }
 
-    /// 整条删除要搬走的全部文件。
+    /// All the files a whole-clip delete has to move.
     ///
-    /// 从 `LibraryItem` 反推路径而不是走通用目录扫描：`item` 已经带着
-    /// `url` / `base`，拼后缀是 O(1)；扫一遍目录要几百个 syscall，而这是
-    /// 可以在主线程上被点出来的动作。
+    /// Derive the paths from `LibraryItem` rather than a general directory scan: `item` already carries
+    /// `url` / `base`, so appending suffixes is O(1); scanning the directory is hundreds of syscalls, and this is
+    /// an action that can be tapped on the main thread.
     ///
-    /// 含 `.asr.json` / `.translated.json` 这两个**旁车 JSON** —— 老的
-    /// `textArtefacts(for:)` 只管四份给人看的文本，把它们落下了；而
-    /// `ClipArtefact.of(fileNamed:)` 是把 `.asr.json` 当 `.transcript` 认的，
-    /// 于是残留一个 JSON 足以让扫描器重建出"有转录、点开却读不出东西"的条目。
+    /// Includes the two **sidecar JSONs** `.asr.json` / `.translated.json` — the old
+    /// `textArtefacts(for:)` only handled the four human-readable texts and left them out; and
+    /// `ClipArtefact.of(fileNamed:)` recognises `.asr.json` as `.transcript`,
+    /// so a leftover JSON is enough for the scanner to rebuild an entry that "has a transcript, but opens to nothing readable".
     private static func deleteURLs(for item: LibraryItem) -> [URL] {
         let t = StorageLocations.transcriptURLs(for: item.name)
         let tr = StorageLocations.translationURLs(for: item.name)
@@ -1231,19 +1296,19 @@ struct LibraryView: View {
     }
 }
 
-// MARK: - 归类的三个模型
+// MARK: - The three grouping models
 
-/// 时间桶。**`rank` 就是展示顺序**：今天 → 昨天 → 本周 → 本月 → 各月从新到旧。
+/// Time bucket. **`rank` is the display order**: Today → Yesterday → This week → This month → months newest to oldest.
 ///
-/// 为什么分两个排序键而不是揉成一个整数：月份之间的先后要按年月比，而它跟
-/// 前四档之间只差"谁在上面"。分开写，排序就是一句元组比较，读的人也一眼
-/// 看得出月份是"垫在最后面、内部倒序"。
+/// Why two sort keys rather than mashing them into one integer: months must be ordered by year-and-month, and between them and
+/// the first four ranks the only question is "which is on top". Written separately the sort is one tuple comparison, and a reader can see at a glance
+/// that the months "sit at the very back, in reverse order internally".
 private enum LibraryTimeBucket: Hashable {
     case today
     case yesterday
     case thisWeek
     case thisMonth
-    /// 更早的，按月。值是 `yyyyMM` —— 能排序，能当 id，也直接是"年 / 月"。
+    /// Anything earlier, by month. The value is `yyyyMM` — sortable, usable as an id, and directly "year / month".
     case month(Int)
 
     var rank: Int {
@@ -1256,7 +1321,7 @@ private enum LibraryTimeBucket: Hashable {
         }
     }
 
-    /// 同档内再排：月份越新越靠上（所以取负）。
+    /// Within the same rank, sort again: the newer the month the higher (hence the negation).
     var tiebreak: Int {
         if case let .month(key) = self { return -key }
         return 0
@@ -1273,13 +1338,13 @@ private enum LibraryTimeBucket: Hashable {
     }
 }
 
-/// 列表里的一行：条目 + 它在**整库**（`model.items`）里的下标。
+/// A row in the list: the entry + its index in the **whole library** (`model.items`).
 ///
-/// 下标是给 `adjacentOlder(at:)` 用的 —— 它按整库的时间序找相邻的上一条。
-/// 拿筛过之后的下标去查会指到别人身上，右滑合并就合出两条毫不相干的录音。
+/// The index is for `adjacentOlder(at:)` — it finds the adjacent previous clip by the whole library's time order.
+/// Using a post-filter index would point at someone else, and a swipe-to-merge would fuse two completely unrelated recordings.
 ///
-/// `unread` 在**归类那一趟**就算好：一次 `isUnread` 是一次账本查询，
-/// 1900 行每次重绘都各查一遍没必要，而且分节头还要数"这节几条未读"。
+/// `unread` is computed **in the grouping pass**: one `isUnread` is a ledger query,
+/// and 1900 rows each querying on every redraw is unnecessary — plus section headers also have to count "how many unread in this section".
 private struct LibraryEntry: Identifiable {
     let item: LibraryItem
     let modelIndex: Int
@@ -1287,16 +1352,16 @@ private struct LibraryEntry: Identifiable {
     var id: String { item.id }
 }
 
-/// 一个（时间 × 设备）分节。
+/// One (time × device) section.
 private struct LibrarySection: Identifiable {
     let id: String
-    /// 同一个时间桶的第一个分节 —— 桶标题只在它头上写一次，同桶后面几台
-    /// 设备不再重复写"今天"。
+    /// The first section of a given time bucket — the bucket title is written only above it, and the later devices
+    /// in the same bucket don't repeat "Today".
     let showsBucketTitle: Bool
     let bucketTitle: String
     let deviceName: String
-    /// **整桶**的合计（不是本分节的）：否则"今天"下面三台设备各写一遍数字，
-    /// 反而看不出今天一共多少。
+    /// The **whole bucket**'s total (not this section's): otherwise under "Today" three devices each write the numbers once,
+    /// and you can't tell how many there were today in total.
     let bucketCount: Int
     let bucketBytes: Int64
     let unreadCount: Int
@@ -1306,21 +1371,23 @@ private struct LibrarySection: Identifiable {
 private struct LibraryRow: View {
     let item: LibraryItem
     let source: Library.ClipSource
-    /// 知识库检索命中的那一段正文（`nil` = 没在搜，或这条正文没命中）。
+    /// The body text where knowledge-base search matched (`nil` = not searching, or this entry's body didn't match).
     ///
-    /// 由调用方从 `snippets` 里取好传进来，行本身不碰检索 —— 列表要滚动，
-    /// 一行不该有"自己去查一下"的成本。
+    /// The caller looks it up in `snippets` and passes it in; the row itself doesn't touch the search — the list scrolls,
+    /// and a row shouldn't have the cost of "looking it up itself".
     var snippet: String? = nil
-    /// 还没打开过 —— 标题前面挂一颗红点。
+    /// not opened yet — a red dot hangs before the title.
     var isUnread: Bool = false
+    /// ★ (2026-10-19) Recorded with the card's voice key — an AI voice memo, badged "Memo".
+    var isVoiceMemo: Bool = false
 
-    /// 自定义过标题的那几条，日期补在来源徽标后面。
+    /// For the few with a customised title, the date is appended after the source badge.
     ///
-    /// ★ 2026-10-16 十三改：原来是**硬编码**的 `"MM-dd HH:mm"`。
-    /// 硬编码的模板在别的语言里就是错的（德语要"17.04."、日语要"4月17日"），
-    /// 而且它是全 App 最后一处"日期不跟 App 语言"的地方。
-    /// 换成系统模板 `yMMMd jm` —— `j` 是"locale 偏好的小时制"，
-    /// 于是英/阿走 12 小时、中日德走 24 小时，不用自己判。
+    /// ★ 2026-10-16 revision 13: this used to be a **hard-coded** `"MM-dd HH:mm"`.
+    /// A hard-coded template is simply wrong in other languages (German wants "17.04.", Japanese its own kanji order),
+    /// and it's the last place in the whole App where "the date doesn't follow the App language".
+    /// Switch to the system template `yMMMd jm` — `j` is "the locale's preferred hour cycle",
+    /// so English/Arabic use 12-hour and Chinese/Japanese/German use 24-hour, with no need to decide yourself.
     private static var shortDate: DateFormatter {
         AppLocale.formatter("library.row_date") { $0.setLocalizedDateFormatFromTemplate("yMMMd jm") }
     }
@@ -1329,8 +1396,8 @@ private struct LibraryRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 if isUnread {
-                    // 红点放在标题**前面**而不是右端：右端已经被转录/摘要徽标
-                    // 和各种状态占了，"有没有新的"要在扫列表的第一眼就看见。
+                    // The red dot goes **before** the title, not on the right: the right is already taken by the transcript/summary badge
+                    // and various states, and "is there anything new" has to be seen at the first glance down the list.
                     Circle()
                         .fill(Color.red)
                         .frame(width: 8, height: 8)
@@ -1339,6 +1406,16 @@ private struct LibraryRow: View {
                 Text(item.displayTitle)
                     .font(.body)
                     .lineLimit(2)
+                if isVoiceMemo {
+                    // ★ (2026-10-19) AI voice memo (the card's voice key) — visually distinct
+                    // from regular recordings, per the user's "把录音功能跟语音备忘录功能区分开来".
+                    Text(L10n.Library.voiceMemoBadge)
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.appAccent.opacity(0.15)))
+                        .foregroundStyle(Color.appAccent)
+                }
                 Spacer()
                 if !item.hasAudio {
                     Image(systemName: "waveform.slash")
@@ -1359,8 +1436,8 @@ private struct LibraryRow: View {
                 }
             }
             if let snippet {
-                // 命中片段。压平过换行（见 `LibraryKnowledgeIndex.snippet`），
-                // 这里再 `lineLimit(2)` 兜一层 —— 转录里偶尔有整段没标点的话。
+                // The matched snippet. Newlines have been flattened (see `LibraryKnowledgeIndex.snippet`),
+                // and `lineLimit(2)` covers it here too — a transcript occasionally has a whole stretch with no punctuation.
                 Text(snippet)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1414,22 +1491,23 @@ private struct SourceBadge: View {
         case .watch: return "applewatch"
         case .phone: return "iphone"
         case .imported: return "square.and.arrow.down"
+        case .live: return "waveform.badge.mic"
         }
     }
 }
 
 extension Library.ClipSource {
-    /// 这台设备的展示名。列表行那枚徽标和分节头用的是**同一份** ——
-    /// 两处各写一遍的话，改了别名的规则就会出现"行里叫新名字、
-    /// 分组标题还是旧名字"。
+    /// This device's display name. The list row's badge and the section header use the **same one** —
+    /// write it in both places and changing the alias rules produces "the row says the new name,
+    /// the group title is still the old name".
     ///
     /// The card naming order is deliberately **user alias → name recorded at persistence → fallback word**,
     /// with the **last 4 digits of the SN** uniformly appended: two cards of the same model both labeled "Recorder Card" are indistinguishable,
     /// while the SN's last 4 digits happen to match the Wi-Fi hotspot naming convention (`TicNote-3N9H`),
     /// so users can match them up directly (see `protocol-notes.md` §18.1).
     ///
-    /// 别名是**显示时**查、不是落库时固化 —— 所以用户之后给卡改名，
-    /// 老记录上的标识和分组标题都跟着变，不会留下一堆旧名字。
+    /// The alias is looked up **at display time**, not frozen into storage — so when the user renames a card later,
+    /// Old records' labels and group titles change too, without leaving a pile of stale names behind.
     var displayName: String {
         switch kind {
         case .watch:
@@ -1438,6 +1516,8 @@ extension Library.ClipSource {
             return L10n.Library.sourcePhone
         case .imported:
             return L10n.Library.sourceImported
+        case .live:
+            return L10n.Library.sourceLive
         case .card:
             let alias = serial.flatMap {
                 RecorderAliasStore.shared.alias(identityHex: $0)
@@ -1469,24 +1549,24 @@ struct LibraryItem: Identifiable, Equatable {
     let modifiedAt: Date
     let duration: Double?
     let hasTranscript: Bool
-    /// ★ 2026-10-15：已生成摘要（`{base}.summary.md` 存在）。
+    /// ★ 2026-10-15: a summary has been generated (`{base}.summary.md` exists).
     ///
-    /// 与 `hasTranscript` 一样由扫描器在**已有的目录列举**里直接判定，
-    /// 零额外 syscall。知识库检索靠它和 `hasTranscript` 决定"这条有没有正文"，
-    /// 列表里也据此挂徽标。
+    /// Like `hasTranscript`, this is determined directly by the scanner from the **existing directory listing**,
+    /// zero extra syscalls. Knowledge-base search relies on it and `hasTranscript` to decide "does this entry have a body",
+    /// and the list hangs a badge off it accordingly.
     let hasSummary: Bool
-    /// 有译文：整篇转录的翻译，或摘要的翻译。
+    /// Has a translation: the translation of the whole transcript, or of the summary.
     let hasTranslation: Bool
     let customTitle: String?
 
     var id: String { name }
 
-    /// 文件名去掉扩展名。**所有旁车文件**（转录 / 摘要 / 翻译 / 标题）
-    /// 都以它为前缀 —— 检索索引拿它拼路径，不要各自再 `deletingPathExtension`
-    /// 一遍（`LibraryScanner` 给纯文本条目合成的 `.opus` 名字也靠这条对齐）。
+    /// The filename without its extension. **Every sidecar file** (transcript / summary / translation / title)
+    /// is prefixed with it — the search index builds paths from it, so don't each call `deletingPathExtension`
+    /// again (`LibraryScanner`'s synthesised `.opus` name for text-only entries also lines up through this).
     var base: String { (name as NSString).deletingPathExtension }
 
-    /// 这条有没有**可检索的正文** —— 也就是"算不算知识库里的一条"。
+    /// Whether this entry has a **searchable body** — that is, "does it count as a knowledge-base entry".
     var hasText: Bool { hasTranscript || hasSummary }
 
     var hasAudio: Bool { url != nil }
@@ -1506,26 +1586,26 @@ struct LibraryItem: Identifiable, Equatable {
     }
     var hasCustomTitle: Bool { customTitle != nil }
 
-    /// 这个条目是否**按名字**命中关键词（落盘名 / 显示标题）。
+    /// Whether this entry matches the keyword **by name** (on-disk name / display title).
     ///
-    /// 只服务于「全部」作用域：还没转录的录音正文是空的，只有名字能搜。
-    /// 匹配对大小写与变音符不敏感 —— 与 `LibraryKnowledgeIndex` 保持同一套
-    /// 判据，不然同一个词在两种作用域下会得到不一样的结果。
+    /// Only serves the "All" scope: an untranscribed recording's body is empty, so only the name can be searched.
+    /// Matching is case- and diacritic-insensitive — the same set of criteria as
+    /// `LibraryKnowledgeIndex`, or the same word gives different results in the two scopes.
     func matchesName(_ needle: String) -> Bool {
         let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
         if name.range(of: needle, options: options) != nil { return true }
         return displayTitle.range(of: needle, options: options) != nil
     }
 
-    /// 单条现查盘：把磁盘上一个**已存在的音频文件**读成一条 `LibraryItem`。
+    /// Single-entry on-the-spot disk read: turn an **existing audio file** on disk into a `LibraryItem`.
     ///
-    /// 全库那条路径走 `LibraryScanner`（拿一次目录列举批量判定，见
-    /// `textFlags`）；这里是"刚录完""刚点过来"的单条路径，手上只有文件名，
-    /// 只能逐个 `fileExists`。**判定逻辑必须只有这一份** —— 这两条路（还有
-    /// 实时页那个入口）以前各写了一遍，加 `hasSummary` 时就是三处一起漏。
+    /// The whole-library path goes through `LibraryScanner` (one directory listing for a batch decision, see
+    /// `textFlags`); this is the single-entry path for "just recorded", "just navigated in", with only the filename to hand,
+    /// so it can only `fileExists` one at a time. **The decision logic must exist in only this one place** — these two paths (and
+    /// the live-page entry point) each had their own copy before, and adding `hasSummary` meant three places missed it together.
     ///
-    /// `duration` 由调用方给：两处算时长的路子本来就不同（实时页只看 Opus，
-    /// 录音页对非 Opus 还要异步问 `AVURLAsset`），硬并到一起只会多一层分支。
+    /// `duration` is given by the caller: the two places compute duration differently anyway (the live page only looks at Opus,
+    /// the recording page asks `AVURLAsset` asynchronously for non-Opus), and forcing them together would only add a branch.
     static func readFromDisk(name: String, duration: Double?) -> LibraryItem? {
         let dir = StorageLocations.decryptedDir
         let url = dir.appendingPathComponent(name)
@@ -1597,9 +1677,9 @@ final class LibraryListModel: ObservableObject {
     /// Popping back from Clip Detail is by far the most common refresh and
     /// almost never changes the directory, so it can return immediately.
     ///
-    /// ★ 2026-10-15：对外只读开放。知识库检索拿它当**缓存失效键** ——
-    /// 目录里任何一个文件被写（重新转录、生成摘要）它都会变，于是正文缓存
-    /// 整块作废。比逐文件比对 mtime 便宜，而且不会漏判。
+    /// ★ 2026-10-15: exposed read-only to the outside. Knowledge-base search uses it as the **cache-invalidation key** —
+    /// it changes whenever any file in the directory is written (re-transcription, summary generation), so the body cache
+    /// is invalidated wholesale. Cheaper than comparing mtime file by file, and it doesn't miss anything.
     private(set) var signature: LibraryScanner.Signature?
 
     private let scanner = LibraryScanner()
@@ -1802,10 +1882,10 @@ actor LibraryScanner {
         return .scanned(items: sorted, signature: signature, totalBytes: totalBytes)
     }
 
-    /// 一条 clip 的文本状态：转录 / 摘要 / 译文。
+    /// A clip's text status: transcript / summary / translation.
     ///
-    /// 三条全部**在已经列举出来的目录名里查** —— 扫描器手上就有
-    /// `presentNames`，再各来一次 `fileExists` 就是 1900 条 × 3 次白跑。
+    /// All three are **looked up in the already-listed directory names** — the scanner already has
+    /// `presentNames` to hand, and another `fileExists` each would be 1900 entries × 3 wasted runs.
     private static func textFlags(
         base: String, presentNames: Set<String>
     ) -> (transcript: Bool, summary: Bool, translation: Bool) {

@@ -2,22 +2,22 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-// MARK: - 控制中心的快捷录音控件（watchOS 26+）
+// MARK: - Control Center quick-record control (watchOS 26+)
 //
-// ★ 2026-10-16 八改。用户原话：
+// ★ 2026-10-16 revision eight. User's words:
 //
-//   "即使脱离出手表的 Nomily APP 的软件在手表的控制菜单栏里面添加一个组件方便用户
-//    直接按手表的旋转按钮下面的按键直接唤出来的控制中心里面添加一个快捷方式，
-//    用户去手表里面找 Nomily 快速进入录音"
+//   "even away from the Nomily watch app, add a component in the watch's control menu bar so the user can
+//    add a shortcut to the Control Centre brought up by the button under the watch's Digital Crown,
+//    so the user can reach recording quickly instead of hunting for Nomily on the watch"
 //
-// 也就是：**不用先去找 App** —— 按侧边按钮（表冠下面那个键）拉出控制中心，里面
-// 有一个 Nomily 的录音按钮，按一下直接开始。
+// In other words: **no need to go find the App first** — press the side button (the one below the Digital Crown) to pull up Control Center, which has
+// a Nomily record button; one press starts recording.
 //
 // ─────────────────────────────────────────────────────────────────────────
-// ## ★ 为什么这个 target 是 watchOS 26 起步，而不是跟着 watch App 的 10.0
+// ## ★ Why this target starts at watchOS 26 rather than following the watch App's 10.0
 //
-// Control Widget 这套 API 在**手表上是到 watchOS 26 才有**的。本机 SDK
-// （WatchOS26.5）的接口文件写得明明白白：
+// The Control Widget API set **only exists on the watch as of watchOS 26**. The local SDK
+// (WatchOS26.5) interface files say it plainly:
 //
 //     SwiftUI.ControlWidget                @available(iOS 18.0, macOS 26.0, watchOS 26.0, *)
 //     SwiftUI.ControlWidgetConfiguration   @available(iOS 18.0, macOS 26.0, watchOS 26.0, *)
@@ -25,58 +25,58 @@ import WidgetKit
 //     WidgetKit.ControlWidgetButton        @available(iOS 18.0, macOS 26.0, watchOS 26.0, *)
 //     WidgetKit.StaticControlConfiguration @available(iOS 18.0, macOS 26.0, watchOS 26.0, *)
 //
-// 注意 iOS 侧写的是 18.0、watchOS 侧写的是 26.0 —— 同一套 API 在表上晚了整整
-// 一个大版本。所以这一份的 `WATCHOS_DEPLOYMENT_TARGET` 必须单写 26.0：
-// 跟着 `nomily_watch` 的 10.0 走的话，编译期过不去 `ControlWidget` 的可用性检查，
-// 就算硬压过去，控件在 10.0~25.x 的表上也不会出现，属于"编译能过、功能没有"。
+// Note the iOS side says 18.0 while the watchOS side says 26.0 — the same API is a full
+// major version later on the watch. So this one's `WATCHOS_DEPLOYMENT_TARGET` must be set to 26.0 on its own:
+// following `nomily_watch`'s 10.0 would fail `ControlWidget`'s availability check at compile time,
+// and even forced through, the control wouldn't appear on 10.0~25.x watches — a case of "it compiles but there's no feature".
 //
 // ─────────────────────────────────────────────────────────────────────────
-// ## ★ 为什么控件必须由 watch 端出，不能只在 iPhone 端写一个
+// ## ★ Why the control must come from the watch side, not just be written on the iPhone side
 //
-// 苹果文档（WidgetKit → Controls → Overview）原文：
+// Apple's docs (WidgetKit → Controls → Overview) verbatim:
 //
 //   "On Apple Watch, people place controls from your watchOS app or from a paired
 //    iPhone in Control Center or the Smart Stack. **If you offer a watchOS app in
 //    addition to an iPhone app and both apps offer controls, people can only place
 //    controls from your watchOS app in Control Center or the Smart Stack.**"
 //
-// 我们两端都有 App，所以**只有这一份**会被控制中心认。再在 iPhone 端写一个
-// 一模一样的控件是纯浪费 —— 系统会直接忽略它。
+// We have an App on both ends, so **only this one** is recognised by Control Center. Writing an
+// identical control on the iPhone side as well is pure waste — the system just ignores it.
 //
 // ─────────────────────────────────────────────────────────────────────────
-// ## ★ 为什么动作直接复用 `ToggleRecordingIntent`
+// ## ★ Why the action reuses `ToggleRecordingIntent` directly
 //
-// 那个 intent 本来就是给 Ultra 的操作按钮写的（`openAppWhenRun = true`，落回 App
-// 进程后由 `RecordingIntentBus` 派发给 `WatchRecorderModel`）。控制中心这条路的
-// 形态与它**完全一样**：一次点击 → 拉起 App → 开始/停止录音。
-// 另写一个 intent 只会让"什么算一次录音开关"多出第二个答案。
+// That intent was originally written for the Ultra's Action Button (`openAppWhenRun = true`, and once back in the App
+// process it's dispatched to `WatchRecorderModel` by `RecordingIntentBus`). Control Center's path has
+// **exactly the same** shape: one tap → bring up the App → start/stop recording.
+// Writing another intent would only give "what counts as one record toggle" a second answer.
 //
-// ⚠️ 这里的 `openAppWhenRun = true` 是**要的**，不是将就：录音要麦克风权限、音频
-//    会话和那圈计时 UI，全都长在 App 里。一个在扩展进程里偷偷起录音的版本，用户
-//    既看不见也停不掉（这段踩坑记录在 `RecordingIntent.swift` 开头）。
+// ⚠️ `openAppWhenRun = true` here is **intended**, not a compromise: recording needs microphone permission, an audio
+//    session and the ring timer UI, all of which live in the App. A version that secretly starts recording in the extension process
+//    is neither visible nor stoppable (this pitfall is recorded at the top of `RecordingIntent.swift`).
 
-/// 控制中心里那个录音按钮。
+/// That record button in Control Center.
 ///
-/// ⚠️ 只在 watchOS 26+ 存在（理由见文件顶部）。这一份的部署目标就是 26.0，
-///    所以这里**不需要**写 `@available` —— 写了反而会被"这个 target 只跑在
-///    26 以上"的事实噎住，变成一句没有信息量的噪音。
+/// ⚠️ Exists only on watchOS 26+ (for the reason see the top of the file). This one's deployment target is 26.0,
+///    so there's **no need** to write `@available` here — writing it would only get you tripped up by the fact that "this target only runs on
+///    26 and up", turning it into noise with no information.
 struct NomilyRecordingControl: ControlWidget {
-    /// 系统按这个字符串记账（一个 App 的多个控件靠它区分）。前缀跟着扩展的
-    /// bundle id 走，不要用 App 的 —— 两者以后可能各归各的。
+    /// The system keeps accounts by this string (multiple controls of one App are told apart by it). The prefix follows the extension's
+    /// bundle id, not the App's — the two may diverge later.
     private static let kind = "com.nomily.app.watchkitapp.control.record"
 
     var body: some ControlWidgetConfiguration {
-        // `StaticControlConfiguration` 而不是 `AppIntentControlConfiguration`：
-        // 这个控件**没有可配项**。用户要的就是"按一下开始录"，给他一个配置页
-        // 只会多一步。
+        // `StaticControlConfiguration` rather than `AppIntentControlConfiguration`:
+        // this control **has no configurable options**. What the user wants is "press to start recording", and giving them a config page
+        // just adds a step.
         StaticControlConfiguration(kind: Self.kind) {
             ControlWidgetButton(action: ToggleRecordingIntent()) {
                 Label {
-                    // ⚠️ 文案**故意复用操作按钮那三个键**
+                    // ⚠️ The copy **deliberately reuses the Action Button's three keys**
                     //    （`watch.intent_toggle_short_title` / `_title` / `_description`）。
-                    //    它们已经在 11 个语言里翻好了，而且说的本来就是同一件事
-                    //    ——"开或关一次录音"。新造键只会让同一句话有两个来源，
-                    //    以后改文案必漏一个。
+                    //    They're already translated into 11 languages and describe the same thing anyway
+                    //    — "toggle recording once". Inventing new keys would only give the same sentence two sources,
+                    //    and a future copy change is bound to miss one.
                     Text(LocalizedStringResource(
                         "watch.intent_toggle_short_title",
                         defaultValue: "Record"
@@ -86,14 +86,14 @@ struct NomilyRecordingControl: ControlWidget {
                 }
             }
         }
-        // 「控制中心 → 编辑 → 添加」列表里显示的名字。
-        // 用**全称**而不是"录音"：那个列表会把同一个 App 的多个控件并排列出，
-        // 两个字的名字在那儿认不出是干嘛的。
+        // The name shown in the "Control Center → Edit → Add" list.
+        // Uses the **full name** rather than "Record": that list lines up several controls of the same App side by side,
+        // and a two-character name is unrecognisable there.
         .displayName(LocalizedStringResource(
             "watch.intent_toggle_title",
             defaultValue: "Start or Stop Recording"
         ))
-        // 名字底下那行说明。
+        // The description line under the name.
         .description(LocalizedStringResource(
             "watch.intent_toggle_description",
             defaultValue: "Starts a voice note on your Apple Watch, or stops the one that's running."
@@ -101,10 +101,10 @@ struct NomilyRecordingControl: ControlWidget {
     }
 }
 
-/// 这个扩展的入口。
+/// This extension's entry point.
 ///
-/// 只有控件、没有普通 widget：用户要的是"控制中心里按一下"，不是智能叠放里
-/// 多一张卡片。少一个东西就少一处要跟着维护的刷新逻辑。
+/// Only a control, no regular widget: what the user wants is "one press in Control Center", not
+/// one more card in the Smart Stack. One less thing means one less refresh logic to maintain.
 @main
 struct NomilyWatchControlsBundle: WidgetBundle {
     var body: some Widget {

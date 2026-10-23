@@ -73,7 +73,7 @@ enum AppLanguage {
 /// chosen `.lproj`. Nothing about that touches `Locale.current`, which is
 /// **the device's** language and has no idea an in-app picker exists. So
 /// choosing "English" inside the app translated every label and left every
-/// timestamp in the phone's language — the "语音的年月日还是中文" report.
+/// timestamp in the phone's language — the "the voice clip's date is still in Chinese" report.
 ///
 /// Worse, the two halves drift in a way that's easy to miss: the *labels* flip
 /// instantly, so it looks like it worked. You only notice on the dates.
@@ -194,8 +194,8 @@ final class LocalizationService: ObservableObject {
     init(selected: String?) {
         self.selected = selected
         Bundle.applyLanguage(selected)
-        // 两个半边都要拨：字符串走 `Bundle`，日期/数字走 `Locale`。
-        // 只拨一边 = "界面是英文、时间还是中文"，见 `AppLocale` 顶部那段。
+        // Both halves have to be flipped: strings go through `Bundle`, dates/numbers through `Locale`.
+        // Flipping only one = "the UI is English but the time is still Chinese"; see the block at the top of `AppLocale`.
         AppLocale.set(selected)
     }
 

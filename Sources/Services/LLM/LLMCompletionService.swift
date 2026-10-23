@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import os.log
 
@@ -11,9 +12,9 @@ enum LLMCompletionError: LocalizedError {
     case httpError(Int, String)
     case decodingError(String)
     case emptyResponse
-    /// 整条 fallback 链都走完了。`failures` 里是**每个通道各自**的原因 ——
-    /// 只报最后一条会让用户以为问题在最后一个通道上（那是兜底的那个，
-    /// 通常是本机的 Ollama，而真正的原因往往是第一个通道没配 Key）。
+    /// The whole fallback chain has been walked. `failures` holds the reason from **each channel individually** —
+    /// reporting only the last one would make users think the problem is on the last channel (the fallback one,
+    /// usually the local Ollama, when the real cause is often the first channel having no key configured).
     case allProvidersFailed([String])
 
     var errorDescription: String? {
@@ -49,19 +50,19 @@ struct LLMCompletionService {
         let truncated: Bool
     }
 
-    /// 一次**带兜底**的补全结果。
+    /// Result of one completion **with fallback**.
     ///
-    /// `providerKey` 是**真正干活**的那个通道（可能就是兜底通道，不是主通道）：
-    /// 用户界面上要能说出"这次是谁生成的"，否则"我明明设的是 Open Router" ——
-    /// 而其实是本机 Ollama 顶上的 —— 这种疑问无处可答。
+    /// `providerKey` is the channel that **actually did the work** (it may be the fallback channel, not the primary):
+    /// the UI has to be able to say "who generated this one", otherwise "I set it to Open Router" —
+    /// when it was really the local Ollama standing in — leaves that question with nowhere to be answered.
     struct Outcome {
         var completion: Completion
         var providerKey: String
-        /// 前面失败掉的通道，每条已经带好人类可读的名字与原因。
+        /// The channels that failed before it; each already carries a human-readable name and reason.
         var warnings: [String]
-        /// 是否走了"分段 → 合并"这条路（长转录）。
+        /// Whether the "chunk → merge" path was taken (long transcripts).
         var chunked: Bool
-        /// 分成几段。
+        /// How many chunks it was split into.
         var chunkCount: Int
     }
 
@@ -69,22 +70,22 @@ struct LLMCompletionService {
     /// local models — see there.
     static let maxOutputTokens = 4096
 
-    /// 本地模型（Ollama / 自建端点）的输出上限。
+    /// Output cap for local models (Ollama / self-hosted endpoints).
     ///
-    /// 2026-10-15 实测：本机 `qwen2.5:3b` 在这台 Intel Mac 上**纯 CPU** 约
-    /// **5 token/s** ⇒ 4096 个 token 要 13 分钟。而一次分段摘要给 2048 已经
-    /// 相当于一千多汉字，够用。把上限砍半，最坏耗时也就砍半。
+    /// Measured on 2026-10-15: local `qwen2.5:3b` on this Intel Mac runs at about
+    /// **5 token/s** on **CPU alone** ⇒ 4096 tokens take 13 minutes. And one chunked summary at 2048 already
+    /// amounts to over a thousand Chinese characters, which is enough. Halve the cap and the worst-case time is halved too.
     static let localMaxOutputTokens = 2048
 
-    /// 单次请求的输入上限（字符）。
+    /// Input cap for a single request (characters).
     ///
-    /// ★ 为什么必须分段，而不是"能塞多少塞多少"：
-    /// `num_ctx` **拿不到**。Ollama 的 OpenAI 兼容端点在请求里没有这个字段，
-    /// 实测本机默认值是 `16384` —— 但换台机器、换个模型就是别的数字。
-    /// 超了之后最糟的不是报错，而是**悄悄从头截断**：用户拿到一份看着完整、
-    /// 实际少了前半段的摘要，而且没有任何提示。分段是唯一能保证"输入 + 输出
-    /// 稳稳落在任何常见上下文里"的做法。8000 字符 ≈ 5000 token（中文实测
-    /// 比例 0.62 token/字符），加 4096 输出 = 9096 < 16384，留足余量。
+    /// ★ Why chunking is mandatory rather than "cram in as much as fits":
+    /// `num_ctx` **is not available**. Ollama's OpenAI-compatible endpoint has no such field in the request,
+    /// and the measured default on this machine is `16384` — but another machine or another model gives a different number.
+    /// The worst part of exceeding it isn't an error, it's **silently truncating from the start**: the user gets a summary that looks complete,
+    /// is actually missing the first half, and has no warning at all. Chunking is the only way to guarantee that "input + output
+    /// lands safely inside any common context". 8000 characters ≈ 5000 tokens (the measured ratio for Chinese
+    /// is 0.62 tokens/character), plus 4096 output = 9096 < 16384, leaving ample headroom.
     static let maxCharsPerRequest = 8000
 
     /// Session for **locally hosted** models (Ollama, and any self-hosted
@@ -94,15 +95,15 @@ struct LLMCompletionService {
     /// and that timer measures the gap between *incoming bytes* — not the total
     /// request.
     ///
-    /// ★ 2026-10-15：本地这条路现在**走流式**（见 `openAICompatible`），
-    /// 所以这个 600 s 的含义从"整次生成的总预算"变成了"**多久没吐字节**才算卡死"：
-    /// 预填充（这段是最慢的一步，12000 token 的提示在纯 CPU 上要几分钟）算在
-    /// 第一块之前，之后每来一块都会把它重置。这两件事合起来才让"慢模型也算得完"
-    /// —— 以前非流式时 600 s 是**总**预算，一条长转录必然撞上去。
+    /// ★ 2026-10-15: the local path now **streams** (see `openAICompatible`),
+    /// so the meaning of this 600 s shifted from "the total budget for one generation" to "**how long without a byte** counts as stuck":
+    /// prefill (the slowest step of all — a 12000-token prompt takes minutes on CPU alone) counts
+    /// before the first chunk, and every chunk after that resets it. Only the two together let "even a slow model finish"
+    /// — under the old non-streaming setup 600 s was the **total** budget and any long transcript was bound to hit it.
     private static let localSession: URLSession = {
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 600
-        // 整次请求的硬上限。流式下这是"真的死循环"的保险丝，不是性能指标。
+        // Hard cap on the whole request. Under streaming this is the fuse for a "genuinely infinite loop", not a performance metric.
         cfg.timeoutIntervalForResource = 7200
         // Surviving a Wi-Fi hand-off matters on a phone that is talking to a
         // box on the LAN; without this the request fails instantly while the
@@ -111,8 +112,8 @@ struct LLMCompletionService {
         return URLSession(configuration: cfg)
     }()
 
-    /// 云端通道的 URLSession。也放宽一点资源上限：一条超长转录分段之后，
-    /// 单次请求仍然可能跑上一两分钟。
+    /// URLSession for cloud channels. It also widens the resource cap a little: after a very long transcript is split up,
+    /// a single request can still run for a minute or two.
     private static let cloudSession: URLSession = {
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 120
@@ -121,36 +122,33 @@ struct LLMCompletionService {
         return URLSession(configuration: cfg)
     }()
 
-    // MARK: - 通道
+    // MARK: - Channels
 
-    /// 通道的展示名。**只此一份** —— 设置页、错误信息、兜底提示都读这里，
-    /// 三处各写一份迟早会出现"设置页叫 Open Router、报错里叫 openRouter"。
+    /// A channel's display name. **One copy only** — the settings page, error messages and fallback notices all read it here,
+    /// and three separate copies would sooner or later produce "the settings page calls it Open Router, the error calls it openRouter".
     static func providerLabel(_ key: String) -> String {
+        // The catalogue is the single source of names — the icon grid, the primary
+        // dropdown and every error message read it, so they can't drift apart.
+        if !key.isEmpty, let spec = LLMProviderSpec.find(key) { return spec.name }
         switch key {
-        case "openai":     return "OpenAI"
-        case "claude":     return "Claude"
-        case "gemini":     return "Gemini"
-        case "openRouter": return "Open Router"
-        case "ollama":     return "Ollama"
-        case "custom":     return "Custom"
         case "":           return L10n.LLM.errorNoProvider
         default:           return key
         }
     }
 
-    /// 这个通道是不是跑在自己机器上（决定超时策略与输出上限）。
+    /// Whether this channel runs on the local machine (decides the timeout policy and the output cap).
     static func isLocal(_ key: String) -> Bool {
         key == "ollama" || key == "custom"
     }
 
-    /// 兜底顺序。
+    /// Fallback order.
     ///
-    /// **本机通道排在前面**：它们不花额度、不出网，而兜底本来就发生在
-    /// "主通道已经证明不可用"之后，这时候再赌一个云端通道没有意义。
+    /// **Local channels come first**: they cost no quota and never leave the machine, and a fallback only ever happens
+    /// after "the primary channel has already proved unusable", at which point gambling on a cloud channel is pointless.
     private static let fallbackOrder = ["ollama", "custom", "openRouter", "openai", "claude", "gemini"]
 
-    /// 这次要依次尝试的通道：**主通道打头**（哪怕它没配全 —— 这样"没配 Key"
-    /// 才能作为一条**具体原因**报出来，而不是被静默跳过），后面接所有能用的。
+    /// The channels to try in order this time: **the primary channel leads** (even if it isn't fully configured — that way "no key configured"
+    /// can be reported as a **concrete reason** instead of being silently skipped), followed by everything usable.
     static func candidateChain(_ config: AppConfig) -> [String] {
         let providers = config.llmProviders
         var chain: [String] = []
@@ -161,17 +159,32 @@ struct LLMCompletionService {
         for key in fallbackOrder where configured.contains(key) && !chain.contains(key) {
             chain.append(key)
         }
+        // Presets go after the built-ins: a local Ollama still wins a tie (no
+        // quota, no data leaving the phone), but a configured Qwen/DeepSeek is a
+        // far better last resort than "no provider at all".
+        for preset in LLMPreset.all where configured.contains(preset.id) && !chain.contains(preset.id) {
+            chain.append(preset.id)
+        }
         return chain
     }
 
-    /// 这个通道有没有"足以发一次请求"的配置。缺什么就返回那句原因。
+    /// Whether this channel has enough config "to send one request". Whatever is missing, that reason is what it returns.
     ///
-    /// ★ 与 `configuredProviders`（只列出**配全了**的通道）分工不同：这里要
-    /// 把"缺什么"说出来。用户当前的情况就是这样 —— `llm_providers.primary`
-    /// 指着 Open Router，而 `open_router` 段里连 `api_key` 字段都没有，
-    /// 界面上只显示一句 "No API key configured"，完全指不出该去哪儿补。
+    /// ★ Its job differs from `configuredProviders` (which lists only **fully configured** channels): this one has to
+    /// say what's missing. The user's current situation is exactly this — `llm_providers.primary`
+    /// points at Open Router, yet the `open_router` section doesn't even have an `api_key` field,
+    /// and the UI shows only "No API key configured", with no hint of where to go to fix it.
     static func configGap(_ key: String, _ config: AppConfig) -> String? {
         let p = config.llmProviders
+        // Presets (Qwen / DeepSeek / Doubao / Ark) share one shape, so one branch
+        // covers all of them — and a new preset needs no change here at all.
+        if LLMPreset.find(key) != nil {
+            guard let c = p.preset(key) else { return L10n.LLM.errorNoProvider }
+            if c.endpoint.isEmpty { return L10n.LLM.errorNoEndpoint(providerLabel(key)) }
+            if (c.apiKey ?? "").isEmpty { return L10n.LLM.errorNoAPIKey(providerLabel(key)) }
+            if (c.model ?? "").isEmpty { return L10n.LLM.errorNoModel(providerLabel(key)) }
+            return nil
+        }
         switch key {
         case "openai":
             guard let c = p.openai else { return L10n.LLM.errorNoProvider }
@@ -218,9 +231,9 @@ struct LLMCompletionService {
         return configGap(primary, config) == nil
     }
 
-    /// 主通道**不能**用，但兜底通道能用吗？给 Settings / 摘要页做体检用。
+    /// The primary channel **can't** be used, but can a fallback be? Used for a health check on Settings / the summary page.
     ///
-    /// 返回值非 nil ⇒ 现在这一次摘要一定会"先失败、再兜底"，值得提前告诉用户。
+    /// A non-nil return ⇒ this summary will definitely "fail first, then fall back", which is worth telling the user in advance.
     static func primaryGapWithFallback(_ config: AppConfig) -> (gap: String, fallback: String?)? {
         guard let primary = config.llmProviders.primary, !primary.isEmpty else { return nil }
         guard let gap = configGap(primary, config) else { return nil }
@@ -228,25 +241,25 @@ struct LLMCompletionService {
         return (gap, others.first.map { providerLabel($0) })
     }
 
-    /// 主通道不能用时，应该改用哪个通道 —— 返回的是**通道键**（"ollama"），
-    /// 不是显示名，供 UI 直接写回 `llm_providers.primary`。
+    /// Which channel to switch to when the primary one can't be used — what's returned is the **channel key** ("ollama"),
+    /// not the display name, so the UI can write it straight back to `llm_providers.primary`.
     ///
-    /// ★ 2026-10-15：给"一键修复"用。这次实测到的根因正好就是这个形状 ——
-    /// `llm_providers.primary` 指着 Open Router，而 `open_router` 段里连
-    /// `api_key` 都没有，用户想用的其实是本机 Ollama。光给提示的话，他还得
-    /// 自己摸到「设置 → LLM 服务商」、翻到 Open Router、找到主通道选择器；
-    /// 而这件事的正确答案只有一个。
+    /// ★ 2026-10-15: used for "one-tap fix". The root cause measured this time has exactly this shape —
+    /// `llm_providers.primary` points at Open Router, yet the `open_router` section doesn't even have
+    /// an `api_key`, and what the user actually wants is the local Ollama. A hint alone still leaves them to
+    /// find "Settings → LLM providers" themselves, scroll to Open Router and locate the primary-channel selector;
+    /// and there is only one right answer to this.
     ///
-    /// 主通道没问题、或压根没有兜底时返回 nil（此时不该显示按钮）。
+    /// Returns nil when the primary channel is fine or there's no fallback at all (in which case the button shouldn't show).
     static func suggestedPrimary(_ config: AppConfig) -> String? {
         guard let primary = config.llmProviders.primary, !primary.isEmpty else { return nil }
         guard configGap(primary, config) != nil else { return nil }
-        // `primary` 非空 ⇒ 它一定排在 `candidateChain` 的第 0 位，所以
-        // `dropFirst()` 拿到的就是第一个可用的兜底。
+        // `primary` non-empty ⇒ it is always at index 0 of `candidateChain`, so
+        // what `dropFirst()` gives you is the first usable fallback.
         return candidateChain(config).dropFirst().first
     }
 
-    // MARK: - 入口
+    // MARK: - Entry points
 
     /// Translate `text` into the given language using the active LLM
     /// provider. `targetLanguage` should be a human-readable English
@@ -255,9 +268,9 @@ struct LLMCompletionService {
     /// preserved so the same helper works for both plain transcripts
     /// and markdown summaries.
     ///
-    /// - Parameter allowFallback: 手动翻译（详情页那颗按钮）为 `true`；
-    ///   实时翻译为 `false` —— 实时那条路是**每几秒一次**的循环，
-    ///   退到一个纯 CPU 的本机模型只会越积越多的积压，不如老实报错。
+    /// - Parameter allowFallback: `true` for manual translation (that button on the detail page);
+    ///   `false` for live translation — the live path is a loop that runs **every few seconds**,
+    ///   and falling back to a CPU-only local model just piles up a growing backlog, so it's better to report the error honestly.
     static func translate(
         text: String, targetLanguage: String, config: AppConfig,
         allowFallback: Bool = true
@@ -270,15 +283,15 @@ struct LLMCompletionService {
         if allowFallback {
             return try await completeResilient(
                 systemPrompt: system, userContent: text, config: config,
-                // 翻译**不**分段：分段会把上下文的连贯性切断（代词指代、
-                // 术语统一都靠整篇），而"漏译一段"比"整篇失败"更难发现。
+                // Translation is **not** chunked: chunking severs the coherence of the context (pronoun references and
+                // consistent terminology both depend on the whole piece), and "one chunk left untranslated" is harder to spot than "the whole thing failed".
                 allowChunking: false
             ).completion
         }
         return try await complete(systemPrompt: system, userContent: text, config: config)
     }
 
-    /// 单通道补全，**通道就是配置里的主通道**。
+    /// Single-channel completion, where **the channel is the primary one from the config**.
     static func complete(systemPrompt: String, userContent: String, config: AppConfig) async throws -> Completion {
         guard let primary = config.llmProviders.primary, !primary.isEmpty else {
             throw LLMCompletionError.noProvider
@@ -289,20 +302,21 @@ struct LLMCompletionService {
         )
     }
 
-    /// 带兜底的补全 —— 摘要、标题这类"用户点了就得有结果"的动作都走它。
+    /// Completion with fallback — actions like summaries and titles, where "the user tapped and must get a result", all go through it.
     ///
-    /// 行为：主通道 → （失败就）本机通道 → 其它云端通道。每一步的失败原因
-    /// 都会收进 `Outcome.warnings`，最后一起报，而不是只留最后一条。
+    /// Behaviour: primary channel → (on failure) local channels → other cloud channels. The failure reason at each step
+    /// is collected into `Outcome.warnings` and reported all together at the end, rather than keeping only the last one.
     ///
-    /// - Parameter preferred: 上一次真正干活的通道，把它挪到队首。
-    ///   摘要成功后紧接着要生成标题 —— 不指定的话就要**再把那条已经证明
-    ///   不可用的主通道重试一遍**（每次都要等它超时），白白多等十几秒。
-    /// - Parameter onChunk: 分段处理时每完成一段回调一次 `(已完成, 总段数)`。
-    ///   长转录要跑好几分钟，转一分钟的菊花和"第 3/5 段"给用户的感受完全不同。
+    /// - Parameter preferred: the channel that did the real work last time; it gets moved to the head of the queue.
+    ///   A summary is immediately followed by generating a title — without specifying it you'd **have to retry
+    ///   the primary channel already proved unusable** once more (waiting for it to time out every time), wasting another dozen seconds.
+    /// - Parameter onChunk: during chunked processing, calls back once per finished chunk with `(completed, total)`.
+    ///   A long transcript runs for several minutes; a spinner going for a minute feels completely different to the user from "chunk 3/5".
     @discardableResult
     static func completeResilient(
         systemPrompt: String, userContent: String, config: AppConfig,
         allowChunking: Bool = true, preferred: String? = nil,
+        allowSectionReuse: Bool = true,
         onChunk: (@MainActor (Int, Int) -> Void)? = nil
     ) async throws -> Outcome {
         var chain = candidateChain(config)
@@ -317,7 +331,9 @@ struct LLMCompletionService {
         if allowChunking, userContent.count > maxCharsPerRequest {
             return try await completeChunked(
                 systemPrompt: systemPrompt, userContent: userContent,
-                chain: chain, config: config, onChunk: onChunk
+                chain: chain, config: config,
+                allowSectionReuse: allowSectionReuse,
+                onChunk: onChunk
             )
         }
         return try await runChain(
@@ -327,9 +343,9 @@ struct LLMCompletionService {
         )
     }
 
-    // MARK: - 链
+    // MARK: - Chain
 
-    /// 沿链试下去，第一个成功的赢。
+    /// Walk down the chain; the first one to succeed wins.
     private static func runChain(
         chain: [String], systemPrompt: String, userContent: String,
         config: AppConfig, chunked: Bool, chunkCount: Int,
@@ -337,8 +353,8 @@ struct LLMCompletionService {
     ) async throws -> Outcome {
         var warnings = seeded
         for key in chain {
-            // 配置不全的通道**不发请求**，但要把缺什么记进 warnings ——
-            // 这正是用户当前那次失败能拿到的最有用的一句话。
+            // A channel that isn't fully configured **sends no request**, but what's missing gets recorded in warnings —
+            // that is exactly the most useful line the user can get out of this particular failure.
             if let gap = configGap(key, config) {
                 warnings.append("\(providerLabel(key)): \(gap)")
                 continue
@@ -356,8 +372,8 @@ struct LLMCompletionService {
                     warnings: warnings, chunked: chunked, chunkCount: chunkCount
                 )
             } catch {
-                // 用户点了取消 / 关掉了页面：**不要**接着试下一个通道 ——
-                // 那会变成"取消了还在后台烧钱"。
+                // The user hit cancel / closed the page: **do not** go on to try the next channel —
+                // that would turn into "cancelled but still burning money in the background".
                 if Task.isCancelled { throw CancellationError() }
                 if let urlError = error as? URLError, urlError.code == .cancelled { throw error }
                 let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -368,19 +384,20 @@ struct LLMCompletionService {
         throw LLMCompletionError.allProvidersFailed(warnings)
     }
 
-    // MARK: - 长转录：分段 → 合并
+    // MARK: - Long transcripts: chunk → merge
 
-    /// 读一遍：
+    /// Read it once:
     ///
-    /// 1. **分段**：按空行 / 换行 / 句子切，每段 ≤ `maxCharsPerRequest`；
-    /// 2. 每段用同一个要求跑一遍，只产出**这一段的要点**；
-    /// 3. 把所有要点连同**原来的要求**再跑一遍，产出最终结果。
+    /// 1. **Chunk**: split on blank lines / newlines / sentences, each chunk ≤ `maxCharsPerRequest`;
+    /// 2. run every chunk through the same instruction, producing only **that chunk's key points**;
+    /// 3. run all the key points together with **the original instruction** once more to produce the final result.
     ///
-    /// 为什么不直接把整篇截断：截断之后用户拿到的是一份"看着完整、其实少了
-    /// 一半"的摘要，而且没有任何提示 —— 那比报错糟得多。
+    /// Why not just truncate the whole thing: after truncation the user gets a summary that "looks complete but is actually missing
+    /// half of it", with no warning at all — which is far worse than an error.
     private static func completeChunked(
         systemPrompt: String, userContent: String,
         chain: [String], config: AppConfig,
+        allowSectionReuse: Bool,
         onChunk: (@MainActor (Int, Int) -> Void)?
     ) async throws -> Outcome {
         let chunks = split(userContent)
@@ -396,7 +413,26 @@ struct LLMCompletionService {
 
         var warnings: [String] = []
         var sections: [String] = []
+        var reused = 0
         for (index, chunk) in chunks.enumerated() {
+            let key = sectionCacheKey(prompt: sectionSystemPrompt(systemPrompt, index: index, total: chunks.count),
+                                      chunk: chunk)
+            // ★ 2026-10-22 ("有转写但摘要生成不下去"): a 3-hour transcript is six
+            // sequential calls on OpenRouter, i.e. minutes. Before this, one
+            // failure near the end — a dropped Wi-Fi, the app being killed, a
+            // single chunk timing out — threw away every section already paid
+            // for and the retry started again at chunk 1. Now each finished
+            // section is cached under a hash of (instruction + chunk), so a
+            // retry resumes where it stopped. The cache is pruned by age and
+            // lives in Caches (the system may purge it — recomputing is only
+            // slow, never wrong).
+            if allowSectionReuse, let hit = cachedSection(key) {
+                sections.append(hit)
+                reused += 1
+                TicNoteDiagLog.log("LLM", "chunk \(index + 1)/\(chunks.count) reused from cache")
+                await onChunk?(index + 1, chunks.count + 1)
+                continue
+            }
             let outcome = try await runChain(
                 chain: chain,
                 systemPrompt: sectionSystemPrompt(systemPrompt, index: index, total: chunks.count),
@@ -406,8 +442,13 @@ struct LLMCompletionService {
             )
             warnings = outcome.warnings
             sections.append(outcome.completion.text)
-            // 合并那一步也算一段进度，否则最后会停在 "n/n" 上干等。
+            storeSection(outcome.completion.text, key: key)
+            TicNoteDiagLog.log("LLM", "chunk \(index + 1)/\(chunks.count) ok chars=\(outcome.completion.text.count) provider=\(outcome.providerKey)")
+            // The merge step counts as one more unit of progress, otherwise it would sit at "n/n" waiting.
             await onChunk?(index + 1, chunks.count + 1)
+        }
+        if reused > 0 {
+            log.notice("reused \(reused, privacy: .public)/\(chunks.count, privacy: .public) cached sections")
         }
 
         let merged = try await runChain(
@@ -420,8 +461,62 @@ struct LLMCompletionService {
         return merged
     }
 
-    /// 分段要求。**接在原来的 system prompt 后面**，这样模板里的所有约束
-    /// （语言、结构、不要编造）都还在。
+    // MARK: - Per-chunk section cache (resume a long summary)
+
+    /// Directory holding one file per finished section.
+    private static var sectionCacheDirectory: URL? {
+        guard let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let dir = base.appendingPathComponent("llm-sections", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Hash of (instruction + chunk text). Both halves matter: the same
+    /// transcript summarised with a different template must **not** reuse the
+    /// old sections — that is the "changed the template, got the old summary"
+    /// class of bug.
+    private static func sectionCacheKey(prompt: String, chunk: String) -> String {
+        let digest = SHA256.hash(data: Data((prompt + "\u{0}" + chunk).utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func cachedSection(_ key: String) -> String? {
+        guard let dir = sectionCacheDirectory else { return nil }
+        let url = dir.appendingPathComponent("\(key).txt")
+        guard let text = try? String(contentsOf: url, encoding: .utf8),
+              !text.isEmpty else { return nil }
+        // Touch the file so the prune below keeps what is actually in use.
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+        return text
+    }
+
+    private static func storeSection(_ text: String, key: String) {
+        guard let dir = sectionCacheDirectory, !text.isEmpty else { return }
+        try? text.data(using: .utf8)?.write(to: dir.appendingPathComponent("\(key).txt"), options: .atomic)
+        pruneSectionCache(dir)
+    }
+
+    /// Two-day retention, and only when the folder actually grew — a running
+    /// summary touches this once per chunk, and a directory scan per chunk on a
+    /// six-chunk run is wasted work.
+    private static func pruneSectionCache(_ dir: URL) {
+        let keys: [URLResourceKey] = [.contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: keys, options: .skipsHiddenFiles
+        ), files.count > 40 else { return }
+        let cutoff = Date().addingTimeInterval(-2 * 24 * 3600)
+        for file in files {
+            let modified = (try? file.resourceValues(forKeys: Set(keys)))?.contentModificationDate
+            if let modified, modified < cutoff {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+    }
+
+    /// The chunking instruction. **Appended after the original system prompt**, so that every constraint in the template
+    /// (language, structure, don't fabricate) is still in place.
     private static func sectionSystemPrompt(_ original: String, index: Int, total: Int) -> String {
         """
         \(original)
@@ -434,8 +529,8 @@ struct LLMCompletionService {
         """
     }
 
-    /// 合并步骤的输入。**必须说清"这是各段要点、不是原始记录"**，否则模型会把
-    /// 它们当成新素材再摘一次，层级越摘越浅。
+    /// Input to the merge step. **It must state clearly that "these are per-chunk key points, not the original transcript"**, otherwise the model will
+    /// treat them as fresh material and summarise again, each level getting shallower.
     private static func mergePrompt(_ sections: [String]) -> String {
         """
         Below are the per-section findings from one long recording, in order. \
@@ -447,15 +542,15 @@ struct LLMCompletionService {
         """
     }
 
-    /// 贪心切分：优先在空行、其次在换行、最后在句末标点处断开。
-    /// 三档的用意是"尽量别把一个句子劈成两半" —— 半句话喂给模型，
-    /// 出来的结果会从中间开始，合并时看着像丢了一段。
+    /// Greedy splitting: break at a blank line first, then a newline, and only then at sentence-ending punctuation.
+    /// The point of the three tiers is "avoid cutting a sentence in half wherever possible" — feed half a sentence to the model
+    /// and the result starts mid-thought, so the merge looks like a chunk went missing.
     static func split(_ text: String) -> [String] {
         guard text.count > maxCharsPerRequest else { return [text] }
 
         var chunks: [String] = []
         var current = ""
-        // 先按空行切成块，块再按换行、按字符塞进箱子。
+        // First split into blocks on blank lines, then pack the blocks into boxes by newline and by character.
         for paragraph in text.components(separatedBy: "\n\n") {
             let piece = paragraph + "\n\n"
             if piece.count > maxCharsPerRequest {
@@ -476,7 +571,7 @@ struct LLMCompletionService {
         return chunks.isEmpty ? [text] : chunks
     }
 
-    /// 单个段落本身就超限（语音转录经常是**一整篇没有空行**的文本）。
+    /// A single paragraph is over the limit on its own (voice transcripts are often **one whole piece with no blank lines**).
     private static func splitLongParagraph(_ paragraph: String) -> [String] {
         var chunks: [String] = []
         var current = ""
@@ -498,7 +593,7 @@ struct LLMCompletionService {
         return chunks
     }
 
-    /// 最后一道：按句末标点切，实在没有标点就硬切。
+    /// Last resort: split at sentence-ending punctuation, and if there really is none, cut it hard.
     private static func splitBySentence(_ line: String) -> [String] {
         let terminators: Set<Character> = ["。", "！", "？", ".", "!", "?", "\n", "；", ";"]
         var chunks: [String] = []
@@ -509,8 +604,8 @@ struct LLMCompletionService {
                 chunks.append(current)
                 current = ""
             } else if current.count >= maxCharsPerRequest * 2 {
-                // 两倍上限都没碰到一个句末标点（外语长句 / 无标点转录）——
-                // 硬切，总比无限攒下去好。
+                // Twice the cap with no sentence-ending punctuation in sight (long foreign sentences / unpunctuated transcripts) —
+                // cut it hard, which beats accumulating forever.
                 chunks.append(current)
                 current = ""
             }
@@ -519,7 +614,7 @@ struct LLMCompletionService {
         return chunks
     }
 
-    // MARK: - 单通道请求
+    // MARK: - Single-channel request
 
     private static func complete(
         providerKey: String, systemPrompt: String, userContent: String, config: AppConfig
@@ -593,28 +688,43 @@ struct LLMCompletionService {
             )
 
         default:
+            // A preset: same OpenAI-compatible wire format as `custom`, but over
+            // the cloud session (their hosts are remote, so the short local
+            // timeout and the small output cap would both be wrong).
+            if let p = providers.preset(providerKey) {
+                guard !p.endpoint.isEmpty else { throw LLMCompletionError.noEndpoint(providerLabel(providerKey)) }
+                guard let key = p.apiKey, !key.isEmpty else { throw LLMCompletionError.noAPIKey(providerLabel(providerKey)) }
+                guard let model = p.model, !model.isEmpty else { throw LLMCompletionError.noModel(providerLabel(providerKey)) }
+                let base = p.endpoint.hasSuffix("/") ? String(p.endpoint.dropLast()) : p.endpoint
+                return try await openAICompatible(
+                    endpoint: "\(base)/chat/completions",
+                    apiKey: key, model: model,
+                    systemPrompt: systemPrompt, userContent: userContent,
+                    session: cloudSession, maxTokens: maxOutputTokens
+                )
+            }
             throw LLMCompletionError.noProvider
         }
     }
 
     // MARK: - OpenAI-compatible (OpenAI, OpenRouter, Ollama, Custom)
 
-    /// ★ 2026-10-15：这条路改成了**流式**（`stream: true` + 逐块解析 SSE）。
+    /// ★ 2026-10-15: this path was changed to **streaming** (`stream: true` + parsing SSE chunk by chunk).
     ///
-    /// 三个理由，一个都不能少：
+    /// Three reasons, none of them optional:
     ///
-    /// 1. **超时语义**。非流式时服务器在整段生成完之前**一个字节都不发**，
-    ///    所以 `timeoutIntervalForRequest` 变成了"整次生成的总预算"：本机
-    ///    纯 CPU 的 3B 模型生成 4096 个 token 要十几分钟，600 s 一到必挂 ——
-    ///    这就是"摘要多少次都失败"的直接原因。流式之后它退回本来的含义
-    ///    （多久没吐字节），慢模型只要在动就不会被杀。
-    /// 2. **能看见进度**。`onDelta` 让上层可以显示"已经写了 300 字"，
-    ///    而不是一个转十几分钟的菊花。
-    /// 3. **`finish_reason` 照旧**：最后一块里带着，截断仍然能被识别。
+    /// 1. **Timeout semantics**. Non-streaming, the server sends **not a single byte** until the whole generation is done,
+    ///    so `timeoutIntervalForRequest` turns into "the total budget for one generation": a local
+    ///    CPU-only 3B model takes over ten minutes to generate 4096 tokens, and 600 s trips it every time —
+    ///    that is the direct cause of "every summary attempt fails". With streaming it goes back to its original meaning
+    ///    (how long without a byte), and a slow model won't be killed as long as it's moving.
+    /// 2. **Visible progress**. `onDelta` lets the layer above show "300 characters written so far",
+    ///    instead of a spinner turning for over ten minutes.
+    /// 3. **`finish_reason` as before**: it comes in the last chunk and truncation can still be detected.
     ///
-    /// ⚠️ 兼容兜底：万一某个实现不认 `stream`（老版本代理、某些自建网关会
-    ///    直接返回一个完整 JSON），下面会**自动退回非流式再试一次**。
-    ///    宁可多一次往返，也不能让"摘要"在换了个网关之后整体失效。
+    /// ⚠️ Compatibility fallback: in case some implementation doesn't recognise `stream` (older proxies and certain self-hosted gateways
+    ///    just return one complete JSON), the code below **automatically falls back to non-streaming and retries once**.
+    ///    Better one extra round trip than letting "summarise" break entirely after switching gateways.
     private static func openAICompatible(
         endpoint: String, apiKey: String, model: String,
         systemPrompt: String, userContent: String,
@@ -628,11 +738,11 @@ struct LLMCompletionService {
                 session: session, maxTokens: maxTokens, onDelta: onDelta
             )
         } catch let error as LLMCompletionError {
-            // 只有"流式这条路本身没走通"才退回非流式：
-            //   · `emptyResponse` —— 一个 token 都没流出来；
-            //   · `decodingError` —— 拿到的不是 SSE 而是别的东西。
-            // HTTP 错误（401/429/5xx）**不**重试：那个错误与非流式无关，
-            // 再打一次只是白白多花一次额度。
+            // Only "the streaming path itself didn't work" falls back to non-streaming:
+            //   · `emptyResponse` — not a single token streamed out;
+            //   · `decodingError` — what came back wasn't SSE but something else.
+            // HTTP errors (401/429/5xx) are **not** retried: that error has nothing to do with streaming,
+            // and firing once more only burns another unit of quota for nothing.
             let streamPathFailed: Bool
             switch error {
             case .emptyResponse, .decodingError: streamPathFailed = true
@@ -676,7 +786,7 @@ struct LLMCompletionService {
         return req
     }
 
-    /// 流式。逐块回调 + 累积。
+    /// Streaming. Call back per chunk + accumulate.
     private static func openAICompatibleStream(
         endpoint: String, apiKey: String, model: String,
         systemPrompt: String, userContent: String,
@@ -707,9 +817,9 @@ struct LLMCompletionService {
                   let choices = object["choices"] as? [[String: Any]],
                   let first = choices.first
             else { continue }
-            // 绝大多数实现给 `delta.content`；少数（含部分 Ollama 版本在最后
-            // 一块里）给 `message.content`。两个都收，别二选一 ——
-            // 漏掉的那个正好就是"全文都在这里"的那一块。
+            // The vast majority of implementations give `delta.content`; a few (including some Ollama versions, in the last
+            // chunk) give `message.content`. Accept both, don't pick one —
+            // the one you miss is exactly the chunk that holds "the entire text is in here".
             var piece: String?
             if let delta = first["delta"] as? [String: Any] { piece = delta["content"] as? String }
             if piece == nil, let message = first["message"] as? [String: Any] {
@@ -724,14 +834,14 @@ struct LLMCompletionService {
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            // 有 SSE 帧但正文为空 ⇒ 上游给了错误帧（例如 OpenRouter 会把
-            // 额度不足放进 `error`），那不是"空回复"，得把原话说出来。
+            // SSE frames arrive but the body is empty ⇒ upstream sent an error frame (OpenRouter, for instance, puts
+            // insufficient quota in `error`); that is not an "empty response", and the original message has to be surfaced.
             throw LLMCompletionError.emptyResponse
         }
         return Completion(text: text, truncated: finishReason == "length" || finishReason == "max_tokens")
     }
 
-    /// 非流式。充当"网关不认 stream"的兜底。
+    /// Non-streaming. Acts as the fallback for "the gateway doesn't recognise stream".
     private static func openAICompatibleOnce(
         endpoint: String, apiKey: String, model: String,
         systemPrompt: String, userContent: String,
@@ -762,7 +872,7 @@ struct LLMCompletionService {
         )
     }
 
-    /// 收集一段响应体用于报错。**必须有上限**：错误页也可能是几十 KB 的 HTML。
+    /// Collect a response body for error reporting. **It must be capped**: even an error page can be tens of KB of HTML.
     private static func bodySnippet(_ stream: URLSession.AsyncBytes) async throws -> String {
         var raw = ""
         for try await line in stream.lines {

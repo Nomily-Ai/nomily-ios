@@ -21,6 +21,17 @@ final class AudioPlaybackController: NSObject, ObservableObject {
     @Published private(set) var currentTime: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
     @Published private(set) var loadError: String?
+    /// Playback speed. ★ (2026-10-19) Added for the inline player: an hour-long meeting at 1×
+    /// is not something anyone re-listens to, and DingTalk's player offers the same control.
+    @Published private(set) var rate: Float = 1.0
+
+    /// Sets the speed and **keeps playing at it** — `AVPlayer.play()` forces rate back to 1.0,
+    /// so every resume path has to re-apply this value.
+    func setRate(_ value: Float) {
+        rate = value
+        guard let player else { return }
+        if player.rate != 0 { player.rate = value }
+    }
 
     private var player: AVPlayer?
     private var item: AVPlayerItem?
@@ -160,9 +171,15 @@ final class AudioPlaybackController: NSObject, ObservableObject {
         // pressing play): start over instead of pressing play on a player
         // that has nothing left to decode and never moves.
         if duration > 0, currentTime >= duration - 0.15 {
-            seek(to: 0) { [weak self] in self?.player?.play() }
+            seek(to: 0) { [weak self] in
+                guard let self else { return }
+                self.player?.play()
+                self.player?.rate = self.rate
+            }
         } else {
             player.play()
+            // `play()` resets rate to 1.0 — re-apply the user's speed.
+            player.rate = rate
         }
         isPlaying = true
     }

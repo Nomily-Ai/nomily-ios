@@ -18,6 +18,9 @@ struct RecordingsView: View {
     /// The single source of truth for the recording session. The record button in the header and the device page share the same one —
     /// **never keep separate copies**: two states would each optimistically flip on their own, and the UI would immediately contradict itself.
     @ObservedObject private var recorderSession: RecorderSessionModel
+    /// Only used to decide whether a PLAUD card occupies the device segment —
+    /// the card view itself observes the same service.
+    @ObservedObject private var plaudDirect = PlaudDirectService.shared
 
     init(session: RecorderSessionModel) {
         _recorderSession = ObservedObject(wrappedValue: session)
@@ -50,6 +53,63 @@ struct RecordingsView: View {
         recorderTarget?.identity ?? "none"
     }
 
+    /// PLAUD holds the header record slot when no D·NOTE / TicNote card is
+    /// online and a PLAUD card is either live or remembered. Only one link is
+    /// allowed at a time (`BluetoothCoordinator` enforces it), so the two
+    /// branches can never both want the slot.
+    private var plaudRecordTarget: Bool {
+        recorderTarget == nil && (plaudDirect.phase.isConnected || plaudDirect.pairedSN != nil)
+    }
+
+    @ViewBuilder
+    private var deviceContent: some View {
+        if let client = bluetooth.client {
+            DeviceFilesView(
+                client: client,
+                library: library,
+                env: env,
+                onFileTransferred: { name in
+                    Task { @MainActor in
+                        if let item = await Self.buildLibraryItem(for: name) {
+                            transferredClipItem = item
+                            segment = .library
+                            showClipDetail = true
+                        } else {
+                            segment = .library
+                        }
+                    }
+                },
+                onFastTransferDone: {
+                    segment = .library
+                }
+            )
+        } else if let matched = bluetooth.matchedRecorder {
+            // Non-D·NOTE recorder card (TicNote): shares the same device page with the scan page
+            // (list / download / quick transfer / recording controls), no longer D·NOTE's empty-state copy.
+            // ⚠️ Use only `matchedRecorder`; **do not** reverse-derive from the ledger: the SN carried by `DiscoveredRecorder`
+            // (`identityText`) comes from the advertisement and serves as the download-dedup key (`deviceSerial`),
+            // and reconstructing it would drop the SN, silently breaking the "already downloaded" check.
+            RecorderDeviceView(recorder: matched, session: recorderSession)
+        } else if plaudDirect.phase.isConnected || plaudDirect.pairedSN != nil {
+            // A PLAUD card is on this segment (live or remembered). Its card is
+            // rendered above; the list of recordings **on the card** belongs
+            // here too (user: "the card's recordings should show under the home
+            // device section, not only inside device info").
+            PlaudCardFilesView()
+        } else {
+            EmptyStateView(
+                L10n.Recordings.noDeviceConnected,
+                systemImage: "waveform.slash",
+                message: L10n.Recordings.noDeviceMessage
+            )
+        }
+    }
+
+    /// Removed 2026-10-21: the bottom-pinned PLAUD entry row. User feedback:
+    /// the entry belongs in the add-device flow (scan page), which now opens
+    /// `PlaudAddSheet`; a connected card appears through the PLAUD branch of
+    /// `deviceContent` above (`PlaudCardFilesView`, one full-width List).
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -81,6 +141,12 @@ struct RecordingsView: View {
                 // Now both device types can connect (see `RecorderSessionModel`).
                 if recorderTarget != nil {
                     RecorderControl(model: recorderSession)
+                } else if plaudRecordTarget {
+                    // ★ 2026-10-21: PLAUD gets the same header slot. Its record
+                    // button used to live inside the device-info sheet, which is
+                    // where the user found it and told us it does not belong
+                    // there; here it is also reachable from the Library segment.
+                    PlaudRecordControl()
                 }
             }
             .padding(.horizontal)
@@ -93,40 +159,16 @@ struct RecordingsView: View {
 
             switch segment {
             case .device:
-                if let client = bluetooth.client {
-                    DeviceFilesView(
-                        client: client,
-                        library: library,
-                        env: env,
-                        onFileTransferred: { name in
-                            Task { @MainActor in
-                                if let item = await Self.buildLibraryItem(for: name) {
-                                    transferredClipItem = item
-                                    segment = .library
-                                    showClipDetail = true
-                                } else {
-                                    segment = .library
-                                }
-                            }
-                        },
-                        onFastTransferDone: {
-                            segment = .library
-                        }
-                    )
-                } else if let matched = bluetooth.matchedRecorder {
-                    // Non-D·NOTE recorder card (TicNote): shares the same device page with the scan page
-                    // (list / download / quick transfer / recording controls), no longer D·NOTE's empty-state copy.
-                    // ⚠️ Use only `matchedRecorder`; **do not** reverse-derive from the ledger: the SN carried by `DiscoveredRecorder`
-                    // (`identityText`) comes from the advertisement and serves as the download-dedup key (`deviceSerial`),
-                    // and reconstructing it would drop the SN, silently breaking the "already downloaded" check.
-                    RecorderDeviceView(recorder: matched, session: recorderSession)
-                } else {
-                    EmptyStateView(
-                        L10n.Recordings.noDeviceConnected,
-                        systemImage: "waveform.slash",
-                        message: L10n.Recordings.noDeviceMessage
-                    )
-                }
+                // ★ 2026-10-21: PLAUD moved to the ADD-DEVICE flow (scan page
+                // → PlaudAddSheet) per user feedback; when a PLAUD card IS
+                // connected it shows here as a device card like the others.
+                //
+                // ★ 2nd round: no separate floating card above the list any more.
+                // The PLAUD branch of `deviceContent` now renders one
+                // `List(.insetGrouped)` page (identity → recording → files on the
+                // card), the same shape V05E / TicNote use. Stacking a centered
+                // card on top of a list was what made PLAUD look like a popup.
+                deviceContent
             case .library:
                 LibraryView()
             }
@@ -141,6 +183,16 @@ struct RecordingsView: View {
             // Same landing as a finished device transfer. Skipped mid-BLE-
             // transfer, where switching away is already guarded by an alert.
             guard !env.isBLETransferring else { return }
+            segment = .library
+        }
+        // ★ 2026-10-20: second layer of the "transcript ready" banner's deep link.
+        // RootView set `env.pendingClipOpen` and switched to this tab; this view's only
+        // job is flipping to the library segment and letting `LibraryView` consume the
+        // rest. Same lock as the picker binding above: a BLE transfer keeps the user on
+        // the device segment, and the pending flag stays set — the library opens the
+        // clip whenever the user reaches it on their own.
+        .onChange(of: env.pendingClipOpen) { pending in
+            guard pending != nil, !env.isBLETransferring else { return }
             segment = .library
         }
         .navigationDestination(isPresented: $showClipDetail) {
@@ -849,9 +901,9 @@ final class DeviceFilesModel: ObservableObject {
                    case .ready(let decryptedURL, _) = saved {
                     let transcription = env.transcription
                     Task.detached { @MainActor in
-                        // ★ 2026-10-15：走**队列**而不是直接跑。先落盘再开跑 ⇒
-                        //   App 被杀掉后下次启动还能接着来；失败按 2/8/30 秒
-                        //   退避自动重试。见 `TranscriptionService.enqueue`。
+                        // ★ 2026-10-15: goes through the **queue** rather than running directly. Persist to disk before starting ⇒
+                        //   after the app is killed, the next launch can carry on; failures auto-retry with a
+                        //   2/8/30-second backoff. See `TranscriptionService.enqueue`.
                         transcription.enqueue(
                             fileURL: decryptedURL,
                             enforceMinDuration: true
@@ -1036,12 +1088,12 @@ private struct PassphraseOnboardingBanner: View {
                 Button(action: onOpenSettings) {
                     Text(L10n.EncryptionOnboarding.bannerCTA)
                         .font(.caption.bold())
-                        .foregroundStyle(isWarning ? Color.white : Color.accentColor)
+                        .foregroundStyle(isWarning ? Color.white : Color.appAccent)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .background(
                             isWarning ? AnyShapeStyle(.white.opacity(0.2))
-                                      : AnyShapeStyle(Color.accentColor.opacity(0.12)),
+                                      : AnyShapeStyle(Color.appAccent.opacity(0.12)),
                             in: Capsule()
                         )
                 }

@@ -5,48 +5,48 @@ import UIKit
 
 private let log = Logger(subsystem: "com.nomily.app.ios", category: "background")
 
-/// 让 App 在**有活在飞**的时候不被系统挂起。
+/// Keeps the App from being suspended by the system while **jobs are in flight**.
 ///
-/// 起这个类的原因：转录和摘要都是几十秒到十几分钟的活，用户一旦切走
-/// （看一眼微信、锁个屏），App 进 `.suspended`，URLSession 的请求被掐断，
-/// 回来就是一句失败 —— 这就是"转录好几次都失败"的一大半。
+/// Why this class exists: transcription and summary are jobs lasting tens of seconds to over ten minutes, and the moment the user switches away
+/// (a glance at WeChat, locking the screen), the App enters `.suspended`, the URLSession request is cut off,
+/// and you come back to a failure — that's the bulk of "transcription fails several times".
 ///
-/// 两层机制叠着用：
+/// Two layers stacked:
 ///
-/// 1. `UIApplication.beginBackgroundTask` —— 只能换来约 30 秒的宽限。
-///    不花钱、不需要任何权限、任何时候都是对的。它是永远开着的那一层。
-/// 2. 一个**循环播放的静音** `AVAudioPlayer`，跑在 `.playback` 会话上。
-///    配合 Info.plist 里已经声明好的 `audio` 后台模式，进程就能一直活着。
-///    这套把戏 `LiveModel` 录音时本来就在用（那里 1544 行起），这里只是
-///    把它**提到一个地方管**——否则两个独立的静音播放器会抢同一个
-///    `AVAudioSession`，谁先 `setActive(false)` 谁就把对方掐了。
+/// 1. `UIApplication.beginBackgroundTask` — buys only about 30 seconds of grace.
+///    Costs nothing, needs no permissions, and is correct at any time. It's the layer that's always on.
+/// 2. A **looping silent** `AVAudioPlayer` running on a `.playback` session.
+///    Together with the `audio` background mode already declared in Info.plist, the process can stay alive.
+///    `LiveModel` was already using this trick while recording (from line 1544 there); here it's just
+///    **lifted into one place to manage** — otherwise two independent silent players would fight over the same
+///    `AVAudioSession`, and whoever calls `setActive(false)` first cuts off the other.
 ///
-/// 用**令牌**计数而不是裸计数：录音那条路的生命周期是"正在录 && 在后台"，
-/// 转录那条路是"活还没干完"，两者会重叠，各自得能单独释放而不误伤对方。
+/// Counting with **tokens** rather than a raw count: the recording path's lifetime is "recording && in the background",
+/// the transcription path's is "the job isn't done yet", the two overlap, and each must be able to release independently without hurting the other.
 @MainActor
 final class BackgroundKeeper {
     static let shared = BackgroundKeeper()
 
-    /// 谁在占着。加新场景就往这里添一个 case，别新开一套机制。
+    /// Who's holding it. Add a case here for a new scenario; don't start a whole new mechanism.
     enum Token: String, CaseIterable {
-        /// 实时录音 —— 由 `LiveModel` 在"录音中 && 切到后台"时持有。
+        /// Live recording — held by `LiveModel` when "recording && switched to the background".
         case recording
-        /// 批量转录（ASR）。
+        /// Batch transcription (ASR).
         case transcription
-        /// 摘要 / 翻译等 LLM 长任务。
+        /// Summary / translation and other long LLM jobs.
         case summary
-        /// 导出音频（大文件的复制 / 重编码）。
+        /// Exporting audio (copying / re-encoding large files).
         ///
-        /// ★ 2026-10-15 六改：用户的原话是"导出音频对于大文件音频需要等待很久
-        /// 这个需要挂在后台"。导出和转录是**同一类**问题（干到一半被挂起），
-        /// 所以共用这一套，不另起一份。
+        /// ★ 2026-10-15 revision six: the user's own words were "exporting audio takes a very long time for large files
+        /// and it needs to run in the background". Export and transcription are **the same kind** of problem (suspended half-way),
+        /// so they share this one setup rather than starting another.
         case export
     }
 
-    /// 镜像 `config.backgroundKeepAliveEnabled`。关掉时只保留那 ~30 秒的
-    /// `beginBackgroundTask` 宽限 —— 短录音仍然能在后台跑完，长的就会断。
-    /// 之所以给开关：第 2 层是"用静音音频骗后台"，不想被这个糊弄的用户
-    /// 应该有权关掉它。
+    /// Mirrors `config.backgroundKeepAliveEnabled`. When off, only the ~30 seconds of
+    /// `beginBackgroundTask` grace remains — short recordings still finish in the background, long ones get cut off.
+    /// Why there's a toggle: layer 2 is "fool the background with silent audio", and users who don't want to be fooled by that
+    /// should have the right to turn it off.
     var audioKeepAliveEnabled = true {
         didSet {
             guard audioKeepAliveEnabled != oldValue else { return }
@@ -66,7 +66,7 @@ final class BackgroundKeeper {
 
     private init() {}
 
-    // MARK: - 令牌
+    // MARK: - Tokens
 
     func isHeld(_ token: Token) -> Bool { active.contains(token) }
 
@@ -85,21 +85,21 @@ final class BackgroundKeeper {
         endAssertion()
     }
 
-    /// 退出前给个干净的收尾（也方便自检脚本对账）。
+    /// Give a clean wrap-up before exit (also helps a self-check script reconcile).
     func releaseAll() {
         active.removeAll()
         stopAudio()
         endAssertion()
     }
 
-    // MARK: - 第 1 层：后台任务断言
+    // MARK: - Layer 1: the background task assertion
 
     private func beginAssertion() {
         guard taskID == .invalid else { return }
         taskID = UIApplication.shared.beginBackgroundTask(withName: "com.nomily.work") { [weak self] in
-            // 走到这里说明 30 秒宽限用完了。有静音音频顶着时不该发生；
-            // 真发生了（用户把音频保活关了）就必须立刻交还令牌，否则
-            // 系统会直接把进程杀掉（而 kill 是没有任何日志的）。
+            // Reaching here means the 30-second grace ran out. With silent audio holding it up that shouldn't happen;
+            // if it really does (the user turned audio keep-alive off) the token must be returned immediately, otherwise
+            // the system will simply kill the process (and a kill leaves no log at all).
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 log.warning("background assertion expired with \(self.active.count) token(s) held")
@@ -117,14 +117,14 @@ final class BackgroundKeeper {
         log.info("background assertion \(id.rawValue) ended")
     }
 
-    // MARK: - 第 2 层：静音音频保活
+    // MARK: - Layer 2: silent-audio keep-alive
 
     private func startAudio() {
         guard player == nil else { return }
         do {
             let session = AVAudioSession.sharedInstance()
-            // `.mixWithOthers`：用户自己的音乐/播客不该被我们掐掉。
-            // 我们放的是纯静音，混进去也听不见。
+            // `.mixWithOthers`: the user's own music/podcasts shouldn't be cut off by us.
+            // What we play is pure silence, so mixing in can't be heard.
             try session.setCategory(.playback, options: .mixWithOthers)
             try session.setActive(true)
             let p = try AVAudioPlayer(data: Self.silentWavData(), fileTypeHint: AVFileType.wav.rawValue)
@@ -135,7 +135,7 @@ final class BackgroundKeeper {
             observeInterruptions()
             log.info("silent audio started")
         } catch {
-            // 拿不到会话不代表活干不了 —— 还有 30 秒的断言兜着，短活照样跑完。
+            // Failing to get the session doesn't mean the job can't run — the 30-second assertion still covers it, and short jobs still finish.
             log.warning("silent audio failed to start: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -152,8 +152,8 @@ final class BackgroundKeeper {
         log.info("silent audio stopped")
     }
 
-    /// 来个电话/闹钟会把我们的静音播放器打断，而打断结束后它**不会自己回来**。
-    /// 不补这一手，用户接完电话回来转录就已经断在半路了。
+    /// An incoming call/alarm interrupts our silent player, and after the interruption it **won't come back on its own**.
+    /// Without this patch-up, the user finishes the call and finds transcription already cut off halfway.
     private func observeInterruptions() {
         guard interruptionObserver == nil else { return }
         interruptionObserver = NotificationCenter.default.addObserver(
@@ -170,9 +170,9 @@ final class BackgroundKeeper {
         }
     }
 
-    /// 1 秒静音：8 kHz 单声道 16 bit PCM WAV（16 044 字节）。
-    /// 小到可以常驻内存，循环播放就永远不停。
-    /// （与 `LiveModel` 原先那份逐字节相同，口径保持一致。）
+    /// 1 second of silence: 8 kHz mono 16-bit PCM WAV (16 044 bytes).
+    /// Small enough to live in memory, and looping means it never stops.
+    /// (Byte-for-byte identical to `LiveModel`'s original one, keeping the two in line.)
     private static func silentWavData() -> Data {
         let sampleRate: UInt32 = 8000
         let numSamples: UInt32 = sampleRate

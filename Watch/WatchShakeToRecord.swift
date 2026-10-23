@@ -2,31 +2,31 @@ import CoreMotion
 import Foundation
 import SwiftUI
 
-/// 「摇一摇开始录音」+「双指互点开/关录音」两个开关。
+/// The two toggles: "shake to start recording" + "double tap to start/stop recording".
 ///
-/// 与 `WatchRingStyleStore` **分开存**是刻意的：那个的 `reset()` 是"恢复默认
-/// 外观"，而"恢复默认外观"顺手把录音行为也重置掉会很意外 —— 用户点的是
-/// 颜色页里的恢复默认，结果录音方式变了。
+/// Storing it **separately** from `WatchRingStyleStore` is deliberate: that one's `reset()` is "restore the default
+/// appearance", and having "restore default appearance" reset the recording behaviour too would be surprising — the user tapped
+/// restore-default on the colour page, and the recording method changed.
 final class WatchRecordingPrefs: ObservableObject {
     static let shared = WatchRecordingPrefs()
 
     private static let key = "watch.shake_to_record.v1"
-    /// ★ 2026-10-15 六改：双指互点（食指拇指捏合）。**独立一个键** ——
-    /// 两个手势的误触场景完全不同（晃是"抬手放下"，捏是"想按却按不到"），
-    /// 共用一个开关的话，关掉一个就会顺手关掉另一个。
+    /// ★ 2026-10-15 revision six: double tap (pinching index finger and thumb). **A separate key** —
+    /// the two gestures misfire in completely different scenarios (shake is "raise and lower the wrist", pinch is "wanting to press but missing"),
+    /// and sharing one toggle would turn off one along with the other.
     private static let pinchKey = "watch.pinch_to_record.v1"
 
-    /// 默认**开**：用户要的就是这个动作能立刻用上；真觉得会误触，
-    /// 去设置页关掉即可（就在版本号下面）。
+    /// Defaults **on**: what the user wants is for this action to work right away; if they really think it misfires,
+    /// they can turn it off on the settings page (right below the version number).
     @Published var shakeToRecord: Bool {
         didSet { defaults.set(shakeToRecord, forKey: Self.key) }
     }
 
-    /// 默认**开**（用户点名要这个能力）。
+    /// Defaults **on** (the user specifically asked for this capability).
     ///
-    /// ⚠️ 只有 watchOS 11+ 真的能关：10.1~10.x 上双指互点是系统行为，
-    /// 没有 API 可拦（见 `PrimaryHandGesture`）。设置页只在 11+ 显示这一行，
-    /// 免得在 10.x 上给出一个拨了没用的开关。
+    /// ⚠️ Only watchOS 11+ can really turn it off: on 10.1~10.x Double Tap is system behaviour,
+    /// with no API to intercept it (see `PrimaryHandGesture`). The settings page only shows this row on 11+,
+    /// so as not to offer a switch that does nothing on 10.x.
     @Published var pinchToRecord: Bool {
         didSet { defaults.set(pinchToRecord, forKey: Self.pinchKey) }
     }
@@ -35,57 +35,57 @@ final class WatchRecordingPrefs: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        // ⚠️ 必须用 `object(forKey:)` 判"设过没有"：`bool(forKey:)` 在键不存在时
-        // 返回 false，于是"默认开"会被静默变成"默认关"，而且用户永远
-        // 打开不了 —— 每次冷启动都回到 false。
+        // ⚠️ Must use `object(forKey:)` to tell "was it ever set": `bool(forKey:)` returns
+        // false when the key is absent, so "default on" would silently become "default off", and the user could never
+        // turn it on — every cold launch returns to false.
         self.shakeToRecord = (defaults.object(forKey: Self.key) as? Bool) ?? true
         self.pinchToRecord = (defaults.object(forKey: Self.pinchKey) as? Bool) ?? true
     }
 }
 
-/// 「用力晃动手表」检测。
+/// "Shake the watch hard" detection.
 ///
-/// ## 为什么用原始加速计，而不是 `deviceMotion.userAcceleration`
-/// 我们只关心"手腕被猛地晃了一下"。原始加速计的**模长**在静止时恒为 1g
-/// （重力），**转动**手腕改变不了它（只是重力在传感器坐标系里的方向变了），
-/// 只有**平移**才会把模长顶上去 —— 正好是"晃"的物理特征。
-/// 所以 `|a| > 阈值` 一条判据就够了，还省掉了 `deviceMotion` 在部分机型上
-/// 可能不可用那条分支（`userAcceleration` 要先做一遍姿态解算）。
+/// ## Why the raw accelerometer rather than `deviceMotion.userAcceleration`
+/// All we care about is "the wrist got yanked hard". The raw accelerometer's **magnitude** is always 1g at rest
+/// (gravity), **rotating** the wrist can't change it (only the direction of gravity in the sensor's coordinate frame changes),
+/// and only **translation** pushes the magnitude up — exactly the physical signature of a "shake".
+/// So a single `|a| > threshold` criterion suffices, and it also avoids the branch where `deviceMotion` may be
+/// unavailable on some models (`userAcceleration` requires an attitude solve first).
 ///
-/// ## 为什么要求"时间窗内连着两次越过阈值"
-/// 抬手放下、敲一下桌沿、戴表时扣一下表带，都会产生**一次**尖锐的峰值；
-/// 真正的"摇两下"必然在一秒内连续越过两次。要求两次，代价是判定晚
-/// 约 0.1 秒，换来的是走路/打字时不会自己开始录音。
+/// ## Why it requires "two threshold crossings in a row within a time window"
+/// Raising and lowering the wrist, tapping the edge of a desk, buckling the strap when putting the watch on — all produce **one** sharp peak;
+/// a real "shake twice" necessarily crosses twice in a row within a second. Requiring two costs about 0.1 s
+/// of latency in detection, and buys not starting recording by itself while walking or typing.
 ///
-/// ## 为什么不能光靠陀螺仪
-/// 陀螺仪只测角速度，"把手腕转过去看表"这种动作角速度很大但加速度很小，
-/// 用它当判据会在每次看表时误触。
+/// ## Why the gyroscope alone won't do
+/// The gyroscope only measures angular velocity; a motion like "turn the wrist to look at the watch" has high angular velocity but tiny acceleration,
+/// so using it as the criterion would misfire every time you check the time.
 final class WatchShakeDetector {
-    /// 越过这个加速度（单位 g）才算一次"撞击"。静止是 1g；走路的峰值
-    /// 到不了 2.3，而刻意甩手腕轻松超过 3g。
+    /// Only crossing this acceleration (in g) counts as one "impact". At rest it's 1g; walking peaks
+    /// never reach 2.3, while deliberately flicking the wrist easily exceeds 3g.
     private static let threshold: Double = 2.3
-    /// 两次撞击必须落在这个时间窗里，才算"摇"。
+    /// Two impacts must fall within this time window to count as a "shake".
     private static let burstWindow: TimeInterval = 0.9
-    /// 触发之后静默一段，免得一次摇晃被拆成"开→关→开"。
+    /// Goes quiet for a spell after triggering, so one shake isn't split into "on→off→on".
     private static let cooldown: TimeInterval = 2.0
-    /// 25Hz 足够分辨"摇"和"碰"（一次撞击持续时间约 100~200ms）。
-    /// 再高只是白耗电 —— 这一页会一直开着，采集频率是电池账上的大头。
+    /// 25Hz is enough to tell "shake" from "bump" (one impact lasts about 100~200ms).
+    /// Higher is just wasted power — this page stays on constantly, and the sampling rate is the big item on the battery bill.
     private static let updateInterval: TimeInterval = 1.0 / 25.0
 
     private let manager = CMMotionManager()
     private var onShake: (() -> Void)?
-    /// 轨迹上的撞击时刻，只保留 `burstWindow` 内的。
+    /// Impact timestamps along the trace, keeping only those within `burstWindow`.
     private var peaks: [Date] = []
-    /// 上一次采样是否已经在阈值以上 —— 用来只认"从下往上穿过"那一次。
+    /// Whether the previous sample was already above the threshold — used to count only the "crossing upward" event.
     private var aboveThreshold = false
     private var lastFire = Date.distantPast
 
     var isRunning: Bool { manager.isAccelerometerActive }
 
-    /// 开始监听。`handler` 会在**主队列**上被调用。
+    /// Start listening. `handler` is called on the **main queue**.
     ///
-    /// 幂等：已经跑着就只换掉 handler，不重开采集（重开会让贴片重新预热，
-    /// 头几十毫秒的数据不准）。
+    /// Idempotent: if it's already running, just swap the handler rather than restarting sampling (restarting re-warms the die,
+    /// and the first few tens of milliseconds of data are inaccurate).
     func start(_ handler: @escaping () -> Void) {
         onShake = handler
         guard manager.isAccelerometerAvailable, !manager.isAccelerometerActive else { return }
@@ -111,8 +111,8 @@ final class WatchShakeDetector {
             aboveThreshold = false
             return
         }
-        // 一个撞击会连着好几个采样点都在阈值以上。只在**第一次**越线时记一笔，
-        // 否则一次撞击就被数成五六次，"两次才算摇"的门槛等于没有。
+        // One impact keeps several consecutive samples above the threshold. Record only on the **first** crossing,
+        // otherwise one impact gets counted five or six times and the "two to count as a shake" bar amounts to nothing.
         guard !aboveThreshold else { return }
         aboveThreshold = true
 
