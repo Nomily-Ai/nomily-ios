@@ -3164,6 +3164,35 @@ enum L10n {
     enum ClipDetail {
         static var opusPlaybackUnsupported: String { NSLocalizedString("clip_detail.opus_playback_unsupported", value: "This system version can't play Opus recordings — playback needs iOS 17 or later. Transcription is unaffected. To listen now, share the file out via AirDrop or the Files app.", comment: "Shown in the player when an Opus clip can't be played on iOS 16") }
         static var transcript: String { NSLocalizedString("clip_detail.transcript", comment: "") }
+
+        // MARK: Outline (★ 2026-10-23, "录音来源里面还有大纲总结")
+        /// Section header above the chapter list in 来源.
+        static var outline: String {
+            NSLocalizedString("clip_detail.outline", value: "Outline",
+                              comment: "Source tab: chapter outline section header")
+        }
+        static var outlineGenerate: String {
+            NSLocalizedString("clip_detail.outline_generate", value: "Generate Outline",
+                              comment: "Source tab: button that builds the chapter outline")
+        }
+        static var outlineRegenerate: String {
+            NSLocalizedString("clip_detail.outline_regenerate", value: "Regenerate outline",
+                              comment: "Source tab: refresh button in the outline header")
+        }
+        static var outlineGenerating: String {
+            NSLocalizedString("clip_detail.outline_generating", value: "Building the outline…",
+                              comment: "Source tab: outline job is running")
+        }
+        static var outlineHint: String {
+            NSLocalizedString("clip_detail.outline_hint",
+                              value: "An outline turns the transcript into chapters you can jump to.",
+                              comment: "Source tab: one-line explanation under the empty outline section")
+        }
+        static var outlineNoTimeline: String {
+            NSLocalizedString("clip_detail.outline_no_timeline",
+                              value: "This transcript has no timestamps, so it can't be split into chapters.",
+                              comment: "Source tab: transcript has no segment timings")
+        }
         static var transcribing: String { NSLocalizedString("clip_detail.transcribing", comment: "") }
         static var providerFallback: String { NSLocalizedString("clip_detail.provider_fallback", comment: "") }
         static var viewFullTranscript: String { NSLocalizedString("clip_detail.view_full_transcript", comment: "") }
@@ -3861,6 +3890,45 @@ enum L10n {
             NSLocalizedString("summarize.custom_badge", value: "Mine",
                               comment: "Template card/overview: created by the user")
         }
+
+        // MARK: Template spaces (★ 2026-10-23, Plaud 4039 / 4040 / 4041)
+        //
+        // The picker is split into three spaces. Names follow Plaud's own
+        // wording where it is already plain Chinese ("我的空间 / 推荐 / 探索") so
+        // a user coming from Plaud recognises the layout.
+        static var spaceMine: String {
+            NSLocalizedString("summarize.space_mine", value: "My Space",
+                              comment: "Template picker: tab holding the user's own templates")
+        }
+        static var spaceRecommended: String {
+            NSLocalizedString("summarize.space_recommended", value: "For You",
+                              comment: "Template picker: tab with curated templates")
+        }
+        static var spaceExplore: String {
+            NSLocalizedString("summarize.space_explore", value: "Explore",
+                              comment: "Template picker: tab with the full category library")
+        }
+        static var myTemplates: String {
+            NSLocalizedString("summarize.my_templates", value: "My Templates",
+                              comment: "Template picker: heading over the user's own templates")
+        }
+        static var createTemplate: String {
+            NSLocalizedString("summarize.create_template", value: "Create Template",
+                              comment: "Template picker: dashed card that opens the template editor")
+        }
+        static var editorsPicks: String {
+            NSLocalizedString("summarize.editors_picks", value: "Editors' Picks",
+                              comment: "Template picker: curated shelf of daily-driver templates")
+        }
+        static var inspiration: String {
+            NSLocalizedString("summarize.inspiration", value: "Inspiration",
+                              comment: "Template picker: curated shelf of less obvious formats")
+        }
+        static var mineSpaceFooter: String {
+            NSLocalizedString("summarize.mine_space_footer",
+                              value: "Language and model apply to this generation only in the sense that they are saved as your defaults.",
+                              comment: "Template picker: footnote under the language/model rows")
+        }
         // ★ 2026-10-19 DingTalk-style picker: chips + default template.
         static var chipRecommended: String {
             NSLocalizedString("summarize.chip_recommended", value: "Recommended",
@@ -4019,6 +4087,11 @@ enum L10n {
         static var kindExport: String {
             NSLocalizedString("jobs.kind_export", value: "Audio export",
                               comment: "Task list: an audio format-conversion job")
+        }
+        /// ★ 2026-10-23: the timestamped chapter outline job (来源 → 大纲).
+        static var kindOutline: String {
+            NSLocalizedString("jobs.kind_outline", value: "Outline",
+                              comment: "Task list: a chapter-outline generation job")
         }
 
         // MARK: Subtitles (`Job.detail`)

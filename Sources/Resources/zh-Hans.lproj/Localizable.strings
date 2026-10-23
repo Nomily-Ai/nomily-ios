@@ -1709,3 +1709,22 @@
 /* 摘要输出纪律：追加到每个模板提示词后，压制占位内容与无关信息（2026-10-23） */
 "summarize.house_rules" = "【输出纪律 · 与上面模板冲突时以本节为准】\n1. 只写转录里确实说过的内容。某个小节没有真实信息就整节省略，绝不要输出【待确认】、TBD、N/A、未提及、未知、无 这类占位内容。\n2. 不复述元信息：录音方式、说话人编号（如“说话人1”）、时长、源材料、转写工具，都不属于摘要内容。\n3. 同一件事只写一次。结论里讲过的，不要在小节里重复一遍。\n4. 每条一到两句话，信息密度要高。模板要求完整报告时以完整为先，真实讲到的点都要收进来；否则全文长度不超过转录本身的四分之一。\n5. 行动项只收“有人明确承诺要做、被指派、或带截止时间”的事；只是讨论、设想、可能性的不算。转录没说负责人和时间就留空，绝不编造。\n6. 保留模板的小节结构，但删掉所有没填出真实内容的小节，包括“补充说明”“其他”这类兜底小节。\n7. 所有标题一律用说话人使用的语言。中文转录就用中文标题（总览 / 要点 / 决策 / 待办…），绝不能内容是中文、标题却是英文。";
 "summarize.tiny_note" = "只写确实说过的内容，不要输出 TBD、【待确认】这类占位文字。";
+
+/* ── 2026-10-23 大纲（来源页章节）+ 模板三空间（Plaud 对齐） ── */
+"jobs.kind_outline" = "大纲";
+"clip_detail.outline" = "大纲";
+"clip_detail.outline_generate" = "生成大纲";
+"clip_detail.outline_regenerate" = "重新生成大纲";
+"clip_detail.outline_generating" = "正在生成大纲…";
+"clip_detail.outline_hint" = "大纲会把转写切成可点击跳转的章节。";
+"clip_detail.outline_no_timeline" = "这份转写没有时间戳，无法切成章节。";
+"outline.no_timeline" = "这份转写没有时间戳，无法生成大纲。重新转写一次即可。";
+"outline.unparsable" = "模型返回的内容里没有可用的大纲，请再试一次。";
+"summarize.space_mine" = "我的空间";
+"summarize.space_recommended" = "推荐";
+"summarize.space_explore" = "探索";
+"summarize.my_templates" = "我的模板";
+"summarize.create_template" = "创建模板";
+"summarize.editors_picks" = "编辑精选";
+"summarize.inspiration" = "灵感推荐";
+"summarize.mine_space_footer" = "这里的语言与 AI 模型会保存为你的默认设置。";

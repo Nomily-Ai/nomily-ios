@@ -18,6 +18,10 @@ struct ClipDetailView: View {
     @StateObject private var player = AudioPlaybackController()
     @StateObject private var languages = LanguageService()
     @State private var transcript: TranscriptDocument?
+    /// ★ 2026-10-23 ("录音来源里面还有大纲总结"): chapters of the recording, read
+    /// from `<base>.chapters.json`. Loaded here (not in the outline section)
+    /// so switching tabs back and forth doesn't hit the disk each time.
+    @State private var chapters: [ClipChapter] = []
     @State private var deleteAudioAlert = false
     @State private var deleteTranscriptAlert = false
     @State private var deleteSummaryAlert = false
@@ -167,6 +171,11 @@ struct ClipDetailView: View {
                 // timestamped transcript (who said what, when) are one surface.
                 if item.hasAudio { heroCard }
                 if !marks.isEmpty { marksSection }
+                // ★ 2026-10-23: Plaud's order — player, then the outline (a
+                //   clickable table of contents), then the transcript itself.
+                //   Only when there is a transcript: an outline is derived from
+                //   its timings, so without one there is nothing to navigate.
+                if transcript != nil { outlineSection }
                 transcriptSection
                 if translation != nil { translationSection }
             case .notes:
@@ -347,6 +356,7 @@ struct ClipDetailView: View {
             if let url = item.url { player.load(url) }
             languages.fetchTargetLanguagesIfNeeded()
             transcript = TranscriptDocument.load(for: item.name)
+            chapters = ClipChapterStore.load(for: item.name)
             // Speaker names are a sidecar of this clip; load once per visit.
             speakerStore.load(clip: item.name)
             marks = A1MarkStore.sidecar(forClipBase: item.base)
@@ -375,6 +385,12 @@ struct ClipDetailView: View {
                 }
                 loadSelectedPageText()
             }
+            // ★ 2026-10-23: same reasoning for the outline — it's written by a
+            // queued job (`outline:<clip>`), which usually finishes while the
+            // user is looking at exactly this page. Equality-guarded, so the
+            // frequent unrelated job-list updates stay free.
+            let loadedChapters = ClipChapterStore.load(for: item.name)
+            if loadedChapters != chapters { chapters = loadedChapters }
         }
         // A rename must reach the Q&A context as well, or answers keep using the
         // old labels until the page is reopened (2026-10-22).
@@ -618,6 +634,101 @@ struct ClipDetailView: View {
         } footer: {
             Text(L10n.ClipDetail.remarksFooter)
         }
+    }
+
+    // MARK: - outline (★ 2026-10-23, "录音来源里面还有大纲总结")
+
+    /// Plaud's 大纲 block: a timestamped table of contents above the transcript.
+    /// Tapping a chapter seeks the player there; the chapter under the playhead
+    /// is tinted, so "where am I in this recording" reads at a glance.
+    @ViewBuilder
+    private var outlineSection: some View {
+        Section {
+            if let job = activeJob(.outline) {
+                runningRow(job, L10n.ClipDetail.outlineGenerating)
+            } else if chapters.isEmpty {
+                if let job = failedJob(.outline) {
+                    failedRow(job)
+                } else if hasTimeline {
+                    Button { generateOutline() } label: {
+                        Label(L10n.ClipDetail.outlineGenerate, systemImage: "sparkles")
+                    }
+                } else {
+                    // A flat `.txt` transcript (import, or an ASR provider with
+                    // no segment timings) can't support chapters — every one
+                    // would start at zero. Say that instead of offering a
+                    // button that can only fail.
+                    Text(L10n.ClipDetail.outlineNoTimeline)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(chapters) { chapter in
+                    chapterRow(chapter)
+                }
+            }
+        } header: {
+            HStack {
+                Text(L10n.ClipDetail.outline)
+                Spacer()
+                if !chapters.isEmpty, activeJob(.outline) == nil {
+                    Button { generateOutline() } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.ClipDetail.outlineRegenerate)
+                }
+            }
+        } footer: {
+            if chapters.isEmpty, hasTimeline {
+                Text(L10n.ClipDetail.outlineHint)
+            }
+        }
+    }
+
+    /// Per-segment timings exist — the precondition for a chapter list.
+    private var hasTimeline: Bool {
+        !(transcript?.segments.isEmpty ?? true)
+    }
+
+    /// The chapter the playhead is currently inside. `nil` while stopped at 0,
+    /// so nothing looks "current" before playback starts.
+    private var activeChapterStart: Double? {
+        guard player.currentTime > 0 else { return nil }
+        return chapters.last { $0.start <= player.currentTime }?.start
+    }
+
+    private func chapterRow(_ chapter: ClipChapter) -> some View {
+        let isActive = activeChapterStart == chapter.start
+        return Button {
+            guard let url = item.url else { return }
+            // `load` is a no-op on the same URL (see `marksSection`).
+            player.load(url)
+            player.seek(to: chapter.start)
+            player.play()
+        } label: {
+            HStack(spacing: 12) {
+                Text(ClockLabel.mmss(chapter.start))
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(isActive ? Color.appAccent : Color.secondary)
+                    .frame(minWidth: 44, alignment: .leading)
+                Text(chapter.title)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func generateOutline() {
+        guard hasTimeline else { return }
+        jobs.enqueue(Job.outline(clip: item.name))
     }
 
     // MARK: - transcript
@@ -960,7 +1071,14 @@ struct ClipDetailView: View {
         }
     }
 
-    private func triggerTranscribe(locales: [String]?) {        if env.config.config.asrProviders.hasConfiguredProvider {
+    private func triggerTranscribe(locales: [String]?) {
+        // ★ 2026-10-23: a re-run invalidates the outline — its timestamps were
+        // derived from the *previous* ASR output, and after this run they point
+        // at the wrong words. Dropping it means the user sees "生成大纲" again
+        // instead of a chapter list that silently lies.
+        ClipChapterStore.delete(for: item.name)
+        chapters = []
+        if env.config.config.asrProviders.hasConfiguredProvider {
             runTranscribe(locales: locales)
         } else {
             showNoASR = true

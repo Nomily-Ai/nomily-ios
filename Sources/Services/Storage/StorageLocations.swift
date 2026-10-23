@@ -95,6 +95,19 @@ enum StorageLocations {
         return decryptedDir.appendingPathComponent("\(base).title")
     }
 
+    /// ★ 2026-10-23 ("来源里面还有大纲总结"): the chapter outline of one clip
+    /// (`<base>.chapters.json`) — `[ClipChapter]`, each `{ start, title }`.
+    ///
+    /// Sits beside the transcript rather than inside it: re-running ASR replaces
+    /// `.asr.json`, and an outline built from the old run's timings would then be
+    /// subtly wrong. Keeping it a separate artifact lets "re-transcribe" drop it
+    /// on purpose (see `ClipChapterStore.delete`) instead of silently serving a
+    /// stale chapter list against new audio offsets.
+    static func chaptersURL(for audioName: String) -> URL {
+        let base = (audioName as NSString).deletingPathExtension
+        return decryptedDir.appendingPathComponent("\(base).chapters.json")
+    }
+
     static var templatesURL: URL {
         root.appendingPathComponent("summarize_templates.json", isDirectory: false)
     }

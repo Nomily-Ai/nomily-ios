@@ -1413,3 +1413,22 @@
 "plaud.live_engine_ondevice" = "On-device";
 "plaud.live_azure_failed" = "Azure live transcription stopped: %@";
 "plaud.live_azure_fell_back" = "Azure dropped out — continuing with on-device recognition.";
+
+/* ── 2026-10-23 Outline (source-tab chapters) + template spaces (Plaud parity) ── */
+"jobs.kind_outline" = "Outline";
+"clip_detail.outline" = "Outline";
+"clip_detail.outline_generate" = "Generate Outline";
+"clip_detail.outline_regenerate" = "Regenerate outline";
+"clip_detail.outline_generating" = "Building the outline…";
+"clip_detail.outline_hint" = "An outline turns the transcript into chapters you can jump to.";
+"clip_detail.outline_no_timeline" = "This transcript has no timestamps, so it can't be split into chapters.";
+"outline.no_timeline" = "This transcript has no timestamps, so an outline can't be built. Re-run the transcription to add them.";
+"outline.unparsable" = "The model's reply didn't contain a usable outline. Try again.";
+"summarize.space_mine" = "My Space";
+"summarize.space_recommended" = "For You";
+"summarize.space_explore" = "Explore";
+"summarize.my_templates" = "My Templates";
+"summarize.create_template" = "Create Template";
+"summarize.editors_picks" = "Editors' Picks";
+"summarize.inspiration" = "Inspiration";
+"summarize.mine_space_footer" = "Language and model are saved as your defaults.";

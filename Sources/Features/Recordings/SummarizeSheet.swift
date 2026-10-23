@@ -54,6 +54,12 @@ struct SummarizeSheet: View {
     /// 自定义生成 (template / output language / model, then 立即生成).
     @State private var generateMode: GenerateMode = .auto
     @State private var showTemplateList = false
+    /// Which of the picker's three spaces is showing (★ 2026-10-23).
+    @State private var space: TemplateSpace = .mine
+    @State private var showCreateTemplate = false
+    /// A custom template being edited from 我的空间 (same editor the settings
+    /// page uses — see `TemplateEditorView`).
+    @State private var editingTemplate: SummarizeTemplate?
 
     private enum GenerateMode { case auto, custom }
     /// The provider said it stopped because it hit the output cap. The text
@@ -74,20 +80,6 @@ struct SummarizeSheet: View {
         case running
         case done
         case failed(String)
-    }
-
-    private var filtered: [SummarizeTemplate] {
-        if search.isEmpty { return templateStore.templates }
-        let q = search.lowercased()
-        return templateStore.templates.filter {
-            $0.name.lowercased().contains(q) ||
-            $0.category.lowercased().contains(q)
-        }
-    }
-
-    private var filteredCategories: [String] {
-        var seen = Set<String>()
-        return filtered.compactMap { seen.insert($0.category).inserted ? $0.category : nil }
     }
 
     var body: some View {
@@ -491,6 +483,33 @@ struct SummarizeSheet: View {
         return languages.targetLanguages.first { $0.code == outputLangCode }?.name ?? outputLangCode
     }
 
+    // MARK: - Template spaces (★ 2026-10-23, Plaud 4039 / 4040 / 4041)
+    //
+    // Plaud splits "选择模板" into three spaces and the user asked for the same:
+    //   我的空间 — templates you made (+ create), language and model rows
+    //   推荐     — a curated two-block shelf ("他人常用" / "灵感推荐")
+    //   探索     — the full library, grouped by category
+    //
+    // Honest difference from Plaud's screens: their 推荐 cards carry other
+    // people's names and usage counts. We have no such telemetry, so every
+    // card credits "Nomily" instead of inventing authors or counts.
+
+    private enum TemplateSpace: String, CaseIterable, Identifiable {
+        case mine
+        case recommended
+        case explore
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .mine: return L10n.Summarize.spaceMine
+            case .recommended: return L10n.Summarize.spaceRecommended
+            case .explore: return L10n.Summarize.spaceExplore
+            }
+        }
+    }
+
     private var templatePicker: some View {
         Group {
             if let previewing {
@@ -507,37 +526,14 @@ struct SummarizeSheet: View {
                     //   "pick a template" moment: telling the user now that "the primary has no key and Ollama will serve as fallback"
                     //   lets them decide whether to go fix the key first or just run as-is.
                     //   Previously this situation only blew up as an English error message **after the run finished**.
-                    if let preflightWarning {
-                        // ★ 2026-10-15: The health check can't stop at "saying something" — it also needs a **one-tap fix**.
-                        //
-                        // What was actually observed: "the primary points at Open Router, and that entry has no
-                        // api_key". With a hint alone, the user has to find their own way to Settings → LLM Providers,
-                        // scroll to Open Router, and locate the primary-channel picker — when there is exactly one correct answer.
-                        VStack(alignment: .leading, spacing: 6) {
-                            Label(preflightWarning, systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                            if let fix = LLMCompletionService.suggestedPrimary(env.config.config) {
-                                Button {
-                                    adoptFallbackAsPrimary(fix)
-                                } label: {
-                                    Text(L10n.LLM.adoptAsPrimary(
-                                        LLMCompletionService.providerLabel(fix)
-                                    ))
-                                    .font(.caption)
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal)
-                        .padding(.vertical, 8)
-                        .background(Color.orange.opacity(0.12))
-                    }
-                    languageBar
-                    templateGrid
+                    if let preflightWarning { preflightBanner(preflightWarning) }
+                    spaceBar
+                    spaceContent
                 }
+                // Filtering applies to whichever space is on screen — the same
+                // search bar Plaud puts over 探索.
+                .searchable(text: $search, prompt: L10n.Summarize.searchTemplates)
+                .safeAreaInset(edge: .bottom) { pickerGenerateBar }
             }
         }
         .onAppear {
@@ -548,9 +544,396 @@ struct SummarizeSheet: View {
                let key = env.config.config.summaryTemplateKey,
                let stored = templateStore.templates.first(where: { $0.storeKey == key }) {
                 selected = stored
+                // Land on the space that actually holds it, so the pre-selection
+                // isn't invisible: a custom default lives in 我的空间, a built-in
+                // one in 探索.
+                space = stored.isBuiltIn ? .explore : .mine
+            }
+        }
+        .sheet(isPresented: $showCreateTemplate) {
+            TemplateEditorView(
+                template: SummarizeTemplate(
+                    category: templateStore.categories.first ?? "Custom",
+                    name: "",
+                    prompt: "",
+                    isBuiltIn: false
+                ),
+                existingCategories: templateStore.categories
+            ) { newTemplate in
+                templateStore.templates.append(newTemplate)
+                templateStore.save()
+                selected = newTemplate
+                space = .mine
+            }
+        }
+        .sheet(item: $editingTemplate) { template in
+            TemplateEditorView(
+                template: template,
+                existingCategories: templateStore.categories
+            ) { updated in
+                if let idx = templateStore.templates.firstIndex(where: { $0.id == updated.id }) {
+                    templateStore.templates[idx] = updated
+                    templateStore.save()
+                    if selected?.id == updated.id { selected = updated }
+                }
             }
         }
     }
+
+    /// The three spaces, underlined like the detail page's 来源 | 笔记 tabs so
+    /// the two pickers in the app feel like one product.
+    private var spaceBar: some View {
+        HStack(spacing: 0) {
+            ForEach(TemplateSpace.allCases) { item in
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) { space = item }
+                } label: {
+                    VStack(spacing: 5) {
+                        Text(item.title)
+                            .font(.system(size: 14, weight: space == item ? .semibold : .regular))
+                            .foregroundStyle(space == item ? Color.primary : Color.secondary)
+                        Capsule()
+                            .fill(space == item ? Color.primary : Color.clear)
+                            .frame(width: 18, height: 2)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(space == item ? [.isSelected] : [])
+            }
+        }
+        .padding(.bottom, 2)
+        .background(Color(uiColor: .systemGroupedBackground))
+    }
+
+    @ViewBuilder
+    private var spaceContent: some View {
+        switch space {
+        case .mine: mineSpace
+        case .recommended: recommendedSpace
+        case .explore: exploreSpace
+        }
+    }
+
+    // MARK: 我的空间
+
+    private var mineSpace: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                sectionHeader(L10n.Summarize.myTemplates, count: myTemplates.count)
+                LazyVGrid(columns: spaceColumns, spacing: 10) {
+                    ForEach(myTemplates) { template in
+                        spaceCard(template)
+                    }
+                    // Plaud's dashed "创建模板" card — always present, even with
+                    // zero templates, because it is the whole point of the space.
+                    createTemplateCard
+                }
+                spaceOptions
+                Text(L10n.Summarize.mineSpaceFooter)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 24)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+    }
+
+    /// 语言 / AI 模型 — the same two bindings the 自定义生成 panel edits
+    /// (output language and the global primary provider), repeated here because
+    /// this is where the user is actually choosing *how* to generate.
+    private var spaceOptions: some View {
+        VStack(spacing: 0) {
+            optionRow(L10n.Summarize.outputLanguage, value: currentLangName, chevron: true) {
+                showLangPicker = true
+            }
+            Divider().padding(.leading, 16)
+            Menu {
+                ForEach(env.config.config.llmProviders.configuredProviders, id: \.key) { provider in
+                    Button {
+                        env.config.config.llmProviders.primary = provider.key
+                        env.config.scheduleSave()
+                    } label: {
+                        if provider.key == env.config.config.llmProviders.primary {
+                            Label(provider.label, systemImage: "checkmark")
+                        } else {
+                            Text(provider.label)
+                        }
+                    }
+                }
+            } label: {
+                optionRow(L10n.Summarize.aiModel, value: activeProviderLabel, chevron: true) {}
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemBackground))
+        )
+    }
+
+    // MARK: 推荐 / 探索
+
+    private var recommendedSpace: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                cardSection(L10n.Summarize.editorsPicks, templates: editorPicks)
+                cardSection(L10n.Summarize.inspiration, templates: inspirationPicks)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 24)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+    }
+
+    private var exploreSpace: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                ForEach(exploreCategories, id: \.self) { category in
+                    cardSection(
+                        SummarizeTemplate.localizedCategoryName(category),
+                        templates: exploreTemplates(in: category)
+                    )
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 24)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+    }
+
+    private func cardSection(_ title: String, templates: [SummarizeTemplate]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader(title, count: nil)
+            LazyVGrid(columns: spaceColumns, spacing: 10) {
+                ForEach(templates) { template in
+                    spaceCard(template)
+                }
+            }
+        }
+    }
+
+    private func sectionHeader(_ title: String, count: Int?) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+            if let count {
+                Text("\(count)")
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var spaceColumns: [GridItem] {
+        [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
+    }
+
+    // MARK: - Space content sources
+
+    private var myTemplates: [SummarizeTemplate] {
+        templateStore.templates.filter { !$0.isBuiltIn && matchesSearch($0) }
+    }
+
+    /// 编辑精选 — the short shelf we actually stand behind: the four Plaud-style
+    /// daily drivers plus the formats most recordings fall into.
+    private static let editorPickNames: [String] = [
+        "Quick Summary", "Meeting Minutes", "Key Points", "To-Do List",
+        "Formal Meeting Minutes", "BANT Customer Analysis", "Interview Summary", "Lecture Notes",
+    ]
+
+    /// 灵感推荐 — "you wouldn't think to look for these": formats that turn a
+    /// recording into something other than prose.
+    private static let inspirationNames: [String] = [
+        "Key Data Points", "Q&A Format", "Brainstorm Synthesis",
+        "Decision Log", "Daily Log", "Long Article to Slide Deck Outline",
+    ]
+
+    private var editorPicks: [SummarizeTemplate] {
+        Self.editorPickNames.compactMap(template(named:)).filter(matchesSearch)
+    }
+
+    private var inspirationPicks: [SummarizeTemplate] {
+        Self.inspirationNames.compactMap(template(named:)).filter(matchesSearch)
+    }
+
+    private func template(named name: String) -> SummarizeTemplate? {
+        templateStore.templates.first { $0.name == name && $0.isBuiltIn }
+    }
+
+    /// Categories in the library's own order, empty ones dropped after search.
+    private var exploreCategories: [String] {
+        templateStore.categories.filter { !exploreTemplates(in: $0).isEmpty }
+    }
+
+    private func exploreTemplates(in category: String) -> [SummarizeTemplate] {
+        templateStore.templates(in: category).filter(matchesSearch)
+    }
+
+    private func matchesSearch(_ template: SummarizeTemplate) -> Bool {
+        guard !search.isEmpty else { return true }
+        let q = search.lowercased()
+        return template.name.lowercased().contains(q)
+            || template.category.lowercased().contains(q)
+            || (template.localizedSummary?.lowercased().contains(q) ?? false)
+    }
+
+    // MARK: - Cards
+
+    /// One template card: icon block, name, one-line "what this is for", and the
+    /// corner expand affordance that opens the full prompt (Plaud's ↗).
+    ///
+    /// Tap = select (the bottom bar then generates with it) — not "run
+    /// immediately": the user is still choosing, and generating is a billable
+    /// act that deserves its own tap.
+    private func spaceCard(_ template: SummarizeTemplate) -> some View {
+        let isSelected = selected?.storeKey == template.storeKey
+        return Button {
+            withAnimation(.easeInOut(duration: 0.12)) { selected = template }
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: template.effectiveIcon)
+                        .font(.body)
+                        .foregroundStyle(Color.appAccent)
+                        .frame(width: 30, height: 30)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.appAccent.opacity(0.12))
+                        )
+                    Spacer(minLength: 0)
+                    Button {
+                        previewing = template
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .padding(4)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text(template.localizedName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+                Text(template.pickerSubtitle(limit: 56))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+                    .frame(minHeight: 28, alignment: .top)
+                HStack(spacing: 4) {
+                    if !template.isBuiltIn {
+                        Text(L10n.Summarize.customBadge)
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.appAccent.opacity(0.16)))
+                            .foregroundStyle(Color.appAccent)
+                    }
+                    Spacer(minLength: 0)
+                    // Plaud prints the author here. We have no marketplace, so
+                    // the honest answer is the product's own name.
+                    Text("Nomily")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(
+                        isSelected ? Color.appAccent : Color.primary.opacity(0.07),
+                        lineWidth: isSelected ? 1.5 : 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if !template.isBuiltIn {
+                Button {
+                    editingTemplate = template
+                } label: {
+                    Label(L10n.Common.edit, systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    templateStore.templates.removeAll { $0.id == template.id }
+                    templateStore.save()
+                    if selected?.id == template.id { selected = nil }
+                } label: {
+                    Label(L10n.Common.delete, systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    /// The dashed "+" card, Plaud style.
+    private var createTemplateCard: some View {
+        Button {
+            showCreateTemplate = true
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: "square.and.pencil")
+                    .font(.title3)
+                    .foregroundStyle(Color.appAccent)
+                Text(L10n.Summarize.createTemplate)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 120)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground).opacity(0.55))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(
+                        Color.primary.opacity(0.18),
+                        style: StrokeStyle(lineWidth: 1, dash: [5, 4])
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 生成笔记 — enabled once a card is selected. Uses `use(_:)` directly
+    /// rather than `generateNow()`: the space picker *is* the custom path, so
+    /// the auto-mode branch doesn't apply here.
+    private var pickerGenerateBar: some View {
+        VStack(spacing: 0) {
+            Divider()
+            Button {
+                guard let selected else { return }
+                showTemplateList = false
+                use(selected)
+            } label: {
+                Text(L10n.Summarize.generateNotes)
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(selected == nil)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .background(.bar)
+    }
+
 
     /// Kick off the run. **Called only from the overview page** — the tile itself only handles "open the overview".
     ///
@@ -682,143 +1065,6 @@ struct SummarizeSheet: View {
         preflightWarning = gap.fallback.map {
             L10n.Summarize.preflightFallback(gap.gap, $0)
         } ?? gap.gap
-    }
-
-    private var languageBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "globe")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text(L10n.Summarize.outputLanguage)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button { showLangPicker = true } label: {
-                HStack(spacing: 4) {
-                    Text(currentLangName)
-                        .font(.subheadline)
-                        .foregroundStyle(outputLangCode.isEmpty ? Color.secondary : Color.appAccent)
-                    Image(systemName: "chevron.down")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 10)
-        .background(Color(uiColor: .secondarySystemBackground))
-    }
-
-    // MARK: - Template grid (★ seventh revision 2026-10-15)
-    //
-    // It used to be `List { Section { one row = icon + name + an 80-character prompt preview } }`:
-    // only three or four fit on screen, and **the names drowned in walls of text** — picking a template became line-by-line reading.
-    // Now spread into tiles by category: scan the category headers, then the names on the tiles — six to eight visible per screen.
-    // To see exactly "what a template will produce", tap through to its overview page.
-    private var templateGrid: some View {
-        Group {
-            if filtered.isEmpty {
-                // Say something when the search finds nothing. An emptied grid leaves the page blank, and users will think it's broken.
-                EmptyStateView(
-                    L10n.Summarize.noMatchingTemplates,
-                    systemImage: "magnifyingglass",
-                    message: L10n.Summarize.searchTemplates
-                )
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 20) {
-                        ForEach(filteredCategories, id: \.self) { category in
-                            VStack(alignment: .leading, spacing: 10) {
-                                categoryHeader(category)
-                                LazyVGrid(
-                                    columns: [GridItem(.adaptive(minimum: 148), spacing: 10)],
-                                    spacing: 10
-                                ) {
-                                    ForEach(templatesIn(category)) { template in
-                                        templateCard(template)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 14)
-                    .padding(.bottom, 28)
-                }
-            }
-        }
-        // Attached outside the Group: that way the search bar is present in both the "results" and "no results" shapes,
-        // so users can delete the typo they just made. Inside, it would have to be written twice (a Group
-        // dispatches the modifier to its single content view).
-        .searchable(text: $search, prompt: L10n.Summarize.searchTemplates)
-    }
-
-    private func templatesIn(_ category: String) -> [SummarizeTemplate] {
-        filtered.filter { $0.category == category }
-    }
-
-    private func categoryHeader(_ category: String) -> some View {
-        HStack(spacing: 6) {
-            Text(SummarizeTemplate.localizedCategoryName(category))
-                .font(.subheadline.weight(.semibold))
-            Text(L10n.Summarize.templateCount(templatesIn(category).count))
-                .font(.caption2)
-                .monospacedDigit()
-                .foregroundStyle(.tertiary)
-            Spacer(minLength: 0)
-        }
-    }
-
-    /// One template tile. **Name only** — the description and prompt live on the overview page; the goal here is "scannable".
-    private func templateCard(_ template: SummarizeTemplate) -> some View {
-        Button {
-            // Opened as the **chooser** from 自定义生成 → picking a card selects
-            // and closes; the overview page stays for the browsing flow.
-            if showTemplateList {
-                selected = template
-                showTemplateList = false
-            } else {
-                withAnimation(.easeInOut(duration: 0.18)) { previewing = template }
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: template.isBuiltIn ? "doc.text" : "pencil.and.outline")
-                        .font(.caption)
-                        .foregroundStyle(template.isBuiltIn ? Color.secondary : Color.appAccent)
-                    Spacer(minLength: 0)
-                    if !template.isBuiltIn {
-                        Text(L10n.Summarize.customBadge)
-                            .font(.system(size: 9, weight: .semibold))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.appAccent.opacity(0.16)))
-                            .foregroundStyle(Color.appAccent)
-                    }
-                }
-                Text(template.localizedName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-            // `maxHeight: .infinity` makes **tiles in the same row equal height** — when a one-line name sits next to
-            // a three-line name, the ragged bottom edges are extremely conspicuous.
-            .frame(maxWidth: .infinity, minHeight: 88, maxHeight: .infinity, alignment: .topLeading)
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(uiColor: .secondarySystemBackground))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.primary.opacity(0.07), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Summarize

@@ -58,6 +58,18 @@ extension Job {
         )
     }
 
+    /// Chapter outline (★ 2026-10-23). One per recording: pressing "regenerate"
+    /// again replaces the artifact rather than queueing a second pass over the
+    /// same transcript — the idempotency key is what makes that true.
+    static func outline(clip: String) -> Job {
+        Job(
+            id: "outline:\(clip)",
+            kind: .outline,
+            clipName: clip,
+            enqueuedAt: Date()
+        )
+    }
+
     /// ★ 2026-10-22 (任务二): document export (`txt` / `md` / `pdf`). Same job id
     /// as the audio export — the two share one slot per recording on purpose.
     static func export(clip: String, format: String) -> Job {
@@ -616,6 +628,100 @@ enum JobRunners {
             result.append(L10n.LLM.chunkedNote(outcome.chunkCount))
         }
         return result
+    }
+
+    // MARK: - Chapter outline (★ 2026-10-23, "录音来源里面还有大纲总结")
+
+    /// Character budget for the timeline handed to the model. Roughly 3.5k
+    /// tokens of input — enough for a two-hour meeting's topic structure once
+    /// each line is trimmed, and cheap enough to run on demand.
+    private static let outlineTimelineBudget = 14_000
+
+    /// Build the 大纲 for one recording: a chapter list with start times.
+    ///
+    /// Not folded into `summarize` on purpose:
+    /// * the outline is **per transcript**, and belongs to 来源 — a summary is
+    ///   per *page* and belongs to 笔记;
+    /// * it must be regenerable on its own (the user may want chapters without
+    ///   touching their notes, or after editing the transcript);
+    /// * the artifact is separate (`<base>.chapters.json`), so a failed outline
+    ///   can never leave a half-written summary behind.
+    @MainActor
+    static func outline(_ job: Job, config: AppConfig, reporter: JobQueue.Reporter) async throws {
+        guard let doc = TranscriptDocument.load(for: job.clipName) else {
+            throw JobSourceMissing(what: L10n.Jobs.sourceTranscript)
+        }
+        // Flat-text transcripts (imported .txt, or a provider that returned no
+        // per-segment timings) can't carry an outline: every chapter would have
+        // to start at 0. Say so instead of producing a fake list.
+        guard !doc.segments.isEmpty else { throw ClipChapterError.noTimeline }
+
+        let timeline = Self.outlineTimeline(doc.segments)
+        guard !timeline.isEmpty else { throw ClipChapterError.noTimeline }
+
+        BackgroundKeeper.shared.acquire(.summary)
+        defer { BackgroundKeeper.shared.release(.summary) }
+
+        let instruction = NSLocalizedString("outline.prompt", value: """
+        You build a navigation outline (a table of contents) for a recording, from a timestamped transcript.
+
+        Return ONLY a JSON array — no prose, no code fence:
+        [{"t":"00:00","title":"..."}]
+
+        Rules:
+        - 5 to 12 chapters, in order. Each one starts where its topic actually changes in the transcript.
+        - "t" is the timestamp of the FIRST line belonging to that chapter, copied from the input's
+          [mm:ss] markers (use h:mm:ss once past the first hour).
+        - "title" is a 4-12 word noun phrase naming what that stretch is about. No numbering,
+          no "Chapter", no quotation marks, no trailing punctuation.
+        - Cover the whole recording: the first chapter starts at the beginning of the first line.
+        - Write the titles in the SAME LANGUAGE as the transcript.
+        """, comment: "System prompt for generating a timestamped chapter outline")
+
+        let outcome = try await LLMCompletionService.completeResilient(
+            systemPrompt: instruction,
+            userContent: timeline,
+            config: config,
+            // The timeline is already budgeted; chunking would produce chapters
+            // per chunk with duplicate timestamps.
+            allowChunking: false,
+            allowSectionReuse: false
+        )
+        let chapters = ClipChapter.parse(outcome.completion.text)
+        guard !chapters.isEmpty else { throw ClipChapterError.unparsable }
+
+        ClipChapterStore.save(chapters, for: job.clipName)
+        reporter.notes(notices(for: outcome, config: config), false)
+        log.info("outline done for \(job.clipName, privacy: .public): \(chapters.count) chapters")
+    }
+
+    /// `[mm:ss] line` per segment, evenly thinned until it fits the budget.
+    ///
+    /// Thinning by taking every second line (rather than truncating the tail)
+    /// keeps the whole recording represented — an outline of the first ten
+    /// minutes followed by silence is worse than a coarser outline of an hour.
+    private static func outlineTimeline(_ segments: [AsrSegment]) -> String {
+        var lines: [String] = segments.compactMap { seg in
+            let text = seg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            let clipped = text.count > 160 ? String(text.prefix(160)) + "…" : text
+            return "[\(Self.outlineClock(seg.start))] \(clipped)"
+        }
+        guard !lines.isEmpty else { return "" }
+        while lines.joined(separator: "\n").count > outlineTimelineBudget, lines.count > 24 {
+            lines = stride(from: 0, to: lines.count, by: 2).map { lines[$0] }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// `mm:ss`, or `h:mm:ss` past the first hour — the same shape the prompt
+    /// asks the model to copy back.
+    private static func outlineClock(_ seconds: Double) -> String {
+        let total = max(0, Int(seconds))
+        if total >= 3600 {
+            return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
+        }
+        return String(format: "%02d:%02d", total / 60, total % 60)
     }
 
     // MARK: - Title (best-effort)

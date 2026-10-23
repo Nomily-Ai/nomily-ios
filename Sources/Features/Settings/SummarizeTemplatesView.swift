@@ -471,8 +471,12 @@ private struct TemplatePreviewView: View {
 }
 
 // MARK: - Template editor
+//
+// ★ 2026-10-23: no longer `private` — the summary sheet's "我的空间" space
+// creates templates in place (Plaud's dashed 创建模板 card), and duplicating a
+// second editor there would guarantee two diverging prompt-length rules.
 
-private struct TemplateEditorView: View {
+struct TemplateEditorView: View {
     @State var template: SummarizeTemplate
     let existingCategories: [String]
     let onSave: (SummarizeTemplate) -> Void
