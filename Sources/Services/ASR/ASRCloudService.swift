@@ -52,6 +52,18 @@ enum ASRCloudService {
             let (data, resp) = try await URLSession.shared.data(for: request)
             let millis = Int(Date().timeIntervalSince(started) * 1000)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            // ★ 2026-10-23: diag line for the on-device probe — the Tencent
+            // chain produced three *different* errors in a row (retired action →
+            // empty scope date → ?), and os_log can't be read off-device. One
+            // line with what the app actually sent (auth header prefix, no
+            // signature) and received makes the next report decidable from the
+            // pulled log alone.
+            if spec.id == "tencent" {
+                let auth = request.value(forHTTPHeaderField: "Authorization") ?? ""
+                let prefix = String(auth.prefix(80))
+                let body = String(data: data.prefix(220), encoding: .utf8) ?? "<binary>"
+                TicNoteDiagLog.log("ASR-Cloud", "tencent probe http=\(code) auth[\(prefix)…] resp=\(body)")
+            }
             // 讯飞's recognition entry is a WebSocket: a *correct* signature is
             // answered with 101 (upgrade accepted), a wrong one with 401 + JSON.
             let accepted = (200..<300).contains(code) || (spec.id == "xfyun" && code == 101)
