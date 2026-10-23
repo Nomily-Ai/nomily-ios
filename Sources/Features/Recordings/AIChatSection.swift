@@ -1,14 +1,27 @@
 import SwiftUI
 
-/// Bottom-of-page AI Q&A, grounded in **this recording only** (DingTalk's recording page ends
-/// with the same block).
+/// Recording-scoped AI Q&A: the model, the floating ask bar on the detail page,
+/// and the conversation sheet it opens.
 ///
-/// ★ (2026-10-19) Split in two on purpose: the answers scroll with the page, the **input bar is
-/// pinned to the bottom** via `safeAreaInset`. A question box that scrolls away is a question box
-/// nobody uses — DingTalk pins it for the same reason.
+/// History:
+/// * (2026-10-19) DingTalk shape — answers in the page, input pinned at the bottom.
+/// * 2026-10-23 ("ai 问答是直接一个聊条框不要直接全部占满底部"): one compact bar.
+/// * 2026-10-23 ("这个布局排版都是有问题的需要优化"): the expanding-bubbles bar was
+///   itself the layout problem — with the keyboard up it covered the player and
+///   left a void between the last bubble and the field. Plaud's own solution is
+///   the one adopted here: the detail page keeps a **short bar**, and tapping it
+///   opens a real conversation sheet with its own input. Nothing overlays the
+///   transcript or the summary any more.
 @MainActor
 final class AIChatModel: ObservableObject {
-    @Published var messages: [AIChatSection.Message] = []
+
+    struct Message: Identifiable {
+        let id = UUID()
+        let isUser: Bool
+        let text: String
+    }
+
+    @Published var messages: [Message] = []
     @Published var draft = ""
     @Published var busy = false
     @Published var errorText: String?
@@ -27,7 +40,7 @@ final class AIChatModel: ObservableObject {
         guard canSend else { return }
         draft = ""
         errorText = nil
-        messages.append(AIChatSection.Message(isUser: true, text: question))
+        messages.append(Message(isUser: true, text: question))
         busy = true
 
         let history = messages
@@ -51,93 +64,199 @@ final class AIChatModel: ObservableObject {
                     // The user is waiting for an answer, not for a chunk-merge pass.
                     allowChunking: false
                 )
-                messages.append(AIChatSection.Message(isUser: false, text: outcome.completion.text))
+                messages.append(Message(isUser: false, text: outcome.completion.text))
             } catch {
                 errorText = error.localizedDescription
             }
         }
     }
+
+    func clear() {
+        messages.removeAll()
+        errorText = nil
+    }
 }
 
-struct AIChatSection: View {
+// MARK: - The floating bar on the detail page
 
-    @ObservedObject var model: AIChatModel
+/// The bottom strip. It is a **button that looks like an input**, not an input:
+/// tapping it opens the conversation sheet.
+///
+/// Plaud's box is the reference — page-coloured fill, a thin accent hairline, a
+/// soft shadow, grey placeholder text. The old version put the whole chat in
+/// here, which is what pushed the page around and left a gap above the keyboard.
+struct AIChatAskBar: View {
 
-    struct Message: Identifiable {
-        let id = UUID()
-        let isUser: Bool
-        let text: String
-    }
+    var placeholder: String
+    var action: () -> Void
 
     var body: some View {
-        Section {
-            ForEach(model.messages) { message in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(message.isUser ? L10n.ClipDetail.aiAskYou : L10n.ClipDetail.aiAskAssistant)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(message.text)
-                        .font(.callout)
-                        .foregroundStyle(.primary)
-                        .lineSpacing(3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .padding(.vertical, 2)
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                Text(placeholder)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(Color.accentColor.opacity(0.85))
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(uiColor: .systemBackground))
+            )
+            .overlay(
+                // Plaud's ask box wears a green→purple→blue hairline; it is what
+                // makes the box read as "AI" rather than as a search field.
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.30, green: 0.78, blue: 0.55),
+                                Color(red: 0.55, green: 0.45, blue: 0.95),
+                                Color(red: 0.35, green: 0.65, blue: 0.95),
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        lineWidth: 1.2
+                    )
+            )
+            .shadow(color: .black.opacity(0.07), radius: 6, x: 0, y: 2)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
+        .background(.bar)
+    }
+}
 
-            if model.busy {
-                HStack(spacing: 8) {
-                    ProgressView()
-                    Text(L10n.ClipDetail.aiAskThinking)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
+// MARK: - The conversation sheet
 
-            if let errorText = model.errorText {
-                Text(errorText)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-        } header: {
-            HStack {
-                Text(L10n.ClipDetail.aiAskTitle)
-                Spacer()
-                if !model.messages.isEmpty {
-                    Button(L10n.ClipDetail.aiAskClear) {
-                        model.messages.removeAll()
-                        model.errorText = nil
+/// Full conversation, opened from `AIChatAskBar`. Content sits above the input,
+/// the input rides the keyboard — no in-page overlay, no capped bubble area.
+struct AIChatSheet: View {
+
+    @ObservedObject var model: AIChatModel
+    var placeholder: String
+
+    @EnvironmentObject private var configService: ConfigService
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var inputFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        if model.messages.isEmpty && !model.busy {
+                            emptyState
+                        }
+                        ForEach(model.messages) { message in
+                            bubble(message).id(message.id)
+                        }
+                        if model.busy {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text(L10n.ClipDetail.aiAskThinking)
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        if let errorText = model.errorText {
+                            Text(errorText)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                        Color.clear.frame(height: 1).id("bottom")
                     }
-                    .font(.caption)
-                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: model.messages.count) { _ in
+                    withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
+                .onChange(of: model.busy) { _ in
+                    withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
             }
-        } footer: {
-            if model.messages.isEmpty {
-                Text(L10n.ClipDetail.aiAskFooter)
+            .safeAreaInset(edge: .bottom) { inputRow }
+            .navigationTitle(L10n.ClipDetail.aiAskTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if !model.messages.isEmpty {
+                        Button(L10n.ClipDetail.aiAskClear) { model.clear() }
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(L10n.ClipDetail.aiAskDone) { dismiss() }
+                        .fontWeight(.semibold)
+                }
             }
+            .onAppear { inputFocused = true }
+        }
+        .presentationDragIndicator(.visible)
+    }
+
+    /// Empty state doubles as the grounding note the inline section used to show.
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.ClipDetail.aiAskEmptyTitle)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text(L10n.ClipDetail.aiAskFooter)
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 24)
+    }
+
+    @ViewBuilder
+    private func bubble(_ message: AIChatModel.Message) -> some View {
+        HStack {
+            if message.isUser { Spacer(minLength: 40) }
+            Text(message.text)
+                .font(.callout)
+                .lineSpacing(3)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(message.isUser
+                              ? Color.accentColor.opacity(0.16)
+                              : Color(uiColor: .secondarySystemBackground))
+                )
+            if !message.isUser { Spacer(minLength: 40) }
         }
     }
-}
 
-/// The pinned bar. Lives outside the Form so it never scrolls away.
-struct AIChatInputBar: View {
-
-    @ObservedObject var model: AIChatModel
-    @EnvironmentObject private var configService: ConfigService
-
-    var body: some View {
-        HStack(spacing: 10) {
-            TextField(L10n.ClipDetail.aiAskPlaceholder, text: $model.draft, axis: .vertical)
-                .lineLimit(1...3)
+    private var inputRow: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField(placeholder, text: $model.draft, axis: .vertical)
+                .focused($inputFocused)
+                .lineLimit(1...4)
                 .textFieldStyle(.plain)
                 .submitLabel(.send)
                 .onSubmit { model.send(config: configService.config) }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
                 .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color(uiColor: .secondarySystemBackground))
                 )
 
@@ -145,14 +264,16 @@ struct AIChatInputBar: View {
                 model.send(config: configService.config)
             } label: {
                 Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(model.canSend ? Color.accentColor : Color.secondary.opacity(0.5))
+                    .font(.system(size: 30))
+                    .foregroundStyle(model.canSend ? Color.accentColor : Color.secondary.opacity(0.45))
             }
             .buttonStyle(.plain)
             .disabled(!model.canSend)
+            .padding(.bottom, 3)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
         .background(.bar)
     }
 }

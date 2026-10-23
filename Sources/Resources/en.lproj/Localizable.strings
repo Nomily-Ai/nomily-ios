@@ -247,6 +247,10 @@
 "clip_detail.ai_ask_thinking" = "Thinking…";
 "clip_detail.ai_ask_clear" = "Clear";
 "clip_detail.ai_ask_placeholder" = "Ask about this recording";
+"clip_detail.ai_ask_placeholder_note" = "Ask about this note";
+"clip_detail.ai_ask_done" = "Done";
+"clip_detail.ai_ask_empty_title" = "Ask anything about this recording";
+"clip_detail.ai_generated_note" = "AI-generated — for reference only";
 "clip_detail.ai_ask_footer" = "Answers use only this recording's transcript and summary.";
 "clip_detail.ai_ask_system" = "You are a meeting assistant. Answer strictly from the RECORDING MATERIAL provided. If it does not contain the answer, say so plainly instead of guessing, and suggest what the user could look for. Reply in the language of the question. Be concise and quote timestamps when useful.";
 "clip_detail.translation" = "Translation";
@@ -525,6 +529,13 @@
 "summarize.copy_name" = "%@ (copy)";
 "summarize.new_category_name" = "New category name";
 "summarize.output_language" = "Output Language";
+"summarize.generate_notes" = "Generate note";
+"summarize.auto_generate" = "Auto";
+"summarize.auto_generate_desc" = "Picks the best-matching template from the transcript — no manual setup.";
+"summarize.custom_generate" = "Custom";
+"summarize.template_row" = "Template";
+"summarize.ai_model" = "AI model";
+"summarize.generate_now" = "Generate now";
 "summarize.same_as_transcript" = "Same as transcript";
 "summarize.restore_defaults" = "Restore default templates";
 "summarize.restore_defaults_title" = "Restore default templates?";
@@ -683,6 +694,9 @@
 "watch.menu_hint_settings" = "Gestures, version, reset";
 "watch.menu_hint_queue" = "Clips still waiting to upload";
 "watch.menu_hint_about" = "Build number on the watch";
+"watch.menu_hint_recap" = "AI digests pushed from the phone";
+"watch.recap_title" = "Recap";
+"watch.recap_empty" = "Summaries generated on your iPhone appear here";
 "watch.style_appearance" = "Appearance";
 "watch.style_breathing" = "Breathing";
 "watch.style_reset" = "Reset";

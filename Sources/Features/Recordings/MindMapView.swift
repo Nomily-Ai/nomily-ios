@@ -309,6 +309,10 @@ struct MindMapCanvas: View {
     /// rendering used for PNG export leaves this alone — a picture has no
     /// branches left to open.
     var onToggle: (Int) -> Void = { _ in }
+    /// ★ 2026-10-23: the preview card paints its own card background, so the
+    /// canvas's beige fill would read as a mismatched inner rectangle. The
+    /// zoomable screen and the PNG export keep the fill.
+    var showsBackground: Bool = true
 
     @Environment(\.colorScheme) private var scheme
 
@@ -318,13 +322,23 @@ struct MindMapCanvas: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            canvasFill
+            if showsBackground {
+                canvasFill
+            }
 
             ForEach(Array(layout.edges.enumerated()), id: \.offset) { _, edge in
+                // ★ 2026-10-23 ("按照他这种样式"): Vobot's map draws *one*
+                // neutral hairline per link, not a rainbow. Colour now lives
+                // only in the node text, so a dense map reads as an outline
+                // rather than a wiring diagram.
                 EdgeShape(edge: edge)
                     .stroke(
-                        color(edge.branchIndex).opacity(edge.depth <= 1 ? 0.75 : 0.5),
-                        style: StrokeStyle(lineWidth: edge.depth <= 1 ? 2 : 1.4, lineCap: .round)
+                        edgeColour.opacity(edge.depth <= 1 ? 0.55 : 0.34),
+                        style: StrokeStyle(
+                            lineWidth: edge.depth <= 1 ? 1.5 : 1,
+                            lineCap: .round,
+                            lineJoin: .round
+                        )
                     )
             }
 
@@ -344,6 +358,11 @@ struct MindMapCanvas: View {
 
     private func color(_ index: Int) -> Color {
         branchPalette[index % branchPalette.count].resolve(scheme)
+    }
+
+    /// Single link colour for every edge (Vobot's map has no per-branch lines).
+    private var edgeColour: Color {
+        scheme == .dark ? Color(white: 0.52) : Color(white: 0.46)
     }
 
     private struct EdgeShape: Shape {
@@ -385,24 +404,14 @@ private struct MindMapNodeView: View {
 
     private var cornerRadius: CGFloat { isRoot ? 10 : (isSection ? 9 : 7) }
 
-    private var rootFill: Color {
-        scheme == .dark ? Color(white: 0.92) : Color(red: 0.20, green: 0.20, blue: 0.20)
-    }
-
-    private var surfaceFill: Color {
-        scheme == .dark ? Color(white: 1, opacity: 0.07) : .white
-    }
-
-    private var bodyFill: Color {
-        if isRoot { return rootFill }
-        if isSection { return colour.opacity(scheme == .dark ? 0.20 : 0.13) }
-        return surfaceFill
-    }
-
+    /// ★ 2026-10-23 ("按照他这种样式"): Vobot's map is **text on paper** — no
+    /// cards, no fills, no shadows. Only the ink carries hierarchy: root and
+    /// branch titles in near-black, leaves in a softer grey.
     private var textColour: Color {
-        if isRoot { return scheme == .dark ? Color(white: 0.1) : .white }
-        if isSection { return colour }
-        return .primary
+        if scheme == .dark {
+            return isRoot || isSection ? Color(white: 0.95) : Color(white: 0.72)
+        }
+        return isRoot || isSection ? Color(white: 0.13) : Color(white: 0.33)
     }
 
     var body: some View {
@@ -419,29 +428,9 @@ private struct MindMapNodeView: View {
         .padding(.horizontal, MindMapLayout.horizontalPadding(for: item.depth))
         .padding(.vertical, MindMapLayout.verticalPadding(for: item.depth))
         .frame(width: item.frame.width, height: item.frame.height, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(bodyFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(isSection ? colour.opacity(0.45) : .clear, lineWidth: 1)
-        )
-        .overlay(alignment: .leading) {
-            // Deep leaves get a slim colour tick instead of an outline,
-            // which keeps dense areas from turning into a grid of boxes.
-            if item.depth >= 2 {
-                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                    .fill(colour.opacity(0.8))
-                    .frame(width: 3, height: max(6, item.frame.height - 10))
-                    .padding(.leading, 4)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .shadow(color: .black.opacity(scheme == .dark ? 0 : 0.07), radius: isRoot ? 4 : 1.5, y: 1)
         // The whole box is the target, not just the glyphs, so a branch is
         // as easy to hit as it is to read.
-        .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .contentShape(Rectangle())
         .onTapGesture { if isTappable { onTap() } }
     }
 
@@ -869,5 +858,85 @@ enum MindMapExporter {
             height: min(bounding.height, available.height)
         )
         (title as NSString).draw(in: textRect, withAttributes: attributes)
+    }
+}
+
+// MARK: - Preview card
+
+/// The mind map as it appears **inside the note page** — Plaud's white card with
+/// the map drawn small and one tap opening the zoomable screen.
+///
+/// ★ 2026-10-23 ("参考一下页面布局跟结构"): the note page used to offer a plain
+/// "思维导图" row. A row says nothing about what is in the map; a thumbnail does,
+/// and it is what Plaud shows between the last section and the ask box.
+///
+/// The layout is built once in `init` at two levels deep — the card is a
+/// thumbnail, not a reading surface, and laying out the full tree for a
+/// 200 pt-tall box would only produce unreadable overlaps.
+struct MindMapPreviewCard: View {
+
+    let title: String
+    var onTap: () -> Void
+
+    private let layout: MindMapLayout?
+    private static let previewHeight: CGFloat = 190
+
+    init(markdown: String, title: String, onTap: @escaping () -> Void) {
+        self.title = title
+        self.onTap = onTap
+        guard let tree = MarkdownOutline.parse(markdown) else {
+            self.layout = nil
+            return
+        }
+        // ★ 2026-10-23 ("思维导图展示有问题"): a busy map folded to two levels
+        // scales down to unreadable dots inside a 190 pt card. The preview
+        // adapts: few sections keep their sub-points, many sections collapse
+        // to the section row only — the same picture Plaud's card shows.
+        let topSections = tree.children.count
+        let levels = topSections > 8 ? 1 : min(2, max(1, tree.maxDepth))
+        let folded = MindMapLayout.foldPoints(in: tree, showingLevels: levels)
+        self.layout = MindMapLayout.build(tree: tree, collapsed: folded)
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L10n.ClipDetail.mindMap)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+
+                GeometryReader { geo in
+                    if let layout {
+                        let fit = min(
+                            1,
+                            min(geo.size.width / max(layout.size.width, 1),
+                                Self.previewHeight / max(layout.size.height, 1))
+                        )
+                        MindMapCanvas(layout: layout, labelForRoot: title, showsBackground: false)
+                            .scaleEffect(fit, anchor: .topLeading)
+                            .frame(
+                                width: layout.size.width * fit,
+                                height: layout.size.height * fit,
+                                alignment: .topLeading
+                            )
+                    }
+                }
+                .frame(height: Self.previewHeight)
+                .clipped()
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(uiColor: .systemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.secondary.opacity(0.16), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L10n.ClipDetail.mindMap)
     }
 }

@@ -205,11 +205,14 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
     ]
 
     private static let nameKeys: [String: String] = [
-        // ★ 2026-10-23: the Plaud-style four (PlaudTemplateLibrary).
-        "Plaud Summary": "template.plaud_summary",
-        "Plaud Meeting Minutes": "template.plaud_meeting_minutes",
-        "Plaud Key Points": "template.plaud_key_points",
-        "Plaud To-Do List": "template.plaud_todo_list",
+        // ★ 2026-10-23: the Plaud-style four (PlaudTemplateLibrary), renamed
+        //   ("直接去除 Plaud") — the l10n KEYS keep their plaud_ spelling so the
+        //   per-language tables don't churn; only the stored template *names*
+        //   changed (see SummarizeTemplateStore.legacyPlaudNames).
+        "Quick Summary": "template.plaud_summary",
+        "Meeting Minutes": "template.plaud_meeting_minutes",
+        "Key Points": "template.plaud_key_points",
+        "To-Do List": "template.plaud_todo_list",
         "Formal Meeting Minutes": "template.formal_minutes",
         "Structured Minutes": "template.structured_minutes",
         "Executive Brief": "template.executive_brief",
@@ -278,11 +281,11 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
     ]
 
     private static let summaryKeys: [String: String] = [
-        // ★ 2026-10-23: the Plaud-style four (PlaudTemplateLibrary).
-        "Plaud Summary": "template_desc.plaud_summary",
-        "Plaud Meeting Minutes": "template_desc.plaud_meeting_minutes",
-        "Plaud Key Points": "template_desc.plaud_key_points",
-        "Plaud To-Do List": "template_desc.plaud_todo_list",
+        // ★ 2026-10-23: the Plaud-style four (PlaudTemplateLibrary), renamed.
+        "Quick Summary": "template_desc.plaud_summary",
+        "Meeting Minutes": "template_desc.plaud_meeting_minutes",
+        "Key Points": "template_desc.plaud_key_points",
+        "To-Do List": "template_desc.plaud_todo_list",
         "Detailed Summary": "template_desc.detailed_summary",
         "Meeting Report": "template_desc.meeting_report",
         "Key Points, Decisions, Tasks, Deadlines, and Actions": "template_desc.key_points_decisions_tasks_deadlines_and_actions",
@@ -353,26 +356,44 @@ final class SummarizeTemplateStore: ObservableObject {
 
     init() {
         if let loaded = Self.load() {
-            // Merge any built-ins that the saved store predates. Identity is
-            // (category, name) — a built-in already present keeps the
-            // user's copy (in case future defaults tweak wording, we don't
-            // want to clobber their muscle memory); any built-in missing
-            // gets appended in the same order as `defaults`. User-added
-            // custom templates are left untouched.
-            let savedIDs: Set<String> = Set(loaded.map { "\($0.category)\u{1F}\($0.name)" })
+            // ★ 2026-10-23 ("直接去除 Plaud"): the four Plaud-style built-ins
+            // were renamed ("Plaud Summary" → "Quick Summary", …). Identity is
+            // (category, name), so a stored copy under the old name is renamed
+            // **in place** — otherwise the renamed built-in would be appended
+            // and the picker would show both old and new. Custom templates and
+            // everything else are untouched.
+            let migrated = loaded.map { t in
+                guard t.isBuiltIn, let newName = Self.legacyPlaudNames[t.name] else { return t }
+                var renamed = t
+                renamed.name = newName
+                return renamed
+            }
+            let savedIDs: Set<String> = Set(migrated.map { "\($0.category)\u{1F}\($0.name)" })
             let missing = Self.defaults.filter { d in
                 d.isBuiltIn && !savedIDs.contains("\(d.category)\u{1F}\(d.name)")
             }
             if missing.isEmpty {
-                templates = loaded
+                templates = migrated
+                if migrated != loaded { Self.saveSynchronously(migrated) }
             } else {
-                templates = loaded + missing
+                templates = migrated + missing
                 Self.saveSynchronously(templates)
             }
         } else {
             templates = Self.defaults
         }
     }
+
+    /// Old → new names for the 2026-10-23 de-Plaud rename. The default
+    /// template choice (`config.summaryTemplateKey`, a storeKey) resets once
+    /// for users who had one of these set — the sheet silently falls back to
+    /// no pre-selection, which is the designed behaviour for a missing key.
+    private static let legacyPlaudNames: [String: String] = [
+        "Plaud Summary": "Quick Summary",
+        "Plaud Meeting Minutes": "Meeting Minutes",
+        "Plaud Key Points": "Key Points",
+        "Plaud To-Do List": "To-Do List",
+    ]
 
     private static func saveSynchronously(_ templates: [SummarizeTemplate]) {
         let encoder = JSONEncoder()

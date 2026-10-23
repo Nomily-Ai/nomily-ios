@@ -14,111 +14,159 @@ struct InlineAudioPlayer: View {
     @ObservedObject var player: AudioPlaybackController
     /// Duration from the database (Ogg page scan); the player's own duration can be a second off.
     let totalDuration: TimeInterval?
+    /// The file the waveform is read from. `nil` = keep the plain slider.
+    /// ★ 2026-10-23 (Plaud's layout): the envelope comes from the audio itself.
+    var fileURL: URL? = nil
 
     @State private var isScrubbing = false
     @State private var scrubTime: TimeInterval = 0
+    @State private var peaks: [Float]?
 
     private static let speeds: [Float] = [0.75, 1, 1.25, 1.5, 2]
 
     private var shownTime: TimeInterval { isScrubbing ? scrubTime : player.currentTime }
     private var shownTotal: TimeInterval { totalDuration ?? player.duration }
 
+    /// Plaud's player, structurally:
+    /// `00:07:55 / 00:16:34` → waveform → one row of evenly spaced controls
+    /// (play, −15 s, +15 s, speed). The old version scattered the two times on
+    /// opposite edges of a slider, which is what made the block read as three
+    /// unrelated pieces.
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             if let error = player.loadError {
                 Label(error, systemImage: "play.slash")
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                Slider(
-                    value: Binding(
-                        get: { shownTime },
-                        set: { scrubTime = $0 }
-                    ),
-                    in: 0...max(player.duration, 0.01),
-                    onEditingChanged: { editing in
-                        if editing {
-                            scrubTime = player.currentTime
-                            isScrubbing = true
-                            player.beginScrub()
-                        } else {
-                            player.endScrub(at: scrubTime)
-                            isScrubbing = false
-                        }
-                    }
-                )
-
-                HStack(spacing: 18) {
-                    Text(ClockLabel.mmss(shownTime))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(minWidth: 44, alignment: .leading)
-
-                    Spacer()
-
-                    // Skip back 15 s — the gesture people actually use when they missed a word.
-                    Button {
-                        player.seek(to: max(0, player.currentTime - 15))
-                    } label: {
-                        Image(systemName: "gobackward.15")
-                            .font(.title3)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        player.toggle()
-                    } label: {
-                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title2)
-                            .foregroundColor(.accentColor)
-                            .frame(width: 44, height: 44)
-                            .background(Circle().fill(Color.appAccent.opacity(0.12)))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
-
-                    Button {
-                        player.seek(to: min(player.currentTime + 15, player.duration))
-                    } label: {
-                        Image(systemName: "goforward.15")
-                            .font(.title3)
-                    }
-                    .buttonStyle(.plain)
-
-                    Spacer()
-
-                    Menu {
-                        ForEach(Self.speeds, id: \.self) { speed in
-                            Button {
-                                player.setRate(speed)
-                            } label: {
-                                if abs(player.rate - speed) < 0.01 {
-                                    Label(speedLabel(speed), systemImage: "checkmark")
-                                } else {
-                                    Text(speedLabel(speed))
-                                }
-                            }
-                        }
-                    } label: {
-                        Text(speedLabel(player.rate))
-                            .font(.caption.weight(.semibold).monospacedDigit())
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(Color.appAccent.opacity(0.12)))
-                    }
-                    .frame(minWidth: 44, alignment: .trailing)
-                }
-
                 HStack {
-                    Text(ClockLabel.mmss(shownTotal))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.tertiary)
+                    Text("\(ClockLabel.mmss(shownTime)) / \(ClockLabel.mmss(shownTotal))")
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(isScrubbing ? Color.primary : Color.secondary)
                     Spacer()
                 }
+
+                scrubber
+
+                controls
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
+        .task(id: fileURL) {
+            guard let fileURL, peaks == nil else { return }
+            peaks = await AudioEnvelope.load(for: fileURL)
+        }
+    }
+
+    /// Waveform when the file decodes, the old slider when it does not. Both go
+    /// through the controller's scrub API, so playback behaviour is identical.
+    @ViewBuilder
+    private var scrubber: some View {
+        if let peaks, peaks.count > 1 {
+            WaveformScrubber(
+                peaks: peaks,
+                progress: shownTotal > 0 ? min(1, max(0, shownTime / shownTotal)) : 0,
+                onScrub: { fraction in
+                    if !isScrubbing {
+                        isScrubbing = true
+                        player.beginScrub()
+                    }
+                    scrubTime = fraction * max(player.duration, 0.01)
+                },
+                onScrubBegan: {
+                    if !isScrubbing {
+                        isScrubbing = true
+                        player.beginScrub()
+                    }
+                },
+                onScrubEnded: { fraction in
+                    player.endScrub(at: fraction * max(player.duration, 0.01))
+                    isScrubbing = false
+                }
+            )
+        } else {
+            Slider(
+                value: Binding(
+                    get: { shownTime },
+                    set: { scrubTime = $0 }
+                ),
+                in: 0...max(player.duration, 0.01),
+                onEditingChanged: { editing in
+                    if editing {
+                        scrubTime = player.currentTime
+                        isScrubbing = true
+                        player.beginScrub()
+                    } else {
+                        player.endScrub(at: scrubTime)
+                        isScrubbing = false
+                    }
+                }
+            )
+        }
+    }
+
+    /// Five equal slots, monochrome — Plaud's row. Each item owns one fifth of
+    /// the width so the icons keep their rhythm at any text size.
+    private var controls: some View {
+        HStack(spacing: 0) {
+            Button {
+                player.toggle()
+            } label: {
+                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 40, height: 40)
+                    .overlay(Circle().stroke(Color.primary.opacity(0.7), lineWidth: 1.2))
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+
+            // Skip back 15 s — the gesture people actually use when they missed a word.
+            Button {
+                player.seek(to: max(0, player.currentTime - 15))
+            } label: {
+                Image(systemName: "gobackward.15")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
+
+            Button {
+                player.seek(to: min(player.currentTime + 15, player.duration))
+            } label: {
+                Image(systemName: "goforward.15")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
+
+            Menu {
+                ForEach(Self.speeds, id: \.self) { speed in
+                    Button {
+                        player.setRate(speed)
+                    } label: {
+                        if abs(player.rate - speed) < 0.01 {
+                            Label(speedLabel(speed), systemImage: "checkmark")
+                        } else {
+                            Text(speedLabel(speed))
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(speedLabel(player.rate))
+                        .font(.footnote.weight(.semibold).monospacedDigit())
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 9))
+                }
+                .foregroundStyle(.primary)
+            }
+            .frame(maxWidth: .infinity)
+        }
     }
 
     private func speedLabel(_ value: Float) -> String {
@@ -151,36 +199,35 @@ struct TranscriptSegmentRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(alignment: .top, spacing: 10) {
-                Text(ClockLabel.mmss(segment.start))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(isActive ? Color.accentColor : .secondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule().fill(Color.appAccent.opacity(isActive ? 0.20 : 0.08))
-                    )
-
-                VStack(alignment: .leading, spacing: 3) {
+            // ★ 2026-10-23 ("参考一下页面布局跟结构", Plaud 4029/4030): Plaud's
+            // transcript line is `00:00:10  Eva` in one small grey row, then
+            // the sentence at reading size — no time chip, no card, no
+            // speaker label stacked above. The row only tints while it is the
+            // line being spoken, which is the follow-along cue.
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 10) {
+                    Text(ClockLabel.mmss(segment.start))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(isActive ? Color.accentColor : .secondary)
                     if let speaker = segment.speaker, !speaker.isEmpty {
                         Text(speakerNames[speaker].flatMap { $0.isEmpty ? nil : $0 }
                              ?? L10n.ClipDetail.speaker(speaker))
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(isActive ? Color.accentColor.opacity(0.85) : .secondary)
                     }
-                    Text(Self.highlighted(segment.text, needle: highlight))
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .lineSpacing(4)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                Text(Self.highlighted(segment.text, needle: highlight))
+                    .font(.system(size: 16))
+                    .foregroundStyle(.primary)
+                    .lineSpacing(5)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.vertical, 6)
-            .padding(.horizontal, 8)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 4)
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(isActive ? Color.appAccent.opacity(0.08) : Color.clear)
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isActive ? Color.appAccent.opacity(0.07) : Color.clear)
             )
             .contentShape(Rectangle())
         }
@@ -392,5 +439,70 @@ struct MarkdownBlocksView: View {
             markdown: text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         )) ?? AttributedString(text)
+    }
+}
+
+/// ★ 2026-10-23 ("待办需要有一个前面点击的框，点击了就直接画一条横线"):
+/// the to-do section rendered through `MarkdownBlocksView` was read-only text.
+/// Now every item row carries a tap-to-check circle; checking strikes the row
+/// through. Checked state persists **per recording** (UserDefaults keyed by the
+/// recording name, values are the row texts), so it survives leaving the page
+/// and app restarts — but re-generating the summary rewrites the rows and a
+/// changed text starts unchecked again, which is the honest behaviour.
+struct TodoChecklistView: View {
+
+    let blocks: [MarkdownBlock]
+    /// Namespace for the persisted checks: the recording's name.
+    let recordingName: String
+
+    @State private var done: Set<String> = []
+
+    private var defaultsKey: String { "todo.checked.\(recordingName)" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(blocks) { block in
+                switch block.kind {
+                case .bullet, .ordered, .paragraph:
+                    row(block)
+                case .heading, .quote, .rule:
+                    // Headings/quotes/rules keep the plain rendering — only
+                    // actual to-do rows get a checkbox.
+                    MarkdownBlocksView(blocks: [block])
+                }
+            }
+        }
+        .onAppear { load() }
+    }
+
+    private func row(_ block: MarkdownBlock) -> some View {
+        let checked = done.contains(block.text)
+        return Button {
+            if checked { done.remove(block.text) } else { done.insert(block.text) }
+            save()
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: checked ? "checkmark.circle.fill" : "circle")
+                    .font(.body)
+                    .foregroundStyle(checked ? Color.green : Color.secondary)
+                Text(block.text)
+                    .font(.callout)
+                    .strikethrough(checked, color: .secondary)
+                    .foregroundStyle(checked ? Color.secondary : Color.primary)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func load() {
+        let stored = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
+        done = Set(stored)
+    }
+
+    private func save() {
+        UserDefaults.standard.set(Array(done), forKey: defaultsKey)
     }
 }

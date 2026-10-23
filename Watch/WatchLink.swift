@@ -135,6 +135,10 @@ final class WatchLink: NSObject, ObservableObject {
     private func apply(remoteContext context: [String: Any]) {
         WatchFaceStore.shared.apply(context[WatchLinkMessage.faceStyleKey] as? String)
         WatchFaceStore.shared.applySettings(context)
+        // ★ 2026-10-23: recaps ride in the same context (one slot, everything
+        // travels together — see `WatchLinkMessage.recapsKey`). The store is
+        // indifferent to missing keys, so an old phone's context is harmless.
+        WatchRecapStore.shared.apply(context)
     }
 }
 

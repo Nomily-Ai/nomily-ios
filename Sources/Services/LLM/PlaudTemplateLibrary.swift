@@ -22,30 +22,41 @@ import Foundation
 enum PlaudTemplateLibrary {
 
     static let templates: [SummarizeTemplate] = [
-        // MARK: 总结 — the quick overview (auto-summary default)
+        // MARK: 总结 — the automatic full report (auto-summary default)
+        //
+        // ★ 2026-10-23 ("如果没有设定模板你需要按照自动去生成，按照他这种样式"):
+        // the no-template auto summary follows Vobot Recorder's automatic
+        // report — a titled document whose body is numbered content sections
+        // (一、二、三… in a Chinese transcript) with dense hierarchical
+        // bullets, then to-dos and open questions. Reference samples:
+        // `Downloads/note_20261020183641_总结.md` and the 10-23 nine-section
+        // sample shared in chat. Old sections (Overview / Key Points /
+        // Decisions / To-dos) forced a fixed 4-part shape and capped output;
+        // this one derives its sections from the recording itself.
 
         SummarizeTemplate(
             category: "General Summary",
-            name: "Plaud Summary",
-            summary: "Plaud-style quick overview: one paragraph, key points, decisions, to-dos.",
+            name: "Quick Summary",
+            summary: "Automatic full report: subjects and conclusions, to-dos, follow-ups.",
             prompt: """
-            Produce the quick overview: short, factual, every line carrying information.
+            Produce the automatic full report — the document this app writes when no template was chosen. This is a FULL report: completeness wins over brevity, every real point the recording makes gets in.
 
-            Output exactly these sections — drop any section the transcript gives no real content for:
+            Structure, in this order — drop any section that ends up with no real content:
 
-            ## Overview
-            One short paragraph: what this recording is and what came out of it.
+            # [A short title naming what the recording is about]
 
-            ## Key Points
-            At most 6 bullets, one sentence each. Include concrete numbers, names, and short quotes where they carry meaning.
+            ## [Major subject]
+            Split the recording into its major subjects, one section per subject — as many sections as the recording actually has. Number the section titles in the speakers' language: 一、二、三… for a Chinese transcript, 1. 2. 3. otherwise.
 
-            ## Decisions
-            Only decisions actually made in the recording, one per line.
+            Under each subject, dense bullets that carry the facts, numbers, names, positions and outcomes as they were said; sub-points may nest one level deeper. A decision or conclusion reached gets its own bullet, stated as the decision, not as the discussion.
 
-            ## To-dos & Follow-ups
-            Only explicit commitments, assignments, or items with a deadline. Leave owner and date blank when the transcript does not say — never invent them.
+            ## To-dos
+            One bullet per explicit commitment: task, deadline, owner. Leave owner or date blank when the transcript does not say — never invent them. Omit the section when there are none.
 
-            Keep the whole output under a quarter of the transcript's length.
+            ## Needs follow-up
+            Open questions, unresolved issues, and anything still awaiting confirmation. Omit the section when there are none.
+
+            The title and every heading are in the speakers' language. Reply with the report in Markdown and nothing else.
             """
         ),
 
@@ -53,8 +64,8 @@ enum PlaudTemplateLibrary {
 
         SummarizeTemplate(
             category: "Meeting Notes",
-            name: "Plaud Meeting Minutes",
-            summary: "Complete, clear meeting minutes with actions and decisions (Plaud 会议纪要).",
+            name: "Meeting Minutes",
+            summary: "Complete, clear meeting minutes with actions and decisions.",
             prompt: """
             Generate complete, clear meeting minutes with actions and decisions.
 
@@ -86,7 +97,7 @@ enum PlaudTemplateLibrary {
 
         SummarizeTemplate(
             category: "Meeting Notes",
-            name: "Plaud Key Points",
+            name: "Key Points",
             summary: "Extraction notes: key insights, quotes with speakers, numbers and dates.",
             prompt: """
             Produce extraction notes: only the content worth keeping, nothing else.
@@ -113,7 +124,7 @@ enum PlaudTemplateLibrary {
 
         SummarizeTemplate(
             category: "Action Items",
-            name: "Plaud To-Do List",
+            name: "To-Do List",
             summary: "Only explicit to-dos: task, owner, deadline. Honest empty state when none.",
             prompt: """
             Extract ONLY explicit to-dos: something someone committed to, was assigned, or that carries a deadline. Ideas, possibilities and "we could maybe" are not to-dos.

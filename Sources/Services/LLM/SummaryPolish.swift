@@ -30,13 +30,16 @@ enum SummaryPolicy {
         2. Do not restate metadata: how the audio was captured, speaker numbers ("Speaker 1"), \
         duration, source material or the transcription tool are not summary content.
         3. Say each thing once. If it is in the conclusions, it does not need repeating under topics.
-        4. One sentence per item, at most three items per section. Keep the whole summary under a \
-        quarter of the transcript's length.
+        4. One or two dense sentences per item. When the template asks for a full report, completeness \
+        wins — every real point gets in; otherwise keep the whole summary under a quarter of the \
+        transcript's length.
         5. Action items are only things someone explicitly committed to, was assigned, or that \
         carries a deadline. Ideas, possibilities and "we could maybe" are not action items. Leave \
         owner/date blank when the transcript does not say — never invent them.
-        6. Keep the template's headings, but drop every section that ends up with nothing real in it, \
+        6. Keep the template's section structure, but drop every section that ends up with nothing real in it, \
         including catch-all sections like "additional notes" or "other".
+        7. Write every heading in the same language the speakers used. A Chinese transcript gets Chinese headings \
+        (总览 / 要点 / 决策 / 待办…), never the template's English headings — section titles must match the body text.
         """, comment: "Appended to every summary template prompt: the output discipline")
     }
 
