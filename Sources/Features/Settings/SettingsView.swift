@@ -424,6 +424,12 @@ struct ASRProvidersView: View {
     /// ★ 2026-10-20: connectivity/auth test for the remote live (WSS) server.
     @State private var remoteProbe: VerifyState = .idle
     @State private var remoteProbeDetail: String?
+    // ★ 2026-10-23: cloud-vendor sheets live here, not on `ASRCloudSection` —
+    // a sheet attached to a Form Section gets cancelled whenever the section's
+    // subtree re-renders during presentation (config writes, AppEnvironment
+    // publishes), which showed up as "sheet flashes open then closes".
+    @State private var editingCloud: ASRCloudSpec?
+    @State private var showAzureSheet = false
 
     /// When the user provides a host but omits the port, a default port is supplied. **Only written when creating the record**,
     // and not used as the displayed value for an empty field.
@@ -438,10 +444,18 @@ struct ASRProvidersView: View {
             // from "云转写". It is now the first row of `ASRCloudSection` (its
             // sheet is `AzureSpeechSheet`), which keeps one list of cloud vendors
             // instead of two places writing the same credentials.
-            ASRCloudSection()
+            ASRCloudSection(editing: $editingCloud, showAzure: $showAzureSheet)
             localSection
             customSection
             remoteLiveSection
+        }
+        .sheet(item: $editingCloud) { spec in
+            ASRCloudSheet(spec: spec)
+                .environmentObject(configService)
+        }
+        .sheet(isPresented: $showAzureSheet) {
+            AzureSpeechSheet()
+                .environmentObject(configService)
         }
         .navigationTitle(L10n.Settings.asrProviders)
         .navigationBarTitleDisplayMode(.inline)
@@ -1142,6 +1156,9 @@ struct ASRProvidersView: View {
 
 struct LLMProvidersView: View {
     @EnvironmentObject private var configService: ConfigService
+    // ★ 2026-10-23: sheet hangs off the Form (stable identity), not the grid
+    // Section — otherwise any @Published change during presentation cancels it.
+    @State private var editingProvider: LLMProviderSpec?
 
     private var configured: [(key: String, label: String)] {
         configService.config.llmProviders.configuredProviders
@@ -1221,8 +1238,13 @@ struct LLMProvidersView: View {
             ProviderGridSection(
                 title: L10n.LLM.gridTitle,
                 footer: L10n.LLM.gridFooter,
-                specs: LLMProviderSpec.all
+                specs: LLMProviderSpec.all,
+                editing: $editingProvider
             )
+        }
+        .sheet(item: $editingProvider) { spec in
+            ProviderConfigSheet(spec: spec)
+                .environmentObject(configService)
         }
         .navigationTitle(L10n.Settings.llmProviders)
         .navigationBarTitleDisplayMode(.inline)
@@ -1245,9 +1267,11 @@ private struct ProviderGridSection: View {
     let title: String
     let footer: String?
     let specs: [LLMProviderSpec]
+    // ★ 2026-10-23: sheet state moved to the owning Form view — same
+    // "sheet flashes then closes" fix as `ASRCloudSection`.
+    @Binding var editing: LLMProviderSpec?
 
     @EnvironmentObject private var configService: ConfigService
-    @State private var editing: LLMProviderSpec?
 
     var body: some View {
         Section {
@@ -1263,10 +1287,6 @@ private struct ProviderGridSection: View {
             Text(title)
         } footer: {
             if let footer { Text(footer) }
-        }
-        .sheet(item: $editing) { spec in
-            ProviderConfigSheet(spec: spec)
-                .environmentObject(configService)
         }
     }
 }

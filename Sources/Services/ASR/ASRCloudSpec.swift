@@ -111,7 +111,7 @@ struct ASRCloudSpec: Identifiable, Equatable {
         endpointEditable: false,
         models: ["录音文件识别（Paraformer）", "一句话识别", "实时语音识别"],
         console: "① nls-portal.console.aliyun.com → 项目列表 拿 Appkey；② ram.console.aliyun.com 创建 AccessKey（需同时授权 OSS 读写）；③ 与区域一致建一个 OSS Bucket",
-        note: "转写流程：音频先上传到你的 OSS Bucket（私有），生成 2 小时有效的预签名链接交给阿里云识别（file_link 必须公网可下载，这是它的接口要求），识别完取回结果。区域默认 cn-shanghai。"
+        note: "转写流程：音频先上传到你的 OSS Bucket（私有），生成 2 小时有效的预签名链接交给阿里云识别（file_link 必须公网可下载，这是它的接口要求），识别完取回结果。区域默认 cn-shanghai。实时字幕不走阿里云——它家只有文件转写接口，实时页仍按 Azure/设备端执行，徽标显示的是真正在跑的引擎。"
     )
 
     static let baidu = ASRCloudSpec(

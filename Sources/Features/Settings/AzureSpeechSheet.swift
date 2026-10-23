@@ -181,8 +181,17 @@ struct AzureSpeechSheet: View {
             return
         }
         verify = .verifying
+        // ★ 2026-10-23: record the round trip so the Azure row in the cloud list
+        // shows a latency like every other vendor (the probe IS the verify).
+        let started = Date()
         let result = await LLMModelService.verifyAzure(key: key, region: region)
+        let millis = Int(Date().timeIntervalSince(started) * 1000)
         verify = result.ok ? .success : .failed(result.error ?? L10n.ASR.verifyFailed)
+        if result.ok {
+            ASRLatencyMemory.save(millis, for: "azure")
+        } else {
+            ASRLatencyMemory.clear("azure")
+        }
         // Persist the verdict: the pipeline consults it before using these
         // credentials, and the list badge reads it too.
         var a = azure ?? .init(key: key, region: region)

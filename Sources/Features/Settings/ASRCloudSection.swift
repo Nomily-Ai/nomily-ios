@@ -15,8 +15,15 @@ import SwiftUI
 struct ASRCloudSection: View {
 
     @EnvironmentObject private var configService: ConfigService
-    @State private var editing: ASRCloudSpec?
-    @State private var showAzure = false
+    // ★ 2026-10-23 ("每次点开配置都会弹出来然后缩回去"): the two sheets used to be
+    // attached to this Section — but any `@Published` change during presentation
+    // (AppEnvironment broadcasts BLE/queue state constantly; `prime()` writes
+    // config right when the sheet opens) rebuilds the Form's subtree and iOS
+    // cancels an in-flight presentation. The user saw the sheet flash and had to
+    // tap twice. The state now lives in `ASRProvidersView` and the sheets hang
+    // off the Form itself, whose identity is stable across re-renders.
+    @Binding var editing: ASRCloudSpec?
+    @Binding var showAzure: Bool
 
     var body: some View {
         Section {
@@ -38,14 +45,6 @@ struct ASRCloudSection: View {
             Text(L10n.ASRCloud.title)
         } footer: {
             Text(L10n.ASRCloud.footer)
-        }
-        .sheet(item: $editing) { spec in
-            ASRCloudSheet(spec: spec)
-                .environmentObject(configService)
-        }
-        .sheet(isPresented: $showAzure) {
-            AzureSpeechSheet()
-                .environmentObject(configService)
         }
     }
 }
@@ -92,6 +91,13 @@ private struct AzureCloudRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
+            // ★ 2026-10-23: same latency readout as the cloud rows — the verify
+            // round trip in the sheet records it now.
+            if let ms = ASRLatencyMemory.millis(for: "azure") {
+                Text("\(ms) ms")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
             if verified {
                 Text(L10n.ASRCloud.ready).font(.caption2).foregroundStyle(.green)
             } else if azure?.key.isEmpty == false {
@@ -188,7 +194,9 @@ private struct ASRBrandTile: View {
 
 // MARK: - Sheet
 
-private struct ASRCloudSheet: View {
+/// Internal (was file-private): the sheet is now presented by
+/// `ASRProvidersView` — the stable Form container — not by this Section.
+struct ASRCloudSheet: View {
     let spec: ASRCloudSpec
 
     @EnvironmentObject private var configService: ConfigService

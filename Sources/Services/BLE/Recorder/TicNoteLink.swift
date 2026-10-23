@@ -2769,14 +2769,37 @@ extension TicNoteLink: LiveAudioSource {
         guard !raw.isEmpty else {
             throw RecorderLinkError.malformed("live audio is empty")
         }
-        guard TicNoteOpusStream.looksLikeOpus(raw) else {
-            throw RecorderLinkError.malformed(
-                "live audio is not a plaintext 160 B Opus stream (\(raw.count) B)")
+        if TicNoteOpusStream.looksLikeOpus(raw) {
+            guard let ogg = TicNoteOpusStream.oggOpus(from: raw) else {
+                throw RecorderLinkError.malformed("Ogg muxing failed (\(raw.count) B)")
+            }
+            return ogg
         }
-        guard let ogg = TicNoteOpusStream.oggOpus(from: raw) else {
-            throw RecorderLinkError.malformed("Ogg muxing failed (\(raw.count) B)")
+        // ★ 2026-10-23: strict check failed — first **record what actually came
+        // off the card** (one line: alignment/TOC stats, first bytes, OggS probe),
+        // then try to salvage. On the real device a session died here with
+        // 79 680 B (= 160 × 498, length fine) and no way to tell which of
+        // "prefix shifted" / "scattered bad packets" / "not Opus at all" it was.
+        let report = TicNoteOpusStream.malformedReport(raw)
+        TicNoteDiagLog.log("LIVE", "✗ \(report)")
+
+        // Salvage ①: the card handed us a finished Ogg (possible firmware change
+        // from raw packets to containerised audio) — pass it through like D·NOTE.
+        if raw.count > 4, raw.prefix(4) == Data("OggS".utf8) {
+            TicNoteDiagLog.log("LIVE", "salvage: stream is already Ogg — storing as-is")
+            return raw
         }
-        return ogg
+        // Salvage ②: realign + drop bad packets. A 20 ms gap per dropped packet
+        // beats losing the whole take; if too little survives, fall through.
+        if let s = TicNoteOpusStream.salvage(raw) {
+            TicNoteDiagLog.log("LIVE",
+                "salvage: realigned +\(s.alignmentOffset) B, kept \(s.kept)/\(s.total) packets")
+            if let ogg = TicNoteOpusStream.oggOpus(from: s.data) {
+                return ogg
+            }
+        }
+        throw RecorderLinkError.malformed(
+            "live audio is not a plaintext 160 B Opus stream (\(raw.count) B)")
     }
 
     // MARK: Internal

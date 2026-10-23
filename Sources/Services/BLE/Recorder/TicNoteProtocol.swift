@@ -394,6 +394,111 @@ enum TicNoteOpusStream {
         Double(packetCount(data)) * Double(TicNoteGATT.recordUnitMillis) / 1000
     }
 
+    // MARK: Failure forensics + salvage (2026-10-23)
+
+    /// One line describing *why* `looksLikeOpus` failed, for the LIVE diag tag.
+    ///
+    /// 2026-10-23 real-device hit: a live session accumulated 79 680 B
+    /// (= 160 × 498, so the length check passed) yet the TOC check failed —
+    /// without these numbers we could not tell "mid-stream byte loss shifted the
+    /// framing" from "the card changed packet size/codec" from "an Ogg arrived".
+    /// The report answers all three in one line.
+    static func malformedReport(_ data: Data) -> String {
+        let bytes = [UInt8](data)
+        let packetBytes = TicNoteGATT.opusPacketBytes
+        var bestOffset = 0
+        var bestHits = 0
+        if bytes.count >= packetBytes * 3 {
+            for offset in 0..<packetBytes {
+                var hits = 0
+                var total = 0
+                var index = offset
+                while index + packetBytes <= bytes.count {
+                    total += 1
+                    if bytes[index] == TicNoteGATT.opusTOC { hits += 1 }
+                    index += packetBytes
+                }
+                if hits > bestHits {
+                    bestHits = hits
+                    bestOffset = offset
+                }
+            }
+        }
+        let alignedAtZero = bytes.enumerated()
+            .filter { $0.offset % packetBytes == 0 }
+            .filter { $0.element == TicNoteGATT.opusTOC }
+            .count
+        let oggS = Array("OggS".utf8)
+        let hasOggS = bytes.count >= 4 && Array(bytes.prefix(4)) == oggS
+        let hex = bytes.prefix(16).map { String(format: "%02X", $0) }.joined(separator: " ")
+        let ratio = bestHits > 0 && bytes.count >= packetBytes
+            ? Double(bestHits) / Double((bytes.count - bestOffset) / packetBytes)
+            : 0
+        return String(format: "malformed stream: %d B (%%160=%d) first16=[%@] oggS=%d TOC@0=%d bestAlign=%d(%.1f%%)",
+                      bytes.count, bytes.count % packetBytes, hex,
+                      hasOggS ? 1 : 0, alignedAtZero, bestOffset, ratio * 100)
+    }
+
+    struct Salvage {
+        var data: Data
+        var kept: Int
+        var total: Int
+        var alignmentOffset: Int
+    }
+
+    /// Best-effort recovery of a stream that failed the strict `looksLikeOpus`
+    /// check. Two independent defects can be repaired without losing the take:
+    ///
+    /// 1. **Prefix misalignment** (a few bytes lost before/at stream start): every
+    ///    packet boundary is shifted by the same offset `o < 160`. Trying each `o`
+    ///    and re-slicing recovers *all* packets after the offset.
+    /// 2. **Scattered bad packets** (a corrupted frame mid-stream): the valid
+    ///    packets around it are self-contained CELT frames — dropping the bad
+    ///    ones costs a 20 ms gap each, not the recording.
+    ///
+    /// Returns nil when the stream does not look recoverable (kept ratio too low
+    /// or too few packets survived) — the caller should then keep the original
+    /// hard failure rather than save garbage.
+    static func salvage(_ data: Data, minKeepRatio: Double = 0.6, minPackets: Int = 10) -> Salvage? {
+        let bytes = [UInt8](data)
+        let packetBytes = TicNoteGATT.opusPacketBytes
+        guard bytes.count >= packetBytes else { return nil }
+
+        // Find the alignment offset that makes the most packets start with the TOC.
+        var bestOffset = 0
+        var bestHits = 0
+        for offset in 0..<packetBytes {
+            var hits = 0
+            var index = offset
+            while index + packetBytes <= bytes.count {
+                if bytes[index] == TicNoteGATT.opusTOC { hits += 1 }
+                index += packetBytes
+            }
+            if hits > bestHits {
+                bestHits = hits
+                bestOffset = offset
+            }
+        }
+        guard bestHits >= minPackets else { return nil }
+
+        var kept = Data()
+        var keptCount = 0
+        var totalCount = 0
+        var index = bestOffset
+        while index + packetBytes <= bytes.count {
+            totalCount += 1
+            if bytes[index] == TicNoteGATT.opusTOC {
+                kept.append(contentsOf: bytes[index..<(index + packetBytes)])
+                keptCount += 1
+            }
+            index += packetBytes
+        }
+        guard totalCount > 0, Double(keptCount) / Double(totalCount) >= minKeepRatio else {
+            return nil
+        }
+        return Salvage(data: kept, kept: keptCount, total: totalCount, alignmentOffset: bestOffset)
+    }
+
     // MARK: Ogg encapsulation
 
     /// Ogg CRC32: polynomial `0x04c11db7`, no reflection, initial value 0 — matches the official `Opus2Ogg`.
