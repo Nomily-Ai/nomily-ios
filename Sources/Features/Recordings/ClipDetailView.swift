@@ -84,22 +84,23 @@ struct ClipDetailView: View {
 
     private enum TranslateTarget { case transcript, summary }
 
-    /// ★ (2026-10-19) DingTalk-style tabs: Transcript / AI Minutes / To-dos. The summary is the
-    /// "minutes" document, the transcript is the listening surface, and the to-dos are
-    /// lifted out of the summary's markdown — three very different reading modes, which
-    /// one endless Form made worse the longer the recording.
+    /// ★ 2026-10-23 ("照 Plaud 的样式", vivo 取证): exactly two tabs, Plaud's
+    /// 「来源 | 笔记」. 来源 = playback + the timestamped, speaker-labelled
+    /// transcript (the *source*); 笔记 = the generated note pages, mind map and
+    /// the note chat (the *product*). The old third To-dos tab is gone, Plaud
+    /// style — to-dos live as a note page (the 待办清单（Plaud） template), and
+    /// TodoExtract's aggregation over all pages remains available there.
     private enum DetailTab: CaseIterable, Identifiable {
-        case transcript, summary, todos
+        case source, notes
         var id: Int { Self.allCases.firstIndex(of: self) ?? 0 }
         var title: String {
             switch self {
-            case .transcript: L10n.ClipDetail.tabTranscript
-            case .summary: L10n.ClipDetail.tabSummary
-            case .todos: L10n.ClipDetail.tabTodos
+            case .source: L10n.ClipDetail.tabTranscript
+            case .notes: L10n.ClipDetail.tabSummary
             }
         }
     }
-    @State private var detailTab: DetailTab = .transcript
+    @State private var detailTab: DetailTab = .source
     @State private var transcriptQuery = ""
     @State private var speakerFilter: String?
     /// ★ 2026-10-22 ("还要支持修改说话人的名称"): the user's names for this clip's
@@ -113,8 +114,9 @@ struct ClipDetailView: View {
 
     var body: some View {
         Form {
-            if item.hasAudio { heroCard }
-            if !marks.isEmpty { marksSection }
+            // ★ 2026-10-23 ("照 Plaud 的样式"): the two tabs sit at the **very top** —
+            //   来源 (left) = audio playback + who said what at what time, 笔记 (right)
+            //   = the generated note pages + mind map. Exactly Plaud's split.
             Section {
                 Picker("", selection: $detailTab) {
                     ForEach(DetailTab.allCases) { tab in
@@ -127,20 +129,21 @@ struct ClipDetailView: View {
                 .listRowInsets(EdgeInsets())
             }
             switch detailTab {
-            case .transcript:
+            case .source:
+                // The player belongs to 来源, like Plaud's: playback and the
+                // timestamped transcript (who said what, when) are one surface.
+                if item.hasAudio { heroCard }
+                if !marks.isEmpty { marksSection }
                 transcriptSection
                 if translation != nil { translationSection }
-            case .summary:
+            case .notes:
                 summarySection
                 if translatedSummary != nil { translatedSummarySection }
-            case .todos:
-                todosSection
-            }
-            // ★ (2026-10-19) AI Q&A closes the page, the way DingTalk's recording page does:
-            // the questions a user has after reading are about *this* clip, and sending them to
-            // a separate chat screen loses the context they were just looking at.
-            if aiChat.isAvailable {
-                AIChatSection(model: aiChat)
+                // AI Q&A is a *note* feature ("对此笔记提问") — it lives on the
+                // 笔记 tab, like Plaud's chat bar under the note.
+                if aiChat.isAvailable {
+                    AIChatSection(model: aiChat)
+                }
             }
             // Export/delete moved into the top-right menu (Plaud / DingTalk detail-page shape).
             // Only a *running or failed* export still gets an inline row — progress needs to be
@@ -156,9 +159,11 @@ struct ClipDetailView: View {
         // recording detail page wastes the bottom strip on navigation the user has already
         // made a decision about — and the Q&A bar needs that strip.
         .toolbar(.hidden, for: .tabBar)
-        // Answers scroll, the question box does not.
+        // Answers scroll, the question box does not. The chat belongs to the
+        // 笔记 tab (Plaud's "对此笔记提问") — hidden on 来源 so playback keeps
+        // the bottom strip.
         .safeAreaInset(edge: .bottom) {
-            if aiChat.isAvailable {
+            if detailTab == .notes, aiChat.isAvailable {
                 AIChatInputBar(model: aiChat)
             }
         }
@@ -851,36 +856,6 @@ struct ClipDetailView: View {
             parts.append("TRANSCRIPT\n" + String(body.prefix(12_000)))
         }
         return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
-    }
-
-    // MARK: To-dos tab
-
-    /// The to-do tab: action items lifted from the notes' markdown — **all note
-    /// pages**, not just the primary one (★ 2026-10-23 "页面模板": a to-do list
-    /// generated as its own page must reach this tab too). An honest empty
-    /// state when no page has such a section — never invented content.
-    @ViewBuilder
-    private var todosSection: some View {
-        Section {
-            let todos = pages
-                .compactMap { NotePages.text(of: $0, for: item.name) }
-                .flatMap { TodoExtract.fromSummary($0) }
-            if !todos.isEmpty {
-                MarkdownBlocksView(blocks: todos)
-            } else if !pages.isEmpty {
-                Text(L10n.ClipDetail.todosEmpty)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else if transcript != nil {
-                Text(L10n.ClipDetail.todosNeedSummary)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(L10n.ClipDetail.transcribeFirst)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-        }
     }
 
     private func triggerTranscribe(locales: [String]?) {        if env.config.config.asrProviders.hasConfiguredProvider {
