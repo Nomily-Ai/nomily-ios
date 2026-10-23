@@ -9,6 +9,13 @@ struct SummarizeSheet: View {
     ///    a transcript", and `use(_:)` uses it to block "empty transcript" before enqueueing.
     let transcriptText: String
     let audioName: String
+    /// Which **note page** this sheet writes (`NotePage.id`).
+    ///
+    /// ★ 2026-10-23 ("页面模板", Plaud parity): defaults to the classic single
+    /// summary — every call site that doesn't care keeps compiling unchanged.
+    /// The detail page passes an existing id to re-generate a page ("更换模板")
+    /// or a fresh one when adding a page (the "+" chip).
+    var pageID: String = NotePage.primaryID
     let onComplete: (String) -> Void
 
     @EnvironmentObject private var env: AppEnvironment
@@ -347,7 +354,8 @@ struct SummarizeSheet: View {
         let job = Job.summarize(
             clip: audioName,
             prompt: withLanguageInstruction(template.localizedPrompt),
-            templateName: template.name
+            templateName: template.name,
+            pageID: pageID
         )
         jobID = job.id
         summarizeState = .running
@@ -396,7 +404,9 @@ struct SummarizeSheet: View {
     /// and the detail page, full-text page, and mind map all read it. Keeping an extra in-memory copy only adds one more truth
     /// that can drift out of sync.
     private func adoptResult(of job: Job) {
-        let url = StorageLocations.summaryURL(for: audioName)
+        // ★ 2026-10-23: read back the **page** this sheet was opened for — the
+        //   output *is* that page's file, nothing else.
+        let url = StorageLocations.notePageURL(for: audioName, pageID: pageID)
         guard let data = try? Data(contentsOf: url),
               let text = String(data: data, encoding: .utf8), !text.isEmpty else {
             // The file is missing, yet the ledger says "success". Only one possibility: the user just cancelled this job on the

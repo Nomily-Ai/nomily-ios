@@ -11,15 +11,24 @@ private let log = Logger(subsystem: "com.nomily.app.ios", category: "jobs")
 //    language), so that "translate the same recording again into another language" gets mistaken for re-enqueueing the same job.
 extension Job {
 
-    /// Summary: **only one allowed per recording at a time** (picking another template and regenerating just re-runs that one).
-    static func summarize(clip: String, prompt: String, templateName: String) -> Job {
-        Job(
-            id: "summarize:\(clip)",
+    /// Summary: one job per **note page**. The primary page (`pageID ==
+    /// NotePage.primaryID`, the default) keeps the historical id `summarize:<clip>`
+    /// so AiTask's "wait for the summary job" and the auto-summary dedup keep
+    /// working; an extra page appends `#<pageID>` — pages run **independently**,
+    /// generating one must not cancel another.
+    ///
+    /// ★ 2026-10-23 ("页面模板", Plaud parity).
+    static func summarize(clip: String, prompt: String, templateName: String,
+                          pageID: String = NotePage.primaryID) -> Job {
+        let suffix = pageID == NotePage.primaryID ? "" : "#\(pageID)"
+        return Job(
+            id: "summarize:\(clip)\(suffix)",
             kind: .summarize,
             clipName: clip,
             enqueuedAt: Date(),
             prompt: prompt,
-            templateName: templateName
+            templateName: templateName,
+            pageID: pageID
         )
     }
 
@@ -141,10 +150,21 @@ enum JobRunners {
         //   `SummaryPolish`. The title is extracted from the **cleaned** text so
         //   it can never be named after a placeholder line.
         let text = SummaryPolish.clean(outcome.completion.text)
+        // ★ 2026-10-23 ("页面模板"): the artifact lands on **its own page**. The
+        //   primary page still is `<base>.summary.md` (nothing pre-existing moves);
+        //   extra pages get `<base>.note.<id>.md` plus a manifest entry. The
+        //   manifest upsert happens here, not in the sheet — a job can finish after
+        //   the app was killed, and the page must then appear without any UI open.
+        let pageID = job.pageID ?? NotePage.primaryID
         try? text.data(using: .utf8)?
-            .write(to: StorageLocations.summaryURL(for: job.clipName), options: .atomic)
+            .write(to: StorageLocations.notePageURL(for: job.clipName, pageID: pageID), options: .atomic)
+        NotePages.upsert(id: pageID,
+                         title: job.templateName ?? L10n.ClipDetail.noteDefaultTitle,
+                         for: job.clipName)
 
-        if let title = await extractTitle(
+        // The recording's display title is derived from the **primary** page only —
+        // an extra page (say, "逐字稿") must not rename the recording in the list.
+        if pageID == NotePage.primaryID, let title = await extractTitle(
             from: text,
             config: config,
             // ★ Directly target the channel that actually did the work. Without specifying it, the primary channel has already proven

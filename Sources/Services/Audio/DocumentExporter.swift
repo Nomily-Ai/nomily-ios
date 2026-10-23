@@ -114,10 +114,24 @@ enum DocumentExporter {
 
     // MARK: - Markdown
 
+    /// ★ 2026-10-23 ("页面模板"): extra note pages (everything past the primary
+    /// summary) travel with the document — Plaud's model exports the whole note,
+    /// not just its first page.
+    private static func extraNotePages(for clipName: String) -> [(title: String, text: String)] {
+        NotePages.load(for: clipName)
+            .filter { $0.id != NotePage.primaryID }
+            .compactMap { page in
+                NotePages.text(of: page, for: clipName).map { (page.title, $0) }
+            }
+    }
+
     private static func markdown(for clipName: String, stem: String) throws -> String {
         var out = "# \(stem)\n\n"
         if let summary = try? summaryText(for: clipName) {
             out += "## \(L10n.ClipDetail.tabSummary)\n\n\(summary)\n\n"
+        }
+        for page in extraNotePages(for: clipName) {
+            out += "## \(page.title)\n\n\(page.text)\n\n"
         }
         out += "## \(L10n.ClipDetail.tabTranscript)\n\n\(try transcriptText(for: clipName))\n"
         return out
@@ -136,6 +150,10 @@ enum DocumentExporter {
             body += "<h2>\(esc(L10n.ClipDetail.tabSummary))</h2>"
             // Summaries are Markdown; a line-break-only rendering stays readable.
             body += "<pre style=\"font-family:-apple-system;font-size:11pt;white-space:pre-wrap\">\(esc(summary))</pre>"
+        }
+        for page in extraNotePages(for: clipName) {
+            body += "<h2>\(esc(page.title))</h2>"
+            body += "<pre style=\"font-family:-apple-system;font-size:11pt;white-space:pre-wrap\">\(esc(page.text))</pre>"
         }
         if let transcript = try? transcriptText(for: clipName) {
             body += "<h2>\(esc(L10n.ClipDetail.tabTranscript))</h2>"

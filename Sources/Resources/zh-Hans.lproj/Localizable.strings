@@ -234,9 +234,14 @@
 "clip_detail.view_full_summary" = "查看完整摘要";
 "clip_detail.summarize" = "生成摘要";
 "clip_detail.transcribe_first" = "请先完成转录以启用摘要功能。";
-"clip_detail.tab_transcript" = "转写";
-"clip_detail.tab_summary" = "AI纪要";
+"clip_detail.tab_transcript" = "来源";
+"clip_detail.tab_summary" = "笔记";
 "clip_detail.tab_todos" = "待办";
+"clip_detail.note_add_page" = "添加笔记页";
+"clip_detail.note_change_template" = "更换模板";
+"clip_detail.note_delete_page" = "删除此页";
+"clip_detail.note_delete_page_message" = "此页生成的内容将被删除。";
+"clip_detail.note_default_title" = "总结";
 "clip_detail.todos_empty" = "摘要里没有待办事项。";
 "clip_detail.todos_need_summary" = "先生成摘要，待办事项会汇集在这里。";
 "clip_detail.search_transcript" = "搜索转录内容";

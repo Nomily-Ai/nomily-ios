@@ -22,6 +22,25 @@ struct ClipDetailView: View {
     @State private var deleteTranscriptAlert = false
     @State private var deleteSummaryAlert = false
     @State private var summary: String?
+    /// ★ 2026-10-23 ("页面模板", Plaud parity): a recording carries **several note
+    /// pages**, each generated from its own template. `summary` stays the text of
+    /// the *primary* page (id `NotePage.primaryID`) so the translate/export/menu
+    /// paths around it don't move; `pages` + `selectedPageID` + `pageText` drive
+    /// the chip row — Plaud's 「总结 ▾ | 权力动态 | +」.
+    @State private var pages: [NotePage] = []
+    @State private var selectedPageID: String = NotePage.primaryID
+    /// Body of the selected **non-primary** page (the primary one lives in `summary`).
+    @State private var pageText: String?
+    /// The page the open summarize sheet writes to (regenerate vs. add).
+    @State private var summarizePageID: String = NotePage.primaryID
+    @State private var showAddPage = false
+    @State private var addPageID = ""
+    @State private var deletePageAlert: NotePage?
+    /// The text of whichever page is on screen — the one surface mind map / full
+    /// view / Q&A should all follow.
+    private var currentPageText: String? {
+        selectedPageID == NotePage.primaryID ? summary : pageText
+    }
     @State private var showSummarize = false
     @State private var showNoProvider = false
     @State private var showNoASR = false
@@ -240,8 +259,8 @@ struct ClipDetailView: View {
         }
         .fullScreenCover(isPresented: $showMindMap) {
             // Re-read from state rather than capture: the summary can be
-            // regenerated while the sheet is closed.
-            MindMapScreen(markdown: summary ?? "", fallbackTitle: item.displayTitle)
+            // regenerated while the sheet is closed. Follows the **selected page**.
+            MindMapScreen(markdown: currentPageText ?? "", fallbackTitle: item.displayTitle)
         }
         .task {
             if let url = item.url { player.load(url) }
@@ -253,9 +272,29 @@ struct ClipDetailView: View {
             loadTranslation()
             loadSummary()
             loadTranslatedSummary()
+            // ★ 2026-10-23 ("页面模板"): load the page manifest; a clip from before
+            //   the feature falls back to "just the primary page" inside `NotePages.load`.
+            pages = NotePages.load(for: item.name)
+            if !pages.contains(where: { $0.id == selectedPageID }) {
+                selectedPageID = pages.first?.id ?? NotePage.primaryID
+            }
+            loadSelectedPageText()
             aiChat.context = aiContext ?? ""
         }
         .onDisappear { player.stop() }
+        .onChange(of: jobs.jobs) { _ in
+            // A summarize job can finish while this page is open (or after the sheet
+            // was dismissed) — the manifest gains the page on disk, so re-read it
+            // here. Guarded by equality so it stays a no-op most of the time.
+            let loaded = NotePages.load(for: item.name)
+            if loaded != pages {
+                pages = loaded
+                if !loaded.contains(where: { $0.id == selectedPageID }) {
+                    selectedPageID = loaded.first?.id ?? NotePage.primaryID
+                }
+                loadSelectedPageText()
+            }
+        }
         // A rename must reach the Q&A context as well, or answers keep using the
         // old labels until the page is reopened (2026-10-22).
         .onChange(of: speakerStore.maps) { _ in
@@ -273,9 +312,30 @@ struct ClipDetailView: View {
             if let doc = transcript {
                 SummarizeSheet(
                     transcriptText: Self.textForSummarization(doc, speakerNames: speakerMap),
-                    audioName: item.name
+                    audioName: item.name,
+                    // ★ 2026-10-23 ("页面模板"): the page the action came from — the
+                    //   primary page when the plain "generate" was tapped, the selected
+                    //   page when "更换模板" was.
+                    pageID: summarizePageID
                 ) { text in
-                    summary = text
+                    if summarizePageID == NotePage.primaryID { summary = text }
+                    pages = NotePages.load(for: item.name)
+                    loadSelectedPageText()
+                }
+            }
+        }
+        .sheet(isPresented: $showAddPage) {
+            if let doc = transcript {
+                SummarizeSheet(
+                    transcriptText: Self.textForSummarization(doc, speakerNames: speakerMap),
+                    audioName: item.name,
+                    pageID: addPageID
+                ) { _ in
+                    // The manifest entry is written by the runner when the artifact
+                    // lands; here we only re-read what it wrote.
+                    pages = NotePages.load(for: item.name)
+                    selectedPageID = addPageID
+                    loadSelectedPageText()
                 }
             }
         }
@@ -315,6 +375,20 @@ struct ClipDetailView: View {
         }
         .sheet(isPresented: $showMailExport) {
             MailExportSheet(clipName: item.name)
+        }
+        // ★ 2026-10-23 ("页面模板"): deleting a note page — the chip's context menu
+        //   hands the page over here. The primary page is excluded in the menu: its
+        //   deletion goes through "删除摘要" (trash flow + translation sidecar).
+        .alert(L10n.ClipDetail.noteDeletePage, isPresented: Binding(
+            get: { deletePageAlert != nil },
+            set: { if !$0 { deletePageAlert = nil } }
+        )) {
+            Button(L10n.Common.delete, role: .destructive) {
+                if let page = deletePageAlert { deletePage(page) }
+            }
+            Button(L10n.Common.cancel, role: .cancel) {}
+        } message: {
+            Text(L10n.ClipDetail.noteDeletePageMessage)
         }
         .confirmationDialog(L10n.ClipDetail.retranscribe, isPresented: $showRetranscribeChoice, titleVisibility: .hidden) {
             Button(L10n.ASR.transcribeAuto) { runTranscribe(locales: nil) }
@@ -781,15 +855,19 @@ struct ClipDetailView: View {
 
     // MARK: To-dos tab
 
-    /// The to-do tab: action items lifted from the summary's markdown. An honest empty
-    /// state when the summary has no such section — never invented content.
+    /// The to-do tab: action items lifted from the notes' markdown — **all note
+    /// pages**, not just the primary one (★ 2026-10-23 "页面模板": a to-do list
+    /// generated as its own page must reach this tab too). An honest empty
+    /// state when no page has such a section — never invented content.
     @ViewBuilder
     private var todosSection: some View {
         Section {
-            let todos = summary.map { TodoExtract.fromSummary($0) } ?? []
+            let todos = pages
+                .compactMap { NotePages.text(of: $0, for: item.name) }
+                .flatMap { TodoExtract.fromSummary($0) }
             if !todos.isEmpty {
                 MarkdownBlocksView(blocks: todos)
-            } else if summary != nil {
+            } else if !pages.isEmpty {
                 Text(L10n.ClipDetail.todosEmpty)
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -1067,33 +1145,110 @@ struct ClipDetailView: View {
 
     // MARK: - summary
 
+    /// The summarize job running / failed / finished for the **selected page** —
+    /// pages run independently, so the status rows must follow the chip, not the clip.
+    private func summarizeJob(_ pick: (Job) -> Bool) -> Job? {
+        jobs.jobs.first {
+            $0.clipName == item.name && $0.kind == .summarize
+                && ($0.pageID ?? NotePage.primaryID) == selectedPageID
+                && pick($0)
+        }
+    }
+
+    /// Plaud's 「总结 ▾ | 权力动态 | +」 row: one chip per note page, long-press for
+    /// 更换模板 / 删除此页, "+" to generate another page from any template.
+    private var pageChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(pages) { page in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            selectedPageID = page.id
+                        }
+                        loadSelectedPageText()
+                    } label: {
+                        Text(page.title)
+                            .font(.footnote.weight(page.id == selectedPageID ? .semibold : .regular))
+                            .lineLimit(1)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                Capsule().fill(page.id == selectedPageID
+                                               ? Color.accentColor.opacity(0.16)
+                                               : Color.secondary.opacity(0.12))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            tapSummarize(pageID: page.id)
+                        } label: {
+                            Label(L10n.ClipDetail.noteChangeTemplate,
+                                  systemImage: "arrow.trianglehead.2.counterclockwise")
+                        }
+                        if page.id != NotePage.primaryID {
+                            Button(role: .destructive) {
+                                deletePageAlert = page
+                            } label: {
+                                Label(L10n.ClipDetail.noteDeletePage, systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+                if transcript != nil {
+                    Button {
+                        addPage()
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.footnote.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.ClipDetail.noteAddPage)
+                }
+            }
+        }
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+    }
+
     @ViewBuilder
     private var summarySection: some View {
         Section {
+            // ★ 2026-10-23 ("页面模板"): the chip row always shows once a transcript
+            //   exists — even with zero pages it offers "+", Plaud's way into a second
+            //   note without leaving the recording.
+            if transcript != nil { pageChips }
             // The summary itself plus its translation — both kinds produce "summary section content", so they sit together.
             //
             // ★ The most important case here: the user **picked a template in the summary sheet and then
             //   swiped it away** (exactly the usage the twelfth revision set out to support). Without these two lines,
             //   they'd return to the detail page to find only the "Generate summary" button, with no sign a job is running.
-            if let job = activeJob(.summarize) {
+            if let job = summarizeJob({ $0.finishedAt == nil }) {
                 runningRow(job, L10n.Summarize.summarizing)
-            } else if let job = failedJob(.summarize) {
+            } else if let job = summarizeJob({ $0.finishedAt != nil && $0.lastError != nil }) {
                 failedRow(job)
             }
-            if let job = activeJob(.translate, target: "summary") {
+            // Summary translation is a primary-page feature (the job reads the
+            // classic `.summary.md` file) — offered only while that page is shown.
+            if selectedPageID == NotePage.primaryID,
+               let job = activeJob(.translate, target: "summary") {
                 runningRow(job, L10n.ClipDetail.translating)
-            } else if let job = failedJob(.translate, target: "summary") {
+            } else if selectedPageID == NotePage.primaryID,
+                      let job = failedJob(.translate, target: "summary") {
                 failedRow(job)
             }
-            if let summary {
+            if let text = currentPageText {
                 // ★ (2026-10-19) The summary tab is the "AI minutes" reading surface, so the
                 //   whole document renders inline (headings / bullets, no truncation) instead of
                 //   a 14-block teaser behind a link.
-                MarkdownBlocksView(blocks: MarkdownBlocks.parse(summary))
+                MarkdownBlocksView(blocks: MarkdownBlocks.parse(text))
 
                 NavigationLink(L10n.ClipDetail.viewFullSummary) {
                     SummaryFullView(
-                        text: summary,
+                        text: text,
                         posterTitle: item.customTitle ?? item.name,
                         posterDate: item.modifiedAt,
                         posterDuration: item.duration
@@ -1102,7 +1257,7 @@ struct ClipDetailView: View {
 
                 // Only offered when the summary actually has section
                 // structure to plot — a flat block of prose has no map.
-                if MarkdownOutline.parse(summary) != nil {
+                if MarkdownOutline.parse(text) != nil {
                     Button {
                         showMindMap = true
                     } label: {
@@ -1111,7 +1266,7 @@ struct ClipDetailView: View {
                 }
             } else if transcript != nil {
                 Button {
-                    tapSummarize()
+                    tapSummarize(pageID: selectedPageID)
                 } label: {
                     Label(L10n.ClipDetail.summarize, systemImage: "sparkles")
                 }
@@ -1122,21 +1277,24 @@ struct ClipDetailView: View {
             }
 
             // Result note (fallback channel / chunked / truncated). Placed after the content — it describes
-            // the content above.
-            if let job = lastFinishedJob(.summarize) { notesRow(job) }
-            if let job = lastFinishedJob(.translate, target: "summary") { notesRow(job) }
+            // the content above. Scoped to the selected page for the same reason as the status rows.
+            if let job = summarizeJob({ $0.finishedAt != nil && $0.lastError == nil }) { notesRow(job) }
+            if selectedPageID == NotePage.primaryID,
+               let job = lastFinishedJob(.translate, target: "summary") { notesRow(job) }
         } header: {
             HStack {
                 Text(L10n.ClipDetail.summary)
                 Spacer()
-                if summary != nil {
-                    Button { tapTranslate(.summary) } label: {
-                        Image(systemName: "character.bubble")
-                            .font(.caption)
+                if currentPageText != nil {
+                    if selectedPageID == NotePage.primaryID {
+                        Button { tapTranslate(.summary) } label: {
+                            Image(systemName: "character.bubble")
+                                .font(.caption)
+                        }
+                        .disabled(translatingSummary)
                     }
-                    .disabled(translatingSummary)
                     if transcript != nil {
-                        Button { tapSummarize() } label: {
+                        Button { tapSummarize(pageID: selectedPageID) } label: {
                             Image(systemName: "arrow.trianglehead.2.counterclockwise")
                                 .font(.caption)
                         }
@@ -1146,12 +1304,50 @@ struct ClipDetailView: View {
         }
     }
 
-    private func tapSummarize() {
+    /// Open the template sheet for a **note page** (default: the primary page —
+    /// every pre-existing call path lands here).
+    private func tapSummarize(pageID: String = NotePage.primaryID) {
         let providers = env.config.config.llmProviders
         if providers.primary == nil || providers.primary!.isEmpty || providers.configuredProviders.isEmpty {
             showNoProvider = true
         } else {
+            summarizePageID = pageID
             showSummarize = true
+        }
+    }
+
+    /// The "+" chip: generate one more note page from a fresh id. The template
+    /// (and language) are picked in the sheet; the manifest entry appears when
+    /// the job's artifact lands — never before there is something to show.
+    private func addPage() {
+        let providers = env.config.config.llmProviders
+        guard providers.primary != nil, !(providers.primary ?? "").isEmpty,
+              !providers.configuredProviders.isEmpty else {
+            showNoProvider = true
+            return
+        }
+        addPageID = UUID().uuidString
+        summarizePageID = addPageID
+        showAddPage = true
+    }
+
+    /// Remove a note page (manifest + body file) and keep the selection valid.
+    private func deletePage(_ page: NotePage) {
+        pages = NotePages.remove(id: page.id, for: item.name)
+        if selectedPageID == page.id {
+            selectedPageID = pages.first?.id ?? NotePage.primaryID
+        }
+        loadSelectedPageText()
+    }
+
+    /// Refresh the on-screen page body after any manifest/selection change.
+    private func loadSelectedPageText() {
+        if selectedPageID == NotePage.primaryID {
+            loadSummary()
+        } else if let page = pages.first(where: { $0.id == selectedPageID }) {
+            pageText = NotePages.text(of: page, for: item.name)
+        } else {
+            pageText = nil
         }
     }
 
@@ -1393,6 +1589,9 @@ struct ClipDetailView: View {
         )
         summary = nil
         translatedSummary = nil
+        // ★ 2026-10-23 ("页面模板"): the primary page also leaves the manifest —
+        //   other pages are untouched (they have their own chips and delete path).
+        pages = NotePages.remove(id: NotePage.primaryID, for: item.name)
     }
 }
 

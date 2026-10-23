@@ -87,6 +87,12 @@ struct Job: Codable, Identifiable, Equatable {
     var prompt: String?
     /// `summarize`: the template name. **For display only**; the run never reads it.
     var templateName: String?
+    /// `summarize`: which **note page** this job writes (`NotePage.id`).
+    ///
+    /// ★ 2026-10-23 ("页面模板"). `nil` means the primary summary page — nil keeps
+    /// every pre-existing ledger entry and call site meaning exactly what they
+    /// always did (see the forward-compatibility note on the struct).
+    var pageID: String?
     /// `translate`: the target language's English name (fed into the prompt; see `LLMCompletionService.translate`).
     var languageName: String?
     /// `translate`: whether it's the transcript or the summary being translated (`"transcript"` / `"summary"`).

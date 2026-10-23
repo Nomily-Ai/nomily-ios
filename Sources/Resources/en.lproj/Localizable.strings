@@ -233,8 +233,8 @@
 "clip_detail.view_full_summary" = "View Full Summary";
 "clip_detail.summarize" = "Summarize";
 "clip_detail.transcribe_first" = "Transcribe first to enable summarization.";
-"clip_detail.tab_transcript" = "Transcript";
-"clip_detail.tab_summary" = "AI Minutes";
+"clip_detail.tab_transcript" = "Source";
+"clip_detail.tab_summary" = "Notes";
 "clip_detail.tab_todos" = "To-dos";
 "clip_detail.todos_empty" = "No action items in the summary.";
 "clip_detail.todos_need_summary" = "Generate a summary to collect action items here.";

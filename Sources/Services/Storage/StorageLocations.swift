@@ -69,6 +69,22 @@ enum StorageLocations {
         return decryptedDir.appendingPathComponent("\(base).summary.md")
     }
 
+    /// ★ 2026-10-23 ("页面模板", Plaud parity): the manifest of a clip's **note
+    /// pages** (`<base>.notes.json`). See `NotePage` — page id "summary" *is*
+    /// the classic summary file below, so nothing pre-existing moves.
+    static func notePagesURL(for audioName: String) -> URL {
+        let base = (audioName as NSString).deletingPathExtension
+        return decryptedDir.appendingPathComponent("\(base).notes.json")
+    }
+
+    /// Body file of one note page. The primary page maps to the classic
+    /// `<base>.summary.md`; extra pages get `<base>.note.<id>.md`.
+    static func notePageURL(for audioName: String, pageID: String) -> URL {
+        guard pageID != NotePage.primaryID else { return summaryURL(for: audioName) }
+        let base = (audioName as NSString).deletingPathExtension
+        return decryptedDir.appendingPathComponent("\(base).note.\(pageID).md")
+    }
+
     static func summaryTranslatedURL(for audioName: String) -> URL {
         let base = (audioName as NSString).deletingPathExtension
         return decryptedDir.appendingPathComponent("\(base).summary.translated.md")

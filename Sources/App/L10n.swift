@@ -3167,10 +3167,18 @@ enum L10n {
         static var viewFullSummary: String { NSLocalizedString("clip_detail.view_full_summary", comment: "") }
         static var summarize: String { NSLocalizedString("clip_detail.summarize", comment: "") }
         static var transcribeFirst: String { NSLocalizedString("clip_detail.transcribe_first", comment: "") }
-        /// ★ (2026-10-19) DingTalk-style detail tabs: Transcript / AI Minutes / To-dos.
-        static var tabTranscript: String { NSLocalizedString("clip_detail.tab_transcript", value: "Transcript", comment: "Detail page tab — transcript") }
-        static var tabSummary: String { NSLocalizedString("clip_detail.tab_summary", value: "AI Minutes", comment: "Detail page tab — AI summary") }
+        /// ★ (2026-10-19) Detail tabs. ★ (2026-10-23) relabelled to Plaud's
+        /// 「来源 | 笔记」 split (captured from the vivo handset): the transcript is
+        /// the *source*, the generated pages are the *notes*.
+        static var tabTranscript: String { NSLocalizedString("clip_detail.tab_transcript", value: "Source", comment: "Detail page tab — the recording's source (audio + transcript)") }
+        static var tabSummary: String { NSLocalizedString("clip_detail.tab_summary", value: "Notes", comment: "Detail page tab — generated note pages") }
         static var tabTodos: String { NSLocalizedString("clip_detail.tab_todos", value: "To-dos", comment: "Detail page tab — action items") }
+        // ★ 2026-10-23 ("页面模板"): multi-page notes, Plaud parity.
+        static var noteAddPage: String { NSLocalizedString("clip_detail.note_add_page", value: "Add note page", comment: "The + chip that generates another note page") }
+        static var noteChangeTemplate: String { NSLocalizedString("clip_detail.note_change_template", value: "Change template", comment: "Page chip menu — regenerate this page from another template") }
+        static var noteDeletePage: String { NSLocalizedString("clip_detail.note_delete_page", value: "Delete this page", comment: "Page chip menu — delete one note page") }
+        static var noteDeletePageMessage: String { NSLocalizedString("clip_detail.note_delete_page_message", value: "The generated content of this page will be deleted.", comment: "Delete-page confirmation") }
+        static var noteDefaultTitle: String { NSLocalizedString("clip_detail.note_default_title", value: "Summary", comment: "Fallback title of the primary note page when its template is unknown") }
         static var moreActions: String { NSLocalizedString("clip_detail.more_actions", value: "More", comment: "Detail page top-right overflow menu") }
         static var aiAskTitle: String { NSLocalizedString("clip_detail.ai_ask_title", value: "AI Q&A", comment: "Detail page — ask questions about this recording") }
         static var aiAskYou: String { NSLocalizedString("clip_detail.ai_ask_you", value: "You", comment: "Chat speaker label — user") }
