@@ -207,21 +207,51 @@ struct TranscriptSegmentRow: View {
 /// detail page's to-dos tab (DingTalk's third tab).
 ///
 /// Heuristic by design: our summary templates emit action items under a heading whose text
-/// contains the localized words for to-do / action / follow-up, plus Action / TODO. Everything between such a heading and the
-/// next heading (of any level) counts as a to-do block. A summary with no such heading has
-/// no to-dos — that's an honest empty state, not an error.
+/// contains the localized words for to-do / action / follow-up, plus Action / TODO. Everything
+/// from such a heading until the next heading **of the same or higher level** counts as a to-do
+/// block — sub-headings inside it (`### 张伟`) stay part of it, which they did not before, so a
+/// grouped to-do list used to vanish on regeneration. A summary with no such heading has no
+/// to-dos; that is an honest empty state, not an error.
 enum TodoExtract {
-    static let keywords = ["待办", "行动", "后续", "action", "todo"]
+    /// ★ 2026-10-23 ("重新生成摘要后待办不显示"): the list used to be
+    /// `待办 / 行动 / 后续 / action / todo`, which missed the headings the
+    /// templates themselves produce — `行动项`, `后续事项`, `跟进`, `下一步`,
+    /// `任务清单`, `To-Do List`, `Next steps`. When a regeneration happened to
+    /// pick a different title, the tab went empty and the to-dos looked lost.
+    static let keywords = [
+        // Chinese
+        "待办", "行动", "后续", "跟进", "下一步", "任务",
+        // English
+        "action", "todo", "to-do", "to do", "follow-up", "follow up", "followup",
+        "next step", "next-step", "assignment",
+        // Japanese / Korean
+        "やること", "アクション", "ネクスト", "할 일", "액션",
+    ]
+
+    /// Headings that contain one of the words above but are **not** a to-do list.
+    /// `## 待确认事项` and `## 风险与未决问题` are the two our own templates emit —
+    /// without this they would show up as to-dos, which is worse than an empty tab.
+    static let blockers = [
+        "待确认", "待定", "未决", "风险", "背景", "说明", "概述", "议程", "总结", "结论",
+    ]
 
     static func fromSummary(_ markdown: String) -> [MarkdownBlock] {
         var result: [MarkdownBlock] = []
-        var collecting = false
+        /// Level of the heading that opened the to-do block; `nil` = not collecting.
+        var openLevel: Int?
         for block in MarkdownBlocks.parse(markdown) {
-            if case .heading = block.kind {
-                collecting = keywords.contains { block.text.localizedCaseInsensitiveContains($0) }
+            if case .heading(let level) = block.kind {
+                if let open = openLevel, level > open {
+                    // A sub-heading inside the block is content, not the end.
+                    result.append(block)
+                    continue
+                }
+                let blocked = blockers.contains { block.text.localizedCaseInsensitiveContains($0) }
+                let matches = keywords.contains { block.text.localizedCaseInsensitiveContains($0) }
+                openLevel = (matches && !blocked) ? level : nil
                 continue
             }
-            if collecting { result.append(block) }
+            if openLevel != nil { result.append(block) }
         }
         return result
     }

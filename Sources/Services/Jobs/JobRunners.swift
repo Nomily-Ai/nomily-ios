@@ -135,11 +135,17 @@ enum JobRunners {
         // It also fixes an old flaw: summary-to-disk and title-to-disk used to be two steps, and cancelling mid-way would leave
         // a "renamed but no summary" state; now both steps are in the same synchronous block, so it's all or
         // nothing.
-        try? outcome.completion.text.data(using: .utf8)?
+        // ★ 2026-10-23: strip what the prompt could only discourage — fields whose
+        //   value is a placeholder, sections left with nothing, items repeated
+        //   under two headings. Mechanical, so the result is predictable; see
+        //   `SummaryPolish`. The title is extracted from the **cleaned** text so
+        //   it can never be named after a placeholder line.
+        let text = SummaryPolish.clean(outcome.completion.text)
+        try? text.data(using: .utf8)?
             .write(to: StorageLocations.summaryURL(for: job.clipName), options: .atomic)
 
         if let title = await extractTitle(
-            from: outcome.completion.text,
+            from: text,
             config: config,
             // ★ Directly target the channel that actually did the work. Without specifying it, the primary channel has already proven
             //   unusable, and this step would **wait for it to time out once more** before the fallback gets its turn —
@@ -187,14 +193,23 @@ enum JobRunners {
             plus any task, date or decision it contains. \
             Do NOT use headings, tables or template sections, and never write more text than the transcript itself.
             """, comment: "System prompt replacing the full template when the transcript is a sentence or two")
+                + "\n\n" + SummaryPolicy.tinyNote
         }
+        // ★ 2026-10-23 ("摘要里很多无关紧要的内容"): the templates are Vobot
+        //   skeletons and the model used to fill every empty slot with
+        //   【To Be Confirmed】, plus a restatement of the recording's metadata.
+        //   The rules ride along with every template — including the chunked and
+        //   merge passes, which reuse this same system prompt — so all 60+
+        //   templates inherit the discipline without being rewritten.
+        let rules = SummaryPolicy.rules
         if weight < compactThreshold {
             return templatePrompt + "\n\n" + NSLocalizedString("summarize.compact_note", value: """
             The source text is short. Keep the output shorter than the source: drop every \
             section that has nothing real to say instead of filling the template with placeholders.
             """, comment: "Appended to the template prompt when the source is a short paragraph")
+                + "\n\n" + rules
         }
-        return templatePrompt
+        return templatePrompt + "\n\n" + rules
     }
 
     /// One number for "how much is actually said here": CJK characters count
