@@ -139,6 +139,10 @@ struct ClipDetailView: View {
             case .notes:
                 summarySection
                 if translatedSummary != nil { translatedSummarySection }
+                // ★ 2026-10-23 ("待办清单在底部即可"): the to-do list comes back as
+                //   a plain section at the bottom of the 笔记 tab — not its own tab
+                //   (user reverted 136's removal), aggregated over ALL note pages.
+                todoListSection
                 // AI Q&A is a *note* feature ("对此笔记提问") — it lives on the
                 // 笔记 tab, like Plaud's chat bar under the note.
                 if aiChat.isAvailable {
@@ -856,6 +860,39 @@ struct ClipDetailView: View {
             parts.append("TRANSCRIPT\n" + String(body.prefix(12_000)))
         }
         return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+    }
+
+    // MARK: To-do list (bottom of the 笔记 tab)
+
+    /// ★ 2026-10-23 ("待办清单在底部即可"): the to-do list lives at the **bottom of
+    /// the 笔记 tab** — not its own tab (that was 136's removal, reverted on user
+    /// feedback), and not Plaud-strict either. Action items lifted from the
+    /// markdown of **all** note pages, so a 待办清单（Plaud） generated page lands
+    /// here too. An honest empty state when no page has such a section.
+    @ViewBuilder
+    private var todoListSection: some View {
+        Section {
+            let todos = pages
+                .compactMap { NotePages.text(of: $0, for: item.name) }
+                .flatMap { TodoExtract.fromSummary($0) }
+            if !todos.isEmpty {
+                MarkdownBlocksView(blocks: todos)
+            } else if !pages.isEmpty {
+                Text(L10n.ClipDetail.todosEmpty)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else if transcript != nil {
+                Text(L10n.ClipDetail.todosNeedSummary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(L10n.ClipDetail.transcribeFirst)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(L10n.ClipDetail.tabTodos)
+        }
     }
 
     private func triggerTranscribe(locales: [String]?) {        if env.config.config.asrProviders.hasConfiguredProvider {
