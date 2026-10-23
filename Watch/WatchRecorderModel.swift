@@ -70,10 +70,14 @@ final class WatchRecorderModel: NSObject, ObservableObject {
     /// observers (each delivering the first interruption N times).
     private var interruptionHandlersInstalled = false
 
-    /// How often the phone is re-told a take is still running. Slow enough to
-    /// be free, frequent enough that the phone can call the state stale after
-    /// three missed beats and still be talking about seconds, not minutes.
-    private static let heartbeatInterval: TimeInterval = 10
+    /// How often the phone is re-told a take is still running.
+    ///
+    /// ★ 2026-10-23 (功耗优化): was 10 s. A heartbeat is one
+    /// `updateApplicationContext` write — cheap per call, but a 10 s beat also
+    /// wakes the radio hourly on long takes. 30 s keeps the phone's staleness
+    /// window meaningful (its watchdog calls a beat stale after 90 s of
+    /// silence, i.e. three missed beats) while cutting context writes by ⅔.
+    private static let heartbeatInterval: TimeInterval = 30
 
     /// The level meter's sampling interval — 12.5Hz.
     ///
@@ -233,6 +237,11 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         self.recorder = nil
         timer?.invalidate()
         timer = nil
+        // ★ 2026-10-23: the take is over — the slow dormancy heartbeat has
+        // nothing left to re-state, and leaving it running would push an
+        // idle state every 30 s for as long as the screen stays dimmed.
+        dormantHeartbeat?.invalidate()
+        dormantHeartbeat = nil
         isRecording = false
         interrupted = false
         // Zero it rather than leave the last slot: after stopping, the home screen must switch back to the eyes immediately,
@@ -369,6 +378,57 @@ final class WatchRecorderModel: NSObject, ObservableObject {
                     self.pushState()
                 }
             }
+        }
+    }
+
+    // MARK: - UI dormancy (★ 2026-10-23, 功耗优化)
+    //
+    // The 12.5 Hz meter exists for exactly one consumer: the waveform the user
+    // sees on the home screen. When watchOS dims the display (wrist down) or
+    // the app drops out of the foreground, nobody can see it — yet the timer
+    // kept firing 12.5 times a second, waking the CPU to sample dBFS and
+    // repaint a `@Published` nobody renders. On a one-hour take that is
+    // ~45,000 wasted wakeups.
+    //
+    // ## What dormancy keeps
+    // **The recording itself.** `AVAudioRecorder` owns the mic and the file and
+    // doesn't need this timer at all; pausing UI work must never touch it.
+    //
+    // ## What replaces it
+    // A slow heartbeat timer at `heartbeatInterval` (30 s) that only re-states
+    // the recorder state to the phone. Without it the phone's watchdog would
+    // read the silence as "watch went away" and flip the status strip to
+    // "offline" during a take — the whole point of the heartbeat is honesty.
+    // Elapsed/bytes updates are skipped while dimmed: nothing displays them,
+    // and the values catch up on the first tick after wake.
+
+    private var uiDormant = false
+    private var dormantHeartbeat: Timer?
+
+    /// Called by the view when the screen dims (`isLuminanceReduced`) or the
+    /// scene leaves the foreground (`scenePhase != .active`). Idempotent.
+    func setUIDormant(_ dormant: Bool) {
+        guard uiDormant != dormant else { return }
+        uiDormant = dormant
+        if dormant {
+            timer?.invalidate()
+            timer = nil
+            guard isRecording else { return } // idle: no timers at all
+            dormantHeartbeat?.invalidate()
+            dormantHeartbeat = Timer.scheduledTimer(
+                withTimeInterval: Self.heartbeatInterval,
+                repeats: true
+            ) { [weak self] _ in
+                Task { @MainActor in self?.pushState() }
+            }
+            log.info("UI dormant — meter paused, heartbeat slowed, recording continues")
+        } else {
+            dormantHeartbeat?.invalidate()
+            dormantHeartbeat = nil
+            if isRecording { startTimer() }
+            // The phone hasn't heard from us in a while; re-state immediately
+            // instead of waiting a full interval.
+            pushState()
         }
     }
 

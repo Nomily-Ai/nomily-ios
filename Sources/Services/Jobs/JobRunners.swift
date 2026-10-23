@@ -58,6 +58,18 @@ extension Job {
         )
     }
 
+    /// Chapter outline (★ 2026-10-23). One per recording: pressing "regenerate"
+    /// again replaces the artifact rather than queueing a second pass over the
+    /// same transcript — the idempotency key is what makes that true.
+    static func outline(clip: String) -> Job {
+        Job(
+            id: "outline:\(clip)",
+            kind: .outline,
+            clipName: clip,
+            enqueuedAt: Date()
+        )
+    }
+
     /// ★ 2026-10-22 (任务二): document export (`txt` / `md` / `pdf`). Same job id
     /// as the audio export — the two share one slot per recording on purpose.
     static func export(clip: String, format: String) -> Job {
@@ -103,7 +115,8 @@ enum JobRunners {
         // **not applying the full template** to a tiny source. The gate lives
         // here (the runner), not in the sheet, so the queue re-runs after an app
         // kill take exactly the same path.
-        let effectivePrompt = Self.adaptedPrompt(templatePrompt: prompt, source: source)
+        let adapted = Self.adaptedPrompt(templatePrompt: prompt, source: source)
+        let effectivePrompt = adapted.text
 
         BackgroundKeeper.shared.acquire(.summary)
         defer { BackgroundKeeper.shared.release(.summary) }
@@ -133,7 +146,24 @@ enum JobRunners {
             TicNoteDiagLog.log("LLM", "summarize FAILED clip=\(job.clipName) primary=\(config.llmProviders.primary ?? "-") gap=\(gap) error=\(error.localizedDescription)")
             throw error
         }
-        TicNoteDiagLog.log("LLM", "summarize ok clip=\(job.clipName) provider=\(outcome.providerKey) chars=\(outcome.completion.text.count)")
+        // ★ 2026-10-23 ("为啥会到模型输出上限，这个需要优化"): the cap is 4096
+        //   output tokens, and a long structured report (interview BANT, formal
+        //   minutes) genuinely exceeds it. Shipping the part that fit plus a
+        //   warning was the old behaviour; now the run **continues** the same
+        //   document from where it stopped, up to two rounds, and only reports
+        //   truncation if that also fails.
+        var completion = outcome.completion
+        if completion.truncated, !completion.text.isEmpty {
+            completion = await extend(
+                completion: completion,
+                providerKey: outcome.providerKey,
+                config: config
+            )
+        }
+        TicNoteDiagLog.log(
+            "LLM",
+            "summarize ok clip=\(job.clipName) provider=\(outcome.providerKey) chars=\(completion.text.count) truncated=\(completion.truncated)"
+        )
         try Task.checkCancellation()
 
         // ⚠️ The summary and the title are **persisted together**, without waiting for the user to tap save.
@@ -149,7 +179,7 @@ enum JobRunners {
         //   under two headings. Mechanical, so the result is predictable; see
         //   `SummaryPolish`. The title is extracted from the **cleaned** text so
         //   it can never be named after a placeholder line.
-        let text = SummaryPolish.clean(outcome.completion.text)
+        let text = SummaryPolish.clean(completion.text)
         // ★ 2026-10-23 ("页面模板"): the artifact lands on **its own page**. The
         //   primary page still is `<base>.summary.md` (nothing pre-existing moves);
         //   extra pages get `<base>.note.<id>.md` plus a manifest entry. The
@@ -176,14 +206,146 @@ enum JobRunners {
                 .write(to: StorageLocations.titleURL(for: job.clipName), options: .atomic)
         }
 
+        // ★ 2026-10-23 ("watch 那边能否靠 Siri Recap 的看齐"): Apple's Siri Recap
+        //   on the wrist is opt-in, beta, and not offered in China — so Nomily
+        //   ships its own. Every finished summary extracts a tiny digest (the
+        //   first heading + up to three list lines) and pushes it to the watch,
+        //   which keeps the last 7 days and shows them from a home-menu page.
+        //   Only the primary page pushes: an extra template page ("逐字稿")
+        //   regenerating would otherwise spam the wrist with duplicates of the
+        //   same recording.
+        if pageID == NotePage.primaryID {
+            let digest = Self.recapDigest(
+                from: text,
+                fallbackTitle: RecordingName.displayTitle(for: job.clipName)
+            )
+            if !digest.points.isEmpty {
+                AppEnvironment.shared?.watch.pushRecap(
+                    clipName: job.clipName,
+                    title: digest.title,
+                    points: digest.points,
+                    // Recorded time parsed from the `yyyyMMddHHmmss` name, so
+                    // the watch can say "this morning's meeting"; a name that
+                    // doesn't parse falls back to now.
+                    recordedAt: RecordingName.date(from: job.clipName) ?? Date()
+                )
+            }
+        }
+
         // The note goes last: it's part of the **result**, and any earlier step throwing shouldn't leave behind
         // the illusion of "it finished and everything was fine".
         var notes = notices(for: outcome, config: config)
-        if effectivePrompt != prompt {
+        if adapted.replacedTemplate {
             notes.append(L10n.Summarize.shortSourceNote)
         }
-        reporter.notes(notes, outcome.completion.truncated)
+        reporter.notes(notes, completion.truncated)
         log.info("summary done for \(job.clipName, privacy: .public) via \(outcome.providerKey, privacy: .public)")
+    }
+
+    // MARK: - Watch recap digest (★ 2026-10-23, "watch 那边能否靠 Siri Recap 的看齐")
+
+    /// Maximum characters of one recap point — a watch row fits roughly one
+    /// line of 40 mm screen, and anything past this gets truncated with "…".
+    private static let recapPointLimit = 60
+
+    /// Mechanical extraction of a Siri-Recap-style digest from the finished
+    /// summary. **No second LLM call** on purpose: the recap must be free
+    /// (another round trip would double the cost of every summary) and cannot
+    /// fail — a plain markdown walk always yields something.
+    ///
+    /// * title — the first markdown heading, markers stripped; falls back to
+    ///   the clip's display title.
+    /// * points — the first three markdown list items (bullets or numbers),
+    ///   bold markers stripped, each capped at `recapPointLimit`. Skips the
+    ///   placeholder-looking lines (`SummaryPolish` already removed most).
+    static func recapDigest(from text: String, fallbackTitle: String) -> (title: String, points: [String]) {
+        func strip(_ line: String) -> String {
+            line
+                .trimmingCharacters(in: .whitespaces)
+                .replacingOccurrences(of: "**", with: "")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "#*-• "))
+        }
+        var title: String?
+        var points: [String] = []
+        for raw in text.components(separatedBy: .newlines) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { continue }
+            if title == nil, line.hasPrefix("#") {
+                let cleaned = strip(line)
+                if !cleaned.isEmpty { title = cleaned }
+                continue
+            }
+            let isList = line.hasPrefix("- ") || line.hasPrefix("* ")
+                || line.hasPrefix("• ") || line.first?.isNumber == true
+            guard isList else { continue }
+            let cleaned = strip(line)
+            guard cleaned.count >= 4 else { continue } // "- xx" style debris
+            if cleaned.count > recapPointLimit {
+                points.append(String(cleaned.prefix(recapPointLimit - 1)) + "…")
+            } else {
+                points.append(cleaned)
+            }
+            if points.count == 3 { break }
+        }
+        return (title ?? fallbackTitle, points)
+    }
+
+    // MARK: - Continuing a truncated document
+
+    /// Ask the same channel to **keep writing** where the cap cut it off.
+    ///
+    /// Why continuation rather than a bigger `max_tokens`: the cap is not ours
+    /// alone — every model has its own ceiling, and several sit at 4096 exactly.
+    /// Raising ours past a model's limit turns a truncation into an API error.
+    /// Continuing works against any ceiling, and it degrades honestly: if two
+    /// rounds still end truncated, the caller reports truncation as before.
+    ///
+    /// The channel is pinned to the one that produced the text: the primary may
+    /// be the one that failed, and retrying it first costs a full timeout.
+    private static func extend(
+        completion: LLMCompletionService.Completion,
+        providerKey: String,
+        config: AppConfig,
+        maxRounds: Int = 2
+    ) async -> LLMCompletionService.Completion {
+        var text = completion.text
+        var truncated = completion.truncated
+
+        var pinned = config
+        pinned.llmProviders.primary = providerKey
+
+        let instruction = NSLocalizedString("summarize.continue_prompt", value: """
+        You are continuing a document that was cut off by an output limit. Continue from the \
+        exact point where it stops — same language, same heading level, same list style. \
+        Do not repeat anything already written, do not restate the heading above the cut, \
+        do not add a preface, and do not summarise what came before. \
+        If the document is in fact already complete, reply with exactly: DONE
+        """, comment: "System prompt used to continue a summary that hit the output cap")
+
+        for _ in 0..<maxRounds where truncated {
+            try? Task.checkCancellation()
+            let tail = String(text.suffix(1_500))
+            guard let next = try? await LLMCompletionService.completeResilient(
+                systemPrompt: instruction,
+                userContent: "DOCUMENT SO FAR (ends at the cut):\n\(tail)",
+                config: pinned,
+                allowChunking: false
+            ) else { break }
+
+            let addition = next.completion.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if addition.isEmpty || addition.uppercased() == "DONE" {
+                truncated = false
+                break
+            }
+            // Keep markdown intact when the cut landed mid-paragraph.
+            text += text.hasSuffix("\n") ? addition : "\n" + addition
+            truncated = next.completion.truncated
+            TicNoteDiagLog.log(
+                "LLM",
+                "summary continued +\(addition.count) chars, stillTruncated=\(truncated)"
+            )
+        }
+        return LLMCompletionService.Completion(text: text, truncated: truncated)
     }
 
     // MARK: - Short-source adaptation (Plaud/Vobot parity)
@@ -204,16 +366,19 @@ enum JobRunners {
     ///   than the source. This is the "structured minutes on a 30 s note"
     ///   case that produces three pages of `## 待确认` placeholders.
     /// * Anything else: the template verbatim.
-    static func adaptedPrompt(templatePrompt: String, source: String) -> String {
+    static func adaptedPrompt(templatePrompt: String, source: String) -> AdaptedPrompt {
         let weight = contentWeight(source)
         if weight < shortGateWeight {
-            return NSLocalizedString("summarize.short_prompt", value: """
-            The transcript below is very short — most likely a quick voice note. \
-            Reply in the user's language with at most two short sentences: what was said, \
-            plus any task, date or decision it contains. \
-            Do NOT use headings, tables or template sections, and never write more text than the transcript itself.
-            """, comment: "System prompt replacing the full template when the transcript is a sentence or two")
-                + "\n\n" + SummaryPolicy.tinyNote
+            return AdaptedPrompt(
+                text: NSLocalizedString("summarize.short_prompt", value: """
+                The transcript below is very short — most likely a quick voice note. \
+                Reply in the user's language with at most two short sentences: what was said, \
+                plus any task, date or decision it contains. \
+                Do NOT use headings, tables or template sections, and never write more text than the transcript itself.
+                """, comment: "System prompt replacing the full template when the transcript is a sentence or two")
+                    + "\n\n" + SummaryPolicy.tinyNote,
+                replacedTemplate: true
+            )
         }
         // ★ 2026-10-23 ("摘要里很多无关紧要的内容"): the templates are Vobot
         //   skeletons and the model used to fill every empty slot with
@@ -223,13 +388,27 @@ enum JobRunners {
         //   templates inherit the discipline without being rewritten.
         let rules = SummaryPolicy.rules
         if weight < compactThreshold {
-            return templatePrompt + "\n\n" + NSLocalizedString("summarize.compact_note", value: """
-            The source text is short. Keep the output shorter than the source: drop every \
-            section that has nothing real to say instead of filling the template with placeholders.
-            """, comment: "Appended to the template prompt when the source is a short paragraph")
-                + "\n\n" + rules
+            return AdaptedPrompt(
+                text: templatePrompt + "\n\n" + NSLocalizedString("summarize.compact_note", value: """
+                The source text is short. Keep the output shorter than the source: drop every \
+                section that has nothing real to say instead of filling the template with placeholders.
+                """, comment: "Appended to the template prompt when the source is a short paragraph")
+                    + "\n\n" + rules,
+                replacedTemplate: false
+            )
         }
-        return templatePrompt + "\n\n" + rules
+        return AdaptedPrompt(text: templatePrompt + "\n\n" + rules, replacedTemplate: false)
+    }
+
+    /// Result of `adaptedPrompt`. ★ 2026-10-23 ("为啥会到模型输出上限"):
+    /// the old code decided "was the template replaced?" by comparing the
+    /// returned string with the original — but the output rules are appended to
+    /// *every* prompt, so the strings always differed and every run carried the
+    /// "转写内容很短——已改用简化摘要" note, even a three-chunk interview. The
+    /// flag is now explicit.
+    struct AdaptedPrompt {
+        let text: String
+        let replacedTemplate: Bool
     }
 
     /// One number for "how much is actually said here": CJK characters count
@@ -449,6 +628,100 @@ enum JobRunners {
             result.append(L10n.LLM.chunkedNote(outcome.chunkCount))
         }
         return result
+    }
+
+    // MARK: - Chapter outline (★ 2026-10-23, "录音来源里面还有大纲总结")
+
+    /// Character budget for the timeline handed to the model. Roughly 3.5k
+    /// tokens of input — enough for a two-hour meeting's topic structure once
+    /// each line is trimmed, and cheap enough to run on demand.
+    private static let outlineTimelineBudget = 14_000
+
+    /// Build the 大纲 for one recording: a chapter list with start times.
+    ///
+    /// Not folded into `summarize` on purpose:
+    /// * the outline is **per transcript**, and belongs to 来源 — a summary is
+    ///   per *page* and belongs to 笔记;
+    /// * it must be regenerable on its own (the user may want chapters without
+    ///   touching their notes, or after editing the transcript);
+    /// * the artifact is separate (`<base>.chapters.json`), so a failed outline
+    ///   can never leave a half-written summary behind.
+    @MainActor
+    static func outline(_ job: Job, config: AppConfig, reporter: JobQueue.Reporter) async throws {
+        guard let doc = TranscriptDocument.load(for: job.clipName) else {
+            throw JobSourceMissing(what: L10n.Jobs.sourceTranscript)
+        }
+        // Flat-text transcripts (imported .txt, or a provider that returned no
+        // per-segment timings) can't carry an outline: every chapter would have
+        // to start at 0. Say so instead of producing a fake list.
+        guard !doc.segments.isEmpty else { throw ClipChapterError.noTimeline }
+
+        let timeline = Self.outlineTimeline(doc.segments)
+        guard !timeline.isEmpty else { throw ClipChapterError.noTimeline }
+
+        BackgroundKeeper.shared.acquire(.summary)
+        defer { BackgroundKeeper.shared.release(.summary) }
+
+        let instruction = NSLocalizedString("outline.prompt", value: """
+        You build a navigation outline (a table of contents) for a recording, from a timestamped transcript.
+
+        Return ONLY a JSON array — no prose, no code fence:
+        [{"t":"00:00","title":"..."}]
+
+        Rules:
+        - 5 to 12 chapters, in order. Each one starts where its topic actually changes in the transcript.
+        - "t" is the timestamp of the FIRST line belonging to that chapter, copied from the input's
+          [mm:ss] markers (use h:mm:ss once past the first hour).
+        - "title" is a 4-12 word noun phrase naming what that stretch is about. No numbering,
+          no "Chapter", no quotation marks, no trailing punctuation.
+        - Cover the whole recording: the first chapter starts at the beginning of the first line.
+        - Write the titles in the SAME LANGUAGE as the transcript.
+        """, comment: "System prompt for generating a timestamped chapter outline")
+
+        let outcome = try await LLMCompletionService.completeResilient(
+            systemPrompt: instruction,
+            userContent: timeline,
+            config: config,
+            // The timeline is already budgeted; chunking would produce chapters
+            // per chunk with duplicate timestamps.
+            allowChunking: false,
+            allowSectionReuse: false
+        )
+        let chapters = ClipChapter.parse(outcome.completion.text)
+        guard !chapters.isEmpty else { throw ClipChapterError.unparsable }
+
+        ClipChapterStore.save(chapters, for: job.clipName)
+        reporter.notes(notices(for: outcome, config: config), false)
+        log.info("outline done for \(job.clipName, privacy: .public): \(chapters.count) chapters")
+    }
+
+    /// `[mm:ss] line` per segment, evenly thinned until it fits the budget.
+    ///
+    /// Thinning by taking every second line (rather than truncating the tail)
+    /// keeps the whole recording represented — an outline of the first ten
+    /// minutes followed by silence is worse than a coarser outline of an hour.
+    private static func outlineTimeline(_ segments: [AsrSegment]) -> String {
+        var lines: [String] = segments.compactMap { seg in
+            let text = seg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            let clipped = text.count > 160 ? String(text.prefix(160)) + "…" : text
+            return "[\(Self.outlineClock(seg.start))] \(clipped)"
+        }
+        guard !lines.isEmpty else { return "" }
+        while lines.joined(separator: "\n").count > outlineTimelineBudget, lines.count > 24 {
+            lines = stride(from: 0, to: lines.count, by: 2).map { lines[$0] }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// `mm:ss`, or `h:mm:ss` past the first hour — the same shape the prompt
+    /// asks the model to copy back.
+    private static func outlineClock(_ seconds: Double) -> String {
+        let total = max(0, Int(seconds))
+        if total >= 3600 {
+            return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
+        }
+        return String(format: "%02d:%02d", total / 60, total % 60)
     }
 
     // MARK: - Title (best-effort)

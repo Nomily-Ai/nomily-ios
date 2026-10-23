@@ -77,4 +77,43 @@ enum WatchLinkMessage {
     static let faceAutoCycleKey = "faceAutoCycle"
     /// Whether the rounded-square frame is drawn around the face. Absent = `true`.
     static let faceFrameKey = "faceFrame"
+
+    // MARK: - Recaps (phone → watch, ★ 2026-10-23)
+    //
+    // The user asked: "watch 那边能否靠 Siri Recap 的看齐" — Apple's Siri Recap
+    // (watchOS 26/27, S11) shows a wrist digest of your day, but it is opt-in,
+    // beta, and not offered in China. Our answer is a Nomily recap: every time
+    // the phone finishes a summary job, it extracts a tiny digest (title +
+    // ≤3 key points) and pushes it here. The watch keeps the last 7 days and
+    // shows them from a home-menu page.
+
+    /// The value is JSON-encoded `Data` of `[WatchRecap]` — `applicationContext`
+    /// only takes property-list values, so the array travels as an opaque blob
+    /// and both ends decode with this same shared struct (this file is compiled
+    /// into both targets, so the wire format can't drift).
+    static let recapsKey = "recaps"
+}
+
+/// One recap entry on the wire. Small by design — the watch shows it on one screen.
+///
+/// `id` is the clip's `yyyyMMddHHmmss` name: re-summarising the same clip
+/// **replaces** its recap instead of stacking a duplicate (same id semantics
+/// the phone's Library uses for clips).
+/// `recordedAt` is when the take was made (parsed from the name); `createdAt`
+/// is when the digest was generated — the 7-day retention clock runs on
+/// `createdAt`, so a re-summary refreshes the entry instead of letting an old
+/// recording's recap expire the moment it lands.
+struct WatchRecap: Codable, Equatable, Identifiable {
+    let id: String
+    let title: String
+    let points: [String]
+    let recordedAt: Date
+    let createdAt: Date
+
+    /// Both ends keep at most this many recaps (phone outbox / watch store).
+    static let limit = 8
+    /// Recaps older than this (by `createdAt`) drop off, on the phone as well
+    /// as the watch — an outbox entry no watch will ever see is just clutter,
+    /// and a wrist entry nothing refreshes any more is a lie about the past.
+    static let retention: TimeInterval = 7 * 24 * 3600
 }

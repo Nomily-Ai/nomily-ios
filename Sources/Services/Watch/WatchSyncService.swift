@@ -313,25 +313,130 @@ final class WatchSyncService: NSObject, ObservableObject {
         // Missing settings fall back to their defaults here so the context is
         // always complete — the watch then never has to distinguish "key
         // absent" from "set to default".
+        let face = FaceContext(
+            style: style,
+            colorHex: colorHex,
+            blinkSpeed: blinkSpeed,
+            autoCycle: autoCycle ?? true,
+            frameVisible: frameVisible ?? true
+        )
+        // ★ 2026-10-23: persisted, because `pushRecap` (which can fire after an
+        // app relaunch, straight out of the job queue) must be able to rebuild
+        // the *complete* context without the settings UI having been opened.
+        if let data = try? JSONEncoder().encode(face) {
+            UserDefaults.standard.set(data, forKey: Self.faceContextKey)
+        }
+        pushCurrentContext(face: face)
+    }
+
+    /// One `updateApplicationContext` push carrying **everything** the phone
+    /// owns: face settings + recaps.
+    ///
+    /// ⚠️ Every push must be a full context — the call *replaces* the previous
+    ///    one wholesale (see the block at `WatchLinkMessage.faceStyleKey`), so
+    ///    pushing recaps alone would wipe the face settings off the watch and
+    ///    vice versa. That is why both `pushFaceSettings` and `pushRecap`
+    ///    funnel into here instead of writing the session directly.
+    private func pushCurrentContext(face: FaceContext) {
+        guard WCSession.isSupported() else { return }
         var context: [String: Any] = [
-            WatchLinkMessage.faceStyleKey: style,
-            WatchLinkMessage.faceAutoCycleKey: autoCycle ?? true,
-            WatchLinkMessage.faceFrameKey: frameVisible ?? true,
+            WatchLinkMessage.faceStyleKey: face.style,
+            WatchLinkMessage.faceAutoCycleKey: face.autoCycle,
+            WatchLinkMessage.faceFrameKey: face.frameVisible,
         ]
-        if let colorHex {
+        if let colorHex = face.colorHex {
             context[WatchLinkMessage.faceColorKey] = colorHex
         }
-        if let blinkSpeed {
+        if let blinkSpeed = face.blinkSpeed {
             context[WatchLinkMessage.blinkSpeedKey] = blinkSpeed
+        }
+        if let data = try? JSONEncoder().encode(loadRecapOutbox()) {
+            context[WatchLinkMessage.recapsKey] = data
         }
         do {
             try WCSession.default.updateApplicationContext(context)
-            log.info("face settings pushed: style=\(style, privacy: .public) color=\(colorHex ?? "-", privacy: .public) speed=\(blinkSpeed ?? "-", privacy: .public) auto=\(autoCycle ?? true, privacy: .public) frame=\(frameVisible ?? true, privacy: .public)")
+            log.info("watch context pushed: style=\(face.style, privacy: .public) recaps=\(Self.recapOutbox.count, privacy: .public)")
         } catch {
             // You reach here when the session hasn't activated yet. The activation callback pushes again, so this time
             // failing isn't fatal — a log line is enough; don't show the user anything.
-            log.error("face settings push failed: \(String(describing: error), privacy: .public)")
+            log.error("watch context push failed: \(String(describing: error), privacy: .public)")
         }
+    }
+
+    // MARK: - Recaps (★ 2026-10-23, "watch 那边能否靠 Siri Recap 的看齐")
+    //
+    // Apple's Siri Recap on the watch is opt-in, beta, and unavailable in
+    // China — our own version instead: every finished summary job extracts a
+    // digest and pushes it here. Kept in a small outbox so a push that goes
+    // out while the watch is asleep is re-delivered with the *next* context
+    // push, and so a recap survives this app being killed before WCSession
+    // accepts the context.
+
+    private static let recapOutboxKey = "watch.recap.outbox.v1"
+    private static let faceContextKey = "watch.face.context.v1"
+
+    /// What the phone last pushed for the face, persisted so a recap push after
+    /// relaunch can still rebuild the *complete* context (see `pushCurrentContext`).
+    private struct FaceContext: Codable {
+        var style: String
+        var colorHex: String?
+        var blinkSpeed: String?
+        var autoCycle: Bool
+        var frameVisible: Bool
+    }
+
+    /// Called by the summarize runner when a summary lands. Fire-and-forget.
+    func pushRecap(clipName: String, title: String, points: [String], recordedAt: Date) {
+        var recaps = loadRecapOutbox()
+        // Re-summarising the same clip replaces its recap (id = clip name).
+        recaps.removeAll { $0.id == clipName }
+        recaps.insert(
+            WatchRecap(
+                id: clipName,
+                title: title,
+                points: points,
+                recordedAt: recordedAt,
+                createdAt: Date()
+            ),
+            at: 0
+        )
+        recaps = Self.prune(recaps)
+        Self.recapOutbox = recaps
+        if let data = try? JSONEncoder().encode(recaps) {
+            UserDefaults.standard.set(data, forKey: Self.recapOutboxKey)
+        }
+        let face = savedFaceContext() ?? FaceContext(
+            style: config.config.watchFaceStyle ?? BotFaceStyle.calm.rawValue,
+            colorHex: config.config.watchEyeColor,
+            blinkSpeed: config.config.watchBlinkSpeed,
+            autoCycle: config.config.watchFaceAutoCycle ?? true,
+            frameVisible: config.config.watchFaceFrame ?? true
+        )
+        pushCurrentContext(face: face)
+        log.info("recap pushed: \(clipName, privacy: .public) points=\(points.count, privacy: .public)")
+    }
+
+    private static var recapOutbox: [WatchRecap] = []
+
+    private func loadRecapOutbox() -> [WatchRecap] {
+        if Self.recapOutbox.isEmpty,
+           let data = UserDefaults.standard.data(forKey: Self.recapOutboxKey),
+           let saved = try? JSONDecoder().decode([WatchRecap].self, from: data) {
+            Self.recapOutbox = Self.prune(saved)
+        }
+        return Self.recapOutbox
+    }
+
+    private func savedFaceContext() -> FaceContext? {
+        guard let data = UserDefaults.standard.data(forKey: Self.faceContextKey) else { return nil }
+        return try? JSONDecoder().decode(FaceContext.self, from: data)
+    }
+
+    /// Cap + retention, applied identically at both ends so the two lists can't
+    /// drift out of shape (numbers live on the shared `WatchRecap`).
+    private static func prune(_ recaps: [WatchRecap]) -> [WatchRecap] {
+        let cutoff = Date().addingTimeInterval(-WatchRecap.retention)
+        return Array(recaps.filter { $0.createdAt > cutoff }.prefix(WatchRecap.limit))
     }
 
     /// Called with the file already copied out of the WatchConnectivity inbox.

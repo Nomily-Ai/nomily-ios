@@ -253,6 +253,10 @@
 "clip_detail.ai_ask_thinking" = "正在思考…";
 "clip_detail.ai_ask_clear" = "清空";
 "clip_detail.ai_ask_placeholder" = "就这段录音提问";
+"clip_detail.ai_ask_placeholder_note" = "对此笔记提问";
+"clip_detail.ai_ask_done" = "完成";
+"clip_detail.ai_ask_empty_title" = "就这段录音随便问";
+"clip_detail.ai_generated_note" = "内容由 AI 生成，仅供参考";
 "clip_detail.ai_ask_footer" = "回答只依据这段录音的转录与摘要。";
 "clip_detail.ai_ask_system" = "你是一名会议助理。只依据提供的《录音材料》回答。材料里没有的内容，直接说明没有，不要猜测，并提示用户可以去找什么。用提问的语言回答，简洁，必要时引用时间点。";
 "clip_detail.translation" = "翻译";
@@ -465,6 +469,13 @@
 "summarize.copy_name" = "%@（副本）";
 "summarize.new_category_name" = "新分类名称";
 "summarize.output_language" = "输出语言";
+"summarize.generate_notes" = "生成笔记";
+"summarize.auto_generate" = "自动生成";
+"summarize.auto_generate_desc" = "根据转写内容自动挑选最匹配的模板并生成，无需手动设置";
+"summarize.custom_generate" = "自定义生成";
+"summarize.template_row" = "模板";
+"summarize.ai_model" = "AI 模型";
+"summarize.generate_now" = "立即生成";
 "summarize.same_as_transcript" = "与转写一致";
 "summarize.restore_defaults" = "恢复默认模板";
 "summarize.restore_defaults_title" = "恢复默认模板？";
@@ -478,11 +489,11 @@
 "template_cat.academic" = "学术";
 "template_cat.creative" = "创意";
 
-"template.plaud_summary" = "总结（Plaud）";
-"template.plaud_meeting_minutes" = "会议纪要（Plaud）";
-"template.plaud_key_points" = "要点提取（Plaud）";
-"template.plaud_todo_list" = "待办清单（Plaud）";
-"template_desc.plaud_summary" = "Plaud 式快速概览：一段总览 + 要点 + 决定 + 待办";
+"template.plaud_summary" = "总结";
+"template.plaud_meeting_minutes" = "会议纪要";
+"template.plaud_key_points" = "要点提取";
+"template.plaud_todo_list" = "待办清单";
+"template_desc.plaud_summary" = "自动完整报告：分主题结论、待办、需跟进";
 "template_desc.plaud_meeting_minutes" = "完整清晰的会议纪要，含行动与决策";
 "template_desc.plaud_key_points" = "只留值得记的：要点、带说话人的原话、数字与日期";
 "template_desc.plaud_todo_list" = "只收明确的待办：事项、负责人、截止；没有就直说";
@@ -705,6 +716,9 @@
 "watch.menu_hint_settings" = "手势、版本、恢复默认";
 "watch.menu_hint_queue" = "还没传走的录音";
 "watch.menu_hint_about" = "手表上的构建号";
+"watch.menu_hint_recap" = "手机推送的 AI 摘要速览";
+"watch.recap_title" = "回顾";
+"watch.recap_empty" = "在 iPhone 上生成的摘要会显示在这里";
 "watch.sending" = "正在发送…";
 "watch.waiting" = "尚未发送";
 "watch.style_appearance" = "外观";
@@ -1693,5 +1707,24 @@
 "devices.switch_to_this" = "切换";
 
 /* 摘要输出纪律：追加到每个模板提示词后，压制占位内容与无关信息（2026-10-23） */
-"summarize.house_rules" = "【输出纪律 · 与上面模板冲突时以本节为准】\n1. 只写转录里确实说过的内容。某个小节没有真实信息就整节省略，绝不要输出【待确认】、TBD、N/A、未提及、未知、无 这类占位内容。\n2. 不复述元信息：录音方式、说话人编号（如“说话人1”）、时长、源材料、转写工具，都不属于摘要内容。\n3. 同一件事只写一次。结论里讲过的，不要在小节里重复一遍。\n4. 每条一句话，每个小节最多 3 条；全文长度不超过转录本身的四分之一。\n5. 行动项只收“有人明确承诺要做、被指派、或带截止时间”的事；只是讨论、设想、可能性的不算。转录没说负责人和时间就留空，绝不编造。\n6. 保留模板的标题结构，但删掉所有没填出真实内容的小节，包括“补充说明”“其他”这类兜底小节。";
+"summarize.house_rules" = "【输出纪律 · 与上面模板冲突时以本节为准】\n1. 只写转录里确实说过的内容。某个小节没有真实信息就整节省略，绝不要输出【待确认】、TBD、N/A、未提及、未知、无 这类占位内容。\n2. 不复述元信息：录音方式、说话人编号（如“说话人1”）、时长、源材料、转写工具，都不属于摘要内容。\n3. 同一件事只写一次。结论里讲过的，不要在小节里重复一遍。\n4. 每条一到两句话，信息密度要高。模板要求完整报告时以完整为先，真实讲到的点都要收进来；否则全文长度不超过转录本身的四分之一。\n5. 行动项只收“有人明确承诺要做、被指派、或带截止时间”的事；只是讨论、设想、可能性的不算。转录没说负责人和时间就留空，绝不编造。\n6. 保留模板的小节结构，但删掉所有没填出真实内容的小节，包括“补充说明”“其他”这类兜底小节。\n7. 所有标题一律用说话人使用的语言。中文转录就用中文标题（总览 / 要点 / 决策 / 待办…），绝不能内容是中文、标题却是英文。";
 "summarize.tiny_note" = "只写确实说过的内容，不要输出 TBD、【待确认】这类占位文字。";
+
+/* ── 2026-10-23 大纲（来源页章节）+ 模板三空间（Plaud 对齐） ── */
+"jobs.kind_outline" = "大纲";
+"clip_detail.outline" = "大纲";
+"clip_detail.outline_generate" = "生成大纲";
+"clip_detail.outline_regenerate" = "重新生成大纲";
+"clip_detail.outline_generating" = "正在生成大纲…";
+"clip_detail.outline_hint" = "大纲会把转写切成可点击跳转的章节。";
+"clip_detail.outline_no_timeline" = "这份转写没有时间戳，无法切成章节。";
+"outline.no_timeline" = "这份转写没有时间戳，无法生成大纲。重新转写一次即可。";
+"outline.unparsable" = "模型返回的内容里没有可用的大纲，请再试一次。";
+"summarize.space_mine" = "我的空间";
+"summarize.space_recommended" = "推荐";
+"summarize.space_explore" = "探索";
+"summarize.my_templates" = "我的模板";
+"summarize.create_template" = "创建模板";
+"summarize.editors_picks" = "编辑精选";
+"summarize.inspiration" = "灵感推荐";
+"summarize.mine_space_footer" = "这里的语言与 AI 模型会保存为你的默认设置。";

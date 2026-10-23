@@ -92,66 +92,65 @@ enum PosterTemplate: String, CaseIterable, Identifiable {
 // MARK: - Content model
 
 /// One drawable block of the poster body. Markdown structure is flattened:
-/// headings keep their section role, list items become bullets, and a summary
-/// without any structure falls back to plain paragraphs.
+/// headings keep their section role and `level` (indentation), list items
+/// become bullets, and a summary without any structure falls back to plain
+/// paragraphs.
+///
+/// ★ 2026-10-23 ("图片里面的内容又不展示完全，还有很多内容没展示出来"):
+/// `level` is new. The old model flattened everything to one depth, and the
+/// builder only walked **two** levels of the outline — every `###` sub-section
+/// and everything under it silently disappeared. Levels now drive indentation
+/// and nothing is dropped.
 enum PosterBlock {
-    case heading(String)
-    case bullet(String)
+    case heading(String, level: Int)
+    case bullet(String, level: Int)
     case paragraph(String)
 }
 
 enum SummaryPosterContent {
 
-    /// Caps keep a sprawling 3-page summary from turning into a 12-screen
-    /// poster — DingTalk's cards are teasers, not transcripts.
-    static let maxSections = 9
-    static let maxBulletsPerSection = 4
-    static let maxBulletsTotal = 24
-    static let maxParagraphs = 8
-    static let maxParagraphCharacters = 1_400
-    static let maxBulletCharacters = 140
+    /// Only pathological bullets get cut; the poster is meant to carry the
+    /// whole summary now, so there is no section / item / total cap anymore.
+    static let maxBulletCharacters = 400
+    /// Absolute safety valve: a 1080×`maxBodyHeight` poster is already a
+    /// ~55k-point tall image. Anything past this is not a summary.
+    static let maxBodyHeight: CGFloat = 40_000
 
     static func blocks(from markdown: String) -> [PosterBlock] {
         if let root = MarkdownOutline.parse(markdown) {
-            let sections = Array(root.children.prefix(maxSections))
             var out: [PosterBlock] = []
-            var bulletsTotal = 0
-            for section in sections {
-                if section.kind == .heading {
-                    out.append(.heading(section.title))
-                } else {
-                    out.append(.paragraph(section.title))
-                }
-                var bulletsInSection = 0
-                for child in section.children where bulletsTotal < maxBulletsTotal {
-                    if child.kind == .heading { continue }
-                    let text = truncate(child.title, to: maxBulletCharacters)
-                    switch child.kind {
-                    case .task: out.append(.bullet("☐ " + text))
-                    default: out.append(.bullet(text))
-                    }
-                    bulletsTotal += 1
-                    bulletsInSection += 1
-                    if bulletsInSection >= maxBulletsPerSection { break }
-                }
-                if bulletsTotal >= maxBulletsTotal { break }
-            }
+            // The root carries the document's own `#` title — the poster header
+            // already prints the clip title, so the body starts at its children.
+            for child in root.children { append(child, into: &out) }
+            if out.isEmpty { append(root, into: &out) }
             if !out.isEmpty { return out }
         }
         // Flat prose fallback.
         var paragraphs: [PosterBlock] = []
-        var budget = maxParagraphCharacters
         for line in markdown.split(separator: "\n") {
             let text = MarkdownOutline.inline(String(line))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty, !text.hasPrefix("#") else { continue }
-            let piece = text.count > budget ? String(text.prefix(max(budget, 0))) : text
-            guard !piece.isEmpty else { break }
-            paragraphs.append(.paragraph(piece))
-            budget -= piece.count
-            if paragraphs.count >= maxParagraphs || budget <= 0 { break }
+            paragraphs.append(.paragraph(text))
         }
         return paragraphs
+    }
+
+    /// Depth-first, **every** level. `node.depth` is the outline's own depth
+    /// (`##` = 1), which is exactly the indentation we want to draw.
+    private static func append(_ node: OutlineNode, into out: inout [PosterBlock]) {
+        let level = max(0, node.depth - 1)
+        switch node.kind {
+        case .heading:
+            out.append(.heading(node.title, level: level))
+        case .bullet:
+            out.append(.bullet(truncate(node.title, to: maxBulletCharacters), level: level))
+        case .task:
+            out.append(.bullet("☐ " + truncate(node.title, to: maxBulletCharacters), level: level))
+        case .quote, .text:
+            out.append(.paragraph(node.title))
+        }
+        for child in node.children { append(child, into: &out) }
     }
 
     private static func truncate(_ text: String, to limit: Int) -> String {
@@ -170,8 +169,15 @@ enum SummaryPosterExporter {
     private static let headerTitleFont = UIFont.systemFont(ofSize: 52, weight: .bold)
     private static let headerMetaFont = UIFont.systemFont(ofSize: 26, weight: .regular)
     private static let headingFont = UIFont.systemFont(ofSize: 34, weight: .semibold)
+    /// Deeper headings (`###`) step down so the outline reads as a hierarchy
+    /// without boxes or colour.
+    private static func headingFont(for level: Int) -> UIFont {
+        level <= 0 ? headingFont : UIFont.systemFont(ofSize: 30, weight: .semibold)
+    }
     private static let bodyFont = UIFont.systemFont(ofSize: 29, weight: .regular)
     private static let footerFont = UIFont.systemFont(ofSize: 23, weight: .medium)
+    /// Indentation per outline level, in points at 1080 width.
+    private static let indentStep: CGFloat = 26
 
     /// Renders the poster. Two passes: measure every block to learn the total
     /// height, then draw. `title`/`meta` may be empty — the layout collapses
@@ -193,14 +199,13 @@ enum SummaryPosterExporter {
         let titleLayout = TextRun(title, font: headerTitleFont, color: p.headerInk, maxWidth: contentWidth, maxLines: 2)
         var measured: [(PosterBlock, CGFloat)] = []
         var bodyHeight: CGFloat = 0
-        var shown = 0
         for block in blocks {
             let h = measure(block, palette: p, width: contentWidth)
             bodyHeight += h
             measured.append((block, h))
-            shown += 1
-            // Hard pixel budget so the worst case still renders on device.
-            if bodyHeight > 8200 { break }
+            // ★ 2026-10-23: no more 8200pt teaser cut — the poster carries the
+            //   whole summary. This is only an OOM safety valve.
+            if bodyHeight > SummaryPosterContent.maxBodyHeight { break }
         }
 
         // Divider block: 14pt above, the fill itself, 14pt below — this must
@@ -218,10 +223,18 @@ enum SummaryPosterExporter {
         let height = ceil(margin + headerHeight + bodyHeight + 44 + footerHeight)
 
         let size = CGSize(width: posterWidth, height: height)
-        guard size.width.isFinite, size.height.isFinite, size.width * size.height < 60_000_000 else { return nil }
+        guard size.width.isFinite, size.height.isFinite, size.height > 0 else { return nil }
+
+        // ★ 2026-10-23: the bitmap budget is now spent on **pixels**, not
+        // points. A 20k-point poster at 2× would be ~700 MB of canvas; we keep
+        // the total under ~60 MP by stepping the scale down only when the
+        // content demands it, so ordinary summaries stay 2× sharp.
+        let pixelBudget: CGFloat = 60_000_000
+        let fitScale = sqrt(pixelBudget / max(1, size.width * size.height))
+        let scale = min(2, max(1, fitScale))
 
         let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 2
+        format.scale = scale
         format.opaque = true
         let renderer = UIGraphicsImageRenderer(size: size, format: format)
 
@@ -337,14 +350,16 @@ enum SummaryPosterExporter {
 
     private static func measure(_ block: PosterBlock, palette p: PosterTemplate.Palette, width: CGFloat) -> CGFloat {
         switch block {
-        case .heading(let text):
-            let run = TextRun(text, font: headingFont, color: p.ink, maxWidth: width - 26, maxLines: 2)
-            return run.height + 20
-        case .bullet(let text):
-            let run = TextRun(text, font: bodyFont, color: p.ink, maxWidth: width - 40, maxLines: 4)
+        case .heading(let text, let level):
+            let indent = CGFloat(level) * indentStep
+            let run = TextRun(text, font: headingFont(for: level), color: p.ink, maxWidth: width - 26 - indent, maxLines: 3)
+            return run.height + (level <= 0 ? 20 : 14)
+        case .bullet(let text, let level):
+            let indent = CGFloat(level) * indentStep
+            let run = TextRun(text, font: bodyFont, color: p.ink, maxWidth: width - 40 - indent, maxLines: 6)
             return run.height + 10
         case .paragraph(let text):
-            let run = TextRun(text, font: bodyFont, color: p.ink, maxWidth: width, maxLines: 6)
+            let run = TextRun(text, font: bodyFont, color: p.ink, maxWidth: width, maxLines: 8)
             return run.height + 12
         }
     }
@@ -358,24 +373,26 @@ enum SummaryPosterExporter {
         at y: inout CGFloat
     ) {
         switch block {
-        case .heading(let text):
+        case .heading(let text, let level):
+            let indent = CGFloat(level) * indentStep
             // Accent bar on the left, text beside it.
-            let barHeight = min(34, max(20, h - 20))
+            let barHeight = min(34, max(20, h - (level <= 0 ? 20 : 14)))
             p.accent.setFill()
-            cg.fill(CGRect(x: margin, y: y + 4, width: 7, height: barHeight))
-            let run = TextRun(text, font: headingFont, color: p.ink, maxWidth: width - 26, maxLines: 2)
-            run.draw(at: CGPoint(x: margin + 26, y: y))
+            cg.fill(CGRect(x: margin + indent, y: y + 4, width: level <= 0 ? 7 : 5, height: barHeight))
+            let run = TextRun(text, font: headingFont(for: level), color: p.ink, maxWidth: width - 26 - indent, maxLines: 3)
+            run.draw(at: CGPoint(x: margin + indent + 26, y: y))
             y += h
-        case .bullet(let text):
+        case .bullet(let text, let level):
+            let indent = CGFloat(level) * indentStep
             // Dot centred on the first text line.
             let dotY = y + bodyFont.lineHeight * 0.62
             p.accent.setFill()
-            cg.fillEllipse(in: CGRect(x: margin + 2, y: dotY - 5.5, width: 11, height: 11))
-            let run = TextRun(text, font: bodyFont, color: p.ink, maxWidth: width - 40, maxLines: 4)
-            run.draw(at: CGPoint(x: margin + 34, y: y))
+            cg.fillEllipse(in: CGRect(x: margin + indent + 2, y: dotY - 5.5, width: 11, height: 11))
+            let run = TextRun(text, font: bodyFont, color: p.ink, maxWidth: width - 40 - indent, maxLines: 6)
+            run.draw(at: CGPoint(x: margin + indent + 34, y: y))
             y += h
         case .paragraph(let text):
-            let run = TextRun(text, font: bodyFont, color: p.ink, maxWidth: width, maxLines: 6)
+            let run = TextRun(text, font: bodyFont, color: p.ink, maxWidth: width, maxLines: 8)
             run.draw(at: CGPoint(x: margin, y: y))
             y += h
         }

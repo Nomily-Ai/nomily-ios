@@ -101,6 +101,13 @@ final class AppEnvironment: ObservableObject {
         jobs.register(.export) { job, _ in
             try await JobRunners.export(job, config: config.config)
         }
+        // ★ 2026-10-23 ("录音来源里面还有大纲总结"): the timestamped chapter
+        // outline at the top of 来源. Same registration shape as the rest —
+        // it reads `config.config` when it runs, so a key added while the job
+        // waits is picked up.
+        jobs.register(.outline) { job, reporter in
+            try await JobRunners.outline(job, config: config.config, reporter: reporter)
+        }
         // ★ "Summarize right after transcribing" (2026-10-18): the transcript→summary hand-off.
         //
         // Two guards, both deliberate:

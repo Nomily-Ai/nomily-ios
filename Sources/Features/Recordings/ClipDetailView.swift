@@ -18,6 +18,10 @@ struct ClipDetailView: View {
     @StateObject private var player = AudioPlaybackController()
     @StateObject private var languages = LanguageService()
     @State private var transcript: TranscriptDocument?
+    /// ★ 2026-10-23 ("录音来源里面还有大纲总结"): chapters of the recording, read
+    /// from `<base>.chapters.json`. Loaded here (not in the outline section)
+    /// so switching tabs back and forth doesn't hit the disk each time.
+    @State private var chapters: [ClipChapter] = []
     @State private var deleteAudioAlert = false
     @State private var deleteTranscriptAlert = false
     @State private var deleteSummaryAlert = false
@@ -111,29 +115,67 @@ struct ClipDetailView: View {
     /// Q&A state lives in the page, not in the section: the input bar is pinned to the bottom
     /// while the answers stay in the scrolling list.
     @StateObject private var aiChat = AIChatModel()
+    /// The Q&A conversation is a sheet, not an in-page panel (17:04 screenshot:
+    /// the panel covered the player and left a void above the keyboard).
+    @State private var showAskSheet = false
+    /// ★ 2026-10-23 ("生成的摘要需要能够支持编辑点击能够写入修改"): tap 编辑 on a
+    /// note page and the markdown becomes a `TextEditor`; 保存 writes straight
+    /// back to the page's file — the same file the reader, share poster and
+    /// mind map all read, so there is exactly one copy of the truth.
+    @State private var isEditingSummary = false
+    @State private var editedSummary = ""
+
+    /// Plaud's wording, per tab.
+    private var askPlaceholder: String {
+        detailTab == .notes ? L10n.ClipDetail.aiAskPlaceholderNote : L10n.ClipDetail.aiAskPlaceholder
+    }
+
+    /// ★ 2026-10-23 ("参考一下页面布局跟结构", Plaud 截图 4029/4028): Plaud puts
+    /// 来源 | 笔记 **in the navigation bar itself**, centred, with a short
+    /// underline under the active one. That is why their content starts
+    /// immediately below the title — there is no second strip eating 40 pt.
+    /// Same shape here: `principal` toolbar item, ~22 pt tall.
+    private var navTabs: some View {
+        HStack(spacing: 22) {
+            ForEach(DetailTab.allCases) { tab in
+                Button {
+                    guard detailTab != tab else { return }
+                    withAnimation(.easeOut(duration: 0.16)) { detailTab = tab }
+                } label: {
+                    VStack(spacing: 3) {
+                        Text(tab.title)
+                            .font(.system(size: 15, weight: detailTab == tab ? .semibold : .regular))
+                            .foregroundStyle(detailTab == tab ? Color.primary : Color.secondary)
+                        Capsule(style: .continuous)
+                            .fill(detailTab == tab ? Color.primary : Color.clear)
+                            .frame(width: 18, height: 2)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(detailTab == tab ? [.isSelected] : [])
+            }
+        }
+    }
 
     var body: some View {
-        Form {
-            // ★ 2026-10-23 ("照 Plaud 的样式"): the two tabs sit at the **very top** —
-            //   来源 (left) = audio playback + who said what at what time, 笔记 (right)
-            //   = the generated note pages + mind map. Exactly Plaud's split.
-            Section {
-                Picker("", selection: $detailTab) {
-                    ForEach(DetailTab.allCases) { tab in
-                        Text(tab.title).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
-            }
+        // ★ 2026-10-23 ("参考一下页面布局跟结构"): the tabs moved INTO the nav bar
+        // (`navTabs`, a `principal` toolbar item) — Plaud's layout. The old
+        // separate strip below the title is gone entirely, so the page starts
+        // right under the navigation bar.
+        VStack(spacing: 0) {
+            Form {
             switch detailTab {
             case .source:
                 // The player belongs to 来源, like Plaud's: playback and the
                 // timestamped transcript (who said what, when) are one surface.
                 if item.hasAudio { heroCard }
                 if !marks.isEmpty { marksSection }
+                // ★ 2026-10-23: Plaud's order — player, then the outline (a
+                //   clickable table of contents), then the transcript itself.
+                //   Only when there is a transcript: an outline is derived from
+                //   its timings, so without one there is nothing to navigate.
+                if transcript != nil { outlineSection }
                 transcriptSection
                 if translation != nil { translationSection }
             case .notes:
@@ -143,11 +185,10 @@ struct ClipDetailView: View {
                 //   a plain section at the bottom of the 笔记 tab — not its own tab
                 //   (user reverted 136's removal), aggregated over ALL note pages.
                 todoListSection
-                // AI Q&A is a *note* feature ("对此笔记提问") — it lives on the
-                // 笔记 tab, like Plaud's chat bar under the note.
-                if aiChat.isAvailable {
-                    AIChatSection(model: aiChat)
-                }
+                // ★ 2026-10-23 ("ai 问答是直接一个聊条框不要直接全部占满底部"):
+                //   the inline Q&A section is GONE. The whole conversation now
+                //   lives in the pinned bottom bar (bubbles above the input) —
+                //   the page body stays content-only.
             }
             // Export/delete moved into the top-right menu (Plaud / DingTalk detail-page shape).
             // Only a *running or failed* export still gets an inline row — progress needs to be
@@ -155,21 +196,32 @@ struct ClipDetailView: View {
             if activeJob(.export) != nil || failedJob(.export) != nil {
                 exportStatusSection
             }
+            }
+            // ★ 2026-10-23 ("这个布局排版都是有问题的"): the −16 that used to pull
+            // the Form up under the tab strip also clipped the top of the player
+            // card — visible in the 17:04 screenshot. The tab strip now carries
+            // its own divider, so the Form keeps its normal inset.
         }
-        .padding(.top, -20)
         .navigationTitle(item.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         // ★ (2026-10-19) The three tabs belong to the app's home shell. Keeping them on a
         // recording detail page wastes the bottom strip on navigation the user has already
         // made a decision about — and the Q&A bar needs that strip.
         .toolbar(.hidden, for: .tabBar)
-        // Answers scroll, the question box does not. The chat belongs to the
-        // 笔记 tab (Plaud's "对此笔记提问") — hidden on 来源 so playback keeps
-        // the bottom strip.
+        // Answers live in their own sheet, the bar does not. Both tabs ask —
+        // the context has always carried SUMMARY + TRANSCRIPT, so a question on
+        // 来源 is answered from the transcript.
+        // ★ 2026-10-23 ("这个布局排版都是有问题的需要优化"): the bar no longer
+        //  expands into the page. It is one short row; tapping it opens
+        //  `AIChatSheet`. Wording follows Plaud per tab (笔记 = their exact
+        //  "对此笔记提问").
         .safeAreaInset(edge: .bottom) {
-            if detailTab == .notes, aiChat.isAvailable {
-                AIChatInputBar(model: aiChat)
+            if aiChat.isAvailable {
+                AIChatAskBar(placeholder: askPlaceholder) { showAskSheet = true }
             }
+        }
+        .sheet(isPresented: $showAskSheet) {
+            AIChatSheet(model: aiChat, placeholder: askPlaceholder)
         }
         // ★ 2026-10-15: The detail page counts as "opened" the moment it appears, and the red dot on the list row goes away with it.
         //
@@ -178,6 +230,11 @@ struct ClipDetailView: View {
         // users opening it from elsewhere would find the dot still there, as if nothing happened. This is the single spot, and it will never
         // miss a new entry point.
         .onAppear { ClipReadStore.shared.markSeen(name: item.name) }
+        // ★ 2026-10-23 ("参考一下页面布局跟结构"): 来源 | 笔记 sit in the centre of
+        // the navigation bar, Plaud's way — no separate strip under the title.
+        .toolbar {
+            ToolbarItem(placement: .principal) { navTabs }
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 // ★ (2026-10-19) Export + delete live here, not as two sections at the bottom of
@@ -219,6 +276,30 @@ struct ClipDetailView: View {
                         }
                     }
                     if item.hasAudio || transcript != nil || summary != nil {
+                        Divider()
+                    }
+                    // ★ 2026-10-23 ("还支持重新转写…" Plaud 4031): Plaud's page
+                    //   menu carries 重新转写 and 为说话人命名 next to the
+                    //   destructive items. Both existed here already — the
+                    //   re-transcribe one only as a small icon in the transcript
+                    //   header, which is not where anyone looks for it.
+                    if item.hasAudio {
+                        Button {
+                            retranscribeAlert = true
+                        } label: {
+                            Label(L10n.ClipDetail.retranscribe,
+                                  systemImage: "arrow.trianglehead.2.counterclockwise")
+                        }
+                        .disabled(isTranscribing)
+                    }
+                    if transcript != nil {
+                        Button {
+                            showSpeakerEditor = true
+                        } label: {
+                            Label(L10n.ClipDetail.editSpeakerNames, systemImage: "person.wave.2")
+                        }
+                    }
+                    if item.hasAudio || transcript != nil {
                         Divider()
                     }
                     if item.hasAudio {
@@ -275,6 +356,7 @@ struct ClipDetailView: View {
             if let url = item.url { player.load(url) }
             languages.fetchTargetLanguagesIfNeeded()
             transcript = TranscriptDocument.load(for: item.name)
+            chapters = ClipChapterStore.load(for: item.name)
             // Speaker names are a sidecar of this clip; load once per visit.
             speakerStore.load(clip: item.name)
             marks = A1MarkStore.sidecar(forClipBase: item.base)
@@ -303,6 +385,12 @@ struct ClipDetailView: View {
                 }
                 loadSelectedPageText()
             }
+            // ★ 2026-10-23: same reasoning for the outline — it's written by a
+            // queued job (`outline:<clip>`), which usually finishes while the
+            // user is looking at exactly this page. Equality-guarded, so the
+            // frequent unrelated job-list updates stay free.
+            let loadedChapters = ClipChapterStore.load(for: item.name)
+            if loadedChapters != chapters { chapters = loadedChapters }
         }
         // A rename must reach the Q&A context as well, or answers keep using the
         // old labels until the page is reopened (2026-10-22).
@@ -475,7 +563,7 @@ struct ClipDetailView: View {
             //   The sheet was the only way to control playback, so reading a transcript meant
             //   opening and closing a modal for every re-listen; the detail page now owns the
             //   transport and the transcript below reacts to it.
-            InlineAudioPlayer(player: player, totalDuration: item.duration)
+            InlineAudioPlayer(player: player, totalDuration: item.duration, fileURL: item.url)
 
             HStack(spacing: 6) {
                 Text(item.name)
@@ -546,6 +634,101 @@ struct ClipDetailView: View {
         } footer: {
             Text(L10n.ClipDetail.remarksFooter)
         }
+    }
+
+    // MARK: - outline (★ 2026-10-23, "录音来源里面还有大纲总结")
+
+    /// Plaud's 大纲 block: a timestamped table of contents above the transcript.
+    /// Tapping a chapter seeks the player there; the chapter under the playhead
+    /// is tinted, so "where am I in this recording" reads at a glance.
+    @ViewBuilder
+    private var outlineSection: some View {
+        Section {
+            if let job = activeJob(.outline) {
+                runningRow(job, L10n.ClipDetail.outlineGenerating)
+            } else if chapters.isEmpty {
+                if let job = failedJob(.outline) {
+                    failedRow(job)
+                } else if hasTimeline {
+                    Button { generateOutline() } label: {
+                        Label(L10n.ClipDetail.outlineGenerate, systemImage: "sparkles")
+                    }
+                } else {
+                    // A flat `.txt` transcript (import, or an ASR provider with
+                    // no segment timings) can't support chapters — every one
+                    // would start at zero. Say that instead of offering a
+                    // button that can only fail.
+                    Text(L10n.ClipDetail.outlineNoTimeline)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(chapters) { chapter in
+                    chapterRow(chapter)
+                }
+            }
+        } header: {
+            HStack {
+                Text(L10n.ClipDetail.outline)
+                Spacer()
+                if !chapters.isEmpty, activeJob(.outline) == nil {
+                    Button { generateOutline() } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.ClipDetail.outlineRegenerate)
+                }
+            }
+        } footer: {
+            if chapters.isEmpty, hasTimeline {
+                Text(L10n.ClipDetail.outlineHint)
+            }
+        }
+    }
+
+    /// Per-segment timings exist — the precondition for a chapter list.
+    private var hasTimeline: Bool {
+        !(transcript?.segments.isEmpty ?? true)
+    }
+
+    /// The chapter the playhead is currently inside. `nil` while stopped at 0,
+    /// so nothing looks "current" before playback starts.
+    private var activeChapterStart: Double? {
+        guard player.currentTime > 0 else { return nil }
+        return chapters.last { $0.start <= player.currentTime }?.start
+    }
+
+    private func chapterRow(_ chapter: ClipChapter) -> some View {
+        let isActive = activeChapterStart == chapter.start
+        return Button {
+            guard let url = item.url else { return }
+            // `load` is a no-op on the same URL (see `marksSection`).
+            player.load(url)
+            player.seek(to: chapter.start)
+            player.play()
+        } label: {
+            HStack(spacing: 12) {
+                Text(ClockLabel.mmss(chapter.start))
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(isActive ? Color.appAccent : Color.secondary)
+                    .frame(minWidth: 44, alignment: .leading)
+                Text(chapter.title)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func generateOutline() {
+        guard hasTimeline else { return }
+        jobs.enqueue(Job.outline(clip: item.name))
     }
 
     // MARK: - transcript
@@ -619,11 +802,12 @@ struct ClipDetailView: View {
                         .lineLimit(3)
                 } else {
                     transcriptSearchBar(doc)
+                    // ★ 2026-10-23 ("查看完整转录不要收纳直接在当前那个页面就可以"):
+                    //   the whole transcript, right here. The playback window
+                    //   (four rows around the playhead) and the separate
+                    //   full-transcript push are gone — a Form row list is lazy,
+                    //   so an hour of speech costs nothing to show.
                     transcriptRows(doc)
-                }
-
-                NavigationLink(L10n.ClipDetail.viewFullTranscript) {
-                    TranscriptFullView(document: doc, player: player, speakerNames: speakerMap)
                 }
             } else if item.hasAudio, !isTranscribing {
                 Button {
@@ -666,16 +850,6 @@ struct ClipDetailView: View {
     private func activeSegmentIndex(_ segments: [AsrSegment]) -> Int? {
         guard !segments.isEmpty, player.currentTime > 0 else { return nil }
         return segments.lastIndex { $0.start <= player.currentTime }
-    }
-
-    /// Four rows of context that slide with the audio — enough to read along without turning
-    /// the detail page into an endless list.
-    private func inlineSegmentWindow(_ segments: [AsrSegment]) -> [AsrSegment] {
-        let windowSize = 4
-        guard segments.count > windowSize else { return segments }
-        let active = activeSegmentIndex(segments) ?? 0
-        let start = max(0, min(active - 1, segments.count - windowSize))
-        return Array(segments[start..<(start + windowSize)])
     }
 
     // MARK: transcript search & speaker filter (★ 2026-10-19, DingTalk parity)
@@ -767,9 +941,10 @@ struct ClipDetailView: View {
                 }
             }
         } else {
-            // A short window that **follows playback**: the current sentence stays on screen
-            // and tapping any line jumps the audio there.
-            ForEach(inlineSegmentWindow(doc.segments), id: \.start) { seg in
+            // ★ 2026-10-23 ("查看完整转录不要收纳…"): the full list now lives on
+            // this page (the window + push-in page are gone), so this is every
+            // segment, in order. Still tap-to-seek.
+            ForEach(doc.segments, id: \.start) { seg in
                 TranscriptSegmentRow(
                     segment: seg,
                     isActive: activeSegmentIndex(doc.segments).map { doc.segments[$0].start == seg.start } ?? false,
@@ -876,7 +1051,8 @@ struct ClipDetailView: View {
                 .compactMap { NotePages.text(of: $0, for: item.name) }
                 .flatMap { TodoExtract.fromSummary($0) }
             if !todos.isEmpty {
-                MarkdownBlocksView(blocks: todos)
+                // ★ 2026-10-23: checklist rows with a tap-to-strike circle.
+                TodoChecklistView(blocks: todos, recordingName: item.name)
             } else if !pages.isEmpty {
                 Text(L10n.ClipDetail.todosEmpty)
                     .font(.callout)
@@ -895,7 +1071,14 @@ struct ClipDetailView: View {
         }
     }
 
-    private func triggerTranscribe(locales: [String]?) {        if env.config.config.asrProviders.hasConfiguredProvider {
+    private func triggerTranscribe(locales: [String]?) {
+        // ★ 2026-10-23: a re-run invalidates the outline — its timestamps were
+        // derived from the *previous* ASR output, and after this run they point
+        // at the wrong words. Dropping it means the user sees "生成大纲" again
+        // instead of a chapter list that silently lies.
+        ClipChapterStore.delete(for: item.name)
+        chapters = []
+        if env.config.config.asrProviders.hasConfiguredProvider {
             runTranscribe(locales: locales)
         } else {
             showNoASR = true
@@ -1179,7 +1362,12 @@ struct ClipDetailView: View {
                         }
                         loadSelectedPageText()
                     } label: {
-                        Text(page.title)
+                        // ★ 2026-10-23 ("顶部摘要标签需要跟随当前设置的语言"):
+                        //   the manifest stores the template's canonical (English)
+                        //   name, but the chip must speak the UI's language —
+                        //   "Quick Summary" reads as 总结 here, exactly like the
+                        //   picker does. Custom templates keep their own name.
+                        Text(SummarizeTemplate.localizedTemplateName(page.title))
                             .font(.footnote.weight(page.id == selectedPageID ? .semibold : .regular))
                             .lineLimit(1)
                             .padding(.horizontal, 10)
@@ -1253,27 +1441,35 @@ struct ClipDetailView: View {
                 failedRow(job)
             }
             if let text = currentPageText {
-                // ★ (2026-10-19) The summary tab is the "AI minutes" reading surface, so the
-                //   whole document renders inline (headings / bullets, no truncation) instead of
-                //   a 14-block teaser behind a link.
-                MarkdownBlocksView(blocks: MarkdownBlocks.parse(text))
+                // ★ 2026-10-23 ("参考一下页面布局跟结构", Plaud 4027): their note
+                //   page opens with a centred "内容由 AI 生成，仅供参考" line.
+                Text(L10n.ClipDetail.aiGeneratedNote)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
-                NavigationLink(L10n.ClipDetail.viewFullSummary) {
-                    SummaryFullView(
-                        text: text,
-                        posterTitle: item.customTitle ?? item.name,
-                        posterDate: item.modifiedAt,
-                        posterDuration: item.duration
-                    )
+                if isEditingSummary {
+                    summaryEditor
+                } else {
+                    // ★ (2026-10-19) The summary tab is the "AI minutes" reading surface, so the
+                    //   whole document renders inline (headings / bullets, no truncation) instead of
+                    //   a 14-block teaser behind a link.
+                    // ★ 2026-10-23 ("笔记也是，无需收纳"): the "view full summary"
+                    //   push is gone — this page IS the full document.
+                    MarkdownBlocksView(blocks: MarkdownBlocks.parse(text))
                 }
 
-                // Only offered when the summary actually has section
-                // structure to plot — a flat block of prose has no map.
-                if MarkdownOutline.parse(text) != nil {
-                    Button {
+                // ★ 2026-10-23 ("参考一下页面布局跟结构", Plaud 4028/4025): the mind
+                //   map is an embedded preview card above the ask box — a white
+                //   card with the map drawn small, one tap opens the real thing.
+                //   It used to be a plain "思维导图" row, which gave no hint of
+                //   what was inside.
+                if !isEditingSummary, MarkdownOutline.parse(text) != nil {
+                    MindMapPreviewCard(
+                        markdown: text,
+                        title: item.customTitle ?? item.name
+                    ) {
                         showMindMap = true
-                    } label: {
-                        Label(L10n.ClipDetail.mindMap, systemImage: "arrow.triangle.branch")
                     }
                 }
             } else if transcript != nil {
@@ -1298,6 +1494,16 @@ struct ClipDetailView: View {
                 Text(L10n.ClipDetail.summary)
                 Spacer()
                 if currentPageText != nil {
+                    // ★ 2026-10-23 ("生成的摘要需要能够支持编辑"): one pencil next
+                    // to 重新生成 — tap to edit, save writes the file back.
+                    Button {
+                        editedSummary = currentPageText ?? ""
+                        isEditingSummary = true
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.caption)
+                    }
+                    .disabled(isEditingSummary)
                     if selectedPageID == NotePage.primaryID {
                         Button { tapTranslate(.summary) } label: {
                             Image(systemName: "character.bubble")
@@ -1313,6 +1519,58 @@ struct ClipDetailView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// The in-place markdown editor. Plain `TextEditor` on purpose — the text
+    /// is markdown, and users edit what the note actually is. Saved to the
+    /// page's own file; nothing else needs notifying because every reader
+    /// (detail page, poster, mind map, export) reads that same file.
+    private var summaryEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextEditor(text: $editedSummary)
+                .font(.system(.footnote, design: .monospaced))
+                .frame(minHeight: 320)
+                .padding(10)
+                .scrollContentBackground(.hidden)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(uiColor: .secondarySystemBackground))
+                )
+            HStack {
+                Button(L10n.Common.cancel) {
+                    isEditingSummary = false
+                    editedSummary = ""
+                }
+                Spacer()
+                Button {
+                    saveSummaryEdit()
+                } label: {
+                    Label(L10n.Common.done, systemImage: "checkmark")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func saveSummaryEdit() {
+        let text = editedSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let url = StorageLocations.notePageURL(for: item.name, pageID: selectedPageID)
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            return
+        }
+        isEditingSummary = false
+        editedSummary = ""
+        if selectedPageID == NotePage.primaryID {
+            loadSummary()
+        } else {
+            loadSelectedPageText()
         }
     }
 

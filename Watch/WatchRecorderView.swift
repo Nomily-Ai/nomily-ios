@@ -129,6 +129,14 @@ struct WatchRecorderView: View {
     /// `@State` keeps it in SwiftUI's storage and initializes it only once.
     @State private var shake = WatchShakeDetector()
 
+    // ★ 2026-10-23 (功耗优化): the two signals that say "nobody is looking".
+    // `isLuminanceReduced` — watchOS dimmed the display (wrist down, always-on
+    // state); `scenePhase` — the app left the foreground. Either one lets the
+    // model stop the 12.5 Hz meter (see `WatchRecorderModel.setUIDormant`);
+    // the recording itself is untouched.
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+    @Environment(\.scenePhase) private var scenePhase
+
     /// Current page of the horizontal paging: 0 = left menu page, 1 = Bot, 2 = right menu page.
     ///
     /// Defaults to **1** (Bot) -- the first thing you see when you raise your wrist has to be the page that "starts recording right away",
@@ -253,6 +261,18 @@ struct WatchRecorderView: View {
         // and this page only comes to the foreground when you raise your wrist.
         .onDisappear { shake.stop() }
         .onChange(of: prefs.shakeToRecord) { _, _ in syncShakeDetector() }
+        // ★ 2026-10-23 (功耗优化): dimmed or backgrounded → pause UI work.
+        // One shared funnel (`syncDormancy`) rather than two raw calls, so a
+        // "dimmed cleared while backgrounded" overlap can't send conflicting
+        // values — the last state computed from both signals is always right.
+        .onChange(of: isLuminanceReduced) { _, _ in syncDormancy() }
+        .onChange(of: scenePhase) { _, _ in syncDormancy() }
+    }
+
+    /// Dormant = dimmed **or** not in the foreground. Both must say "awake"
+    /// before the meter runs again.
+    private func syncDormancy() {
+        model.setUIDormant(isLuminanceReduced || scenePhase != .active)
     }
 
     // MARK: - The Bot home screen
@@ -747,5 +767,22 @@ enum WatchFormat {
 
     static func bytes(_ count: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: count, countStyle: .file)
+    }
+
+    /// Day + time for the Recap rows (★ 2026-10-23): "10/23 14:30" shape.
+    /// Recap entries live for 7 days, so the date is as relevant as the time —
+    /// a bare `HH:mm` leaves "which morning was this?" unanswered. Cached
+    /// formatter: `DateFormatter` init is expensive enough that a watch app
+    /// shouldn't pay it per row per render.
+    private static let dayTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = DateFormatter.dateFormat(
+            fromTemplate: "MMdd HH:mm", options: 0, locale: .current
+        )
+        return formatter
+    }()
+
+    static func dayTime(_ date: Date) -> String {
+        dayTimeFormatter.string(from: date)
     }
 }

@@ -14,6 +14,11 @@ enum JobKind: String, Codable, CaseIterable {
     case summarize
     case translate
     case export
+    /// ★ 2026-10-23 ("录音来源里面还有大纲总结"): the timestamped chapter
+    /// outline shown at the top of 来源. A separate kind (not part of
+    /// `summarize`) because it is generated **per transcript**, can be re-run
+    /// on its own, and must not fight over the note page a summary writes.
+    case outline
 
     var symbol: String {
         switch self {
@@ -21,6 +26,7 @@ enum JobKind: String, Codable, CaseIterable {
         case .summarize:  return "sparkles"
         case .translate:  return "character.book.closed"
         case .export:     return "square.and.arrow.up"
+        case .outline:    return "list.bullet.rectangle"
         }
     }
 
@@ -30,6 +36,7 @@ enum JobKind: String, Codable, CaseIterable {
         case .summarize:  return L10n.Jobs.kindSummarize
         case .translate:  return L10n.Jobs.kindTranslate
         case .export:     return L10n.Jobs.kindExport
+        case .outline:    return L10n.Jobs.kindOutline
         }
     }
 }
@@ -117,6 +124,7 @@ struct Job: Codable, Identifiable, Equatable {
             return languageName
         case .export:    return exportFormat?.uppercased()
         case .transcribe: return nil
+        case .outline:   return nil
         }
     }
 }

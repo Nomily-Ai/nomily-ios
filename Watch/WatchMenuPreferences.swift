@@ -28,9 +28,11 @@ enum WatchHomeMenu: String, CaseIterable, Identifiable, Codable {
     case history
     case language
     case settings
-    // The last two are the new "can be added on" ones.
+    // The last three are the "can be added on" ones.
     case queue
     case about
+    // ★ 2026-10-23: Siri-Recap-style digest pushed from the phone.
+    case recap
 
     var id: String { rawValue }
 
@@ -42,6 +44,7 @@ enum WatchHomeMenu: String, CaseIterable, Identifiable, Codable {
         case .settings:   return L10n.Watch.menuSettings
         case .queue:      return L10n.Watch.pendingHeader
         case .about:      return L10n.Settings.version
+        case .recap:      return L10n.Watch.recapTitle
         }
     }
 
@@ -53,6 +56,7 @@ enum WatchHomeMenu: String, CaseIterable, Identifiable, Codable {
         case .settings:   return "gearshape.fill"
         case .queue:      return "tray.full.fill"
         case .about:      return "info.circle.fill"
+        case .recap:      return "sparkles"
         }
     }
 
@@ -66,6 +70,7 @@ enum WatchHomeMenu: String, CaseIterable, Identifiable, Codable {
         case .settings:   return L10n.Watch.menuHintSettings
         case .queue:      return L10n.Watch.menuHintQueue
         case .about:      return L10n.Watch.menuHintAbout
+        case .recap:      return L10n.Watch.menuHintRecap
         }
     }
 
@@ -83,6 +88,7 @@ enum WatchHomeMenu: String, CaseIterable, Identifiable, Codable {
         case .settings:   WatchSettingsView()
         case .queue:      WatchQueueView()
         case .about:      WatchAboutView()
+        case .recap:      WatchRecapView()
         }
     }
 }
