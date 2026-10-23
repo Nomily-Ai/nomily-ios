@@ -526,6 +526,15 @@ struct AppConfig: Codable, Equatable {
     struct AsrDefaults: Codable, Equatable {
         var primary: String
         var fallbacks: [String]
+        /// ★ 2026-10-23 ("实时转写要支持选择已经配置好的 ASR，而不是锁死 Azure"):
+        /// which engine live captions use. Empty/nil = auto (walk `primary` →
+        /// `fallbacks` and take the first one that can actually stream).
+        ///
+        /// Separate from `primary` because the two jobs have different
+        /// requirements: file transcription accepts batch vendors (Aliyun, Baidu,
+        /// Tencent…), live captions need a streaming endpoint (Azure, the local /
+        /// remote whisper servers, on-device).
+        var liveProvider: String? = nil
     }
 
     struct WifiAP: Codable, Equatable {

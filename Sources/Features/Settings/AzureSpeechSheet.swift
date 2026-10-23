@@ -21,6 +21,9 @@ struct AzureSpeechSheet: View {
 
     @State private var verify: VerifyState = .idle
     @State private var showHelp = false
+    /// Round trip of the last verify, so the test row can say "可用 · 1234 ms"
+    /// even before the value is read back from `ASRLatencyMemory`.
+    @State private var lastMillis: Int?
 
     private var azure: AppConfig.AsrProviders.Azure? {
         configService.config.asrProviders.azure
@@ -121,6 +124,48 @@ struct AzureSpeechSheet: View {
                     Text(L10n.ASR.azurePurposeFooter + "\n\n" + L10n.ASR.autosaveNote)
                         .font(.footnote)
                 }
+
+                // ★ 2026-10-23 ("Azure 没有测速"): the tiny checkmark next to the key
+                // field *is* the round-trip test, but nobody reads it that way, and
+                // the result vanished. A dedicated row now states the measured
+                // latency in words, same as every cloud vendor's sheet.
+                Section {
+                    Button {
+                        Task { await runVerify() }
+                    } label: {
+                        HStack(spacing: 10) {
+                            if verify == .verifying {
+                                ProgressView().controlSize(.small)
+                                Text(L10n.ASRCloud.testRunning).foregroundStyle(.primary)
+                            } else if case .success = verify {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(Color.green)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(L10n.ASRCloud.ok(
+                                        lastMillis ?? ASRLatencyMemory.millis(for: "azure") ?? 0))
+                                        .foregroundStyle(.primary)
+                                    Text(L10n.ASRCloud.ready)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } else if case .failed(let reason) = verify {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(Color.red)
+                                Text(reason)
+                                    .foregroundStyle(.primary)
+                                    .multilineTextAlignment(.leading)
+                            } else {
+                                Image(systemName: "bolt.horizontal.circle")
+                                    .foregroundStyle(.primary)
+                                Text(L10n.ASRCloud.testButton).foregroundStyle(.primary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .disabled(verify == .verifying || key.isEmpty || region.isEmpty)
+                } footer: {
+                    Text(L10n.ASRCloud.testNote).font(.footnote)
+                }
             }
             .navigationTitle(L10n.ASR.azureSpeech)
             .navigationBarTitleDisplayMode(.inline)
@@ -186,6 +231,7 @@ struct AzureSpeechSheet: View {
         let started = Date()
         let result = await LLMModelService.verifyAzure(key: key, region: region)
         let millis = Int(Date().timeIntervalSince(started) * 1000)
+        lastMillis = millis
         verify = result.ok ? .success : .failed(result.error ?? L10n.ASR.verifyFailed)
         if result.ok {
             ASRLatencyMemory.save(millis, for: "azure")

@@ -530,11 +530,44 @@ struct ASRProvidersView: View {
         return result
     }
 
+    /// ★ 2026-10-23 ("实时转写要支持选择已经配置好的 ASR"): only the providers that
+    /// can actually stream audio are offered for live captions. Aliyun / Baidu /
+    /// Tencent / Google / AWS / … are batch file APIs — listing them here would
+    /// promise something the engine cannot do.
+    private var liveCapableASR: [(key: String, label: String)] {
+        let liveKeys: Set<String> = ["ondevice", "azure", "local", "remote"]
+        return configuredASR.filter { liveKeys.contains($0.key) }
+    }
+
+    private var liveEngineBinding: Binding<String> {
+        Binding(
+            get: { configService.config.defaults.asr.liveProvider ?? "" },
+            set: {
+                configService.config.defaults.asr.liveProvider = $0.isEmpty ? nil : $0
+                configService.scheduleSave()
+            }
+        )
+    }
+
     private var transcriptionSection: some View {
         Section {
             if !configuredASR.isEmpty {
                 Picker(L10n.ASR.activeProvider, selection: primaryBinding) {
                     ForEach(configuredASR, id: \.key) { Text($0.label).tag($0.key) }
+                }
+            }
+
+            // ★ Live captions have their own engine choice: the batch vendors above
+            // cannot stream, and pinning a live engine must not change file order.
+            if !liveCapableASR.isEmpty {
+                Picker(selection: liveEngineBinding) {
+                    Text(L10n.ASR.liveEngineAuto).tag("")
+                    ForEach(liveCapableASR, id: \.key) { Text($0.label).tag($0.key) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(L10n.ASR.liveEngine)
+                        InfoTip(text: L10n.ASR.liveEngineFooter)
+                    }
                 }
             }
 

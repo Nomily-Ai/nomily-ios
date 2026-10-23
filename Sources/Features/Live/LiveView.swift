@@ -259,7 +259,12 @@ private struct LiveContent: View {
     }
 
     private var activeProviderName: String {
-        config.config.defaults.asr.primary
+        // ★ 2026-10-23: the language lists follow the engine that will actually
+        // run these captions — the pinned live engine wins over the file-order
+        // primary (Aliyun can't stream, so its language list would mislead).
+        let defaults = config.config.defaults.asr
+        if let live = defaults.liveProvider, !live.isEmpty { return live }
+        return defaults.primary
     }
 
     private var azureConfigured: Bool {

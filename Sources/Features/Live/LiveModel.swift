@@ -923,7 +923,14 @@ final class LiveModel: ObservableObject {
         //    loop that produced no text for the whole session. Once marked dead we
         //    fall through to the plain-transcription chain below; `beginLiveTranslation`
         //    keeps translating finals locally if an LLM is configured.
-        if wantTranslation, azureUsable, let azure, !deadASRProviders.contains("azuretranslate") {
+        // ★ 2026-10-23: the Azure real-time-translation shortcut is only taken when
+        // Azure is also the chosen **live** engine. A user who pinned on-device /
+        // local / remote for captions gets the LLM translation path instead —
+        // otherwise "I picked on-device" silently came back as Azure on screen.
+        let liveChoice = (config.config.defaults.asr.liveProvider ?? "").lowercased()
+        let azureIsLiveChoice = liveChoice.isEmpty || liveChoice == "azure"
+        if wantTranslation, azureUsable, azureIsLiveChoice, let azure,
+           !deadASRProviders.contains("azuretranslate") {
             // ★★ The preferred option remains Azure real-time translation: the source and translated text **return together in the same stream**,
             //    with the lowest latency and no need for local compute power. This path is consistent with the previous word-by-word approach.
             endLiveTranslation()
@@ -959,9 +966,16 @@ final class LiveModel: ObservableObject {
         }
 
         let defaults = config.config.defaults.asr
-        var chain = [defaults.primary]
-        for fb in defaults.fallbacks where fb != defaults.primary {
-            chain.append(fb)
+        // ★ 2026-10-23: an explicitly chosen live engine leads the chain; the
+        // file-transcription order stays as the fallback ladder behind it, so a
+        // dead live choice still degrades to something that works.
+        var chain: [String] = []
+        if let live = defaults.liveProvider, !live.isEmpty {
+            chain.append(live)
+            diagLive("live engine pinned by settings: \(live)")
+        }
+        for name in [defaults.primary] + defaults.fallbacks where !chain.contains(name) {
+            chain.append(name)
         }
         // ★ On-device is appended as the **last resort**, not the first (2026-10-18).
         //

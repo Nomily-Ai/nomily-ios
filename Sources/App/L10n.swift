@@ -862,6 +862,21 @@ enum L10n {
                     comment: "Aliyun SubmitTask/GetTaskResult reported a task failure; %@ carries the server's reason"), detail)
         }
         static var activeProvider: String { NSLocalizedString("asr.active_provider", comment: "") }
+        // ★ 2026-10-23 ("实时转写要支持选择已经配置好的 ASR"): live captions get their
+        // own engine choice — batch-only vendors cannot stream audio.
+        static var liveEngine: String {
+            NSLocalizedString("asr.live_engine", value: "Live engine",
+                              comment: "Settings picker: which ASR runs live captions")
+        }
+        static var liveEngineAuto: String {
+            NSLocalizedString("asr.live_engine_auto", value: "Automatic (follow the order above)",
+                              comment: "Live engine picker: no explicit choice")
+        }
+        static var liveEngineFooter: String {
+            NSLocalizedString("asr.live_engine_footer",
+                              value: "Only engines that can stream audio are listed: Aliyun, Baidu, Tencent and the other cloud vendors are batch file APIs and cannot do live captions. Automatic picks the first stream-capable service from the order above.",
+                              comment: "Explains why the live picker is shorter than the transcription picker")
+        }
         static var autoTranscribeAfterDownload: String { NSLocalizedString("asr.auto_transcribe_after_download", comment: "") }
         static func autoTranscribeMin(_ duration: Int) -> String {
             String(format: NSLocalizedString("asr.auto_transcribe_min", comment: ""), duration)
