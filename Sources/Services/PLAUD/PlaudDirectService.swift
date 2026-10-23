@@ -260,6 +260,12 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Lives on the class body, not the extension that owns the method — Swift
     /// does not allow stored properties in extensions.
     private var liveWatchdog: Task<Void, Never>?
+    /// Slow "is the card still recording?" poll behind `armRecordStateWatchdog`.
+    private var recordStateWatchdog: Task<Void, Never>?
+    /// Last `blePenState.state` the card reported (4099 = recording, 1 = idle).
+    private var lastPenState = 0
+    /// `blePenState.state` while a take is running.
+    static let penStateRecording = 4099
     /// Ack watchdog for pause/resume (CMD 21 / CMD 140). Same class-body rule.
     private var recordCommandWatchdog: Task<Void, Never>?
     /// When the take was paused, so its length can exclude the gap on resume.
@@ -868,6 +874,8 @@ final class PlaudDirectService: NSObject, ObservableObject {
     func deactivate() {
         PlaudDeviceAgent.shared.disconnect()
         stopStatePolling()
+        recordStateWatchdog?.cancel()
+        recordStateWatchdog = nil
         isConfigured = false
         isInitialized = false
         userToken = nil
@@ -2480,8 +2488,15 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
     /// official app's state dump showed.
     func blePenState(state: Int, privacy: Int, keyState: Int, uDisk: Int, findMyToken: Int, hasSndpKey: Int, deviceAccessToken: Int) {
         log.info("plaud pen state \(state) privacy \(privacy) key \(keyState) udisk \(uDisk)")
-        let nowRecording = (state == 4099)
+        // ★ Remember the raw state: `armRecordStateWatchdog` reconciles against
+        //   it, so a card-initiated stop that never surfaced as `bleRecordStop`
+        //   can still end the take instead of leaving the clock running.
+        lastPenState = state
+        let nowRecording = (state == Self.penStateRecording)
         let wasRecording = isRecording
+        if wasRecording != nowRecording {
+            TicNoteDiagLog.log("PLAUD-REC", "pen state \(state) — recording \(wasRecording) → \(nowRecording)")
+        }
         DispatchQueue.main.async {
             self.isRecording = nowRecording
             // The card stopped on its own (key press / out of space): clear the
@@ -2699,6 +2714,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.rawBytesTotal = 0
         }
         armLiveWatchdog(sid: sid)
+        armRecordStateWatchdog(sid: sid)
     }
 
     /// "Nothing is arriving" self-heal, and the reason it exists:
@@ -2799,6 +2815,9 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         TicNoteDiagLog.log("PLAUD-REC", "pause acked sid=\(sessionId) fileSize=\(fileSize)")
         recordCommandWatchdog?.cancel()
         recordCommandWatchdog = nil
+        // A paused take is silent by design — reconciling it would end it.
+        recordStateWatchdog?.cancel()
+        recordStateWatchdog = nil
         DispatchQueue.main.async {
             self.isPaused = true
             self.isRecording = false
@@ -2814,11 +2833,28 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
 
     func bleRecordStop(sessionId: Int, reason: Int, fileExist: Bool, fileSize: Int) {
         log.info("plaud record stop sid=\(sessionId) reason=\(reason) exist=\(fileExist) size=\(fileSize)")
+        TicNoteDiagLog.log("PLAUD-REC", "stop acked sid=\(sessionId) reason=\(reason) size=\(fileSize)")
+        finishTake(cardInitiated: false)
+    }
+
+    /// Common teardown for a finished take — whether the app stopped it, the card
+    /// did, or the reconciler noticed the card had.
+    ///
+    /// `cardInitiated` only changes the log line: there is no stop command to send
+    /// when the card has already stopped. Everything else must be identical, or a
+    /// card-initiated stop leaves the live clock ticking on screen (which is
+    /// exactly what the user saw: "在卡片上已经停止录音了但实时转写还显示录音时长").
+    private func finishTake(cardInitiated: Bool) {
+        if cardInitiated {
+            TicNoteDiagLog.log("PLAUD-REC", "card-ended take reconciled (no bleRecordStop arrived)")
+        }
         PlaudDeviceAgent.shared.stopSyncFile()
         Task { @MainActor in self.stopLiveTranscription() }
         DispatchQueue.main.async {
             self.liveWatchdog?.cancel()
             self.liveWatchdog = nil
+            self.recordStateWatchdog?.cancel()
+            self.recordStateWatchdog = nil
             self.clearRecordClock()
             self.isRecording = false
             self.isPaused = false
@@ -2830,6 +2866,41 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             guard self.phase.isConnected else { return }
             self.autoPullNewRecordings()
+        }
+    }
+
+    /// Ask the card whether it is still recording, every 10 s while a take is open.
+    ///
+    /// Why this exists: a stop pressed **on the card** arrives as an unsolicited
+    /// CMD 23. The SDK handles it internally (its log shows `stopSyncFile` in the
+    /// same millisecond) but does not reliably surface it as `bleRecordStop`, and
+    /// when it does not, `isRecording` stays true and the clock keeps counting for
+    /// a take that ended minutes ago.
+    ///
+    /// Two independent signals must agree before we declare the take over — the
+    /// card answering "not recording" **and** no PCM arriving in that window — so
+    /// a stale or unsolicited state reply can never cut a live take short.
+    private func armRecordStateWatchdog(sid: Int) {
+        recordStateWatchdog?.cancel()
+        recordStateWatchdog = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var delay: UInt64 = 4_000_000_000   // first check early, then every 10 s
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: delay)
+                delay = 10_000_000_000
+                guard !Task.isCancelled else { return }
+                guard self.isRecording, !self.isPaused, self.recordSessionID == sid else { return }
+                let pcmBefore = self.livePCMBytes
+                PlaudDeviceAgent.shared.getState()
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                guard !Task.isCancelled else { return }
+                guard self.isRecording, !self.isPaused, self.recordSessionID == sid else { return }
+                let state = self.lastPenState
+                guard state != 0, state != Self.penStateRecording,
+                      self.livePCMBytes == pcmBefore else { continue }
+                self.finishTake(cardInitiated: true)
+                return
+            }
         }
     }
 
