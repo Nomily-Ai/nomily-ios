@@ -40,8 +40,8 @@ targets:
       path: Sources/App/Info.plist
       properties:
         CFBundleDisplayName: Nomily AI
-        CFBundleShortVersionString: "1.0.0"
-        CFBundleVersion: "3"
+        CFBundleShortVersionString: "1.0.1"
+        CFBundleVersion: "5"
         # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
         # appropriate when the app's crypto use is exempt from US export
         # documentation requirements:

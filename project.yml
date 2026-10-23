@@ -42,11 +42,11 @@ targets:
       path: Sources/App/Info.plist
       properties:
         CFBundleDisplayName: Nomily AI
-        CFBundleShortVersionString: "1.0.0"
+        CFBundleShortVersionString: "1.0.1"
         # Must track `nomily_watch`'s build number — watchOS refuses to install
         # a companion whose version doesn't match its host, and an embedded
         # watch app one build ahead is enough to trip it. Bump both or neither.
-        CFBundleVersion: "27"
+        CFBundleVersion: "5"
         # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
         # appropriate when the app's crypto use is exempt from US export
         # documentation requirements:
@@ -163,10 +163,10 @@ targets:
       path: Watch/Info.plist
       properties:
         CFBundleDisplayName: Nomily AI
-        CFBundleShortVersionString: "1.0.0"
+        CFBundleShortVersionString: "1.0.1"
         # Must track the iPhone app's build number — watchOS refuses to install
         # a companion whose version doesn't match its host.
-        CFBundleVersion: "27"
+        CFBundleVersion: "5"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.nomily.app
         NSMicrophoneUsageDescription: Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.
@@ -264,10 +264,10 @@ targets:
       path: WatchControls/Info.plist
       properties:
         CFBundleDisplayName: Nomily AI
-        CFBundleShortVersionString: "1.0.0"
+        CFBundleShortVersionString: "1.0.1"
         # 必须与父 App 一致 —— 嵌入式二进制的版本号和宿主不一致时，watchOS 会把
         # 整个 App 一起拒装。
-        CFBundleVersion: "27"
+        CFBundleVersion: "5"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
