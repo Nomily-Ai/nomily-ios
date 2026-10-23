@@ -182,9 +182,7 @@ enum ASRCloudService {
     /// `secret + "&"`. `CreateToken` (nls-meta) is the call because its result
     /// — the token — is the credential the transcription itself will use.
     private static func aliyunSigned(accessKeyId: String, accessKeySecret: String) -> URLRequest? {
-        guard !accessKeyId.isEmpty, !accessKeySecret.isEmpty,
-              let url = URL(string: "https://nls-meta.cn-shanghai.aliyuncs.com/")
-        else { return nil }
+        guard !accessKeyId.isEmpty, !accessKeySecret.isEmpty else { return nil }
 
         let params: [(String, String)] = [
             ("Action", "CreateToken"),
@@ -208,12 +206,27 @@ enum ASRCloudService {
             using: SymmetricKey(data: Data("\(accessKeySecret)&".utf8)))
         let signature = Data(mac).base64EncodedString()
 
-        var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)!
-        parts.queryItems = params.map { URLQueryItem(name: $0.0, value: $0.1) }
-            + [URLQueryItem(name: "Signature", value: signature)]
-        var req = URLRequest(url: parts.url!)
+        var req = URLRequest(url: Self.aliyunSignedURL(
+            host: "nls-meta.cn-shanghai.aliyuncs.com",
+            params: params, signature: signature)!)
         req.timeoutInterval = timeout
         return req
+    }
+
+    /// Build a signed Aliyun RPC URL.
+    ///
+    /// ⚠️ Deliberately **not** `URLComponents`: it leaves `+` inside a query
+    /// value untouched, and Aliyun decodes a bare `+` as a space — so every
+    /// signature whose base64 happened to contain one was rejected with
+    /// "Specified signature is not matched with our calculation". On device that
+    /// was about one call in three (2026-10-23), which is exactly why it looked
+    /// like flaky networking instead of a encoding bug. `aliyunEncode` maps `+`
+    /// to `%2B`, so building the query by hand fixes it.
+    static func aliyunSignedURL(host: String, params: [(String, String)], signature: String) -> URL? {
+        let query = (params + [("Signature", signature)])
+            .map { "\(aliyunEncode($0.0))=\(aliyunEncode($0.1))" }
+            .joined(separator: "&")
+        return URL(string: "https://\(host)/?\(query)")
     }
 
     /// RFC3986 encode with the two Aliyun quirks: `+` → `%20`, `*` → `%2A`,

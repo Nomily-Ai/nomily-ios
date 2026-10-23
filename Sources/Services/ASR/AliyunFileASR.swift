@@ -48,15 +48,15 @@ struct AliyunFileASR {
 
         // 1. Upload to the user's OSS bucket. The object is private; nobody can
         //    read it without a signed URL.
-        try await ossPut(data: data, contentType: Self.mimeType(for: ext), key: key)
-        Self.log.notice("oss upload ok key=\(key, privacy: .public) bytes=\(data.count)")
+        let host = try await ossPut(data: data, contentType: Self.mimeType(for: ext), key: key)
+        Self.log.notice("oss upload ok host=\(host, privacy: .public) key=\(key, privacy: .public) bytes=\(data.count)")
 
         // 2. Presigned download link — this is the `file_link` Aliyun requires.
         let link = Self.presignedGet(key: key,
                                      accessKeyId: accessKeyId,
                                      accessKeySecret: accessKeySecret,
                                      bucket: ossBucket,
-                                     region: region,
+                                     host: host,
                                      expiresIn: Self.presignValidity)
 
         // 3. Submit the recognition task (AK-signed POP RPC, POST).
@@ -200,12 +200,15 @@ struct AliyunFileASR {
             using: SymmetricKey(data: Data("\(accessKeySecret)&".utf8)))
         let signature = Data(mac).base64EncodedString()
 
-        var signed = params.map { URLQueryItem(name: $0.0, value: $0.1) }
-        signed.append(URLQueryItem(name: "Signature", value: signature))
-
-        var components = URLComponents(string: endpoint)!
-        components.queryItems = signed
-        var request = URLRequest(url: components.url!)
+        // Hand-built query, not `URLComponents`: the latter leaves `+` in the
+        // base64 signature unescaped and Aliyun reads it as a space (see
+        // `ASRCloudService.aliyunSignedURL`).
+        let host = URL(string: endpoint)?.host ?? ""
+        guard let url = ASRCloudService.aliyunSignedURL(
+            host: host, params: params, signature: signature) else {
+            throw AsrError.http(0, "cannot build the Aliyun request URL")
+        }
+        var request = URLRequest(url: url)
         request.timeoutInterval = 30
         if method == "POST" {
             // RFC 3986 form-encode the body by hand — URLQueryItem would encode
@@ -232,42 +235,91 @@ struct AliyunFileASR {
 
     // MARK: - OSS
 
+    /// Bucket → real host, learned from OSS's own 403 hint.
+    ///
+    /// The credential sheet's `region` is free text and OSS is strict about it:
+    /// a bucket created in Hangzhou answers an endpoint built from `cn-shanghai`
+    /// with *"The bucket you are attempting to access must be addressed using
+    /// the specified endpoint"* and HTTP 403 — which is exactly what every
+    /// Aliyun file transcription hit on device (2026-10-23). Making the user
+    /// look up their bucket's region is a bad trade when the error itself names
+    /// the right endpoint: read `<Endpoint>` out of it, retry once, remember it.
+    private static var ossHostCache: [String: String] = [:]
+    private static let ossHostLock = NSLock()
+
+    private static func cachedOSSHost(bucket: String) -> String? {
+        ossHostLock.lock(); defer { ossHostLock.unlock() }
+        return ossHostCache[bucket]
+    }
+
+    private static func cacheOSSHost(_ host: String, bucket: String) {
+        ossHostLock.lock(); ossHostCache[bucket] = host; ossHostLock.unlock()
+    }
+
+    /// `https://<bucket>.oss-cn-hangzhou.aliyuncs.com/` → `<bucket>.oss-cn-hangzhou.aliyuncs.com`
+    private static func endpointHint(in data: Data) -> String? {
+        guard let xml = String(data: data, encoding: .utf8),
+              let open = xml.range(of: "<Endpoint>"),
+              let close = xml.range(of: "</Endpoint>") else { return nil }
+        let raw = String(xml[open.upperBound..<close.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+        let host = raw.split(separator: "/").first.map(String.init) ?? ""
+        return host.isEmpty ? nil : host
+    }
+
     /// PUT with the classic OSS header signature:
     /// `base64(HMAC-SHA1(secret, "PUT\n\n<type>\n<date>\n/<bucket>/<key>"))`.
-    private func ossPut(data: Data, contentType: String, key: String) async throws {
-        let host = "\(ossBucket).oss-\(region).aliyuncs.com"
-        let resource = "/\(ossBucket)/\(key)"
-        let date = Self.rfc1123Now()
-        let stringToSign = "PUT\n\n\(contentType)\n\(date)\n\(resource)"
-        let mac = HMAC<Insecure.SHA1>.authenticationCode(
-            for: Data(stringToSign.utf8),
-            using: SymmetricKey(data: Data(accessKeySecret.utf8)))
-        let signature = Data(mac).base64EncodedString()
+    /// Returns the host that accepted the object, so the presigned GET below is
+    /// built against the same endpoint.
+    private func ossPut(data: Data, contentType: String, key: String) async throws -> String {
+        var host = Self.cachedOSSHost(bucket: ossBucket)
+            ?? "\(ossBucket).oss-\(region).aliyuncs.com"
+        for attempt in 0...1 {
+            let resource = "/\(ossBucket)/\(key)"
+            let date = Self.rfc1123Now()
+            let stringToSign = "PUT\n\n\(contentType)\n\(date)\n\(resource)"
+            let mac = HMAC<Insecure.SHA1>.authenticationCode(
+                for: Data(stringToSign.utf8),
+                using: SymmetricKey(data: Data(accessKeySecret.utf8)))
+            let signature = Data(mac).base64EncodedString()
 
-        guard let url = URL(string: "https://\(host)/\(key)") else {
-            throw AsrError.missingCredentials(L10n.ASR.aliyun)
-        }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 300
-        request.httpMethod = "PUT"
-        request.httpBody = data
-        request.setValue(date, forHTTPHeaderField: "Date")
-        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        request.setValue("OSS \(accessKeyId):\(signature)", forHTTPHeaderField: "Authorization")
+            guard let url = URL(string: "https://\(host)/\(key)") else {
+                throw AsrError.missingCredentials(L10n.ASR.aliyun)
+            }
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 300
+            request.httpMethod = "PUT"
+            request.httpBody = data
+            request.setValue(date, forHTTPHeaderField: "Date")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+            request.setValue("OSS \(accessKeyId):\(signature)", forHTTPHeaderField: "Authorization")
 
-        let (respData, resp) = try await URLSession.shared.data(for: request)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(code) else {
+            let (respData, resp) = try await URLSession.shared.data(for: request)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if (200..<300).contains(code) {
+                Self.cacheOSSHost(host, bucket: ossBucket)
+                return host
+            }
+            // Wrong-endpoint 403 names the right one — follow it once.
+            if attempt == 0, code == 403,
+               let hint = Self.endpointHint(in: respData), hint != host {
+                Self.log.notice("oss endpoint \(host, privacy: .public) → \(hint, privacy: .public)")
+                host = hint
+                continue
+            }
             Self.log.error("oss put failed HTTP \(code): \(String(data: respData.prefix(180), encoding: .utf8) ?? "", privacy: .public)")
             throw AsrError.http(code, String(data: respData.prefix(200), encoding: .utf8) ?? "")
         }
+        throw AsrError.http(403, "OSS endpoint could not be resolved")
     }
 
     /// Presigned GET (object stays private): the URL embeds an expiry-stamped
     /// signature over `"GET\n\n\n<expires>\n/<bucket>/<key>"`.
     private static func presignedGet(
         key: String, accessKeyId: String, accessKeySecret: String,
-        bucket: String, region: String, expiresIn: TimeInterval
+        bucket: String, host: String, expiresIn: TimeInterval
     ) -> String {
         let expires = String(Int(Date().timeIntervalSince1970 + expiresIn))
         let resource = "/\(bucket)/\(key)"
@@ -276,7 +328,7 @@ struct AliyunFileASR {
             for: Data(stringToSign.utf8),
             using: SymmetricKey(data: Data(accessKeySecret.utf8)))
         let signature = Data(mac).base64EncodedString()
-        return "https://\(bucket).oss-\(region).aliyuncs.com/\(key)"
+        return "https://\(host)/\(key)"
             + "?OSSAccessKeyId=\(ASRCloudService.aliyunEncode(accessKeyId))"
             + "&Expires=\(expires)"
             + "&Signature=\(ASRCloudService.aliyunEncode(signature))"

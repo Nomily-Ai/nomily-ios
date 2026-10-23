@@ -346,6 +346,11 @@ final class PlaudDirectService: NSObject, ObservableObject {
     private var lastLevelPublish = Date.distantPast
     /// PCM blocks seen this session (diag only, see `blePcmData`).
     private var pcmBlockCount = 0
+    /// Raw (still encrypted) bytes off the card — diag only, see `bleData`.
+    /// Counting them is what separates "the card sends nothing" from "the SDK
+    /// decoder never turns what it sent into PCM"; both used to be invisible.
+    private var rawBlockCount = 0
+    private var rawBytesTotal = 0
     /// SN we are trying to re-bind automatically (`reconnect()`). Cleared as
     /// soon as the card is seen or the attempt is abandoned.
     private var reconnectTarget: String?
@@ -2665,33 +2670,33 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             setSyncMessage(L10n.Plaud.syncPreemptedByRecord)
         }
         TicNoteDiagLog.log("PLAUD-PCM", "open live stream sid=\(sid) start=\(start)")
-        // ★★ 2026-10-22 ("实时转录还是没出文字") — **this was the bug.**
+        // ★★ 2026-10-23 — **this is the real reason live captions were silent.**
         //
-        // The card pushes decoded PCM through `blePcmData` **only when the sync
-        // request asks for it**: the low-level `BleAgent.syncFile` carries a
-        // `decode:` flag whose doc reads "是否同时返回解码后的数据" with
-        // `blePcmData` listed under it (PlaudBleSDK-Swift.h). The high-level
-        // `PlaudDeviceAgent.syncFile(start:end:)` has no such flag — it is the
-        // raw-Opus file transfer, and nothing in our app decodes Opus frames on
-        // that path. So every take of the day produced **zero** PCM: no
-        // `first block`, no `pcm blocks=`, and an Azure socket that sat silent.
+        // The card's recordings are **E2EE encrypted**. The SDK can only turn
+        // them into PCM after its own handshake, and *only the high-level call
+        // performs it*. Its log tells the whole story:
         //
-        // (`start` is "resume from byte N" per CMD 28's payload — for a fresh
-        // take that is the card's data offset, for an attach it is the file
-        // size we just listed. `end: 0` = "to the file end", which for a live
-        // take keeps growing.)
-        if let ble = PlaudDeviceAgent.shared.bleAgent {
-            ble.syncFile(sessionId: sid, start: start, end: 0, decode: true)
-        } else {
-            // The low-level agent appears only after a bind; falling back keeps
-            // the pre-bind attach path harmless instead of crashing.
-            log.warning("plaud live: bleAgent unavailable — falling back to non-decode sync")
-            TicNoteDiagLog.log("PLAUD-PCM", "bleAgent nil — non-decode sync (no PCM expected)")
-            PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: start, end: 0)
-        }
+        //   2026-10-21 (worked): [PlaudSDK] syncFile - sessionId: … (recording)
+        //       → ">>> E2EE stream: starting header sync"
+        //       → "header buffer 208 / 416 / 624 bytes"
+        //       → "key ready, segment=0, starting PCM decode"
+        //       → a second syncFile at start=1024 streams PCM every 20 ms
+        //
+        //   2026-10-23 (silent, every attempt): a bare CMD 28 with no "E2EE
+        //       stream" line at all, then "file sync finished, count:0".
+        //
+        // The low-level `ble.syncFile(…, decode: true)` used since 2026-10-22
+        // skips the header/key exchange completely — the `decode:` flag is a
+        // red herring, it never reaches the wire (payload is `sid | start | end`
+        // only, verified byte for byte in the SDK log). So every take opened a
+        // pipe the card could not send a single decodable byte on.
+        PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: start, end: 0)
         DispatchQueue.main.async {
             self.liveStreaming = true
             self.livePCMBytes = 0
+            self.pcmBlockCount = 0
+            self.rawBlockCount = 0
+            self.rawBytesTotal = 0
         }
         armLiveWatchdog(sid: sid)
     }
@@ -2728,17 +2733,14 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
                 PlaudDeviceAgent.shared.stopSyncFile()
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 guard !Task.isCancelled, self.liveStreaming, self.recordSessionID == sid else { return }
-                // Same decode flag as the first open: a non-decode retry would
-                // reproduce the exact silence the retry exists to fix.
-                if let ble = PlaudDeviceAgent.shared.bleAgent {
-                    ble.syncFile(sessionId: sid, start: 0, end: 0, decode: true)
-                } else {
-                    PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: 0, end: 0)
-                }
+                // Same call as the first open: the retry exists to recover a
+                // swallowed command, not to change protocol — a low-level retry
+                // would skip the E2EE handshake and reproduce the silence.
+                PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: 0, end: 0)
             }
 
             guard self.liveStreaming, self.recordSessionID == sid else { return }
-            TicNoteDiagLog.log("PLAUD-PCM", "watchdog: still no PCM after 2 opens — giving up sid=\(sid)")
+            TicNoteDiagLog.log("PLAUD-PCM", "watchdog: still no PCM after 2 opens — giving up sid=\(sid) raw=\(self.rawBlockCount) blocks/\(self.rawBytesTotal)B")
             // The recording itself is fine — this is only the live channel. Say
             // exactly that, so nobody thinks their take is being lost.
             self.liveASRNotice = L10n.Plaud.liveNoStream
@@ -3060,7 +3062,21 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
 
     func bleDownloadFileStop() {}
 
-    func bleData(sessionId: Int, start: Int, data: Data) {}
+    /// Raw bytes off the card, before the SDK's E2EE/Opus decode.
+    ///
+    /// Diagnosis only — this fires for ordinary file transfers too, so it is
+    /// counted, not logged in bulk. It answers the one question the transcript
+    /// cannot: with the live stream open, is the card sending **anything**?
+    func bleData(sessionId: Int, start: Int, data: Data) {
+        rawBlockCount += 1
+        rawBytesTotal += data.count
+        if rawBlockCount == 1 {
+            TicNoteDiagLog.log("PLAUD-PCM", "raw first block sid=\(sessionId) start=\(start) bytes=\(data.count)")
+        }
+        if rawBlockCount % 500 == 0 {
+            TicNoteDiagLog.log("PLAUD-PCM", "raw blocks=\(rawBlockCount) total=\(rawBytesTotal)B sid=\(sessionId)")
+        }
+    }
 }
 
 private extension URL {

@@ -104,14 +104,14 @@ struct ASRCloudSpec: Identifiable, Equatable {
                   placeholder: "nls-portal 项目列表里的 Appkey", required: false),
             Field(id: "ossBucket", kind: .plain, label: "OSS Bucket",
                   placeholder: "与区域一致的 bucket 名", required: false),
-            Field(id: "region", kind: .plain, label: "Region",
-                  placeholder: "cn-shanghai", required: false),
+            Field(id: "region", kind: .plain, label: "OSS Region",
+                  placeholder: "cn-hangzhou（跟着 Bucket 走）", required: false),
         ],
         defaultEndpoint: "https://nls-meta.cn-shanghai.aliyuncs.com",
         endpointEditable: false,
         models: ["录音文件识别（Paraformer）", "一句话识别", "实时语音识别"],
         console: "① nls-portal.console.aliyun.com → 项目列表 拿 Appkey；② ram.console.aliyun.com 创建 AccessKey（需同时授权 OSS 读写）；③ 与区域一致建一个 OSS Bucket",
-        note: "转写流程：音频先上传到你的 OSS Bucket（私有），生成 2 小时有效的预签名链接交给阿里云识别（file_link 必须公网可下载，这是它的接口要求），识别完取回结果。区域默认 cn-shanghai。实时字幕走它家的实时语音识别 WebSocket（同一个 Appkey），在「录音与转写 → 实时识别引擎」里选阿里云即可。"
+        note: "转写流程：音频先上传到你的 OSS Bucket（私有），生成 2 小时有效的预签名链接交给阿里云识别（file_link 必须公网可下载，这是它的接口要求），识别完取回结果。这里填的是 **OSS 区域**（Bucket 建在杭州就填 cn-hangzhou）——填错会自动按 OSS 返回的 endpoint 纠正一次；实时字幕的网关区域与它无关，会自动归一化。实时字幕走它家的实时语音识别 WebSocket（同一个 Appkey），在「录音与转写 → 实时识别引擎」里选阿里云即可。"
     )
 
     static let baidu = ASRCloudSpec(

@@ -65,6 +65,9 @@ final class AliyunRealtimeClient {
     /// `stop()` was called and we are waiting for `TranscriptionCompleted`.
     private var awaitingCompletion = false
     private var emittedClosed = false
+    /// Last time audio (real or keep-alive silence) went out — see `startKeepAlive`.
+    private var lastAudioAt = Date()
+    private var keepAlive: DispatchSourceTimer?
 
     /// Stable for the whole session — NLS requires every instruction of one
     /// recognition task to reuse the same `task_id`, and rejects a missing one
@@ -141,6 +144,7 @@ final class AliyunRealtimeClient {
                     if let error { self?.fail("send: \(error.localizedDescription)") }
                 }
                 self.batchesSent += 1
+                self.lastAudioAt = Date()
             }
         }
     }
@@ -174,6 +178,8 @@ final class AliyunRealtimeClient {
             return
         }
         log.notice("closing ws (batches=\(self.batchesSent))")
+        keepAlive?.cancel()
+        keepAlive = nil
         task.cancel(with: .normalClosure, reason: nil)
         session?.invalidateAndCancel()
         self.task = nil
@@ -240,6 +246,32 @@ final class AliyunRealtimeClient {
         }
     }
 
+    // MARK: - Keep-alive
+
+    /// NLS drops a socket after **10 s without audio**
+    /// (`Gateway:IDLE_TIMEOUT … the last directive is 'StartTranscription'`).
+    /// With the PLAUD card that window is real: the SDK has to fetch 640 bytes of
+    /// header, do its E2EE key exchange and only then emits PCM, and a take can
+    /// legitimately pause. Silence keeps the session alive at a negligible cost
+    /// (16 kHz mono 16-bit ≈ 32 KB/s *only while it is actually idle*).
+    private func startKeepAlive() {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 4, repeating: 4)
+        timer.setEventHandler { [weak self] in
+            guard let self, self.ready, !self.closed, let task = self.task else { return }
+            // Real audio already went out recently → nothing to do.
+            guard Date().timeIntervalSince(self.lastAudioAt) >= 4 else { return }
+            let silence = Data(count: Self.flushBytes)
+            task.send(.data(silence)) { [weak self] error in
+                if let error { self?.fail("keepalive: \(error.localizedDescription)") }
+            }
+            self.lastAudioAt = Date()
+            self.log.debug("keep-alive silence sent")
+        }
+        timer.resume()
+        keepAlive = timer
+    }
+
     private func handle(_ text: String) {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -255,6 +287,7 @@ final class AliyunRealtimeClient {
                 self.ready = true
                 self.log.notice("TranscriptionStarted — flushing buffered audio")
                 self.onEvent?(.ready)
+                self.startKeepAlive()
                 // Flush anything captured while the handshake was in flight.
                 guard let task = self.task else { return }
                 while self.pending.count >= Self.flushBytes {
@@ -262,6 +295,7 @@ final class AliyunRealtimeClient {
                     self.pending.removeFirst(Self.flushBytes)
                     task.send(.data(Data(chunk))) { _ in }
                     self.batchesSent += 1
+                    self.lastAudioAt = Date()
                 }
             }
         case "TranscriptionResultChanged":
@@ -301,7 +335,11 @@ final class AliyunRealtimeClient {
 
     private func fail(_ why: String) {
         queue.async { [weak self] in
-            guard let self else { return }
+            guard let self, !self.closed else { return }
+            // A dead socket must not keep a keep-alive timer firing into it.
+            self.closed = true
+            self.keepAlive?.cancel()
+            self.keepAlive = nil
             self.log.error("aliyun rt failed: \(why, privacy: .public)")
             self.onEvent?(.failed(why))
         }
@@ -342,10 +380,13 @@ final class AliyunRealtimeClient {
             using: SymmetricKey(data: Data("\(accessKeySecret)&".utf8)))
         let signature = Data(mac).base64EncodedString()
 
-        var components = URLComponents(string: "https://nls-meta.cn-shanghai.aliyuncs.com/")!
-        components.queryItems = params.map { URLQueryItem(name: $0.0, value: $0.1) }
-            + [URLQueryItem(name: "Signature", value: signature)]
-        var request = URLRequest(url: components.url!)
+        guard let url = ASRCloudService.aliyunSignedURL(
+            host: "nls-meta.cn-shanghai.aliyuncs.com",
+            params: params, signature: signature) else {
+            throw NSError(domain: "AliyunRT", code: 400, userInfo: [
+                NSLocalizedDescriptionKey: "cannot build the Aliyun token URL"])
+        }
+        var request = URLRequest(url: url)
         request.timeoutInterval = 20
 
         let (data, response) = try await URLSession.shared.data(for: request)
