@@ -133,8 +133,8 @@ enum ASRCloudService {
                 apiSecret: secrets["apiSecret"] ?? "")
 
         case "tencent":
-            // TC3-HMAC-SHA256 against the cheapest authenticated read
-            // (DescribeVocabList). Region is a header, not part of the host.
+            // TC3-HMAC-SHA256 against a read that still exists. Region is a
+            // header, not part of the host.
             return tencentSigned(
                 secretId: secrets["secretId"] ?? "",
                 secretKey: secrets["tencentSecretKey"] ?? "",
@@ -290,17 +290,25 @@ enum ASRCloudService {
     // MARK: - 腾讯云 TC3 signature (HMAC-SHA256 chain)
 
     /// Tencent Cloud's TC3 scheme: three HMAC rounds (date → service →
-    /// "tc3_request") over the canonical request hash. `DescribeVocabList` is
-    /// the cheapest authenticated read; a business error still comes back as
-    /// HTTP 200 with `Response.Error`, which `bodyError` turns into a failure.
+    /// "tc3_request") over the canonical request hash.
+    ///
+    /// ★ 2026-10-23: the probe action is `DescribeTaskStatus {"TaskId": 1}`.
+    /// The hot-word list actions (`DescribeVocabList` / `DescribeVocab` /
+    /// `GetVocabList`) **no longer exist** in `asr 2019-06-14` — every one of
+    /// them answers `InvalidAction` (verified with live keys), which is what the
+    /// user saw as "action is invalid or not found". A task that isn't there
+    /// answers `FailedOperation.NoSuchTask`, which still proves the signature
+    /// was accepted; see `bodyError`'s tencent branch for the verdict logic.
     private static func tencentSigned(secretId: String, secretKey: String, region: String) -> URLRequest? {
         guard !secretId.isEmpty, !secretKey.isEmpty,
               let url = URL(string: "https://asr.tencentcloudapi.com")
         else { return nil }
         let host = "asr.tencentcloudapi.com"
         let service = "asr"
-        let action = "DescribeVocabList"
-        let body = Data("{\"Limit\":1}".utf8)
+        let action = "DescribeTaskStatus"
+        // `TaskId` must be a JSON **number** (uint64) — a string fails with
+        // InvalidParameter before reaching the "no such task" business reply.
+        let body = Data("{\"TaskId\":1}".utf8)
 
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -450,9 +458,22 @@ enum ASRCloudService {
         case "tencent":
             // TC3 services wrap everything in Response; business errors ride
             // along at 200.
-            if let err = (json["Response"] as? [String: Any])?["Error"] as? [String: Any] {
-                return (err["Message"] as? String) ?? (err["Code"] as? String)
-                    ?? L10n.ASRCloud.badCredentials
+            //
+            // ★ 2026-10-23: the verdict is **code-shaped**, not "any Error is a
+            // failure". The probe asks for a task that doesn't exist, so the
+            // expected reply IS an error — `FailedOperation.NoSuchTask` — and it
+            // still proves the credentials+signature were accepted (Tencent's
+            // gateway checks the signature before business logic; a wrong key
+            // answers `AuthFailure.SignatureFailure`, verified live). So:
+            // auth-shaped codes fail, everything else counts as verified.
+            if let err = (json["Response"] as? [String: Any])?["Error"] as? [String: Any],
+               let code = err["Code"] as? String, !code.isEmpty {
+                let authFailed = code.hasPrefix("AuthFailure")
+                    || code == "UnauthorizedOperation"
+                    || code == "InvalidCredential"
+                guard authFailed else { return nil }
+                let message = err["Message"] as? String
+                return (message?.isEmpty == false) ? message : code
             }
             return nil
         default:

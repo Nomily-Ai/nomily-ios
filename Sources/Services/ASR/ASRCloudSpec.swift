@@ -169,7 +169,7 @@ struct ASRCloudSpec: Identifiable, Equatable {
         endpointEditable: false,
         models: ["16k_zh 普通话", "16k_en 英语", "16k_yue 粤语", "16k_zh_medical 医疗"],
         console: "console.cloud.tencent.com → 访问管理 → API 密钥管理",
-        note: "地址固定 asr.tencentcloudapi.com，区域是请求参数（TC3-HMAC-SHA256 签名）。探测调热词表列表——最便宜的已鉴权读。"
+        note: "地址固定 asr.tencentcloudapi.com，区域是请求参数（TC3-HMAC-SHA256 签名）。探测调 DescribeTaskStatus（不存在的任务 ID）——只验证签名，不上传音频；热词表接口（DescribeVocabList 等）已在 asr 2019-06-14 下线，不要用它做探测。"
     )
 
     static let google = ASRCloudSpec(
