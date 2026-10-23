@@ -478,6 +478,15 @@
 "template_cat.academic" = "学术";
 "template_cat.creative" = "创意";
 
+"template.plaud_summary" = "总结（Plaud）";
+"template.plaud_meeting_minutes" = "会议纪要（Plaud）";
+"template.plaud_key_points" = "要点提取（Plaud）";
+"template.plaud_todo_list" = "待办清单（Plaud）";
+"template_desc.plaud_summary" = "Plaud 式快速概览：一段总览 + 要点 + 决定 + 待办";
+"template_desc.plaud_meeting_minutes" = "完整清晰的会议纪要，含行动与决策";
+"template_desc.plaud_key_points" = "只留值得记的：要点、带说话人的原话、数字与日期";
+"template_desc.plaud_todo_list" = "只收明确的待办：事项、负责人、截止；没有就直说";
+
 /* 模板名称 */
 "template.formal_minutes" = "正式会议纪要";
 "template.structured_minutes" = "结构化会议纪要";

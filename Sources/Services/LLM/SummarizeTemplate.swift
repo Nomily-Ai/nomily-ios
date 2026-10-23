@@ -205,6 +205,11 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
     ]
 
     private static let nameKeys: [String: String] = [
+        // ★ 2026-10-23: the Plaud-style four (PlaudTemplateLibrary).
+        "Plaud Summary": "template.plaud_summary",
+        "Plaud Meeting Minutes": "template.plaud_meeting_minutes",
+        "Plaud Key Points": "template.plaud_key_points",
+        "Plaud To-Do List": "template.plaud_todo_list",
         "Formal Meeting Minutes": "template.formal_minutes",
         "Structured Minutes": "template.structured_minutes",
         "Executive Brief": "template.executive_brief",
@@ -273,6 +278,11 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
     ]
 
     private static let summaryKeys: [String: String] = [
+        // ★ 2026-10-23: the Plaud-style four (PlaudTemplateLibrary).
+        "Plaud Summary": "template_desc.plaud_summary",
+        "Plaud Meeting Minutes": "template_desc.plaud_meeting_minutes",
+        "Plaud Key Points": "template_desc.plaud_key_points",
+        "Plaud To-Do List": "template_desc.plaud_todo_list",
         "Detailed Summary": "template_desc.detailed_summary",
         "Meeting Report": "template_desc.meeting_report",
         "Key Points, Decisions, Tasks, Deadlines, and Actions": "template_desc.key_points_decisions_tasks_deadlines_and_actions",
@@ -800,7 +810,10 @@ final class SummarizeTemplateStore: ObservableObject {
         ),
     ]
 
-    /// Everything the picker offers out of the box: the hand-written
-    /// originals plus the library adopted from Vobot Recorder.
-    static let defaults: [SummarizeTemplate] = builtInDefaults + VobotTemplateLibrary.templates
+    /// Everything the picker offers out of the box: the Plaud-style four first
+    /// (★ 2026-10-23 — `defaults.first` is also the **auto-summary** template, so
+    /// "Plaud Summary" replaced the Vobot skeleton that filled empty slots with
+    /// placeholders), then the hand-written originals, then the Vobot library.
+    static let defaults: [SummarizeTemplate] =
+        PlaudTemplateLibrary.templates + builtInDefaults + VobotTemplateLibrary.templates
 }
