@@ -2271,7 +2271,6 @@ enum L10n {
             NSLocalizedString("watch.recording_busy", value: "Recording",
                               comment: "Watch home: accessibility value while a take is running")
         }
-
         // MARK: Side swipe menus + quick menu settings (★ seventh revision 2026-10-16)
         //
         // User's words: "the 4 menus should appear by swiping left or right... the quick-recording menu bar on the watch
@@ -2354,6 +2353,17 @@ enum L10n {
         static var recapEmpty: String {
             NSLocalizedString("watch.recap_empty", value: "Summaries generated on your iPhone appear here",
                               comment: "Watch recap page: empty state")
+        }
+        /// ★ 2026-10-23 ("只看到一个标题，点进去才是主要内容"): the list row only
+        /// carries the title, so the detail page needs its own section label.
+        static var recapPoints: String {
+            NSLocalizedString("watch.recap_points", value: "Key points",
+                              comment: "Watch recap detail page: label above the bullet list")
+        }
+        /// Shown on the detail page when a digest arrived with no points.
+        static var recapNoPoints: String {
+            NSLocalizedString("watch.recap_no_points", value: "No key points for this summary",
+                              comment: "Watch recap detail page: empty body")
         }
 
         // MARK: Ring appearance (directly called on the watch face)

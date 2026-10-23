@@ -1002,6 +1002,17 @@ struct WatchBotFace: View {
     /// Stroke width of the hold ring.
     private var holdRingWidth: CGFloat { max(4, size * 0.06) }
 
+    /// ★★ 2026-10-23 (user: "启动跟关闭都是更暂停"): the same ring played for
+    /// both directions, so a press **to start** and a press **to stop** looked
+    /// identical — and "a ring with two bars inside" reads as a pause button,
+    /// which is what made both look like "paused". The arc now explains itself:
+    ///
+    /// * **idle** (this press will start a take) — a solid arc, the original look;
+    /// * **recording** (this press will end the take) — the *same* arc, drawn
+    ///   **dashed and thinner**, sitting outside the live wave.
+    ///
+    /// Solid = "fill this up to begin", dashed = "let this run out to end". No new
+    /// labels, no new screen, and the difference survives always-on dimming.
     @ViewBuilder
     private var holdLayer: some View {
         if holdProgress > 0.002 {
@@ -1014,13 +1025,28 @@ struct WatchBotFace: View {
             // counter. Shrinking the path by exactly `lineWidth` puts the stroke's
             // outer edge back on the box boundary: no layout change, no clipping
             // change, 6 pt of real clearance under the ring on every size.
+            //
+            // ★ 2026-10-23: the other half of that report — the **pending pill**
+            // sitting on the same 6-o'clock edge — was fixed on the host page
+            // (`WatchRecorderView.topBar`), not here: a ring can't dodge a bar that
+            // shares its edge, so the bar had to move.
             Circle()
                 .trim(from: 0, to: holdProgress)
-                .stroke(tint, style: StrokeStyle(lineWidth: holdRingWidth, lineCap: .round))
+                .stroke(
+                    tint,
+                    style: StrokeStyle(
+                        lineWidth: isRecording ? holdRingWidth * 0.62 : holdRingWidth,
+                        lineCap: .round,
+                        // Dashed only while a take is running: see the note above.
+                        dash: isRecording
+                            ? [holdRingWidth * 1.15, holdRingWidth * 0.95]
+                            : []
+                    )
+                )
                 .frame(width: size * 1.14 - holdRingWidth,
                        height: size * 1.14 - holdRingWidth)
                 .rotationEffect(.degrees(-90)) // start at 12 o'clock, like the old ring
-                .opacity(sweepFading ? 0 : 1)
+                .opacity(sweepFading ? 0 : (isRecording ? 0.9 : 1))
                 .animation(.easeOut(duration: 0.4), value: sweepFading)
                 .allowsHitTesting(false)
         }

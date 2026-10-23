@@ -234,7 +234,20 @@ struct WatchRecorderView: View {
         // own gestures. `.gesture` would override the Bot `Button`'s hold/tap --
         // which is exactly this page's most important interaction.
         .simultaneousGesture(pageDrag)
-        .overlay(alignment: .bottom) { bottomBar }
+        // ★★ 2026-10-23 (user: "手表底部三个小点…放在其他地方，不然的话就把它充当成
+        // 嘴巴去了" + "长按那个圆圈底部都是被遮挡的"):
+        //
+        // The bottom edge used to carry the page dots **and** the pending pill,
+        // stacked in one overlay. On the Bot page that edge is exactly where the
+        // hold ring's 6-o'clock arc runs — so the ring got cut off by the pill,
+        // and the three dots under a round face + two red eyes read as a **mouth**
+        // (the screenshots the user sent are literally that face).
+        //
+        // Both moved to the top edge, which the Bot page leaves empty: the pill
+        // top-leading, the page indicator top-trailing as a **three-segment bar**
+        // rather than dots — a bar can't be mistaken for a mouth, and it sits at
+        // the same height as the pill so the two never fight the ring.
+        .overlay(alignment: .top) { topBar }
         // What's hidden is **this page's** navigation bar; the pushed sub-pages have their own bars and back buttons.
         //
         // ⚠️ You need both: `.toolbar(.hidden, for: .navigationBar)` hides the navigation bar itself,
@@ -280,7 +293,7 @@ struct WatchRecorderView: View {
     /// That Bot face. Hold to start, tap to stop, double tap to start/stop -- **all three live on it**
     /// (see the passage at the top of `WatchBotFace`); this is only responsible for catching its two callbacks.
     private var botPane: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 5) {
             Spacer(minLength: 0)
 
             WatchBotFace(
@@ -316,8 +329,9 @@ struct WatchRecorderView: View {
 
             caption
 
-            // Leave room for the bottom row of page dots + the pending hint so the two don't overlap.
-            Spacer(minLength: 0).frame(height: 22)
+            // ★ 2026-10-23: only the top bar needs clearance now — the page
+            // indicator and the pending pill moved up out of the ring's way.
+            Spacer(minLength: 0).frame(height: 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // ★ 2026-10-20: double-tap / shake while recording land here instead of
@@ -353,12 +367,24 @@ struct WatchRecorderView: View {
             // so there is nothing left for a second, weaker hint to explain. That
             // line goes back to being the byte counter, which is the only hard
             // evidence that audio is reaching the file.
-            Text(WatchFormat.bytes(model.currentBytes))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(styleStore.style.tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .monospacedDigit()
+            //
+            // ★ 2026-10-23 (user: "启动跟关闭都是更暂停"): the counter alone left
+            // both presses looking the same — you hold 2 s to start and hold 2 s
+            // to stop, and nothing on screen said which one this press was. The
+            // action label now sits **directly under the counter**, small and
+            // secondary, so it explains the gesture without competing with the
+            // one number that proves the take is alive.
+            VStack(spacing: 1) {
+                Text(WatchFormat.bytes(model.currentBytes))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(styleStore.style.tint)
+                    .monospacedDigit()
+                Text(L10n.Watch.holdToStop)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
         } else {
             Text(L10n.Watch.holdToRecord)
                 .font(.system(size: 11, weight: .medium))
@@ -581,69 +607,80 @@ struct WatchRecorderView: View {
             }
     }
 
-    // MARK: - Bottom edge of the screen
+    // MARK: - Top edge of the screen
 
-    /// The little stack at the very bottom: page dots + pending hint.
+    /// The little stack at the very top: pending pill on the left, page
+    /// indicator on the right.
     ///
-    /// ⚠️ The two **must go in the same overlay** (not one overlay each): two
-    ///    `alignment: .bottom` overlays **stack in the same place**, so the moment the pending bar appears
-    ///    it covers the page dots.
-    private var bottomBar: some View {
-        VStack(spacing: 3) {
-            pageDots
+    /// ⚠️ One overlay, one `HStack` — two separate `.overlay(alignment: .top)`
+    ///    modifiers would stack on the same spot, which is the mistake the old
+    ///    bottom bar documented and then this rewrite removed along with it.
+    private var topBar: some View {
+        HStack(alignment: .top, spacing: 0) {
             queueBar
+            Spacer(minLength: 0)
+            pageBar
         }
-        .padding(.bottom, 1)
+        .padding(.horizontal, 4)
+        .padding(.top, 1)
     }
 
-    /// Three little dots showing which page you're on.
+    /// Three little **segments** showing which page you're on.
     ///
-    /// ★ Added in revision eight. The user reported "swiping left and right doesn't reach the menus"; half of that was broken behavior (`.page` not giving horizontal
-    /// paging, now fixed) and the other half was **discoverability**: nothing on screen ever hinted that you could swipe here.
-    /// Three dots are the least space and the least explanation.
+    /// ★ Rewritten 2026-10-23 from dots to a bar, for the reason in `body`:
+    /// three round dots under a face read as a mouth. Three short capsules in a
+    /// row read as a page control — the shape itself is the explanation.
     ///
-    /// ⚠️ Deliberately **not tappable**: a 4pt dot is nearly impossible to hit on a 40mm watch, and making it a button would only
-    ///    bring "I tapped and nothing happened". Its job is "tell you that you can swipe", not "swipe for you".
-    private var pageDots: some View {
-        HStack(spacing: 4) {
+    /// ★ Added in revision eight as dots. The user reported "swiping left and
+    /// right doesn't reach the menus"; half of that was broken behavior
+    /// (`.page` not giving horizontal paging, now fixed) and the other half was
+    /// **discoverability**: nothing on screen ever hinted that you could swipe here.
+    ///
+    /// ⚠️ Deliberately **not tappable**: a 4pt-tall bar is impossible to hit on a
+    ///    40mm watch, and making it a button would only bring "I tapped and
+    ///    nothing happened". Its job is "tell you that you can swipe".
+    private var pageBar: some View {
+        HStack(spacing: 3) {
             ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(Color.white.opacity(index == page ? 0.85 : 0.25))
-                    .frame(width: 4, height: 4)
+                Capsule()
+                    .fill(Color.white.opacity(index == page ? 0.85 : 0.22))
+                    .frame(width: index == page ? 12 : 6, height: 3)
             }
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: page)
         .allowsHitTesting(false)
     }
 
-    // MARK: - The pending hint bar
+    // MARK: - The pending hint
 
-    /// The thin hint at the very bottom of the screen. **Only appears when something is pending**, about one line of text tall.
+    /// The compact pending pill. **Only appears when something is pending.**
     ///
-    /// Why not spread it back into a column: the center of the home screen is the Bot now, and spreading it out would shove it up.
-    /// Details are on a separate page (`WatchQueueView`), so the two don't conflict.
+    /// ★ Moved 2026-10-23 from the bottom edge to the top-leading corner: on the
+    /// Bot page the bottom edge is the hold ring's arc, and the pill was literally
+    /// covering it ("长按那个圆圈底部都是被遮挡的"). Details stay on their own page
+    /// (`WatchQueueView`), so the pill is just an icon + count + chevron.
     @ViewBuilder
     private var queueBar: some View {
         if !model.pending.isEmpty {
             NavigationLink {
                 WatchQueueView()
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     Image(systemName: "arrow.up.circle.fill")
                     Text(L10n.Watch.pendingCount(model.pending.count))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: 8, weight: .bold))
                 }
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(styleStore.style.tint)
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Capsule().fill(Color.white.opacity(0.12)))
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .padding(.bottom, 2)
             .accessibilityLabel(L10n.Watch.pendingHeader)
         }
     }

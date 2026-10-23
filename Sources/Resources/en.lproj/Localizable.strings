@@ -669,7 +669,7 @@
 "watch.mic_denied" = "Allow microphone access in Settings.";
 "watch.record_failed" = "Couldn't start recording: %@";
 "watch.recording_interrupted" = "Recording was interrupted and saved. Reopen the app to start a new take.";
-"watch.hold_to_stop" = "Long-press to end the recording";
+"watch.hold_to_stop" = "Hold to stop";
 "watch.stop_confirm_title" = "End this recording?";
 "watch.stop_confirm_message" = "The take will be saved and sent to your iPhone.";
 "watch.stop_confirm_action" = "End";
@@ -697,6 +697,8 @@
 "watch.menu_hint_recap" = "AI digests pushed from the phone";
 "watch.recap_title" = "Recap";
 "watch.recap_empty" = "Summaries generated on your iPhone appear here";
+"watch.recap_points" = "Key points";
+"watch.recap_no_points" = "No key points for this summary";
 "watch.style_appearance" = "Appearance";
 "watch.style_breathing" = "Breathing";
 "watch.style_reset" = "Reset";
