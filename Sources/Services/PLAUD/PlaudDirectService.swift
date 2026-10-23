@@ -158,6 +158,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// it in `bleRecordStart`; 1024 on E2EE cards = header size). The watchdog
     /// re-uses it so retries replay the same region shape as the first open.
     private var liveStartOffset = 0
+    /// Handle for the delayed **bounded** audio request (stage 2 of
+    /// `openLiveStream`). One at a time: a re-open or a resume cancels the
+    /// pending one so two requests can't race onto the single sync slot.
+    private var boundedAudioTask: Task<Void, Never>?
     /// 0…1 loudness of the newest PCM block (drives the level meter while recording).
     @Published private(set) var liveLevel: Double = 0
     /// Live transcript text (finals + in-flight hypothesis) for the current
@@ -1336,6 +1340,8 @@ final class PlaudDirectService: NSObject, ObservableObject {
         DispatchQueue.main.async {
             self.liveWatchdog?.cancel()
             self.liveWatchdog = nil
+            self.boundedAudioTask?.cancel()
+            self.boundedAudioTask = nil
         }
         clearRecordClock()
         recordMarks = []
@@ -2707,11 +2713,21 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         // note was an inference from 640-byte blocks at 16 kHz, never an
         // observation; the 10-21 logs show the identical silence.
         //
-        // Fix: ask for the audio region with an explicit huge end. The card
-        // clamps to its write cursor and keeps pushing frames as audio lands,
-        // which the SDK E2EE-decodes into `blePcmData` (640 B = 20 ms) —
-        // exactly the documented live behavior.
-        PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: start, end: 0xFFFF_FFFF)
+        // ★★★ 2026-10-23 (second pass, screenshot "卡片没有推送实时音频"): the
+        // huge end never reached the wire — the high-level call is the SDK's
+        // **E2EE wrapper**, and it re-issues the audio request with its own
+        // hard-coded `end = 0` (verified byte for byte: our 0xFFFFFFFF call
+        // produced `…00040000 00000000`). So the request shape is split in two:
+        //
+        //   stage 1 — high-level `PlaudDeviceAgent.syncFile` **only** for the
+        //     E2EE handshake (header sync 0…640 → "key ready"), which is the
+        //     one thing only that call can do;
+        //   stage 2 — low-level `BleAgent.syncFile(…, decode: true)` with an
+        //     explicit `end = 0xFFFFFFFF` once the key is ready: that call is
+        //     the CMD 12 sender, so the end we pass is the end the card sees,
+        //     and with the key already established the SDK decodes what comes
+        //     back into `blePcmData`.
+        PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: start, end: 0)
         liveStartOffset = start
         DispatchQueue.main.async {
             self.liveStreaming = true
@@ -2722,6 +2738,31 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         }
         armLiveWatchdog(sid: sid)
         armRecordStateWatchdog(sid: sid)
+        requestBoundedAudio(sid: sid, after: 1.1)
+    }
+
+    /// Stage 2 of `openLiveStream`: ask for the audio region **with an explicit
+    /// end**, through the low-level sender.
+    ///
+    /// `delay` covers the high-level handshake: the header arrives ~100 ms after
+    /// the request and the key is ready a few ms after that, so 1.1 s is a
+    /// generous margin on a loaded connection — and issuing it too early would
+    /// simply get the same empty-range answer the handshake request got.
+    private func requestBoundedAudio(sid: Int, after delay: TimeInterval) {
+        boundedAudioTask?.cancel()
+        boundedAudioTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled,
+                  self.liveStreaming, self.recordSessionID == sid, self.isRecording else { return }
+            TicNoteDiagLog.log("PLAUD-PCM", "bounded audio request sid=\(sid) start=\(self.liveStartOffset) end=FFFFFFFF (low-level, decode)")
+            BleAgent.shared.syncFile(
+                sessionId: sid,
+                start: self.liveStartOffset,
+                end: 0xFFFF_FFFF,
+                decode: true
+            )
+        }
     }
 
     /// "Nothing is arriving" self-heal, and the reason it exists:
@@ -2772,9 +2813,12 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
                 PlaudDeviceAgent.shared.stopSyncFile()
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 guard !Task.isCancelled, self.liveStreaming, self.recordSessionID == sid, self.isRecording else { return }
-                // Same shape as the first open (bounded huge end) — a low-level
-                // retry would skip the E2EE handshake and reproduce the silence.
-                PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: self.liveStartOffset, end: 0xFFFF_FFFF)
+                // Exactly the two stages of `openLiveStream`: handshake first,
+                // then the bounded audio request once the key is ready. A
+                // low-level call **alone** would skip the handshake and get an
+                // undecodable stream (that is the 2026-10-22 failure).
+                PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: self.liveStartOffset, end: 0)
+                self.requestBoundedAudio(sid: sid, after: 1.0)
             }
         }
     }
@@ -2869,6 +2913,8 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         DispatchQueue.main.async {
             self.liveWatchdog?.cancel()
             self.liveWatchdog = nil
+            self.boundedAudioTask?.cancel()
+            self.boundedAudioTask = nil
             self.recordStateWatchdog?.cancel()
             self.recordStateWatchdog = nil
             self.clearRecordClock()
@@ -3004,6 +3050,8 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             guard !self.isRecording else { return }
             self.liveWatchdog?.cancel()
             self.liveWatchdog = nil
+            self.boundedAudioTask?.cancel()
+            self.boundedAudioTask = nil
             self.liveStreaming = false
         }
     }
