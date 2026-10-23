@@ -213,15 +213,6 @@ final class WatchRecorderModel: NSObject, ObservableObject {
             meter = WatchAudioMeter()
             isRecording = true
             startedAt = Date()
-            // ★ revision eleven: start/stop heart-rate sampling with recording. Placed here (after recording has **really started**)
-            //   rather than earlier: if `record()` fails, sampling shouldn't be started for nothing.
-            //
-            // ⚠️ Start and stop must come in pairs, in the same place as `isRecording` — put them elsewhere and you get
-            //    an invisible battery leak like "still polling HealthKit after recording finished".
-            // ★ revision fifteen: there used to be a `heart.follow()` here (added in revision eleven, to make heart-rate
-            //   sampling follow recording start/stop). Once heart rate stopped driving the waveform it had no consumers,
-            //   and the whole chain, together with `prepareHeartRate()`, was disabled — see
-            //   the block at the top of `WatchHeartRate.swift`.
             WKInterfaceDevice.current().play(Self.confirmation)
             startTimer()
             pushState()
@@ -247,8 +238,6 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         // Zero it rather than leave the last slot: after stopping, the home screen must switch back to the eyes immediately,
         // and keeping a level value would make the waveform flash once before it disappears.
         meter = WatchAudioMeter()
-        // ★ revision fifteen: there used to be `heart.unfollow()` and `heartRate = nil` here.
-        //   After the heart-rate chain was disabled both lines were dropped together (same reason as the line in `start()`).
         startedAt = nil
         try? AVAudioSession.sharedInstance().setActive(false)
         WKInterfaceDevice.current().play(Self.confirmation)

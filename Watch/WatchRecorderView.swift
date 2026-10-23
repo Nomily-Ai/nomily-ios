@@ -52,7 +52,7 @@ import WatchKit
 ///   ⚠️ **Revision ten overturns this**, see below.
 /// * **While recording swap in a waveform** (`WatchVoiceWave`): the peak height follows the microphone's **real level**
 ///   (`isMeteringEnabled`, only turned on in `WatchRecorderModel` this round; the sample rate
-///   goes 1Hz → **12.5Hz**), and while quiet a "boom-tick" base keeps up a heartbeat-like rhythm.
+///   goes 1Hz → **12.5Hz**), and while quiet it runs flat along the bottom.
 ///   The recording state is no longer "a variant of the eyes" but another form altogether -- which is exactly following Grok's
 ///   "don't give the state its own indicator light; let the character's motion express it all".
 /// * **Color comes back to the eyes** -- but only **a single solid color** (`WatchRingStyle.tint`).
@@ -248,11 +248,6 @@ struct WatchRecorderView: View {
         }
         .onAppear {
             syncShakeDetector()
-            // ★ Revision fifteen: there used to be a `model.prepareHeartRate()` here (added in revision eleven,
-            //   requesting heart-rate access when the home screen appears). From this round on, nothing calls the heart-rate chain any more,
-            //   so this line goes with it -- otherwise the user sees a permission page asking "why does this recording app want
-            //   to read my heart rate", and all it buys is a number nobody uses.
-            //   The full reasoning is at the top of `WatchHeartRate.swift`.
         }
         // Stop sampling when leaving this page: keeping the accelerometer on is a big line on the battery bill,
         // and this page only comes to the foreground when you raise your wrist.
@@ -279,8 +274,6 @@ struct WatchRecorderView: View {
                 tint: faceStore.colorHex.map { Color(botHex: $0) } ?? styleStore.style.tint,
                 meter: model.meter,
                 // ★ Revision eleven: while recording the timer shows right by the wave (user: "with the recording time attached below").
-                // ★ Revision fifteen: the `bpm:` parameter is **deleted** -- the waveform is no longer driven by heart rate,
-                //   reasons in the "revision fifteen" passage at the top of `WatchVoiceWave`.
                 elapsedText: model.isRecording
                     ? WatchFormat.compactDuration(model.elapsed)
                     : nil,
@@ -329,19 +322,9 @@ struct WatchRecorderView: View {
     ///
     /// ⚠️ While idle that hint **cannot be dropped**. "Hold for 2 seconds" is an **invisible** interaction --
     /// without the hint, a first-time user just pokes once, finds nothing happens, and gives up.
-    ///
-    /// ★ Revision eleven: **the recording timer moves below the wave** (see `WatchBotFace.elapsedText`),
-    /// So this no longer shows the time; at that point it was switched to the live heart rate.
-    ///
-    /// ★★ Revision fifteen: this line **drops back from "heart rate + byte count" to just the byte count**.
-    /// Once heart rate no longer drives the waveform (see "revision fifteen" at the top of `WatchVoiceWave`), the only
-    /// reason it sat here disappears -- it was shown so the user could confirm "the heart rate really is working"
-    /// (the user can't see the difference between 72 and 75). And the pile of trouble it caused is real:
-    ///   · When no heart rate is read you have to write "watch not worn", but the most common reason for no reading is actually
-    ///     **no health permission granted**, so that line hangs permanently over a failure that isn't there;
-    ///   · At rest HealthKit only records a sample every ten-odd minutes, so the number is stale most of the time.
-    /// ⚠️ The byte count stays: it's the **only** hard evidence that "the recording is really being written to disk" --
-    ///   after revision fifteen that waveform is a flat line hugging the bottom when things are quiet, and from it alone you can't tell "no sound" from "broken".
+    /// ★ The recording timer sits right below the wave (see `WatchBotFace.elapsedText`), so this line no longer shows time.
+    /// ⚠️ The byte count is the **only** hard evidence that "the recording is really being written to disk" --
+    ///   the wave is a flat line hugging the bottom when things are quiet, and from it alone you can't tell "no sound" from "broken".
     @ViewBuilder
     private var caption: some View {
         if model.isRecording {

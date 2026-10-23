@@ -17,11 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>1.0.1</string>
 	<key>CFBundleVersion</key>
-	<string>140</string>
-	<key>NSHealthShareUsageDescription</key>
-	<string>Nomily AI reads your current heart rate while recording, so the waveform on the watch face beats in time with your own pulse. It never reads any other health data and never leaves your devices.</string>
+	<string>6</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.</string>
 	<key>UIBackgroundModes</key>

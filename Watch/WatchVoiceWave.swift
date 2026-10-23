@@ -2,75 +2,11 @@ import SwiftUI
 
 // MARK: - The waveform while recording
 //
-// ★ 2026-10-16 revision 9 (user's words: "when recording starts, it should be a single waveform like a heart rate").
+// This wave has **one** input: the mic level (`meter.level`, 12.5Hz).
+// The baseline sits at the bottom of the canvas and spike height is the level, so the whole canvas is vertical travel.
 //
-// The recording look used to be "eyes one size bigger + floating left/right with an offset phase". After seeing it on real hardware, what the user wanted was
-// **a single waveform**, and one that **moves the way a heart rate does** — the way the Apple Watch heart-rate app does it:
-// the baseline runs flat, then bumps, one beat at a time.
-//
-// ─────────────────────────────────────────────────────────────────────────
-// ## Why it's both a "waveform" and a "heart rate" — here the two are the same curve
-//
-//   · **Spike height = the mic's live level**. That's the "waveform" half: talk and it shoots up.
-//   · **The little bumps when it's quiet** (`beat`) are the "heart rate" half.
-//
-// ⚠️ The second item above was **deleted entirely in revision 15** — see the "revision 15" block at the end of this file.
-//
-// ─────────────────────────────────────────────────────────────────────────
-// ★★ 2026-10-16 revision 11 (user's words:
-//    "when recording, the rises and falls should overall follow the personal real-time heart rate the watch picks up"):
-// That "heart rate" is no longer a generic value but the measured bpm taken from `WatchHeartRateMonitor`,
-// used to decide how fast the table runs.
-//
-// ⚠️ **This route was withdrawn entirely in revision 15**.
-//
-// ─────────────────────────────────────────────────────────────────────────
-// ★★ 2026-10-16 revision 12 (user: "when recording, the heart-rate rises and falls need a bigger amplitude and a bigger share of the screen"):
-// Canvas `0.86×0.30` → `1.06×0.44`, base-shape main peak `0.34` → `0.52`, line width `0.024` → `0.028`.
-//
-// ─────────────────────────────────────────────────────────────────────────
-// ★★ 2026-10-16 revision 13 (user's words: "and after the watch starts recording, the recording's up-and-down should be more
-//    obvious; right now the up-and-down isn't enough and doesn't take up the watch's share of the screen"):
-//
-// ## Root cause: the baseline is on the centre line, but values are only drawn upward
-// The baseline is drawn at the canvas's **centre line**, while the curve only grows **upward** ⇒ "up-and-down" has no second half at all,
-// that half of the canvas is always empty, and the usable vertical travel is only half. Raising the numbers won't help.
-//
-// ## The fix: drop the baseline to the bottom of the canvas
-// | | revision 12 | revision 13 |
-// |---|---|---|
-// | baseline | centre line | **bottom** |
-// | canvas height | `0.44 × size` | **`0.68 × size`** |
-// | canvas width | `1.06 × size` | **`1.10 × size`** |
-// ⇒ The same level now travels **about three and a half times** as far.
-//
-// ─────────────────────────────────────────────────────────────────────────
-// ★★ 2026-10-16 revision 14 ("when the watch isn't being worn there's no up-and-down ripple during recording"):
-// Added a `guard bpm != nil else { return }` on `onChange(of: meter)`.
-//
-// ⚠️ **That gate is the root cause of the bug in the next round**.
-//
-// ─────────────────────────────────────────────────────────────────────────
-// ★★ 2026-10-16 revision fifteen (user's words:
-//    "when recording, the waveform's rise and fall should still go by the surrounding sound's recording decibels, don't drive it off the heart rate,
-//     because it's inaccurate right now and it's just a straight white line"):
-//
-// ## Symptom and root cause
-// What the user sees is a **straight white line hugging the bottom**. The root cause isn't that the level isn't coming in, it's revision 14's
-// `guard bpm != nil else { return }` — **if the heart rate can't be read, not one slot advances**.
-// And "can't read it" is the **norm** in this chain: at rest an Apple Watch may take a dozen minutes to
-// drop a single sample into HealthKit, and with no health permission granted it's **never** read.
-//
-// ## The fix: this wave has **one** input left — the mic level
-// Delete the `bpm` parameter, the `beat` base table, `restingBPM`, `beatPhase`,
-// `nextBeatSample()`, and that gate. `advance` writes `meter.level` directly.
-//
-// ## Three things that came along to become obsolete / degrade (all deliberate, not oversights)
-//   · The re-12 discipline "don't push the base shape to full scale" is void along with the base shape;
-//   · **The ability to "tell it's working even when quiet" is gone**: when the mic picks up no sound it's a
-//     bottom-hugging flat line, the same shape as "broken". The fallback is the faint baseline axis and the **recording timer** below the wave
-//     (the latter is the harder evidence);
-//   · Revision 14's "no watch on the wrist, no wave" degrades to "quiet means flat" — the user overturned that criterion themselves.
+// ⚠️ When quiet it is a flat line hugging the bottom; from it alone you can't tell "no sound" from "broken".
+//    The fallback is the faint baseline axis, the recording timer below the wave, and the byte count on the home screen.
 //
 // ─────────────────────────────────────────────────────────────────────────
 // ★★ 2026-10-16 revision sixteen (user's words:
@@ -205,7 +141,7 @@ struct WatchVoiceWave: View {
 
     /// Advance one slot. **Driven by `tick`**, not by `level` — see the `WatchAudioMeter` block.
     ///
-    /// ★ Revision 15: this slot's height **is** the level, with no second term.
+    /// This slot's height **is** the level, with no second term.
     private func advance(using meter: WatchAudioMeter) {
         var next = samples
         next.append(CGFloat(meter.level))
@@ -241,7 +177,7 @@ struct WatchVoiceWave: View {
 
         // A very faint baseline. It isn't decoration — with it, "there's no sound right now" and
         // "this thing is broken and stuck" can be told apart (the former is a flat line hugging the baseline, the latter is a blank).
-        // ★ After revision 15 it is, once "the whole wave is driven by one input", the only static reference still standing.
+        // It is the only static reference on this canvas.
         var axis = Path()
         axis.move(to: CGPoint(x: 0, y: baseline))
         axis.addLine(to: CGPoint(x: canvas.width, y: baseline))

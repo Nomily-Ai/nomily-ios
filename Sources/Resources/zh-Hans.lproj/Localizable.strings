@@ -1168,7 +1168,6 @@
 "trash.delete_selected" = "删除 %d 条";
 "trash.delete_selected_title" = "彻底删除？";
 "trash.delete_selected_message" = "%d 条将被永久删除，无法撤销。";
-"watch.not_worn" = "未佩戴手表";
 
 // MARK: - 主题配色（2026-10-18）
 "settings.theme" = "主题配色";

@@ -2432,18 +2432,6 @@ enum L10n {
         static var transferWatchOffline: String { NSLocalizedString("watch.transfer_watch_offline", value: "The watch went offline mid-transfer. The clip stays on the watch and arrives when it reconnects.", comment: "") }
         static var transferGaveUp: String { NSLocalizedString("watch.transfer_gave_up", value: "The watch transfer stopped responding. Open the watch app to resend the clip.", comment: "") }
         static var hideTransferStatus: String { NSLocalizedString("watch.hide_transfer_status", value: "Hide this status", comment: "Close the watch transfer strip") }
-
-        // MARK: Recording home screen (★ fourteenth revision 2026-10-16)
-        //
-        // ⚠️ With `value:` inline English fallback (only the en / zh-Hans .lproj files were added).
-        /// The hint shown when heart rate can't be read. At that moment the wave is a **flat, motionless line**,
-        /// and without an explanation it reads as "broken" (see the fourteenth-revision note at the top of `WatchVoiceWave`).
-        ///
-        /// ⚠️ Deliberately **short**: it shares a line with the byte count, and a long string would shrink the whole line into illegibility.
-        static var notWorn: String {
-            NSLocalizedString("watch.not_worn", value: "Not worn",
-                              comment: "Watch recorder caption when no heart rate is available — the watch isn't being worn")
-        }
     }
 
     // MARK: - Watch home screen expression (★ thirteenth revision 2026-10-16)
