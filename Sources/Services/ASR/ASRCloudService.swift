@@ -313,6 +313,11 @@ enum ASRCloudService {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = TimeZone(secondsFromGMT: 0)
+        // ★ 2026-10-23: the format was **never set** — `string(from:)` came back
+        // as an empty string, so the Credential scope began with "/asr/…" and
+        // Tencent rejected it with "`Date` in Credential not valid format".
+        // The scope date must be `yyyyMMdd` (no dashes).
+        f.dateFormat = "yyyy-MM-dd"
         let fullDate = String(f.string(from: Date()).replacingOccurrences(of: "-", with: "").prefix(8))
         let timestamp = String(Int(Date().timeIntervalSince1970))
 
