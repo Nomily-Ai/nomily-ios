@@ -154,6 +154,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Live PCM stream state (the sync-file channel opened while recording).
     @Published private(set) var liveStreaming = false
     @Published private(set) var livePCMBytes = 0
+    /// Audio-region offset the live stream was opened with (the card reports
+    /// it in `bleRecordStart`; 1024 on E2EE cards = header size). The watchdog
+    /// re-uses it so retries replay the same region shape as the first open.
+    private var liveStartOffset = 0
     /// 0…1 loudness of the newest PCM block (drives the level meter while recording).
     @Published private(set) var liveLevel: Double = 0
     /// Live transcript text (finals + in-flight hypothesis) for the current
@@ -2685,27 +2689,30 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             setSyncMessage(L10n.Plaud.syncPreemptedByRecord)
         }
         TicNoteDiagLog.log("PLAUD-PCM", "open live stream sid=\(sid) start=\(start)")
-        // ★★ 2026-10-23 — **this is the real reason live captions were silent.**
+        // ★★★ 2026-10-23 晚 — the reason live PCM never flowed, found by byte-level
+        // log forensics across the 10-21/10-22/10-23 SDK logs:
         //
-        // The card's recordings are **E2EE encrypted**. The SDK can only turn
-        // them into PCM after its own handshake, and *only the high-level call
-        // performs it*. Its log tells the whole story:
+        // The card serves **bounded** reads of an in-progress recording but not
+        // open-ended ones. In every session ever logged (11 on 10-21 alone, all
+        // the way through today), the same two requests went out back to back:
         //
-        //   2026-10-21 (worked): [PlaudSDK] syncFile - sessionId: … (recording)
-        //       → ">>> E2EE stream: starting header sync"
-        //       → "header buffer 208 / 416 / 624 bytes"
-        //       → "key ready, segment=0, starting PCM decode"
-        //       → a second syncFile at start=1024 streams PCM every 20 ms
+        //   syncFile(sid, start=0, end=640)      → header bytes arrive (E2EE
+        //       handshake completes, "key ready, starting PCM decode")  ✓
+        //   syncFile(sid, start=1024, end=0)     → CMD 28 ack, sync stays open,
+        //       **zero voice frames, forever**                            ✗
         //
-        //   2026-10-23 (silent, every attempt): a bare CMD 28 with no "E2EE
-        //       stream" line at all, then "file sync finished, count:0".
+        // `end: 0` is documented as "sync to file end" — but on a file the card
+        // is still *writing*, the card computes an empty range and politely
+        // acks nothing-to-send. The earlier "10-21 worked, PCM every 20 ms"
+        // note was an inference from 640-byte blocks at 16 kHz, never an
+        // observation; the 10-21 logs show the identical silence.
         //
-        // The low-level `ble.syncFile(…, decode: true)` used since 2026-10-22
-        // skips the header/key exchange completely — the `decode:` flag is a
-        // red herring, it never reaches the wire (payload is `sid | start | end`
-        // only, verified byte for byte in the SDK log). So every take opened a
-        // pipe the card could not send a single decodable byte on.
-        PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: start, end: 0)
+        // Fix: ask for the audio region with an explicit huge end. The card
+        // clamps to its write cursor and keeps pushing frames as audio lands,
+        // which the SDK E2EE-decodes into `blePcmData` (640 B = 20 ms) —
+        // exactly the documented live behavior.
+        PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: start, end: 0xFFFF_FFFF)
+        liveStartOffset = start
         DispatchQueue.main.async {
             self.liveStreaming = true
             self.livePCMBytes = 0
@@ -2736,30 +2743,39 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         liveWatchdog = Task { @MainActor [weak self] in
             guard let self else { return }
 
-            // Attempt 1 → 2.
-            for attempt in 1...2 {
+            // Watches the live channel for as long as the take runs:
+            // - first stall (~3 s): re-open — recovers a syncFile swallowed by
+            //   the export queue after a preemption (the old silent failure);
+            // - second consecutive stall (~6 s): tell the panel, then keep
+            //   re-opening every ~3.4 s anyway — if the card serves the audio
+            //   range as a bounded burst (sync closes at its write cursor
+            //   instead of streaming), each re-open replays what it wrote
+            //   since and live captions continue, chunked.
+            var stalls = 0
+            while !Task.isCancelled {
                 let baseline = self.livePCMBytes
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 guard !Task.isCancelled else { return }
                 guard self.liveStreaming, self.recordSessionID == sid else { return }
-                if self.livePCMBytes > baseline { return }   // audio is flowing
-                guard attempt == 1 else { break }
+                guard self.isRecording else { return }
+                if self.livePCMBytes > baseline { stalls = 0; continue }   // audio is flowing
 
-                TicNoteDiagLog.log("PLAUD-PCM", "watchdog: no PCM 3s after open — re-issuing syncFile sid=\(sid) start=0")
+                stalls += 1
+                if stalls == 2 {
+                    TicNoteDiagLog.log("PLAUD-PCM", "watchdog: no PCM 6s after open sid=\(sid) raw=\(self.rawBlockCount) blocks/\(self.rawBytesTotal)B — will keep re-opening")
+                    // The recording itself is fine — this is only the live
+                    // channel. Say exactly that, so nobody thinks their take
+                    // is being lost.
+                    self.liveASRNotice = L10n.Plaud.liveNoStream
+                }
+                TicNoteDiagLog.log("PLAUD-PCM", "watchdog: no PCM (stall #\(stalls)) — re-opening live stream sid=\(sid)")
                 PlaudDeviceAgent.shared.stopSyncFile()
                 try? await Task.sleep(nanoseconds: 400_000_000)
-                guard !Task.isCancelled, self.liveStreaming, self.recordSessionID == sid else { return }
-                // Same call as the first open: the retry exists to recover a
-                // swallowed command, not to change protocol — a low-level retry
-                // would skip the E2EE handshake and reproduce the silence.
-                PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: 0, end: 0)
+                guard !Task.isCancelled, self.liveStreaming, self.recordSessionID == sid, self.isRecording else { return }
+                // Same shape as the first open (bounded huge end) — a low-level
+                // retry would skip the E2EE handshake and reproduce the silence.
+                PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: self.liveStartOffset, end: 0xFFFF_FFFF)
             }
-
-            guard self.liveStreaming, self.recordSessionID == sid else { return }
-            TicNoteDiagLog.log("PLAUD-PCM", "watchdog: still no PCM after 2 opens — giving up sid=\(sid) raw=\(self.rawBlockCount) blocks/\(self.rawBytesTotal)B")
-            // The recording itself is fine — this is only the live channel. Say
-            // exactly that, so nobody thinks their take is being lost.
-            self.liveASRNotice = L10n.Plaud.liveNoStream
         }
     }
 
@@ -2801,8 +2817,8 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             PlaudDeviceAgent.shared.stopSyncFile()
             try? await Task.sleep(nanoseconds: 400_000_000)
             guard self.isRecording, self.recordSessionID == sessionId else { return }
-            TicNoteDiagLog.log("PLAUD-PCM", "reopening live stream after resume sid=\(sessionId)")
-            self.openLiveStream(sid: sessionId, start: 0)
+            TicNoteDiagLog.log("PLAUD-PCM", "reopening live stream after resume sid=\(sessionId) start=\(start)")
+            self.openLiveStream(sid: sessionId, start: start)
             // Azure closes an idle socket, so a long pause leaves the engine gone.
             // `continued: true` keeps the lines transcribed before the pause —
             // the session id changed, the take did not.
@@ -2977,6 +2993,15 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
     func bleSyncFileStop() {
         log.info("plaud sync-file stopped")
         DispatchQueue.main.async {
+            // ★ While a recording is live, a sync stop is **expected** — it is
+            // either the watchdog's own stop→400 ms→re-open sequence, or the
+            // card ending a bounded burst. Tearing the stream state down here
+            // is what made the old watchdog's retry a silent no-op: its own
+            // stopSyncFile landed as this callback, cancelled the watchdog and
+            // cleared `liveStreaming`, so the re-issued syncFile never left
+            // the app (diag 2026-10-23: stopSyncFile at 19:08:02.738, then no
+            // syncFile on the wire ever again for that take).
+            guard !self.isRecording else { return }
             self.liveWatchdog?.cancel()
             self.liveWatchdog = nil
             self.liveStreaming = false
