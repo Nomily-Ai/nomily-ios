@@ -1528,6 +1528,7 @@
 "plaud.live_waiting" = "正在听——说完第一句，文字就会出现在这里。";
 "plaud.live_idle" = "还没有转写内容。卡片录音时，文字会实时出现在这里。";
 "plaud.live_expand" = "完整转写";
+"plaud.live_collapse" = "收起";
 "plaud.live_copy" = "复制";
 "plaud.live_copied" = "已复制";
 "plaud.live_needs_permission" = "实时转写需要「语音识别」权限，请在 设置 → Nomily 中允许。录音本身不受影响，只是没有文字。";

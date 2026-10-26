@@ -153,6 +153,12 @@ final class PlaudDirectService: NSObject, ObservableObject {
     @Published private(set) var cardFilesLoaded = false
     /// Live PCM stream state (the sync-file channel opened while recording).
     @Published private(set) var liveStreaming = false
+    /// ★ 2026-10-26 (user: "实时字幕按照 Plaud 的那个方式，卡片弹出那种页面"):
+    /// the recording stage is a sheet the app raises when a take starts, not a
+    /// tab the user has to find. Closing it only hides the UI — the take and
+    /// its transcript keep running, which is why this is separate from
+    /// `isRecording`.
+    @Published var showRecordingStage = false
     @Published private(set) var livePCMBytes = 0
     /// Audio-region offset the live stream was opened with (the card reports
     /// it in `bleRecordStart`; 1024 on E2EE cards = header size). The watchdog
@@ -2722,6 +2728,9 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         DispatchQueue.main.async {
             self.isRecording = true
             self.recordSessionID = sessionId
+            // Raising the stage on the same tick as `isRecording` means the
+            // user sees the take begin, not a button that "did something".
+            self.showRecordingStage = true
             self.recordBytes = start
             self.recordNotice = nil
             self.recordMarks = []
@@ -3068,6 +3077,8 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.isRecording = false
             self.isPaused = false
             self.liveStreaming = false
+            // The stage goes away with the take it was showing.
+            self.showRecordingStage = false
         }
         // The stop just wrote a file to the card — re-read the list so the home
         // segment shows it immediately instead of lagging one clip behind, and

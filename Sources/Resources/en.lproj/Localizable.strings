@@ -1401,6 +1401,7 @@
 "plaud.live_waiting" = "Listening — text shows up after the first sentence.";
 "plaud.live_idle" = "Nothing transcribed yet. Text appears here while the card records.";
 "plaud.live_expand" = "Full transcript";
+"plaud.live_collapse" = "Minimise";
 "plaud.live_copy" = "Copy";
 "plaud.live_copied" = "Copied";
 "plaud.live_needs_permission" = "Live transcription needs Speech Recognition permission — allow it in Settings → Nomily. The card still records without text.";

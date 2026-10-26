@@ -227,6 +227,20 @@ struct PlaudLiveScreen: View {
                 }
             }
             Spacer()
+            if direct.isRecording || direct.isPaused {
+                // ★ 2026-10-26: the stage is where recording actually looks
+                // right (dark card, big clock, live words). The tab keeps a
+                // one-tap way in for anyone already here.
+                Button {
+                    direct.showRecordingStage = true
+                } label: {
+                    Image(systemName: "rectangle.inset.topright.filled")
+                        .font(.caption)
+                        .foregroundStyle(Color.appAccent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.Plaud.liveExpand)
+            }
             if hasText {
                 Button {
                     showFullTranscript = true
