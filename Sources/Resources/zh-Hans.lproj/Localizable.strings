@@ -343,6 +343,8 @@
 /* 实时转录 */
 "live.no_device" = "未连接设备";
 "live.no_device_message" = "连接您的录音设备以开始实时转录和翻译。";
+"live.source_plaud" = "PLAUD";
+"live.back_to_card" = "返回卡片";
 "live.view_in_library" = "在资料库中查看";
 "live.save_to_library" = "保存到资料库";
 "live.saved_to_library" = "已保存到资料库";
@@ -1268,6 +1270,7 @@
 
 /* ---- 要点（录音时在卡上打点） ---- */
 "clip_detail.remarks" = "要点";
+"clip_detail.mark_key_point" = "重点标记";
 "clip_detail.remarks_count" = "%d 个要点";
 "clip_detail.remarks_footer" = "录音过程中在卡上按一下录音键，会在那一刻打一个点。点一下就能跳到那个位置。";
 
@@ -1418,6 +1421,14 @@
 "plaud.factory_reset_title" = "清空卡内全部内容？";
 "plaud.factory_reset_msg" = "卡内所有录音将被清空并解除绑定，卡片恢复全新状态。此操作不可撤销。";
 "plaud.erase" = "清空";
+"plaud.clear_card_files" = "清空卡片录音";
+"plaud.clear_card_files_title" = "清空卡片上的全部录音？";
+"plaud.clear_card_files_action" = "清空";
+"plaud.clear_card_files_msg" = "只清空卡片，绑定关系保留；已经导入资料库的录音不受影响。";
+"plaud.card_space_orphaned" = "卡上显示已用 %@，但列不出任何文件——卡内有残留数据。可以试试「清空卡片录音」，或在卡片上执行格式化。";
+"plaud.clear_card_running" = "正在清空卡片…";
+"plaud.clear_card_freed" = "清空完成，已回收 %@。";
+"plaud.clear_card_done" = "清空命令已发送。卡上仍显示已用 %@——这是文件索引之下的残留，只能通过「恢复出厂」或在卡片上格式化来回收。";
 "plaud.released" = "已解绑——官方 PLAUD App 可重新配对该卡。";
 "plaud.handover_header" = "切换回官方 App";
 "plaud.handover" = "交还给官方 App（解绑并清空卡片）";
@@ -1527,8 +1538,10 @@
 "plaud.live_badge" = "实时";
 "plaud.live_waiting" = "正在听——说完第一句，文字就会出现在这里。";
 "plaud.live_idle" = "还没有转写内容。卡片录音时，文字会实时出现在这里。";
+"plaud.live_take_ended" = "本段录音已结束，实时文字已收起 —— 音频传完后会随录音一起保存。";
 "plaud.live_expand" = "完整转写";
 "plaud.live_collapse" = "收起";
+"plaud.live_add_mark" = "打标记";
 "plaud.live_copy" = "复制";
 "plaud.live_copied" = "已复制";
 "plaud.live_needs_permission" = "实时转写需要「语音识别」权限，请在 设置 → Nomily 中允许。录音本身不受影响，只是没有文字。";

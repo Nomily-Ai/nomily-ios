@@ -960,7 +960,9 @@ struct ClipDetailView: View {
     private func distinctSpeakers(_ segments: [AsrSegment]) -> [String] {
         var seen: [String] = []
         for segment in segments {
-            guard let speaker = segment.speaker, !speaker.isEmpty else { continue }
+            // ★ 2026-10-26: `mark` rows are bookmarks, not a speaker — they
+            // must not appear in the speaker chips / rename sheet.
+            guard let speaker = segment.speaker, !speaker.isEmpty, speaker != "mark" else { continue }
             if !seen.contains(speaker) { seen.append(speaker) }
         }
         return seen
@@ -994,7 +996,9 @@ struct ClipDetailView: View {
         var order: [String] = []
         var counts: [String: Int] = [:]
         for segment in segments {
-            guard let speaker = segment.speaker, !speaker.isEmpty else { continue }
+            // ★ 2026-10-26: `mark` rows are bookmarks, not a speaker (see
+            // `distinctSpeakers`).
+            guard let speaker = segment.speaker, !speaker.isEmpty, speaker != "mark" else { continue }
             if counts[speaker] == nil { order.append(speaker) }
             counts[speaker, default: 0] += 1
         }

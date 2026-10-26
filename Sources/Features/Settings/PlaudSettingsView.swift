@@ -70,6 +70,7 @@ struct DirectConnectSection: View {
     @State private var showHandoverConfirm = false
     @State private var handedOver = false
     @State private var showRecoveryConfirm = false
+    @State private var showClearCardConfirm = false
     @State private var recoveryDoneShown = false
     @State private var releasedNote = false
     @State private var showRename = false
@@ -308,8 +309,27 @@ struct DirectConnectSection: View {
             }
             .padding(.vertical, 2)
         }
+        // ★ 2026-10-26 (user: "卡上有 56.6MB 但是卡上没有一条录音"): used space
+        // with nothing to list means the card's own filesystem still holds bytes
+        // we can neither see nor delete one by one. Say it out loud instead of
+        // leaving the two numbers contradicting each other on screen.
+        if let total = direct.storageTotal, let free = direct.storageFree,
+           total - free > 5 * 1024 * 1024,
+           direct.cardFilesLoaded, direct.cardFiles.isEmpty {
+            Text(L10n.Plaud.cardSpaceOrphaned(PlaudCardFilesView.sizeText(total - free)))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
         Button(L10n.Plaud.syncFromCard) { direct.syncFromCard() }
             .disabled(direct.isRecording)
+
+        // Narrow version of 恢复出厂: wipes the card's files, keeps the binding.
+        // Exists because "space is taken but the list is empty" leaves the user
+        // with no per-file delete to tap.
+        Button(L10n.Plaud.clearCardFiles, role: .destructive) {
+            showClearCardConfirm = true
+        }
+        .disabled(direct.isRecording || !direct.phase.isConnected)
 
         Button(L10n.Plaud.disconnect) { direct.disconnect() }
     }
@@ -470,6 +490,18 @@ struct DirectConnectSection: View {
             Button(L10n.Common.cancel, role: .cancel) {}
         } message: {
             Text(L10n.Plaud.recoveryConfirmMsg)
+        }
+        .confirmationDialog(
+            L10n.Plaud.clearCardFilesConfirmTitle,
+            isPresented: $showClearCardConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.Plaud.clearCardFilesConfirmAction, role: .destructive) {
+                direct.clearCardFiles()
+            }
+            Button(L10n.Common.cancel, role: .cancel) {}
+        } message: {
+            Text(L10n.Plaud.clearCardFilesConfirmMsg)
         }
         .onChange(of: direct.syncMessage) { msg in
             if msg == L10n.Plaud.recoveryDone { recoveryDoneShown = true }
@@ -711,45 +743,17 @@ struct PlaudCardFilesView: View {
                 LevelMeter(level: direct.liveLevel)
                     .frame(height: 6)
             }
-            // ★ 打点 (bookmarks pressed on the card). ★ 2026-10-22 on request:
-            //   nothing at all is shown until there IS a count — a row that says
-            //   "the card reports marks when the take ends" for the whole
-            //   recording is noise. When the card does report them, its times are
-            //   what matters, so they are shown as chips next to the count (that
-            //   is also where the old "本次打点" row was pointing).
-            if direct.recordMarkCount > 0 {
-                marksRow
-            }
+            // ★ 2026-10-26 (user: "不要在设备开始录音下面显示几处打点"): the
+            // marks row is gone from here on purpose. A mark is now a marker
+            // line **inside the live transcript** at the moment it is pressed
+            // (card key or the in-app button) and is written into the saved
+            // transcript with the take — counting chips under the record
+            // button duplicated that in the least useful place.
             if let notice = direct.recordNotice {
                 Text(notice).font(.footnote).foregroundStyle(.orange)
             }
             // The live transcript itself lives on the 实时 tab (`PlaudLiveScreen`) —
             // it is not a footnote under the recording controls any more.
-        }
-    }
-
-    private var marksRow: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "bookmark.fill")
-                .font(.caption2)
-                .foregroundStyle(.orange)
-            Text(L10n.Plaud.marksCount(direct.recordMarkCount))
-                .font(.caption)
-                .foregroundStyle(.orange)
-            ForEach(Array(direct.markTimestamps.prefix(4).enumerated()), id: \.offset) { _, time in
-                Text(PlaudLiveLine.stamp(time))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.orange.opacity(0.14)))
-            }
-            if direct.markTimestamps.count > 4 {
-                Text("+\(direct.markTimestamps.count - 4)")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-            }
-            Spacer(minLength: 0)
         }
     }
 
@@ -1051,10 +1055,21 @@ struct PlaudCardFilesView: View {
     /// view happened to be re-evaluated off-beat.
     static func elapsedText(_ direct: PlaudDirectService, at date: Date = Date()) -> String {
         let seconds: TimeInterval
-        if let device = direct.deviceElapsed {
-            seconds = device
+        if direct.isPaused {
+            // A paused take must not keep counting — freeze at the pause point.
+            seconds = direct.deviceElapsed ?? 0
         } else if let start = direct.recordStartedAt {
+            // ★ 2026-10-26 (user: "实时转录的读秒有问题，不是正常计时"): the clock
+            // used to prefer `deviceElapsed`, which on the live-decryptor path is
+            // the *decoded audio* clock — while the OGG→PCM converter catches up
+            // it stalls for tens of seconds and then jumps, so the timer froze
+            // and leapt instead of counting. A recording clock is **wall time**
+            // anchored at the take; `resumeRecording` shifts the anchor by the
+            // accumulated base, so pauses are already accounted for. The words
+            // may lag the clock; the clock must never lag the wall.
             seconds = date.timeIntervalSince(start)
+        } else if let device = direct.deviceElapsed {
+            seconds = device
         } else {
             seconds = 0
         }
@@ -1082,12 +1097,12 @@ struct PlaudRecordControl: View {
                 }
                 // "N marks so far" — the card itself gives no feedback for its
                 // bookmark key, so this badge is the only proof a press landed.
-                if direct.recordMarkCount > 0 {
+                if direct.liveMarkCount > 0 {
                     Label("\(direct.recordMarkCount)", systemImage: "bookmark.fill")
                         .labelStyle(.titleAndIcon)
                         .font(.caption2.weight(.semibold).monospacedDigit())
                         .foregroundStyle(.orange)
-                        .accessibilityLabel(L10n.Plaud.marksCount(direct.recordMarkCount))
+                        .accessibilityLabel(L10n.Plaud.marksCount(direct.liveMarkCount))
                 }
             }
             Button {

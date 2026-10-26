@@ -106,7 +106,12 @@ final class PlaudLiveDecryptor {
             self.event("decryptor start sid=\(sessionId) key=\(Self.privateKeyPem != nil ? "yes" : "MISSING")")
 
             let timer = DispatchSource.makeTimerSource(queue: self.queue)
-            timer.schedule(deadline: .now() + 2.5, repeating: 3.0)
+            // ★ 2026-10-26 (user: "提升转写文字显示速度"): 2.5/3.0 s meant up to
+            // ~5 s from "the words were spoken" to "the recogniser heard them".
+            // The pump decrypts the whole file each round, so a shorter period
+            // costs a little redundant work but cuts first-text latency to
+            // ~2–3 s — the card itself only writes every few seconds anyway.
+            timer.schedule(deadline: .now() + 1.2, repeating: 2.0)
             timer.setEventHandler { [weak self] in self?.pumpLocked() }
             timer.resume()
             self.pumpTimer = timer
@@ -234,6 +239,7 @@ final class PlaudLiveDecryptor {
         if isOgg, let pcmData = Self.convertOggToPCM(path: path, event: event) {
             let fresh = pcmData.dropFirst(pcmConsumed)
             if !fresh.isEmpty {
+                let consumedBefore = pcmConsumed
                 pcmConsumed = pcmData.count
                 let seconds = Double(pcmData.count / 2) / 16_000
                 decodedSeconds = seconds
@@ -241,7 +247,14 @@ final class PlaudLiveDecryptor {
                     hasProducedPCM = true
                     event("decryptor: first PCM out (ogg->pcm) — \(pcmData.count)B, \(String(format: "%.1f", seconds))s")
                 }
-                onPCM?(Data(fresh), seconds)
+                // ★ 2026-10-26 (device log 11:24/11:25): the converter catches
+                // up after a stall by returning the whole backlog at once
+                // (42.8 s / 46.1 s in a single call). The cloud engines expect
+                // a *stream* — `AliyunRealtimeClient` caps its buffer at 960 KB
+                // and drops the OLDEST audio when a burst overflows it, so the
+                // recogniser never saw a complete sentence and the take showed
+                // no live text at all. Pace it out instead.
+                emitPaced(Data(fresh), baseBytes: consumedBefore)
                 return
             }
             return   // converter works, nothing new this round
@@ -296,6 +309,27 @@ final class PlaudLiveDecryptor {
     /// per-chunk progress tick — so this waits for the first tick and then a
     /// beat for the file to close. It runs on the decryptor's serial queue,
     /// i.e. never on main, so blocking here is free.
+    /// Drain a backlog into the ASR **paced like a live stream**.
+    ///
+    /// 100 ms slices (3 200 B of 16 kHz mono) with a 15 ms gap ≈ 6.6× real
+    /// time, so a 46 s backlog drains in ~7 s while the socket sees ordinary
+    /// audio frames instead of one multi-megabyte burst. `baseBytes` is how
+    /// much PCM the file had already produced before this chunk, so each
+    /// slice's `seconds` stays the card's true elapsed time.
+    private func emitPaced(_ fresh: Data, baseBytes: Int) {
+        let slice = 3_200
+        var offset = 0
+        while offset < fresh.count {
+            let end = min(offset + slice, fresh.count)
+            let at = Double((baseBytes + offset) / 2) / 16_000
+            onPCM?(fresh.subdata(in: offset..<end), at)
+            offset = end
+            if offset < fresh.count {
+                Thread.sleep(forTimeInterval: 0.015)
+            }
+        }
+    }
+
     private static func convertOggToPCM(path: String, event: (String) -> Void) -> Data? {
         let pcmPath = path + ".pcm"
         try? FileManager.default.removeItem(atPath: pcmPath)
@@ -308,9 +342,26 @@ final class PlaudLiveDecryptor {
             ns_agc: false,
             callback: { _ in ticked = true }
         )
-        let deadline = Date().addingTimeInterval(2.0)
-        while Date() < deadline && !ticked {
-            Thread.sleep(forTimeInterval: 0.05)
+        let deadline = Date().addingTimeInterval(5.0)
+        // ★ 2026-10-26: poll the PCM file until it stops *growing* instead of a
+        // blind 2 s + 0.15 s. The old budget was tuned for the first ~0.7 s
+        // round; once the file is bigger the conversion itself needs longer,
+        // the old code read an empty file, returned nil, and the next round
+        // restarted the whole conversion — which is how a take could run for
+        // 45 s with the converter "producing nothing" and then hand over the
+        // entire backlog in one lump.
+        var lastSize = -1
+        var stable = 0
+        while Date() < deadline {
+            if ticked, stable >= 2 { break }
+            Thread.sleep(forTimeInterval: 0.1)
+            let pcmSize = ((try? FileManager.default.attributesOfItem(atPath: pcmPath))?[.size] as? Int) ?? 0
+            if pcmSize > 0 && pcmSize == lastSize {
+                stable += 1
+            } else {
+                stable = 0
+            }
+            lastSize = pcmSize
         }
         Thread.sleep(forTimeInterval: 0.15)
         guard let pcm = FileManager.default.contents(atPath: pcmPath), !pcm.isEmpty else {

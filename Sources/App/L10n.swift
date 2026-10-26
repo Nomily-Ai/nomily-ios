@@ -321,6 +321,23 @@ enum L10n {
         static var deactivate: String { NSLocalizedString("plaud.deactivate", value: "Deactivate direct connect", comment: "") }
         static var unbindKeep: String { NSLocalizedString("plaud.unbind_keep", value: "Unbind card (keep recordings)", comment: "Release the card so another app can pair it; recordings stay") }
         static var factoryReset: String { NSLocalizedString("plaud.factory_reset", value: "Factory reset (erase card)", comment: "Unbind AND wipe all recordings — for returns") }
+        // ★ 2026-10-26 ("卡上有 56.6MB 但是卡上没有一条录音"): wipe the card's files
+        // WITHOUT dropping the binding — the narrow version of 恢复出厂.
+        static var clearCardFiles: String { NSLocalizedString("plaud.clear_card_files", value: "Erase recordings on card", comment: "Delete every file on the card, keep the binding") }
+        static var clearCardFilesConfirmTitle: String { NSLocalizedString("plaud.clear_card_files_title", value: "Erase every recording on the card?", comment: "") }
+        static var clearCardFilesConfirmAction: String { NSLocalizedString("plaud.clear_card_files_action", value: "Erase", comment: "") }
+        static var clearCardFilesConfirmMsg: String { NSLocalizedString("plaud.clear_card_files_msg", value: "Only the card is wiped — the binding stays, and recordings already in the library are untouched.", comment: "") }
+        static func cardSpaceOrphaned(_ value: String) -> String {
+            String(format: NSLocalizedString("plaud.card_space_orphaned", value: "The card reports %@ used but lists no files — leftover data inside the card. Try erasing the card, or format it on the device.", comment: "%@ = size like 56.6 MB"), value)
+        }
+        // ★ 2026-10-26: feedback for 清空卡片录音 — running / freed / (residue) honest.
+        static var clearCardRunning: String { NSLocalizedString("plaud.clear_card_running", value: "Erasing card…", comment: "") }
+        static func clearCardFreed(_ value: String) -> String {
+            String(format: NSLocalizedString("plaud.clear_card_freed", value: "Card erased — %@ reclaimed.", comment: "%@ = size"), value)
+        }
+        static func clearCardDone(_ value: String) -> String {
+            String(format: NSLocalizedString("plaud.clear_card_done", value: "Erase sent. Card still reports %@ used — that is leftover below the card's file index; only Factory reset or formatting the card itself can reclaim it.", comment: "%@ = size"), value)
+        }
         static var factoryResetTitle: String { NSLocalizedString("plaud.factory_reset_title", value: "Erase everything on the card?", comment: "") }
         static var factoryResetMsg: String { NSLocalizedString("plaud.factory_reset_msg", value: "All recordings on the card will be erased and the binding released — the card becomes like new. This cannot be undone.", comment: "") }
         static var erase: String { NSLocalizedString("plaud.erase", value: "Erase", comment: "") }
@@ -390,8 +407,14 @@ enum L10n {
         static var liveBadge: String { NSLocalizedString("plaud.live_badge", value: "Live", comment: "Small badge next to the live transcript title while the card is recording") }
         static var liveWaiting: String { NSLocalizedString("plaud.live_waiting", value: "Listening — text shows up after the first sentence.", comment: "Live transcript placeholder while the engine has not produced any text yet") }
         static var liveIdle: String { NSLocalizedString("plaud.live_idle", value: "Nothing transcribed yet. Text appears here while the card records.", comment: "Live transcript placeholder when no take has been transcribed") }
+        /// Shown right after a take ends: the live words are gone from the panel
+        /// on purpose (Plaud / vobot clear the live view when the take stops).
+        static var liveTakeEnded: String { NSLocalizedString("plaud.live_take_ended", value: "This take has ended, so its live text is cleared — it is saved with the recording once the file lands.", comment: "Live panel after a take stopped: the text belongs to the recording now") }
         static var liveExpand: String { NSLocalizedString("plaud.live_expand", value: "Full transcript", comment: "Open the live transcript full screen") }
         static var liveCollapse: String { NSLocalizedString("plaud.live_collapse", value: "Minimise", comment: "Close the floating recording stage and keep recording in the background") }
+        /// The in-app bookmark button on the stage / live page — drops a marker
+        /// line into the live transcript at the moment it is pressed.
+        static var liveAddMark: String { NSLocalizedString("plaud.live_add_mark", value: "Mark", comment: "Button that inserts a bookmark into the live transcript while recording") }
         static var liveCopy: String { NSLocalizedString("plaud.live_copy", value: "Copy", comment: "Copy the live transcript") }
         static var liveCopied: String { NSLocalizedString("plaud.live_copied", value: "Copied", comment: "Confirmation after copying the live transcript") }
         static var liveNeedsPermission: String { NSLocalizedString("plaud.live_needs_permission", value: "Live transcription needs Speech Recognition permission — allow it in Settings → Nomily, or the card still records without text.", comment: "Live transcript unavailable: speech permission missing") }
@@ -3364,6 +3387,12 @@ enum L10n {
             String(format: NSLocalizedString("clip_detail.speaker", comment: ""), id)
         }
         // ---- "Marks" pressed on the recorder card while recording ----
+        /// Label on the key-point row for a live-transcript bookmark
+        /// (`speaker == "mark"` in the saved segments).
+        static var markKeyPoint: String {
+            NSLocalizedString("clip_detail.mark_key_point", value: "重点标记",
+                              comment: "Key-point row label for a live-transcript bookmark in the transcript")
+        }
         static var remarks: String {
             NSLocalizedString("clip_detail.remarks", value: "Remarks",
                               comment: "Section listing the markers the recorder card dropped while recording")
@@ -3667,6 +3696,12 @@ enum L10n {
     enum Live {
         static var noDeviceConnected: String { NSLocalizedString("live.no_device", comment: "") }
         static var noDeviceMessage: String { NSLocalizedString("live.no_device_message", comment: "") }
+        // ★ 2026-10-26: third segment of the live-tab source picker — the PLAUD
+        // card's own PCM pipeline. Brand name, not translated.
+        static var sourcePlaud: String { NSLocalizedString("live.source_plaud", value: "PLAUD", comment: "Segment label for the PLAUD card's live screen") }
+        // ★ 2026-10-26: the mic button on the card's live screen leads here; this
+        // is the way back to the card.
+        static var backToCard: String { NSLocalizedString("live.back_to_card", value: "Back to card", comment: "Return from the phone-mic live screen to the card's live screen") }
         static var viewInLibrary: String { NSLocalizedString("live.view_in_library", comment: "") }
         /// After stopping recording **auto-save failed**, but when there are still bytes on hand, that button (user 2026-10-12 request).
         static var saveToLibrary: String { NSLocalizedString("live.save_to_library", comment: "") }

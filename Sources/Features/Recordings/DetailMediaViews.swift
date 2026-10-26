@@ -197,8 +197,36 @@ struct TranscriptSegmentRow: View {
     var speakerNames: [String: String] = [:]
     var onTap: () -> Void
 
+    /// ★ 2026-10-26 (user: "打点要在转录里作为重点标记，而不是文字"): live
+    /// markers are saved with `speaker = "mark"` (see
+    /// `PlaudDirectService.liveSnapshot`), so the detail page can render them
+    /// as bookmark key-point rows instead of ordinary transcript lines.
+    private var isMark: Bool { segment.speaker == "mark" }
+
     var body: some View {
         Button(action: onTap) {
+            if isMark {
+                // The key-point row: orange bookmark + the position, tap = seek.
+                HStack(spacing: 8) {
+                    Image(systemName: "bookmark.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Text(ClockLabel.mmss(segment.start))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.orange)
+                    Text(L10n.ClipDetail.markKeyPoint)
+                        .font(.caption)
+                        .foregroundStyle(.orange.opacity(0.85))
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 7)
+                .padding(.horizontal, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.orange.opacity(0.08))
+                )
+                .contentShape(Rectangle())
+            } else {
             // ★ 2026-10-23 ("参考一下页面布局跟结构", Plaud 4029/4030): Plaud's
             // transcript line is `00:00:10  Eva` in one small grey row, then
             // the sentence at reading size — no time chip, no card, no
@@ -230,6 +258,7 @@ struct TranscriptSegmentRow: View {
                     .fill(isActive ? Color.appAccent.opacity(0.07) : Color.clear)
             )
             .contentShape(Rectangle())
+            }
         }
         .buttonStyle(.plain)
     }

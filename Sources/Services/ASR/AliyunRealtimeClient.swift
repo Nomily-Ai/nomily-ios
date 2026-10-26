@@ -120,6 +120,9 @@ final class AliyunRealtimeClient {
                     self.queue.async { self.openSocket(token: token) }
                 } catch {
                     self.log.error("token failed: \(error.localizedDescription, privacy: .public)")
+                    // ★ 2026-10-26: the #1 "实时没文字" suspect lands in the diag
+                    // log now — a token refusal means NO engine, silently.
+                    TicNoteDiagLog.log("XLATE", "aliyun CreateToken FAILED: \(error.localizedDescription)")
                     self.onEvent?(.failed(error.localizedDescription))
                 }
             }
@@ -235,10 +238,17 @@ final class AliyunRealtimeClient {
 
         // StartTranscription after the socket exists; audio is buffered until
         // `TranscriptionStarted` arrives.
+        //
+        // ★ 2026-10-26 (user: "语音转录的准确性也要优化"): `max_sentence_silence`
+        // 500 ms (official range 200–2000, default 800) closes sentences sooner —
+        // finals land faster and corrections apply to a shorter span, which both
+        // reads as more accurate and shortens the "text rewrites itself" window.
+        // Punctuation + ITN were already on; they are what makes output look
+        // polished, keep them.
         let start = instruction("StartTranscription", payload: """
         {"format":"pcm","sample_rate":\(Self.sampleRate),\
         "enable_intermediate_result":true,"enable_punctuation_prediction":true,\
-        "enable_inverse_text_normalization":true}
+        "enable_inverse_text_normalization":true,"max_sentence_silence":500}
         """)
         log.notice("StartTranscription task_id=\(self.taskID, privacy: .public)")
         task.send(.string(start)) { [weak self] error in
@@ -286,6 +296,7 @@ final class AliyunRealtimeClient {
                 guard let self else { return }
                 self.ready = true
                 self.log.notice("TranscriptionStarted — flushing buffered audio")
+                TicNoteDiagLog.log("XLATE", "aliyun TranscriptionStarted (buffered \(self.pending.count)B)")
                 self.onEvent?(.ready)
                 self.startKeepAlive()
                 // Flush anything captured while the handshake was in flight.
@@ -314,6 +325,9 @@ final class AliyunRealtimeClient {
         case "TaskFailed":
             let why = (header["status_text"] as? String)
                 ?? (header["status"] as? String) ?? "TaskFailed"
+            // ★ 2026-10-26: gateway refusals (wrong appkey, quota, bad region…)
+            // used to vanish between "engine open" and "no text".
+            TicNoteDiagLog.log("XLATE", "aliyun TaskFailed: \(why) (batchesSent=\(batchesSent))")
             fail(why)
         default:
             log.debug("unhandled event \(name, privacy: .public)")

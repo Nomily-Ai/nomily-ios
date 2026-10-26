@@ -404,6 +404,8 @@
 /* Live */
 "live.no_device" = "No device connected";
 "live.no_device_message" = "Connect your recorder to start live transcription and translation.";
+"live.source_plaud" = "PLAUD";
+"live.back_to_card" = "Back to card";
 "live.view_in_library" = "View in Library";
 "live.save_to_library" = "Save to Library";
 "live.saved_to_library" = "Saved to Library";
@@ -1204,6 +1206,7 @@
 
 /* ---- Remark marks dropped on the card while recording ---- */
 "clip_detail.remarks" = "Remarks";
+"clip_detail.mark_key_point" = "Key point";
 "clip_detail.remarks_count" = "%d marks";
 "clip_detail.remarks_footer" = "Pressed the record key while the card was recording — each press drops a marker there. Tap one to jump to it.";
 
@@ -1294,6 +1297,14 @@
 "plaud.factory_reset_title" = "Erase everything on the card?";
 "plaud.factory_reset_msg" = "All recordings on the card will be erased and the binding released — the card becomes like new. This cannot be undone.";
 "plaud.erase" = "Erase";
+"plaud.clear_card_files" = "Erase recordings on card";
+"plaud.clear_card_files_title" = "Erase every recording on the card?";
+"plaud.clear_card_files_action" = "Erase";
+"plaud.clear_card_files_msg" = "Only the card is wiped — the binding stays, and recordings already in the library are untouched.";
+"plaud.card_space_orphaned" = "The card reports %@ used but lists no files — leftover data inside the card. Try erasing the card, or format it on the device.";
+"plaud.clear_card_running" = "Erasing card…";
+"plaud.clear_card_freed" = "Card erased — %@ reclaimed.";
+"plaud.clear_card_done" = "Erase sent. Card still reports %@ used — that is leftover below the card's file index; only Factory reset or formatting the card itself can reclaim it.";
 "plaud.released" = "Card released — the official PLAUD app can pair it again.";
 "plaud.handover_header" = "Switch back to the official app";
 "plaud.handover" = "Hand back to the official app (unbind + erase card)";
@@ -1400,8 +1411,10 @@
 "plaud.live_badge" = "Live";
 "plaud.live_waiting" = "Listening — text shows up after the first sentence.";
 "plaud.live_idle" = "Nothing transcribed yet. Text appears here while the card records.";
+"plaud.live_take_ended" = "This take has ended, so its live text is cleared — it is saved with the recording once the file lands.";
 "plaud.live_expand" = "Full transcript";
 "plaud.live_collapse" = "Minimise";
+"plaud.live_add_mark" = "Mark";
 "plaud.live_copy" = "Copy";
 "plaud.live_copied" = "Copied";
 "plaud.live_needs_permission" = "Live transcription needs Speech Recognition permission — allow it in Settings → Nomily. The card still records without text.";

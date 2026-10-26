@@ -10,16 +10,25 @@ struct LiveView: View {
     @EnvironmentObject private var env: AppEnvironment
     @StateObject private var model = LiveModel()
     /// Observed so this tab re-evaluates when the PLAUD card connects /
-    /// disconnects — otherwise `showsPlaudLive` would read a stale phase and the
+    /// disconnects — otherwise the branch would read a stale phase and the
     /// screen would stay on "no device connected" after the card came up.
     @ObservedObject private var plaud = PlaudDirectService.shared
     @State private var clipItem: LibraryItem?
     @State private var clipMissing = false
-    /// ★ 2026-10-22 (任务一): the「实时」tab now also offers **phone-microphone**
-    /// recording with live captions, as a sibling of the device paths. The
-    /// PLAUD card keeps owning the whole tab when it is the device in play
-    /// (build 99 decision) — the picker appears only on the non-PLAUD paths.
-    @State private var phoneMode = false
+    /// ★ 2026-10-26 (user: "提供一个点击的方式方便切换到当前手机的麦克风"): the
+    /// card's live screen carries a mic button; it flips this flag so the tab
+    /// shows `PhoneRecordScreen` with a way back. Reset the moment the user
+    /// leaves the phone screen — the pill remains the source of truth.
+    @State private var forcePhoneMic = false
+    // ★ 2026-10-26, 二次改版 (user: "不要顶部放个手机跟设备还有 PLAUD 这样，
+    // 全部用当前左上角的设置进行切换"): the segmented picker (手机|设备|PLAUD)
+    // lasted one build. The tab now has **no source switch of its own** — it
+    // follows whatever the top-left connection pill currently points at:
+    //   · a V05E / TicNote / A1 card connected → the Opus ASR pipeline;
+    //   · else a PLAUD card paired/connected → `PlaudLiveScreen`;
+    //   · else (nothing in play) → the phone microphone.
+    // Switching devices = the pill's device menu (top-left), same as every
+    // other tab.
 
     /// Which device this live session should capture audio from.
     ///
@@ -50,59 +59,41 @@ struct LiveView: View {
         Binding(get: { clipItem != nil }, set: { if !$0 { clipItem = nil } })
     }
 
-    /// Whether this tab should show the PLAUD card's live transcript.
-    ///
-    /// Rules, in order:
-    /// * an A1 / D·NOTE source exists → that one wins (full ASR pipeline);
-    /// * a PLAUD card is **connected** → yes;
-    /// * a PLAUD card is merely **paired** → yes as well: the screen then shows
-    ///   the connect hint and the transcript of the last take, which is more
-    ///   useful than "no device connected" for someone who owns only that card.
-    private var showsPlaudLive: Bool {
-        guard liveSource == nil else { return false }
-        return plaud.phase.isConnected || plaud.pairedSN != nil
-    }
-
     var body: some View {
         // The outermost container must be a **stable host** like VStack, not Group: Group is a transparent container,
         // so modifiers are dispatched to the current branch. When `bluetooth.client` changes, the branch switches,
         // and the pushed detail page loses the navigation bar's safe-area layout — this is the phenomenon
         // where "the navigation bar overlaps the body when entering the detail page from the real-time page" (u7y9w25). The path in the database works correctly precisely because the outermost container of RecordingsView is a VStack.
         VStack(spacing: 0) {
-            // ★ 2026-10-22: the PLAUD card owns this tab when it is the device in
-            // play. Its audio is raw PCM, which the Opus-based ASR chain cannot
-            // take, so `PlaudLiveScreen` renders the card's own live transcript,
-            // clock, level and record button instead of `LiveContent`.
-            // The card wins only when no A1/D·NOTE source is available — those
-            // have the full pipeline (translation, save-to-library) and must keep
-            // it.
-            if showsPlaudLive {
-                PlaudLiveScreen()
-            } else if phoneMode {
-                // ★ 任务一 (2026-10-22): phone-mic recording + live captions.
-                PhoneRecordScreen()
-            } else {
-                sourcePicker
-                if let source = liveSource {
-                    LiveContent(model: model, source: source, config: env.config, library: env.library) { item in
-                        // nil = The recording is no longer in the database; provide a prompt instead of silently swallowing it
-                        if let item { clipItem = item } else { clipMissing = true }
-                    }
-                } else if model.linkRecovering || model.isRunning {
-                    // Session alive, link down — see `LiveModel.recoverStream`. Without this branch
-                    // the screen jumped straight to "no device" and the session looked finished.
-                    reconnectingState
-                } else if !model.finalSegments.isEmpty || model.savedClipName != nil {
-                    disconnectedResults
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color(uiColor: .systemGroupedBackground))
-                } else {
-                    EmptyStateView(
-                        L10n.Live.noDeviceConnected,
-                        systemImage: "dot.radiowaves.left.and.right",
-                        message: L10n.Live.noDeviceMessage
-                    )
+            // ★ 2026-10-26: no in-tab source switch — the surface follows the
+            // top-left connection pill (see the note above). The one exception
+            // is `forcePhoneMic`: the card's live screen offers a mic button,
+            // and while it is set the phone screen owns the tab (with a way back).
+            if forcePhoneMic {
+                PhoneRecordScreen(onExit: { forcePhoneMic = false })
+            } else if let source = liveSource {
+                LiveContent(model: model, source: source, config: env.config, library: env.library) { item in
+                    // nil = The recording is no longer in the database; provide a prompt instead of silently swallowing it
+                    if let item { clipItem = item } else { clipMissing = true }
                 }
+            } else if model.linkRecovering || model.isRunning {
+                // Session alive, link down — see `LiveModel.recoverStream`. Without this branch
+                // the screen jumped straight to "no device" and the session looked finished.
+                reconnectingState
+            } else if !model.finalSegments.isEmpty || model.savedClipName != nil {
+                disconnectedResults
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(uiColor: .systemGroupedBackground))
+            } else if plaud.phase.isConnected || plaud.pairedSN != nil {
+                // A PLAUD card paired or connected owns the tab: its audio is raw
+                // PCM, which the Opus-based ASR chain cannot take, so
+                // `PlaudLiveScreen` renders the card's own live transcript, clock,
+                // level and record button instead of `LiveContent`.
+                PlaudLiveScreen(onRequestPhoneMic: { forcePhoneMic = true })
+            } else {
+                // Nothing in play — the phone microphone is the fallback live
+                // source (任务一, 2026-10-22).
+                PhoneRecordScreen()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -145,18 +136,6 @@ struct LiveView: View {
             env.isStreaming = running
             UIApplication.shared.isIdleTimerDisabled = running
         }
-    }
-
-    /// 「设备 | 手机」segment picker (任务一). Phone mode needs no device at all,
-    /// so it stays reachable even with nothing connected.
-    private var sourcePicker: some View {
-        Picker("", selection: $phoneMode) {
-            Text(L10n.Phone.modeDevice).tag(false)
-            Text(L10n.Phone.modePhone).tag(true)
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal)
-        .padding(.top, 8)
     }
 
     /// The session is still alive but the card is out of reach.

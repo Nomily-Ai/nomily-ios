@@ -18,6 +18,11 @@ struct PhoneRecordScreen: View {
     @StateObject private var recorder = PhoneMicRecorder()
     @StateObject private var captions = LiveCaptionController()
     @State private var savedName: String?
+    /// ★ 2026-10-26: set when the user came here **from a card's live screen**
+    /// (the mic button on `PlaudLiveScreen`). Non-nil → a "back to card" button
+    /// renders in the header; without it there was no way back while a card was
+    /// paired, which is how the phone mic felt like a trap.
+    var onExit: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,6 +49,18 @@ struct PhoneRecordScreen: View {
 
     private var header: some View {
         VStack(spacing: 14) {
+            if let onExit {
+                HStack {
+                    Button(action: onExit) {
+                        Label(L10n.Live.backToCard, systemImage: "chevron.left")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+            }
             Text(clockText)
                 .font(.system(size: 44, weight: .medium, design: .monospaced))
                 .monospacedDigit()

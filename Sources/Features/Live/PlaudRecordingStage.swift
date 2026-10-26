@@ -158,8 +158,8 @@ struct PlaudRecordingStage: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.7))
                 Spacer()
-                if direct.recordMarkCount > 0 {
-                    Label("\(direct.recordMarkCount)", systemImage: "bookmark.fill")
+                if direct.liveMarkCount > 0 {
+                    Label("\(direct.liveMarkCount)", systemImage: "bookmark.fill")
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 }
@@ -183,19 +183,58 @@ struct PlaudRecordingStage: View {
 
     private let bottomID = "stage-bottom"
 
+    /// Lines and marks in one time-ordered list — the same merge the shared
+    /// `PlaudLiveTranscriptList` does, kept local because the stage draws its
+    /// own dark lines. ★ 2026-10-26: marks (card key **and** the in-app button)
+    /// must appear in the live transcript while it is running, not only after
+    /// the take is saved.
+    private enum StageRow: Identifiable {
+        case line(PlaudLiveSegment)
+        case mark(TimeInterval)
+
+        var id: String {
+            switch self {
+            case .line(let segment): return segment.id.uuidString
+            case .mark(let at): return "mark-\(at)"
+            }
+        }
+
+        var at: TimeInterval {
+            switch self {
+            case .line(let segment): return segment.at
+            case .mark(let at): return at
+            }
+        }
+    }
+
+    private var stageRows: [StageRow] {
+        var items = direct.liveSegmentsVisible.map(StageRow.line)
+        items += direct.liveMarkers.filter { $0 > 0 }.map(StageRow.mark)
+        return items.sorted { $0.at < $1.at }
+    }
+
     private var transcriptScroll: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    if direct.liveSegments.isEmpty && direct.livePartial.isEmpty {
+                    // ★ 2026-10-26: the *visible* transcript (see
+                    // `liveSegmentsVisible`) — the stage is a view onto the take
+                    // that is running, and a finished take's words must not
+                    // reappear on it.
+                    if direct.liveSegmentsVisible.isEmpty && direct.livePartialVisible.isEmpty && direct.liveMarkers.isEmpty {
                         emptyState
                     }
-                    ForEach(direct.liveSegments) { segment in
-                        line(stamp: PlaudLiveLine.stamp(segment.at), text: segment.text, partial: false)
+                    ForEach(stageRows) { row in
+                        switch row {
+                        case .line(let segment):
+                            line(stamp: PlaudLiveLine.stamp(segment.at), text: segment.text, partial: false)
+                        case .mark(let at):
+                            markRow(stamp: PlaudLiveLine.stamp(at))
+                        }
                     }
-                    if !direct.livePartial.isEmpty {
-                        line(stamp: PlaudLiveLine.stamp(direct.liveSegments.last?.at ?? 0),
-                             text: direct.livePartial,
+                    if !direct.livePartialVisible.isEmpty {
+                        line(stamp: PlaudLiveLine.stamp(direct.liveSegmentsVisible.last?.at ?? 0),
+                             text: direct.livePartialVisible,
                              partial: true)
                     }
                     Color.clear.frame(height: 1).id(bottomID)
@@ -204,13 +243,30 @@ struct PlaudRecordingStage: View {
                 .padding(.bottom, 16)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .onChange(of: direct.liveSegments.count) { _ in
+            .onChange(of: direct.liveSegmentsVisible.count) { _ in
                 withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(bottomID, anchor: .bottom) }
             }
-            .onChange(of: direct.livePartial) { _ in
+            .onChange(of: direct.livePartialVisible) { _ in
                 withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(bottomID, anchor: .bottom) }
             }
+            .onChange(of: direct.liveMarkers.count) { _ in
+                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+            }
         }
+    }
+
+    /// A bookmark pressed mid-take (card key or the in-app button), drawn in
+    /// place between the lines — "打点也要有标记".
+    private func markRow(stamp: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "bookmark.fill")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+            Text(stamp)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.orange.opacity(0.8))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func line(stamp: String, text: String, partial: Bool) -> some View {
@@ -249,7 +305,23 @@ struct PlaudRecordingStage: View {
 
     private var controls: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 26) {
+            HStack(spacing: 22) {
+                // ★ 2026-10-26 (user: "打标记需要也在实时转录的时候生效"):
+                // the app's own bookmark — same channel as the card's key, so
+                // the marker line appears in the live transcript immediately.
+                Button {
+                    direct.addLiveMark()
+                } label: {
+                    Image(systemName: "bookmark.fill")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .frame(width: 54, height: 54)
+                        .background(Circle().fill(Color.white.opacity(0.13)))
+                }
+                .buttonStyle(.plain)
+                .disabled(!direct.isRecording && !direct.isPaused)
+                .accessibilityLabel(L10n.Plaud.liveAddMark)
+
                 // Pause / resume — a pause keeps the take (and its words) alive.
                 Button {
                     if direct.isPaused { direct.resumeRecording() } else { direct.pauseRecording() }
