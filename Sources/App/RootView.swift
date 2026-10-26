@@ -341,13 +341,27 @@ struct RootView: View {
         // the "process killed, user cold-starts again" half. Both re-entries are guarded by their own
         // `startDrainIfNeeded`.
         .onChange(of: scenePhase) { phase in
-            if phase == .active {
-                env.transcription.resumePending()
-                env.jobs.resume()
-                // A toast that finished queuing in the background must not pop up
-                // minutes after unlock — drop anything past its shelf life.
-                TranscriptionBannerCenter.shared.dropStale()
-            }
+            handleScenePhase(phase)
+        }
+    }
+
+    /// Foreground/background side effects, kept out of `body` — inlining them
+    /// pushed the view builder past the type-checker's time budget.
+    private func handleScenePhase(_ phase: ScenePhase) {
+        if phase == .active {
+            env.transcription.resumePending()
+            env.jobs.resume()
+            // A toast that finished queuing in the background must not pop up
+            // minutes after unlock — drop anything past its shelf life.
+            TranscriptionBannerCenter.shared.dropStale()
+            // ★ 2026-10-26: "打开就要持续连接状态" — re-arm the PLAUD keeper on
+            // every foreground so a card that slept in a pocket comes back on
+            // its own instead of waiting for a tap.
+            plaudDirect.startConnectionKeeper()
+        } else if phase == .background {
+            // Nothing to keep alive while suspended; the next foreground start
+            // reconnects anyway.
+            plaudDirect.stopConnectionKeeper()
         }
     }
 

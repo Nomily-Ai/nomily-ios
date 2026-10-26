@@ -1013,6 +1013,69 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// out of a scan list (the situation after every app relaunch, or after the
     /// card went to sleep). Scans in the background and binds as soon as the
     /// stored SN shows up.
+    // MARK: - Connection keeper
+
+    /// ★ 2026-10-26 (user: "打开 Nomily 首页卡片的连接就不要断，打开就要持续
+    /// 连接状态"): opening the app used to leave the card disconnected until the
+    /// pill or the record button was tapped, and a sleeping card was never
+    /// woken again. This keeps a paired card connected for as long as the app
+    /// is in the foreground:
+    ///
+    ///  · on launch / foreground it reconnects straight away;
+    ///  · afterwards it re-checks every 20 s (backing off to 60 s after three
+    ///    failed wakes, so a card left at home does not spin the radio).
+    ///
+    /// It never interrupts real work: any busy phase (scanning, binding,
+    /// switching, recording, transferring) skips the tick, and it stands down
+    /// entirely while another card owns the link — the app is one-card-at-a-
+    /// time, and stealing the radio from a TicNote recording would be worse
+    /// than a disconnected PLAUD.
+    private var connectionKeeper: Task<Void, Never>?
+    /// Set by the host: "another card (TicNote / A1 / D·NOTE) owns the link
+    /// right now". The keeper stands down while it is true — one card at a
+    /// time, and stealing the radio mid-recording would be worse than a
+    /// disconnected PLAUD.
+    var isOtherCardConnected: (() -> Bool)?
+
+    func startConnectionKeeper() {
+        guard connectionKeeper == nil else { return }
+        connectionKeeper = Task { @MainActor [weak self] in
+            guard let self else { return }
+            // CoreBluetooth needs a beat after launch before a scan sticks.
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            var misses = 0
+            while !Task.isCancelled {
+                guard self.pairedSN != nil,
+                      !self.phase.isConnected,
+                      !self.phase.isBusy,
+                      !self.isRecording,
+                      !self.isSyncing,
+                      self.isOtherCardConnected?() != true else {
+                    try? await Task.sleep(nanoseconds: 20_000_000_000)
+                    continue
+                }
+                if misses >= 3 {
+                    // Three failed wakes in a row: the card is asleep in a bag
+                    // or out of range. Stop hammering the radio.
+                    try? await Task.sleep(nanoseconds: 60_000_000_000)
+                }
+                guard !Task.isCancelled else { return }
+                if misses == 0 {
+                    TicNoteDiagLog.log("PLAUD", "keeper: card not connected — wake + reconnect")
+                }
+                misses += 1
+                self.reconnect()
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+                if self.phase.isConnected { misses = 0 }
+            }
+        }
+    }
+
+    func stopConnectionKeeper() {
+        connectionKeeper?.cancel()
+        connectionKeeper = nil
+    }
+
     func reconnect() {
         guard let sn = pairedSN else {
             startScan()

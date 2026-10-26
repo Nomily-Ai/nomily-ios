@@ -72,6 +72,15 @@ final class AppEnvironment: ObservableObject {
         // The card also belongs in the device ledger (`config.devices`) so it is
         // listed alongside V05E / TicNote / A1 in Settings → Devices & Library.
         PlaudDirectService.shared.configService = config
+        // ★ 2026-10-26 (user: "打开 App 卡片的连接就不要断，打开就要持续连接状态"):
+        // the paired card used to stay disconnected until the pill was tapped.
+        // The keeper re-wakes and reconnects it for as long as the app is in
+        // the foreground — but only when no other card owns the BLE link, so
+        // it can never steal the radio from a TicNote/A1 recording.
+        PlaudDirectService.shared.isOtherCardConnected = { [bluetooth] in
+            bluetooth.client != nil || bluetooth.recorderLink?.isConnected == true
+        }
+        PlaudDirectService.shared.startConnectionKeeper()
         let transcription = TranscriptionService(config: config)
         let afterTranscription = Date()
         // ★ 2026-10-16 twelfth revision: the on-disk queue for summary / translation / format conversion. The initialiser has only
