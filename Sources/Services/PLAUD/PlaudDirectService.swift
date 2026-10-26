@@ -158,10 +158,19 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// it in `bleRecordStart`; 1024 on E2EE cards = header size). The watchdog
     /// re-uses it so retries replay the same region shape as the first open.
     private var liveStartOffset = 0
-    /// Handle for the delayed **bounded** audio request (stage 2 of
-    /// `openLiveStream`). One at a time: a re-open or a resume cancels the
-    /// pending one so two requests can't race onto the single sync slot.
-    private var boundedAudioTask: Task<Void, Never>?
+    /// Handle for the delayed **header** read that must land before the pull
+    /// loop starts (stage 1 of `openLiveStream`).
+    private var liveHeaderTask: Task<Void, Never>?
+    /// The pull loop itself (stage 2). One at a time: a re-open or a resume
+    /// cancels the running one so two loops can't race onto the single sync slot.
+    private var livePumpTask: Task<Void, Never>?
+    /// Bytes asked for per pull round. Big enough to hold a second of audio
+    /// (~32 KB/s on the card) in a handful of blocks, small enough that the
+    /// card always has the range once it exists.
+    private static let liveChunkBytes = 8 * 1024
+    /// Pause between pull rounds. The card needs ~200 ms for 8 KB at its
+    /// ~41 KB/s ceiling; 300 ms keeps the pipe busy without stacking requests.
+    private static let livePullInterval: TimeInterval = 0.3
     /// ★ 2026-10-23 (third pass): the SDK's live E2EE decoder never emits a
     /// single `blePcmData` block (handshake completes, then silence — verified
     /// in every logged session). While the card streams the recording over the
@@ -1348,8 +1357,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
         DispatchQueue.main.async {
             self.liveWatchdog?.cancel()
             self.liveWatchdog = nil
-            self.boundedAudioTask?.cancel()
-            self.boundedAudioTask = nil
+            self.liveHeaderTask?.cancel()
+            self.liveHeaderTask = nil
+            self.livePumpTask?.cancel()
+            self.livePumpTask = nil
         }
         clearRecordClock()
         recordMarks = []
@@ -2703,40 +2714,30 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             setSyncMessage(L10n.Plaud.syncPreemptedByRecord)
         }
         TicNoteDiagLog.log("PLAUD-PCM", "open live stream sid=\(sid) start=\(start)")
-        // ★★★ 2026-10-23 晚 — the reason live PCM never flowed, found by byte-level
-        // log forensics across the 10-21/10-22/10-23 SDK logs:
+        // ★★★ 2026-10-26 (fourth pass — evidence: plaud.log SDK trace 09:37 and
+        // 20:07, plus ticnote-ble.log). Three facts kill the push model:
         //
-        // The card serves **bounded** reads of an in-progress recording but not
-        // open-ended ones. In every session ever logged (11 on 10-21 alone, all
-        // the way through today), the same two requests went out back to back:
+        //   1. The SDK's E2EE layer **eats the header**: it asks (0, 640), keeps
+        //      all three 208-byte blocks to itself ("E2EE stream: header buffer
+        //      624 bytes") and forwards only the trailing 16-byte block to
+        //      `bleData` — so a self-decryptor can never assemble the 624-byte
+        //      header through the high-level handshake.
+        //   2. After "key ready" the SDK asks (1024, end=0); the card answers
+        //      `count:0`. Our own low-level (1024, 0xFFFFFFFF) gets the same:
+        //      `onVoiceDataReceive fileOffset:4294967295 count:0`. An open-ended
+        //      read of a file that is still being written returns nothing.
+        //   3. A region already served inside one sync session is **not served
+        //      again** (the card de-duplicates per session) — which is why the
+        //      old "header re-read (0, 1024)" never produced a byte.
         //
-        //   syncFile(sid, start=0, end=640)      → header bytes arrive (E2EE
-        //       handshake completes, "key ready, starting PCM decode")  ✓
-        //   syncFile(sid, start=1024, end=0)     → CMD 28 ack, sync stays open,
-        //       **zero voice frames, forever**                            ✗
-        //
-        // `end: 0` is documented as "sync to file end" — but on a file the card
-        // is still *writing*, the card computes an empty range and politely
-        // acks nothing-to-send. The earlier "10-21 worked, PCM every 20 ms"
-        // note was an inference from 640-byte blocks at 16 kHz, never an
-        // observation; the 10-21 logs show the identical silence.
-        //
-        // ★★★ 2026-10-23 (second pass, screenshot "卡片没有推送实时音频"): the
-        // huge end never reached the wire — the high-level call is the SDK's
-        // **E2EE wrapper**, and it re-issues the audio request with its own
-        // hard-coded `end = 0` (verified byte for byte: our 0xFFFFFFFF call
-        // produced `…00040000 00000000`). So the request shape is split in two:
-        //
-        //   stage 1 — high-level `PlaudDeviceAgent.syncFile` **only** for the
-        //     E2EE handshake (header sync 0…640 → "key ready"), which is the
-        //     one thing only that call can do;
-        //   stage 2 — low-level `BleAgent.syncFile(…, decode: true)` with an
-        //     explicit `end = 0xFFFFFFFF` once the key is ready: that call is
-        //     the CMD 12 sender, so the end we pass is the end the card sees,
-        //     and with the key already established the SDK decodes what comes
-        //     back into `blePcmData`.
-        PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: start, end: 0)
-        liveStartOffset = start
+        // So the card is a **pull** device, exactly like the TicNote pen
+        // (`TicNoteLivePump`): ask for a bounded range, take what comes back,
+        // advance the cursor, repeat. And the header has to be taken **before**
+        // the SDK's E2EE layer can swallow it — by issuing the very same wire
+        // request the SDK sends (start 0, end 640 = `…80020000`) through the
+        // low-level sender with `decode: false`, which delivers the raw blocks
+        // to `bleData` → `PlaudLiveDecryptor`.
+        liveStartOffset = max(start, 1024)
         // ★ 2026-10-23: wire the self-decryption pipeline. `onPCM` replicates
         // exactly what `blePcmData` does for the SDK path (byte counter the
         // watchdog reads, level meter, card clock, live sink) — one producer
@@ -2771,100 +2772,120 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         }
         armLiveWatchdog(sid: sid)
         armRecordStateWatchdog(sid: sid)
-        requestBoundedAudio(sid: sid, after: 1.1)
+        captureHeaderThenPull(sid: sid)
     }
 
-    /// Stage 2 of `openLiveStream`: ask for the audio region **with an explicit
-    /// end**, through the low-level sender.
+    /// Stage 1 of the live pump: fetch the E2EE header **ourselves**, then hand
+    /// over to the pull loop.
     ///
-    /// `delay` covers the high-level handshake: the header arrives ~100 ms after
-    /// the request and the key is ready a few ms after that, so 1.1 s is a
-    /// generous margin on a loaded connection — and issuing it too early would
-    /// simply get the same empty-range answer the handshake request got.
-    ///
-    /// ★ 2026-10-23: since the app now decrypts the live stream itself
-    /// (`PlaudLiveDecryptor`), the encrypted image must be complete from
-    /// offset 0 — but the high-level handshake only eats 0…640, and the
-    /// header is 1024 bytes (512 B metadata + 256 B RSA-wrapped key). So the
-    /// delayed task first re-reads (0, 1024) through the low-level sender
-    /// (re-reads are idempotent and the decryptor filters duplicates), waits
-    /// briefly for it, then opens the audio region.
-    private func requestBoundedAudio(sid: Int, after delay: TimeInterval) {
-        boundedAudioTask?.cancel()
-        boundedAudioTask = Task { @MainActor [weak self] in
+    /// Why the low-level sender and not the high-level handshake: the wire
+    /// request is identical (start 0, end 640 → `…80020000`), but the
+    /// high-level path runs it through the SDK's E2EE stream parser, which
+    /// swallows all 624 header bytes into its own buffer and forwards only the
+    /// 16-byte tail. With `decode: false` the raw blocks arrive in `bleData`
+    /// and `PlaudLiveDecryptor` gets the header it needs to decrypt anything.
+    private func captureHeaderThenPull(sid: Int) {
+        liveHeaderTask?.cancel()
+        liveHeaderTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            // Give the record-start ack a moment to clear the BLE pipe.
+            try? await Task.sleep(nanoseconds: 200_000_000)
             guard !Task.isCancelled,
                   self.liveStreaming, self.recordSessionID == sid, self.isRecording else { return }
-            TicNoteDiagLog.log("PLAUD-PCM", "header re-read sid=\(sid) start=0 end=1024 (low-level, for live decryptor)")
-            BleAgent.shared.syncFile(sessionId: sid, start: 0, end: 1024, decode: false)
-            try? await Task.sleep(nanoseconds: 800_000_000)
+            TicNoteDiagLog.log("PLAUD-PCM", "live header read sid=\(sid) start=0 end=640 (low-level, raw)")
+            BleAgent.shared.syncFile(sessionId: sid, start: 0, end: 640, decode: false)
+            // The header is three 208-byte blocks; 700 ms is two BLE round
+            // trips of slack, and the pull loop re-asks for it anyway if the
+            // decryptor still reports a short header.
+            try? await Task.sleep(nanoseconds: 700_000_000)
             guard !Task.isCancelled,
                   self.liveStreaming, self.recordSessionID == sid, self.isRecording else { return }
-            TicNoteDiagLog.log("PLAUD-PCM", "bounded audio request sid=\(sid) start=\(self.liveStartOffset) end=FFFFFFFF (low-level, decode)")
-            BleAgent.shared.syncFile(
-                sessionId: sid,
-                start: self.liveStartOffset,
-                end: 0xFFFF_FFFF,
-                decode: true
-            )
+            self.startLivePump(sid: sid)
         }
     }
 
-    /// "Nothing is arriving" self-heal, and the reason it exists:
+    /// Stage 2: the pull loop — bounded range, take what comes back, advance,
+    /// repeat.
     ///
-    /// After a preemption the SDK is still unwinding the export it was told to
-    /// abort, and a `syncFile` issued in that same tick can be swallowed by the
-    /// export queue — the exact silent failure that produced "no text at all"
-    /// for two builds. Guessing a sleep duration would just trade one silent
-    /// failure for another, so instead: if **not one PCM block** lands within
-    /// three seconds of opening the stream, close it and open it again once.
+    /// The card never pushes audio while it is writing (every push-shaped
+    /// request in the 10-21…10-26 logs came back `count:0`, including the
+    /// SDK's own), but it happily serves bounded ranges — the 640-byte header
+    /// read proves it. So the app asks for `[offset, offset + 8 KB)` every
+    /// 300 ms, where `offset` is however far the decryptor has bytes. When the
+    /// card has nothing new the read simply returns empty and the cursor stays
+    /// put; nothing to interpret, nothing to reset.
+    private func startLivePump(sid: Int) {
+        livePumpTask?.cancel()
+        livePumpTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var offset = Int64(self.liveStartOffset)
+            var idleRounds = 0
+            TicNoteDiagLog.log("PLAUD-PCM", "live pull loop start sid=\(sid) from=\(offset) chunk=\(Self.liveChunkBytes)B every \(Int(Self.livePullInterval * 1000))ms")
+            while !Task.isCancelled {
+                guard self.liveStreaming, self.recordSessionID == sid, self.isRecording else { return }
+                let end = offset + Int64(Self.liveChunkBytes)
+                BleAgent.shared.syncFile(
+                    sessionId: sid,
+                    start: Int(offset),
+                    end: Int(end),
+                    decode: false
+                )
+                try? await Task.sleep(nanoseconds: UInt64(Self.livePullInterval * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                let received = self.liveDecryptor.receivedEnd
+                if received > offset {
+                    offset = received
+                    idleRounds = 0
+                } else {
+                    idleRounds += 1
+                    // One line per ~3 s of silence: enough to prove the loop is
+                    // alive and stuck at a real offset, quiet enough for a log.
+                    if idleRounds % 10 == 0 {
+                        TicNoteDiagLog.log("PLAUD-PCM", "live pull idle x\(idleRounds) at offset \(offset) — card has nothing new")
+                        // The decryptor may still be short of a header (e.g. the
+                        // very first take after a reconnect); re-ask for it once
+                        // in a while instead of pulling audio blindly.
+                        if offset <= 1024 {
+                            BleAgent.shared.syncFile(sessionId: sid, start: 0, end: 640, decode: false)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// "Is anything arriving?" monitor.
     ///
-    /// ★ 2026-10-22: a second window was added. Silently retrying forever is
-    /// how "实时转录没字" survived several builds — the screen said "listening"
-    /// while nothing was arriving. If the retry also comes back empty, the panel
-    /// is told, so the failure is visible instead of looking like a bug in the
-    /// text renderer.
+    /// ★ 2026-10-26: it used to **re-open** the stream on a stall, and that
+    /// re-open is what cancelled the pending audio request before it ever left
+    /// the app (09:37 diag: header re-read at +1.2 s, watchdog re-open at
+    /// +2.0 s, "bounded audio request" never logged). With the pull loop the
+    /// app retries by itself, so re-opening is both unnecessary and harmful.
+    /// What is still needed is honest UI: if not a single byte has arrived
+    /// after 12 s, say so instead of pretending to listen.
     private func armLiveWatchdog(sid: Int) {
         liveWatchdog?.cancel()
         liveWatchdog = Task { @MainActor [weak self] in
             guard let self else { return }
-
-            // Watches the live channel for as long as the take runs:
-            // - first stall (~3 s): re-open — recovers a syncFile swallowed by
-            //   the export queue after a preemption (the old silent failure);
-            // - second consecutive stall (~6 s): tell the panel, then keep
-            //   re-opening every ~3.4 s anyway — if the card serves the audio
-            //   range as a bounded burst (sync closes at its write cursor
-            //   instead of streaming), each re-open replays what it wrote
-            //   since and live captions continue, chunked.
-            var stalls = 0
+            var lastSeen = self.liveDecryptor.receivedEnd
+            var quiet = 0
             while !Task.isCancelled {
-                let baseline = self.livePCMBytes
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 guard !Task.isCancelled else { return }
                 guard self.liveStreaming, self.recordSessionID == sid else { return }
                 guard self.isRecording else { return }
-                if self.livePCMBytes > baseline { stalls = 0; continue }   // audio is flowing
-
-                stalls += 1
-                if stalls == 2 {
-                    TicNoteDiagLog.log("PLAUD-PCM", "watchdog: no PCM 6s after open sid=\(sid) raw=\(self.rawBlockCount) blocks/\(self.rawBytesTotal)B — will keep re-opening")
-                    // The recording itself is fine — this is only the live
-                    // channel. Say exactly that, so nobody thinks their take
-                    // is being lost.
+                let seen = self.liveDecryptor.receivedEnd
+                if seen > lastSeen || self.livePCMBytes > 0 {
+                    lastSeen = seen
+                    quiet = 0
+                    self.liveASRNotice = nil
+                    continue
+                }
+                quiet += 1
+                if quiet == 4 {   // ~12 s of nothing at all
+                    TicNoteDiagLog.log("PLAUD-PCM", "no bytes from card 12s after open sid=\(sid) offset=\(seen) — panel told")
                     self.liveASRNotice = L10n.Plaud.liveNoStream
                 }
-                TicNoteDiagLog.log("PLAUD-PCM", "watchdog: no PCM (stall #\(stalls)) — re-opening live stream sid=\(sid)")
-                PlaudDeviceAgent.shared.stopSyncFile()
-                try? await Task.sleep(nanoseconds: 400_000_000)
-                guard !Task.isCancelled, self.liveStreaming, self.recordSessionID == sid, self.isRecording else { return }
-                // Exactly the two stages of `openLiveStream`: handshake first,
-                // then the bounded audio request once the key is ready. A
-                // low-level call **alone** would skip the handshake and get an
-                // undecodable stream (that is the 2026-10-22 failure).
-                PlaudDeviceAgent.shared.syncFile(sessionId: sid, start: self.liveStartOffset, end: 0)
-                self.requestBoundedAudio(sid: sid, after: 1.0)
             }
         }
     }
@@ -2964,8 +2985,10 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         DispatchQueue.main.async {
             self.liveWatchdog?.cancel()
             self.liveWatchdog = nil
-            self.boundedAudioTask?.cancel()
-            self.boundedAudioTask = nil
+            self.liveHeaderTask?.cancel()
+            self.liveHeaderTask = nil
+            self.livePumpTask?.cancel()
+            self.livePumpTask = nil
             self.recordStateWatchdog?.cancel()
             self.recordStateWatchdog = nil
             self.clearRecordClock()
@@ -3107,8 +3130,10 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             guard !self.isRecording else { return }
             self.liveWatchdog?.cancel()
             self.liveWatchdog = nil
-            self.boundedAudioTask?.cancel()
-            self.boundedAudioTask = nil
+            self.liveHeaderTask?.cancel()
+            self.liveHeaderTask = nil
+            self.livePumpTask?.cancel()
+            self.livePumpTask = nil
             self.liveStreaming = false
         }
     }

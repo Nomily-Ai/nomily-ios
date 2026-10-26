@@ -25,12 +25,15 @@ import Security
 /// but real text on screen beats a perfect pipeline that never fires.
 ///
 /// ## Why the header has to be captured
-/// The encrypted image is `[0..1024) header (512 B metadata + 256 B RSA-wrapped
-/// key + padding) | [1024…) audio`. `bleData` only receives bytes the SDK does
-/// not consume itself, and the handshake eats 0…640, so the caller asks the
-/// card for `(0, 1024)` and `(1024, ∞)` explicitly (see `PlaudDirectService`)
-/// and this class reassembles the image by the `start` offset each block
-/// carries.
+/// The encrypted image is `[0..624) E2EE header (metadata + RSA-wrapped key
+/// cipher — the SDK calls it "key ready" after exactly 3 × 208 bytes) |
+/// padding to 1024 | [1024…) audio`. `bleData` only receives bytes the SDK
+/// does not consume itself, and the SDK's E2EE parser swallows all 624 header
+/// bytes during a handshake, so the caller reads `(0, 640)` through the
+/// low-level sender (raw, no decode) and this class reassembles the image by
+/// the `start` offset each block carries. The gap at 640…1024 is never
+/// received (the card never serves it) and does not matter: ChaCha20 is
+/// position-addressed and every Opus frame stands alone.
 final class PlaudLiveDecryptor {
 
     // MARK: State
@@ -55,6 +58,9 @@ final class PlaudLiveDecryptor {
     /// Set once the pipeline has produced PCM. The host then ignores the SDK's
     /// (broken, and if it ever wakes up, duplicate) `blePcmData`.
     private(set) var hasProducedPCM = false
+    /// How far the reassembled image reaches (updated on `queue`, read from the
+    /// main actor as a progress signal — the pull loop uses it as its cursor).
+    private(set) var receivedEnd: Int64 = 0
     /// Frames per decode call had this many samples; set on the first frame so
     /// a 48 kHz decoder output can be detected and decimated to 16 kHz.
     private var samplesPerFrame = 0
@@ -79,6 +85,7 @@ final class PlaudLiveDecryptor {
             self.teardownLocked()
             self.sessionId = sessionId
             self.expectedOffset = 0
+            self.receivedEnd = 0
             self.unflushedBytes = 0
             self.decodedFrames = 0
             self.decodedSeconds = 0
@@ -99,7 +106,7 @@ final class PlaudLiveDecryptor {
             self.event("decryptor start sid=\(sessionId) key=\(Self.privateKeyPem != nil ? "yes" : "MISSING")")
 
             let timer = DispatchSource.makeTimerSource(queue: self.queue)
-            timer.schedule(deadline: .now() + 3.5, repeating: 4.0)
+            timer.schedule(deadline: .now() + 2.5, repeating: 3.0)
             timer.setEventHandler { [weak self] in self?.pumpLocked() }
             timer.resume()
             self.pumpTimer = timer
@@ -150,6 +157,7 @@ final class PlaudLiveDecryptor {
             self.fileHandle?.seek(toFileOffset: UInt64(offset))
             self.fileHandle?.write(data)
             self.expectedOffset = max(self.expectedOffset, offset + Int64(data.count))
+            self.receivedEnd = self.expectedOffset
             self.unflushedBytes += data.count
         }
     }
@@ -163,7 +171,7 @@ final class PlaudLiveDecryptor {
     /// file transcription, but the live panel would end mid-sentence).
     private func pumpLocked(final: Bool = false) {
         guard sessionId != 0, fileHandle != nil else { return }
-        guard expectedOffset >= 1024 else {
+        guard expectedOffset >= 624 else {
             if final { event("decryptor: header never completed (\(expectedOffset)B)") }
             return
         }
