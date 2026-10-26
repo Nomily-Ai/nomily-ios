@@ -2792,12 +2792,22 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             try? await Task.sleep(nanoseconds: 200_000_000)
             guard !Task.isCancelled,
                   self.liveStreaming, self.recordSessionID == sid, self.isRecording else { return }
-            TicNoteDiagLog.log("PLAUD-PCM", "live header read sid=\(sid) start=0 end=640 (low-level, raw)")
-            BleAgent.shared.syncFile(sessionId: sid, start: 0, end: 640, decode: false)
-            // The header is three 208-byte blocks; 700 ms is two BLE round
-            // trips of slack, and the pull loop re-asks for it anyway if the
-            // decryptor still reports a short header.
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            TicNoteDiagLog.log("PLAUD-PCM", "live header read sid=\(sid) start=0 end=1024 (low-level, raw)")
+            BleAgent.shared.syncFile(sessionId: sid, start: 0, end: 1024, decode: false)
+            // A complete E2EE header is 768 B (512 metadata + 256 keyCipher)
+            // and audio starts at 1024; if the card served less, ask for the
+            // remaining range in a second, non-overlapping request — the card
+            // de-duplicates per session, so a re-read of what we already have
+            // would come back empty.
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled,
+                  self.liveStreaming, self.recordSessionID == sid, self.isRecording else { return }
+            let have = Int(self.liveDecryptor.receivedEnd)
+            if have < 1024 {
+                TicNoteDiagLog.log("PLAUD-PCM", "live header fill sid=\(sid) start=\(have) end=1024")
+                BleAgent.shared.syncFile(sessionId: sid, start: have, end: 1024, decode: false)
+                try? await Task.sleep(nanoseconds: 400_000_000)
+            }
             guard !Task.isCancelled,
                   self.liveStreaming, self.recordSessionID == sid, self.isRecording else { return }
             self.startLivePump(sid: sid)
@@ -2842,11 +2852,11 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
                     // alive and stuck at a real offset, quiet enough for a log.
                     if idleRounds % 10 == 0 {
                         TicNoteDiagLog.log("PLAUD-PCM", "live pull idle x\(idleRounds) at offset \(offset) — card has nothing new")
-                        // The decryptor may still be short of a header (e.g. the
-                        // very first take after a reconnect); re-ask for it once
-                        // in a while instead of pulling audio blindly.
-                        if offset <= 1024 {
-                            BleAgent.shared.syncFile(sessionId: sid, start: 0, end: 640, decode: false)
+                        // A missing/partial header blocks decryption entirely;
+                        // re-ask for the range we do not have yet.
+                        let have = Int(self.liveDecryptor.receivedEnd)
+                        if have < 1024 {
+                            BleAgent.shared.syncFile(sessionId: sid, start: have, end: 1024, decode: false)
                         }
                     }
                 }

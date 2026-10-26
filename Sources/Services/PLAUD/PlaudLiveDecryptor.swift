@@ -130,6 +130,7 @@ final class PlaudLiveDecryptor {
             try? FileManager.default.removeItem(atPath: filePath)
         }
         try? FileManager.default.removeItem(atPath: decryptedPath)
+        try? FileManager.default.removeItem(atPath: decryptedPath + ".plain")
         filePath = ""
         decryptedPath = ""
         sessionId = 0
@@ -171,7 +172,9 @@ final class PlaudLiveDecryptor {
     /// file transcription, but the live panel would end mid-sentence).
     private func pumpLocked(final: Bool = false) {
         guard sessionId != 0, fileHandle != nil else { return }
-        guard expectedOffset >= 624 else {
+        // A complete header is 512 B metadata + 256 B keyCipher; below that
+        // nothing can be decrypted, so do not bother the pump.
+        guard expectedOffset >= 768 else {
             if final { event("decryptor: header never completed (\(expectedOffset)B)") }
             return
         }
@@ -184,44 +187,50 @@ final class PlaudLiveDecryptor {
         }
 
         try? fileHandle?.synchronizeFile()
-        // Belt-and-braces: the decrypt call is an @objc category method on
-        // BleAgent. If the linker ever drops the category again (it needs
-        // -ObjC — see project.yml), aborting with an unhandled ObjC exception
-        // on this queue took the whole app down (crash 2026-10-23 20:30);
-        // fail loud in the diag log instead.
-        let decryptSelector = Selector(("decryptE2EEAudioFileWithInputPath:outputPath:privateKeyPem:error:"))
-        guard BleAgent.shared.responds(to: decryptSelector) else {
-            event("decryptor: SDK does not respond to decryptE2EEAudioFile — static-link ObjC flag missing?")
+        // ★★ 2026-10-26 (fifth pass, device log 10:17): `decryptE2EEAudioFile`
+        // decrypts fine (header parsed, ChaCha20 test passed, 32-byte key
+        // unwrapped, 5088 B of audio decrypted) and then throws it all away:
+        // its last step is `OGG -> raw AVC: 0/0 frames, 0 bytes` — the live
+        // prefix of the file is **not** parseable as the OGG container the
+        // finished file uses. So stop asking that call to demux for us and
+        // take the plaintext: `decryptAudioToOgg` only decrypts, leaving
+        // whatever the card actually wrote (raw Opus packets while a take is
+        // open, OGG pages once finished).
+        guard let pem = Self.privateKeyPem else {
+            event("decryptor: no private key — cannot decode live stream")
             return
         }
-        let out: String
+        logHeaderOnce()
+
+        let plainPath = decryptedPath + ".plain"
+        let produced: String?
         do {
-            out = try BleAgent.shared.decryptE2EEAudioFile(
+            produced = try AudioFileDecryptor.decryptAudioToOgg(
                 inputPath: filePath,
-                outputPath: decryptedPath,
-                privateKeyPem: pem
+                privateKeyPem: pem,
+                outputPath: plainPath
             )
         } catch {
-            event("decryptor: decrypt failed \(error)")
+            event("decryptor: decryptAudioToOgg failed \(error)")
             return
         }
-        guard out == decryptedPath else {
-            event("decryptor: decrypt returned unexpected path \(out)")
+        guard let path = produced,
+              let blob = FileManager.default.contents(atPath: path), !blob.isEmpty else {
+            event("decryptor: plaintext empty (image=\(expectedOffset)B)")
             return
         }
-        guard let blob = FileManager.default.contents(atPath: decryptedPath) else {
-            event("decryptor: decrypted output unreadable")
-            return
+        if samplesPerFrame == 0 && !hasProducedPCM {
+            event("decryptor: plaintext \(blob.count)B head=\(Self.hexPrefix(blob))")
         }
 
-        let totalFrames = blob.count / frameBytes
+        let frames = Self.opusFrames(from: blob)
+        let totalFrames = frames.count
         guard totalFrames > decodedFrames else { return }
 
         var pcm = Data()
         pcm.reserveCapacity((totalFrames - decodedFrames) * 640)
         for index in decodedFrames..<totalFrames {
-            let frame = blob.subdata(in: (index * frameBytes)..<((index + 1) * frameBytes))
-            guard let block = opusDecoder?.decode(frame), !block.isEmpty else { continue }
+            guard let block = opusDecoder?.decode(frames[index]), !block.isEmpty else { continue }
             pcm.append(Self.to16k(block, samplesPerFrame: &samplesPerFrame, event: event))
         }
         decodedFrames = totalFrames
@@ -234,6 +243,73 @@ final class PlaudLiveDecryptor {
             event("decryptor: first PCM out — \(totalFrames) frames, \(pcm.count)B")
         }
         onPCM?(pcm, seconds)
+    }
+
+    /// Logs the SDK's own view of the header once per take — the one place
+    /// where "did we get a complete header?" has a numeric answer
+    /// (`headerSize` + 256-byte keyCipher).
+    private var loggedHeader = false
+    private func logHeaderOnce() {
+        guard !loggedHeader, let header = AudioFileDecryptor.getHeader(path: filePath) else { return }
+        loggedHeader = true
+        event("decryptor: header ok headerSize=\(header.headerSizeValue) nonce=\(Self.hexPrefix(header.nonce)) segment=\(header.segment) counter=\(header.counter) dur=\(header.duration) keyCipher=\(header.keyCipher.count)B")
+    }
+
+    /// Minimal OGG demux, or a raw split, whichever the bytes deserve.
+    ///
+    /// The finished file is an OGG container ("OGG -> raw AVC: 1746/1844
+    /// frames" in the SDK log for a closed take), but a take that is still
+    /// being written may be a bare stream of Opus packets — the SDK's own
+    /// converter yields `0/0 frames` on it. Handling both here keeps the live
+    /// path from depending on which shape the card picked today.
+    private static func opusFrames(from blob: Data) -> [Data] {
+        let isOgg = blob.count > 4 && blob.prefix(4).elementsEqual("OggS".utf8)
+        guard isOgg else {
+            // Raw stream: fixed 80-byte mono frames (per JXOpusDecoder).
+            let size = 80
+            guard blob.count >= size else { return [] }
+            return stride(from: 0, to: blob.count - size + 1, by: size).map {
+                blob.subdata(in: $0..<($0 + size))
+            }
+        }
+        var packets: [Data] = []
+        var pending = Data()
+        var index = blob.startIndex
+        while index + 27 <= blob.endIndex {
+            guard blob[index...].prefix(4).elementsEqual("OggS".utf8) else {
+                index += 1
+                continue
+            }
+            let headerType = blob[index + 5]
+            let segmentCount = Int(blob[index + 26])
+            guard index + 27 + segmentCount <= blob.endIndex else { break }
+            let segments = blob[(index + 27)..<(index + 27 + segmentCount)]
+            let payloadSize = segments.reduce(0) { $0 + Int($1) }
+            let payloadStart = index + 27 + segmentCount
+            guard payloadStart + payloadSize <= blob.endIndex else { break }
+            let payload = blob[payloadStart..<(payloadStart + payloadSize)]
+            if headerType & 0x01 == 0 && !pending.isEmpty {   // not a continuation
+                packets.append(pending)
+                pending = Data()
+            }
+            pending.append(payload)
+            // A packet ends at a segment shorter than 255.
+            if let last = segments.last, last < 255 {
+                packets.append(pending)
+                pending = Data()
+            }
+            index = payloadStart + payloadSize
+        }
+        if !pending.isEmpty { packets.append(pending) }
+        return packets.filter { packet in
+            !packet.prefix(8).elementsEqual("OpusHead".utf8)
+                && !packet.prefix(8).elementsEqual("OpusTags".utf8)
+                && packet.count >= 2
+        }
+    }
+
+    private static func hexPrefix(_ data: Data, count: Int = 12) -> String {
+        data.prefix(count).map { String(format: "%02X", $0) }.joined()
     }
 
     /// The decoder may answer in the card's native rate; the ASR wants 16 kHz
