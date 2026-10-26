@@ -223,15 +223,50 @@ final class PlaudLiveDecryptor {
             event("decryptor: plaintext \(blob.count)B head=\(Self.hexPrefix(blob))")
         }
 
+        // ★★ 2026-10-26 (sixth pass, device log 10:29): the plaintext **is** an
+        // OGG container (`head=4F676753` = "OggS") and grows every pump, but the
+        // hand-rolled demux produced no frames. Rather than guess at packet
+        // framing, hand the container to the SDK's own OGG→PCM converter — the
+        // same chain playback and file transcription use — and read the PCM it
+        // writes. The manual demux stays as a fallback for a raw (non-OGG)
+        // prefix.
+        let isOgg = blob.count > 4 && blob.prefix(4).elementsEqual("OggS".utf8)
+        if isOgg, let pcmData = Self.convertOggToPCM(path: path, event: event) {
+            let fresh = pcmData.dropFirst(pcmConsumed)
+            if !fresh.isEmpty {
+                pcmConsumed = pcmData.count
+                let seconds = Double(pcmData.count / 2) / 16_000
+                decodedSeconds = seconds
+                if !hasProducedPCM {
+                    hasProducedPCM = true
+                    event("decryptor: first PCM out (ogg->pcm) — \(pcmData.count)B, \(String(format: "%.1f", seconds))s")
+                }
+                onPCM?(Data(fresh), seconds)
+                return
+            }
+            return   // converter works, nothing new this round
+        }
+
         let frames = Self.opusFrames(from: blob)
+        if !isOgg && !loggedFrames {
+            loggedFrames = true
+            event("decryptor: raw packets=\(frames.count) sizes=\(frames.prefix(5).map(\.count))")
+        }
         let totalFrames = frames.count
         guard totalFrames > decodedFrames else { return }
 
         var pcm = Data()
         pcm.reserveCapacity((totalFrames - decodedFrames) * 640)
+        var failedDecodes = 0
         for index in decodedFrames..<totalFrames {
-            guard let block = opusDecoder?.decode(frames[index]), !block.isEmpty else { continue }
+            guard let block = opusDecoder?.decode(frames[index]), !block.isEmpty else {
+                failedDecodes += 1
+                continue
+            }
             pcm.append(Self.to16k(block, samplesPerFrame: &samplesPerFrame, event: event))
+        }
+        if !isOgg && !hasProducedPCM && failedDecodes == totalFrames - decodedFrames && failedDecodes > 0 {
+            event("decryptor: opus decode failed on all \(failedDecodes) frames")
         }
         decodedFrames = totalFrames
 
@@ -249,6 +284,44 @@ final class PlaudLiveDecryptor {
     /// where "did we get a complete header?" has a numeric answer
     /// (`headerSize` + 256-byte keyCipher).
     private var loggedHeader = false
+    private var loggedFrames = false
+    /// PCM bytes already handed to the ASR (the converter rewrites the whole
+    /// file each pump, so only the tail is new).
+    private var pcmConsumed = 0
+
+    /// OGG → PCM through the SDK's own converter (`Mp3Convert`), which is the
+    /// chain playback and file transcription already trust.
+    ///
+    /// The converter is asynchronous and has no completion callback — only a
+    /// per-chunk progress tick — so this waits for the first tick and then a
+    /// beat for the file to close. It runs on the decryptor's serial queue,
+    /// i.e. never on main, so blocking here is free.
+    private static func convertOggToPCM(path: String, event: (String) -> Void) -> Data? {
+        let pcmPath = path + ".pcm"
+        try? FileManager.default.removeItem(atPath: pcmPath)
+        var ticked = false
+        let size = ((try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int) ?? 0
+        Mp3Convert.shared().convertOgg(
+            path,
+            toPcm: pcmPath,
+            channels: 1,
+            ns_agc: false,
+            callback: { _ in ticked = true }
+        )
+        let deadline = Date().addingTimeInterval(2.0)
+        while Date() < deadline && !ticked {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        Thread.sleep(forTimeInterval: 0.15)
+        guard let pcm = FileManager.default.contents(atPath: pcmPath), !pcm.isEmpty else {
+            // Only worth a log line when the input was substantial enough to
+            // have produced audio.
+            if size > 8 * 1024 { event("decryptor: ogg->pcm produced nothing (\(size)B in)") }
+            return nil
+        }
+        return pcm
+    }
+
     private func logHeaderOnce() {
         guard !loggedHeader, let header = AudioFileDecryptor.getHeader(path: filePath) else { return }
         loggedHeader = true
