@@ -163,6 +163,14 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.nomily.app
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_PREVIEWS: YES
+        # ★ 2026-10-24: PlaudDeviceBasicSDK is a STATIC archive linked into the
+        # app, and its ObjC categories on BleAgent (decryptE2EEAudioFile,
+        # isE2EEEncryptedFile, …) live in object files nothing references
+        # directly — without -ObjC the linker drops them and the first
+        # objc_msgSend to one of those selectors aborts with
+        # "unrecognized selector" (crash log nomily_ios 2026-10-23 20:30,
+        # PlaudLiveDecryptor.pumpLocked).
+        OTHER_LDFLAGS: ["-ObjC"]
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor

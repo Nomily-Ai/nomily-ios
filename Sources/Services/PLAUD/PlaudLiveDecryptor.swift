@@ -176,6 +176,16 @@ final class PlaudLiveDecryptor {
         }
 
         try? fileHandle?.synchronizeFile()
+        // Belt-and-braces: the decrypt call is an @objc category method on
+        // BleAgent. If the linker ever drops the category again (it needs
+        // -ObjC — see project.yml), aborting with an unhandled ObjC exception
+        // on this queue took the whole app down (crash 2026-10-23 20:30);
+        // fail loud in the diag log instead.
+        let decryptSelector = Selector(("decryptE2EEAudioFileWithInputPath:outputPath:privateKeyPem:error:"))
+        guard BleAgent.shared.responds(to: decryptSelector) else {
+            event("decryptor: SDK does not respond to decryptE2EEAudioFile — static-link ObjC flag missing?")
+            return
+        }
         let out: String
         do {
             out = try BleAgent.shared.decryptE2EEAudioFile(
