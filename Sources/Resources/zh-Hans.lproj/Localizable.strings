@@ -691,7 +691,7 @@
 "watch.mic_denied" = "请在设置中允许使用麦克风。";
 "watch.record_failed" = "无法开始录音：%@";
 "watch.recording_interrupted" = "录音被打断，已保存已录部分。重新打开 App 可开始新录音。";
-"watch.hold_to_stop" = "长按屏幕结束录音";
+"watch.hold_to_stop" = "长按结束录音";
 "watch.stop_confirm_title" = "结束这段录音？";
 "watch.stop_confirm_message" = "录音会保存并发送到 iPhone。";
 "watch.stop_confirm_action" = "结束";
@@ -719,6 +719,8 @@
 "watch.menu_hint_recap" = "手机推送的 AI 摘要速览";
 "watch.recap_title" = "回顾";
 "watch.recap_empty" = "在 iPhone 上生成的摘要会显示在这里";
+"watch.recap_points" = "要点";
+"watch.recap_no_points" = "这次总结没有要点";
 "watch.sending" = "正在发送…";
 "watch.waiting" = "尚未发送";
 "watch.style_appearance" = "外观";

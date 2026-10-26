@@ -21,15 +21,36 @@ private struct BranchColor {
         let lift = 0.38
         return Color(red: r + (1 - r) * lift, green: g + (1 - g) * lift, blue: b + (1 - b) * lift)
     }
+
+    /// The colour a **filled** chip uses (★ 2026-10-23, "增加一点模块色彩").
+    ///
+    /// A filled shape needs the opposite treatment from text on paper: on the
+    /// light theme the base hue is already dark enough for white glyphs, while
+    /// on the dark theme the lifted version turns pastel and white text would
+    /// wash out. So the fill deepens toward the dark canvas instead of away
+    /// from it — same hue, the side of it that can carry white text.
+    func fill(_ scheme: ColorScheme) -> Color {
+        guard scheme == .dark else { return Color(red: r, green: g, blue: b) }
+        let sink = 0.34
+        return Color(red: r * (1 - sink), green: g * (1 - sink), blue: b * (1 - sink))
+    }
 }
 
 private let branchPalette: [BranchColor] = [
-    BranchColor(r: 0.20, g: 0.20, b: 0.20),   // #333334 — root
-    BranchColor(r: 0.29, g: 0.49, b: 0.35),   // #4a7c59
-    BranchColor(r: 0.78, g: 0.42, b: 0.31),   // #c66b4e
-    BranchColor(r: 0.23, g: 0.42, b: 0.54),   // #3a6a8a
-    BranchColor(r: 0.55, g: 0.36, b: 0.62),   // #8d5b9e
-    BranchColor(r: 0.72, g: 0.53, b: 0.23),   // #b8863a
+    BranchColor(r: 0.20, g: 0.20, b: 0.20),   // #333334 — index 0 is reserved for the root
+    BranchColor(r: 0.29, g: 0.49, b: 0.35),   // #4a7c59 — moss
+    BranchColor(r: 0.78, g: 0.42, b: 0.31),   // #c66b4e — terracotta
+    BranchColor(r: 0.23, g: 0.42, b: 0.54),   // #3a6a8a — slate blue
+    BranchColor(r: 0.55, g: 0.36, b: 0.62),   // #8d5b9e — plum
+    BranchColor(r: 0.72, g: 0.53, b: 0.23),   // #b8863a — ochre
+    // ★ 2026-10-23: three more hues so a summary with six or seven sections
+    // never has to repeat a colour inside one map — repeated hues would say
+    // "these two branches are the same module", which is the opposite of what
+    // the colour is here to say.
+    BranchColor(r: 0.18, g: 0.55, b: 0.55),   // #2e8c8c — teal
+    BranchColor(r: 0.36, g: 0.38, b: 0.66),   // #5c61a8 — indigo
+    BranchColor(r: 0.68, g: 0.32, b: 0.45),   // #ad5273 — rose
+    BranchColor(r: 0.45, g: 0.50, b: 0.22),   // #738038 — olive
 ]
 
 // MARK: - Layout engine
@@ -71,10 +92,18 @@ struct MindMapLayout {
 
     // Layout constants. Sizes step down with depth so the eye can tell a
     // section from a sub-point without reading either.
-    private static let margin: CGFloat = 24
-    private static let horizontalGap: CGFloat = 34
-    private static let verticalGap: CGFloat = 9
-    private static let deepVerticalGap: CGFloat = 6
+    //
+    // ★ 2026-10-23 ("最左边的目录看不清被遮挡了"): the left margin went 24 → 34
+    // and the root became a filled pill (see `MindMapNodeView`). Two things were
+    // clipping the leftmost node in the screenshot: a 24 pt margin is under what
+    // a rounded chip needs once its own padding and corner radius are counted,
+    // and the zoomed-out scroll view kept whatever offset the previous pan left —
+    // with the root hard against x = 24 there was nothing to keep it visible.
+    // 34 pt is the pill's own padding + a full corner radius of breathing room.
+    private static let margin: CGFloat = 34
+    private static let horizontalGap: CGFloat = 32
+    private static let verticalGap: CGFloat = 11
+    private static let deepVerticalGap: CGFloat = 7
 
     static func font(for depth: Int) -> UIFont {
         switch depth {
@@ -96,15 +125,22 @@ struct MindMapLayout {
         }
     }
 
-    static func horizontalPadding(for depth: Int) -> CGFloat { depth == 0 ? 14 : 11 }
-    static func verticalPadding(for depth: Int) -> CGFloat { depth == 0 ? 9 : 7 }
+    static func horizontalPadding(for depth: Int) -> CGFloat { depth == 0 ? 14 : (depth == 1 ? 13 : 11) }
+    static func verticalPadding(for depth: Int) -> CGFloat { depth == 0 ? 9 : (depth == 1 ? 8 : 7) }
     private static func maxNodeWidth(for depth: Int) -> CGFloat {
         switch depth {
-        case 0: return 210
-        case 1: return 200
-        default: return 190
+        case 0: return 220
+        case 1: return 210
+        default: return 200
         }
     }
+
+    /// ★ 2026-10-23: leaves carry a 3 pt colour rule on their leading edge (the
+    /// "which module is this" cue now that the map is not all text). The rule and
+    /// its gap have to come out of the measurable width, exactly like the fold
+    /// badge does — otherwise a wide label wraps to a line the height was never
+    /// measured for.
+    static func accentWidth(for depth: Int) -> CGFloat { depth >= 2 ? 8 : 0 }
 
     /// Width held back beside a label that has children, for the fold
     /// chevron and its count. The two states of the badge are different
@@ -121,7 +157,8 @@ struct MindMapLayout {
         // a badge on top would wrap a long label onto a line the height was
         // never computed for.
         let badge: CGFloat = hasChildren ? foldedBadgeReserve : 0
-        let textCap = maxNodeWidth(for: depth) - padH * 2
+        let accent = accentWidth(for: depth)
+        let textCap = maxNodeWidth(for: depth) - padH * 2 - accent
 
         let measured = (title as NSString).boundingRect(
             with: CGSize(width: textCap, height: .greatestFiniteMagnitude),
@@ -135,7 +172,7 @@ struct MindMapLayout {
         // axis keeps the box the text was measured for from clipping it.
         let textWidth = ceil(measured.width) + 2
         let textHeight = min(ceil(measured.height) + 2, ceil(font.lineHeight) * CGFloat(maxLines(for: depth)))
-        let width = min(textCap + badge, textWidth + badge) + padH * 2
+        let width = min(textCap + badge, textWidth + badge) + accent + padH * 2
         let height = max(30, textHeight + padV * 2)
         // A two-character label would otherwise collapse into a dot.
         return CGSize(width: max(56, width), height: height)
@@ -166,7 +203,10 @@ struct MindMapLayout {
             visible.append(Visible(node: node, parentID: parentID, branch: branch, isExpanded: expanded))
             guard expanded else { return }
             for (index, child) in node.children.enumerated() {
-                walk(child, parentID: node.id, branch: node.depth == 0 ? index : branch)
+                // ★ +1: palette[0] is the root's near-black, so the first
+                // section has to start at the first real hue — otherwise every
+                // map's top branch came out grey.
+                walk(child, parentID: node.id, branch: node.depth == 0 ? index + 1 : branch)
             }
         }
         walk(tree, parentID: nil, branch: 0)
@@ -327,13 +367,16 @@ struct MindMapCanvas: View {
             }
 
             ForEach(Array(layout.edges.enumerated()), id: \.offset) { _, edge in
-                // ★ 2026-10-23 ("按照他这种样式"): Vobot's map draws *one*
-                // neutral hairline per link, not a rainbow. Colour now lives
-                // only in the node text, so a dense map reads as an outline
-                // rather than a wiring diagram.
+                // ★ 2026-10-23 ("增加一点模块色彩之类的突出"): one count per branch
+                // colour again. The previous pass went all-neutral to match a
+                // reference screenshot, but with text-only nodes the map read as
+                // one undifferentiated grey nest — colour is now the only thing
+                // that says "these five lines are the same module", so each edge
+                // inherits its branch's hue (softer than the chips, so the ink
+                // still belongs to the words).
                 EdgeShape(edge: edge)
                     .stroke(
-                        edgeColour.opacity(edge.depth <= 1 ? 0.55 : 0.34),
+                        ink(edge.branchIndex).opacity(edge.depth <= 1 ? 0.55 : 0.34),
                         style: StrokeStyle(
                             lineWidth: edge.depth <= 1 ? 1.5 : 1,
                             lineCap: .round,
@@ -345,7 +388,7 @@ struct MindMapCanvas: View {
             ForEach(layout.items) { item in
                 MindMapNodeView(
                     item: item,
-                    colour: color(item.branchIndex),
+                    colour: fill(item.branchIndex),
                     rootLabel: labelForRoot,
                     onTap: { onToggle(item.id) }
                 )
@@ -356,13 +399,15 @@ struct MindMapCanvas: View {
         .frame(width: layout.size.width, height: layout.size.height, alignment: .topLeading)
     }
 
-    private func color(_ index: Int) -> Color {
-        branchPalette[index % branchPalette.count].resolve(scheme)
+    /// The colour a **filled chip** uses (root excluded — see `MindMapNodeView`).
+    private func fill(_ index: Int) -> Color {
+        branchPalette[index % branchPalette.count].fill(scheme)
     }
 
-    /// Single link colour for every edge (Vobot's map has no per-branch lines).
-    private var edgeColour: Color {
-        scheme == .dark ? Color(white: 0.52) : Color(white: 0.46)
+    /// The colour an **edge** uses: the readable-on-paper variant, so a link
+    /// stays visible on the canvas without competing with the chips it connects.
+    private func ink(_ index: Int) -> Color {
+        branchPalette[index % branchPalette.count].resolve(scheme)
     }
 
     private struct EdgeShape: Shape {
@@ -386,6 +431,8 @@ struct MindMapCanvas: View {
 
 private struct MindMapNodeView: View {
     let item: MindMapLayout.Item
+    /// The branch colour, already resolved for the current scheme (a **fill**
+    /// colour — see `BranchColor.fill`).
     let colour: Color
     let rootLabel: String
     let onTap: () -> Void
@@ -394,6 +441,7 @@ private struct MindMapNodeView: View {
 
     private var isRoot: Bool { item.depth == 0 }
     private var isSection: Bool { item.depth == 1 }
+    private var isLeaf: Bool { item.depth >= 2 }
     /// Only a node with something behind it is a control.
     private var isTappable: Bool { item.childCount > 0 }
 
@@ -402,35 +450,80 @@ private struct MindMapNodeView: View {
         return item.title
     }
 
-    private var cornerRadius: CGFloat { isRoot ? 10 : (isSection ? 9 : 7) }
+    private var cornerRadius: CGFloat { isRoot ? 13 : (isSection ? 11 : 9) }
 
-    /// ★ 2026-10-23 ("按照他这种样式"): Vobot's map is **text on paper** — no
-    /// cards, no fills, no shadows. Only the ink carries hierarchy: root and
-    /// branch titles in near-black, leaves in a softer grey.
+    // MARK: Inks — the chips carry the colour, so the text has to follow it.
+
     private var textColour: Color {
-        if scheme == .dark {
-            return isRoot || isSection ? Color(white: 0.95) : Color(white: 0.72)
+        // The root chip **inverts** with the theme (near-black on paper,
+        // near-white on the dark canvas), so its text has to invert with it —
+        // white-on-white would erase the very node the user said was clipped.
+        if isRoot { return scheme == .dark ? Color(white: 0.10) : .white }
+        if isSection { return .white }
+        return scheme == .dark ? Color(white: 0.93) : Color(white: 0.12)
+    }
+
+    /// The chip behind the words. This is the "模块色彩" the user asked for:
+    ///
+    /// * **root** — near-black (light theme) / near-white (dark theme): the
+    ///   anchor of the map, deliberately **not** one of the branch hues;
+    /// * **section (depth 1)** — a solid fill in the branch hue, white text:
+    ///   each outline section reads as one coloured module at a glance;
+    /// * **leaf (depth 2+)** — a 12%-tinted card of the same hue plus a 3 pt
+    ///   rule on its leading edge, so it belongs to the module without shouting.
+    private var chipFill: Color {
+        if isRoot {
+            return scheme == .dark ? Color(white: 0.90) : Color(red: 0.16, green: 0.16, blue: 0.17)
         }
-        return isRoot || isSection ? Color(white: 0.13) : Color(white: 0.33)
+        if isSection { return colour }
+        return colour.opacity(scheme == .dark ? 0.24 : 0.12)
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: 5) {
+            if isLeaf {
+                // The module rule. Height follows the text block rather than the
+                // chip so a two-line leaf doesn't get a stubby tick.
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(colour)
+                    .frame(width: 3)
+                    .frame(maxHeight: .infinity)
+                    .padding(.vertical, 1)
+            }
+
             Text(text)
                 .font(.system(size: MindMapLayout.font(for: item.depth).pointSize,
                               weight: MindMapLayout.weight(for: item.depth)))
                 .foregroundStyle(textColour)
                 .lineLimit(MindMapLayout.maxLines(for: item.depth))
                 .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
 
             if isTappable { foldBadge }
         }
         .padding(.horizontal, MindMapLayout.horizontalPadding(for: item.depth))
         .padding(.vertical, MindMapLayout.verticalPadding(for: item.depth))
         .frame(width: item.frame.width, height: item.frame.height, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(chipFill)
+        )
+        .overlay(
+            // Sections and leaves get a hairline of their own hue: on a busy map
+            // two adjacent chips of similar tint would otherwise melt together.
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .strokeBorder(
+                    (isRoot ? Color.clear : colour.opacity(isSection ? 0 : 0.28)),
+                    lineWidth: 1
+                )
+        )
+        .shadow(
+            color: isRoot ? Color.black.opacity(scheme == .dark ? 0.4 : 0.18) : .clear,
+            radius: 6, x: 0, y: 2
+        )
         // The whole box is the target, not just the glyphs, so a branch is
         // as easy to hit as it is to read.
-        .contentShape(Rectangle())
+        .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .onTapGesture { if isTappable { onTap() } }
     }
 
@@ -440,6 +533,17 @@ private struct MindMapNodeView: View {
     ///
     /// The count shows only while folded; once the branch is open, its
     /// children are on screen and the number would just be noise.
+    /// Badge ink follows the chip it sits on (white on a filled chip, the
+    /// branch hue on a leaf) — and on the root that means inverting with the
+    /// theme, exactly like `textColour`.
+    private var badgeColour: Color {
+        if isRoot {
+            return (scheme == .dark ? Color(white: 0.10) : Color.white).opacity(0.72)
+        }
+        if isSection { return Color.white.opacity(0.72) }
+        return colour.opacity(0.95)
+    }
+
     private var foldBadge: some View {
         HStack(spacing: 1.5) {
             Image(systemName: item.isExpanded ? "chevron.down" : "chevron.right")
@@ -448,8 +552,8 @@ private struct MindMapNodeView: View {
             }
         }
         .font(.system(size: 9, weight: .semibold))
-        .foregroundStyle(isRoot || isSection ? textColour.opacity(0.6) : colour.opacity(0.85))
-        .padding(.top, isRoot ? 5 : 3)
+        .foregroundStyle(badgeColour)
+        .padding(.top, isRoot ? 4 : 2)
         .fixedSize()
     }
 }
@@ -803,23 +907,37 @@ enum MindMapExporter {
 
     private static func drawNode(_ item: MindMapLayout.Item, rootLabel: String, dark: Bool) {
         let rect = item.frame
-        let radius: CGFloat = item.depth == 0 ? 10 : (item.depth == 1 ? 9 : 7)
+        let radius: CGFloat = item.depth == 0 ? 13 : (item.depth == 1 ? 11 : 9)
+        let scheme: ColorScheme = dark ? .dark : .light
+        let branch = branchPalette[item.branchIndex % branchPalette.count]
 
+        // ★ 2026-10-23: the export follows the on-screen chips exactly — root
+        // near-black, section solid in its branch hue, leaf a 12% tint with a
+        // 3 pt rule on the leading edge. An export that disagreed with the
+        // screen was the reason this function used to be "close but not quite".
         let fill: UIColor
         if item.depth == 0 {
-            fill = dark ? UIColor(white: 0.92, alpha: 1) : UIColor(white: 0.20, alpha: 1)
+            fill = dark ? UIColor(white: 0.90, alpha: 1) : UIColor(red: 0.16, green: 0.16, blue: 0.17, alpha: 1)
+        } else if item.depth == 1 {
+            fill = UIColor(branch.fill(scheme))
         } else {
-            fill = dark ? UIColor(white: 1, alpha: 0.07) : .white
+            fill = UIColor(branch.fill(scheme)).withAlphaComponent(dark ? 0.24 : 0.12)
         }
         fill.setFill()
         UIBezierPath(roundedRect: rect, cornerRadius: radius).fill()
 
-        // A depth-1 card gets a thin accent edge, matching the on-screen node.
+        if item.depth >= 2 {
+            // The module rule. Drawn inside the chip so the rounded corner can't
+            // clip it into a half-moon.
+            let rule = CGRect(x: rect.minX + 5, y: rect.minY + 6, width: 3, height: max(2, rect.height - 12))
+            UIColor(branch.fill(scheme)).setFill()
+            UIBezierPath(roundedRect: rule, cornerRadius: 1.5).fill()
+        }
+
         if item.depth == 1 {
-            UIColor(branchPalette[item.branchIndex % branchPalette.count]
-                .resolve(dark ? .dark : .light))
-                .withAlphaComponent(0.55)
-                .setStroke()
+            // A slightly darker edge in the chip's own hue keeps two sections of
+            // similar tint from melting together at export scale.
+            UIColor(branch.fill(scheme)).withAlphaComponent(0.9).setStroke()
             let outline = UIBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), cornerRadius: radius)
             outline.lineWidth = 1
             outline.stroke()
@@ -830,23 +948,29 @@ enum MindMapExporter {
 
         let textColor: UIColor
         if item.depth == 0 {
-            textColor = dark ? .black : .white
+            // Same inversion as the on-screen chip: dark chip on paper, light
+            // chip on the dark canvas.
+            textColor = dark ? UIColor(white: 0.10, alpha: 1) : .white
+        } else if item.depth == 1 {
+            textColor = .white
         } else {
-            textColor = dark ? .white : UIColor(white: 0.12, alpha: 1)
+            textColor = dark ? UIColor(white: 0.93, alpha: 1) : UIColor(white: 0.12, alpha: 1)
         }
         let font = UIFont.systemFont(
             ofSize: item.depth == 0 ? 15 : 13.5,
-            weight: item.depth == 0 ? .semibold : (item.depth == 1 ? .medium : .regular)
+            weight: item.depth == 0 ? .semibold : (item.depth == 1 ? .semibold : .regular)
         )
         let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
+        paragraph.alignment = .left
         paragraph.lineBreakMode = .byTruncatingTail
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: textColor,
             .paragraphStyle: paragraph,
         ]
-        let inset: CGFloat = 6
+        // Leaves indent past their colour rule; sections and the root do not
+        // carry one.
+        let inset: CGFloat = item.depth >= 2 ? 13 : 10
         let available = CGSize(width: max(1, rect.width - inset * 2), height: max(1, rect.height - 4))
         let bounding = (title as NSString).boundingRect(
             with: available, options: [.usesLineFragmentOrigin], attributes: attributes, context: nil
