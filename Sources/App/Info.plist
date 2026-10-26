@@ -30,7 +30,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>6</string>
+	<string>7</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>
@@ -44,10 +44,16 @@
 	<string>Nomily AI scans the QR code that carries a DingTalk A1 credential, so it never has to go through the clipboard.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Nomily AI opens a direct TCP connection to your D·NOTE over its Wi-Fi access point during Fast Transfer.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Nomily AI records a rough location when your recorder card disconnects, so it can tell you where you last had it. It asks for the position once, only at that moment, and never tracks you.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Nomily AI records a rough location when your recorder card disconnects, so it can tell you where you last had it. It asks for the position once, only at that moment, and never tracks you.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Live transcription monitors microphone state to coordinate with the device's stream.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Nomily AI saves an image or video to your photo library only when you ask it to.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Nomily AI only opens your photo library when you choose a photo or video to attach. It never reads your library on its own.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Nomily AI turns your recordings into text on this iPhone, using Apple's on-device speech recogniser. On that path the audio never leaves the device.</string>
 	<key>UIApplicationSceneManifest</key>
