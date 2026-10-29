@@ -294,6 +294,31 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// different claims. Same rule as the A1 `sizeBytes` trap: never let an
     /// unknown masquerade as a measurement.
     @Published private(set) var cardFileCount: Int?
+    /// ★ 2026-10-27 ("点击交还官方 App 没效果"): the last hand-back's real
+    /// outcome. The UI used to print "已交还" the instant the button was
+    /// tapped, whatever the card answered — this is the honest replacement.
+    /// `nil` = no hand-back attempted in this session.
+    enum ReleaseOutcome: Equatable {
+        /// The card acked `bleDepair` with status 0 — it really is released.
+        case acked
+        /// The card answered with a non-zero status (it refused).
+        case rejected(Int32)
+        /// No answer within the watchdog window — command sent, outcome unknown.
+        case unconfirmed
+    }
+    @Published private(set) var releaseOutcome: ReleaseOutcome?
+    /// ★ 2026-10-27 ("点击解绑还是跟 Nomily 绑定的蓝牙" — the real bug): after a
+    /// hand-back the card MUST NOT be re-connected automatically. The keeper
+    /// scanned and re-bound it **4 s** after `depair` (diag 11:08:05 → 11:08:09
+    /// "PLAUD bound 8810A3…"), which mints a fresh ownership lock and quietly
+    /// undoes the release the card had just performed (its storage had already
+    /// dropped 61.9 MB → 704 KB, i.e. the wipe DID run). While this is true the
+    /// keeper stands down and no scan auto-binds; only an explicit user action
+    /// (scan / pair / reconnect tap) clears it.
+    /// Persisted: a relaunch must not undo a hand-back either — with an
+    /// unconfirmed release the card is still `pairedSN`, and the launch-time
+    /// keeper would re-bind it within seconds.
+    @Published private(set) var handoverHold = UserDefaults.standard.bool(forKey: "plaud.handover_hold")
     /// The card the user tapped in the scan list (before credentials exist —
     /// the official app shows cards + SN first, key comes after).
     @Published private(set) var selectedCard: ScannedCard?
@@ -370,6 +395,10 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Every segment id of the current take, oldest first. A take is no longer
     /// guaranteed to be one file on the card.
     private var recordSegmentIDs: [Int] = []
+    /// ★ 2026-10-27: a hand-back that is waiting for the card's `bleDepair`
+    /// answer. Non-nil = a release is in flight (see `releaseDevice`).
+    private var pendingRelease: (factoryReset: Bool, sn: String)?
+    private var releaseWatchdog: DispatchWorkItem?
     private var userToken: String?
     private var userTokenAt = Date.distantPast
     private var isInitialized = false
@@ -1248,6 +1277,9 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// a tap needs no extra round trip; failure is non-fatal — scanning is a
     /// pure BLE operation under the hood.
     func startScan() {
+        // ★ 2026-10-27: an explicit scan is the user saying "I want this card
+        // back" — it is what lifts the post-hand-back hold (see `handoverHold`).
+        clearHandoverHold("scan")
         Task {
             if isConfigured {
                 try? await ensureInitialized()
@@ -1257,6 +1289,15 @@ final class PlaudDirectService: NSObject, ObservableObject {
             reconnectTarget = nil
             PlaudDeviceAgent.shared.startScan()
         }
+    }
+
+    /// Lift the post-hand-back hold — only ever on an explicit user gesture.
+    private func clearHandoverHold(_ why: String) {
+        guard handoverHold else { return }
+        handoverHold = false
+        UserDefaults.standard.set(false, forKey: "plaud.handover_hold")
+        releaseOutcome = nil
+        TicNoteDiagLog.log("PLAUD-REC", "release: hold lifted by \(why)")
     }
 
     /// Reconnect a **previously paired** card without making the user pick it
@@ -1296,6 +1337,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
             var misses = 0
             while !Task.isCancelled {
                 guard self.pairedSN != nil,
+                      !self.handoverHold,
                       !self.phase.isConnected,
                       !self.phase.isBusy,
                       !self.isRecording,
@@ -1327,6 +1369,11 @@ final class PlaudDirectService: NSObject, ObservableObject {
     }
 
     func reconnect() {
+        // ★ 2026-10-27: every caller is a user gesture — the pill, the
+        // reconnect button, a card switch — and the keeper, which is blocked
+        // by `handoverHold` before it gets here. So this is a safe place to
+        // lift a post-hand-back hold.
+        clearHandoverHold("reconnect")
         guard let sn = pairedSN else {
             startScan()
             return
@@ -1484,6 +1531,9 @@ final class PlaudDirectService: NSObject, ObservableObject {
             setPhase(.failed(L10n.Plaud.cardGone))
             return
         }
+        // Tapping a card in the scan list is an explicit "bind this one" —
+        // it lifts a hand-back hold (the card is being paired on purpose).
+        clearHandoverHold("card tap")
         firmware = nil
         setPhase(.connecting(name: card.name))
         // 8.1: capture the advertised name here — `connect` is the one place
@@ -2236,43 +2286,98 @@ final class PlaudDirectService: NSObject, ObservableObject {
     ///      Best-effort: the card-side depair is what actually frees the
     ///      hardware; the cloud record only matters for SDK recovery flows.
     func releaseDevice(factoryReset: Bool) {
-        guard case .connected(let sn) = phase else { return }
-        log.info("plaud release (factoryReset=\(factoryReset)) sn=\(sn, privacy: .public)")
+        guard case .connected(let sn) = phase else {
+            // ★ 2026-10-27: this used to `return` silently. A tap that landed
+            // a beat after the card slept (or while a reconnect was in
+            // flight) therefore looked exactly like a dead button.
+            TicNoteDiagLog.log("PLAUD-REC", "release: aborted — phase is not connected")
+            setSyncMessage(L10n.Plaud.notConnected)
+            return
+        }
+        TicNoteDiagLog.log("PLAUD-REC", "release: requested factoryReset=\(factoryReset) sn=\(sn)")
+        releaseOutcome = nil
+        // Hold the keeper off from this instant — not after the outcome. The
+        // 4-second re-bind in the 11:08 log happened while we were still
+        // waiting for an ack.
+        handoverHold = true
+        UserDefaults.standard.set(true, forKey: "plaud.handover_hold")
+        setSyncMessage(L10n.Plaud.releasing)
         if liveStreaming { PlaudDeviceAgent.shared.stopSyncFile() }
         stopStatePolling()
+        // A scan already in flight could bind the card the instant the depair
+        // lands, so cancel it and forget the reconnect target too.
+        PlaudDeviceAgent.shared.stopScan()
+        reconnectTarget = nil
         Task { @MainActor in self.stopLiveTranscription() }
+        pendingRelease = (factoryReset, sn)
         PlaudDeviceAgent.shared.depair(clear: factoryReset)
-        // ★ 2026-10-21 (8th round, "切换回官方 App"): `depair` releases the keys it
-        // stored, but it does not necessarily drop the central-side link. If we
-        // keep it, the official app can see the card on scan and still fail to
-        // connect — which reads as "官方 App 用不了". So free the radio here:
-        // disconnect the agent and drop the scan results.
+        // ★★ 2026-10-27 ("点击交还官方 App 没效果" — root cause): this used to
+        // call `disconnect()` on the very next line. `depair` is an async BLE
+        // command, so dropping the link immediately killed it before it left
+        // the radio: the card stayed bound, the app forgot it, and the next
+        // launch simply re-bound it again (diag 10:48:34 / 10:52:39 "PLAUD
+        // bound 8810A30346423315" after three launches). Now we wait for the
+        // card's own `bleDepair` answer and only then release the radio.
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.pendingRelease != nil else { return }
+            TicNoteDiagLog.log("PLAUD-REC", "release: no depair ack within \(Int(Self.releaseAckTimeout))s")
+            self.completeRelease(.unconfirmed)
+        }
+        releaseWatchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.releaseAckTimeout, execute: work)
+    }
+
+    /// How long the card gets to answer `depair` before the outcome is
+    /// reported as unknown. The recovery path already waited 1.5 s "for the
+    /// command to reach the card"; 5 s is the same idea with a real answer.
+    private static let releaseAckTimeout: TimeInterval = 5.0
+
+    /// Finish a hand-back exactly once, with the card's own verdict.
+    ///
+    /// Only an **acked** release lets go of everything. On a refusal or a
+    /// silent timeout the local binding (ledger row, SN, key) is kept: a card
+    /// that is still bound to us while the app has forgotten it is precisely
+    /// the "locked out of every app" state that only 卡片恢复 can undo.
+    private func completeRelease(_ outcome: ReleaseOutcome) {
+        guard let pending = pendingRelease else { return }
+        pendingRelease = nil
+        releaseWatchdog?.cancel()
+        releaseWatchdog = nil
         PlaudDeviceAgent.shared.disconnect()
         scanned = []
         selectedCard = nil
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.ensureInitialized()
-                try await self.cloudUnbind(sn: sn)
-            } catch {
-                log.warning("plaud cloud unbind skipped: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-        pendingDownloads.removeAll()
-        currentExportSession = nil
-        // The card is handed back, so it must also leave the user-visible
-        // device list — a released card is not "my device" any more (same
-        // concluding step `RecorderDeviceView.unbindAndRemove` does).
-        forgetLedger(sn: sn)
-        pairedSN = nil
-        UserDefaults.standard.removeObject(forKey: "plaud.paired_sn")
-        battery = nil
-        storageFree = nil
-        storageTotal = nil
-        cardFileCount = nil
+        releaseOutcome = outcome
         isRecording = false
         setPhase(.idle)
+        switch outcome {
+        case .acked:
+            TicNoteDiagLog.log("PLAUD-REC", "release: ACKED — card released, forgetting local binding")
+            pendingDownloads.removeAll()
+            currentExportSession = nil
+            forgetLedger(sn: pending.sn)
+            pairedSN = nil
+            UserDefaults.standard.removeObject(forKey: "plaud.paired_sn")
+            battery = nil
+            storageFree = nil
+            storageTotal = nil
+            cardFileCount = nil
+            setSyncMessage(L10n.Plaud.handoverDone)
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.ensureInitialized()
+                    try await self.cloudUnbind(sn: pending.sn)
+                } catch {
+                    log.warning("plaud cloud unbind skipped: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        case .rejected(let status):
+            TicNoteDiagLog.log("PLAUD-REC", "release: card REFUSED (status \(status)) — binding kept")
+            setSyncMessage(nil)
+        case .unconfirmed:
+            TicNoteDiagLog.log("PLAUD-REC", "release: unconfirmed — binding kept so a retry is possible")
+            setSyncMessage(nil)
+        }
     }
 
     private func cloudUnbind(sn: String) async throws {
@@ -3777,6 +3882,14 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
 
     func bleDepair(_ status: Int) {
         log.info("plaud depair status \(status)")
+        // ★ 2026-10-27: this is the ONLY proof that a hand-back actually
+        // happened. It used to be logged and thrown away, so "did the card
+        // release?" had no answer anywhere in the app.
+        TicNoteDiagLog.log("PLAUD-REC", "release: depair ack status=\(status)")
+        DispatchQueue.main.async {
+            guard self.pendingRelease != nil else { return }
+            self.completeRelease(status == 0 ? .acked : .rejected(Int32(status)))
+        }
     }
 
     func bleDeviceDisconnectErr() {

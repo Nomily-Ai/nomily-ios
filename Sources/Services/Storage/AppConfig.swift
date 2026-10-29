@@ -49,6 +49,29 @@ struct AppConfig: Codable, Equatable {
     /// Turning it off leaves only `beginBackgroundTask`'s ~30-second grace — short jobs still finish,
     /// long ones get cut. There's a switch because the user should have the right to refuse "tricking the background with silent audio".
     var backgroundKeepAliveEnabled: Bool
+    /// ★ 2026-10-29 (饭耳移植): night-shift backlog transcription via BGProcessingTask.
+    /// When on, iOS may wake the app overnight (charging + network) to transcribe
+    /// recordings that never got a transcript. Off = never wake in the background.
+    var nightlyTranscribeEnabled: Bool
+    /// ★ 2026-10-29 (饭耳移植 · 规格 §3.1): timed overnight recording. Between
+    /// `timedRecordingStart`/`timedRecordingEnd` ("HH:mm") the phone mic records
+    /// until the window ends. Off by default — auto-recording at night is a
+    /// decision the user must make explicitly.
+    var timedRecordingEnabled: Bool
+    var timedRecordingStart: String
+    var timedRecordingEnd: String
+    /// ★ 2026-10-29 (饭耳移植 · 规格 §2.3): WebDAV backup destination. `nil` =
+    /// not configured. The password travels through `SecretStore` (Keychain)
+    /// and is stripped before `config.json` is written — see ConfigService.
+    var webdav: WebDAVConfig?
+    /// ★ 2026-10-29 (饭耳移植 · 规格 §2.2): the cold-data downgrade tier —
+    /// `RecordingQualityTier.rawValue`. `nil`/`asIs` = keep original quality (default).
+    var recordingQualityTier: String?
+    /// When on, clips older than `coldDataDowngradeDays` that already have a
+    /// transcript get re-encoded down to `recordingQualityTier` in place.
+    var coldDataDowngradeEnabled: Bool
+    /// Cold-data age threshold, days (spec default: 7).
+    var coldDataDowngradeDays: Int
     /// When on, the app reconnects to the most recent device by itself after
     /// an unexpected drop (device powered off/on, out of range). When off the
     /// app stays disconnected until the user taps the connection pill.
@@ -113,6 +136,14 @@ struct AppConfig: Codable, Equatable {
     var watchFaceAutoCycle: Bool?
     /// Whether the rounded-square frame is drawn around the watch face. `nil` = `true`.
     var watchFaceFrame: Bool?
+    /// ★ 2026-10-28（饭耳逆向规格 §3.2）：用户称呼。AI 摘要/整理 prompt 里用
+    /// 它交代「录音的主人是谁」，转写说话人标注也能对上「X（我）」。
+    /// `nil`/空 = 用户没填，prompt 里不加这条（保持旧行为）。
+    var userName: String?
+    /// ★ 2026-10-29（用户："待办支持同步到 iPhone 里面的待办，需要打开这个开关"）：
+    /// 开启后录音摘要里的待办行会写进系统「提醒事项」App（EventKit Reminders），
+    /// App 内勾选/取消勾选也会同步提醒事项的完成状态。`false` = 不同步（默认）。
+    var remindersSyncEnabled: Bool
     /// Backlog size (in KB) above which the Wi-Fi fast-transfer button
     /// is offered on the device-files screen. 0 disables the suggestion
     /// and the button never appears.
@@ -152,6 +183,14 @@ struct AppConfig: Codable, Equatable {
         case autoSummarizeAfterTranscription = "auto_summarize_after_transcription"
         case localVADEnabled = "local_vad_enabled"
         case backgroundKeepAliveEnabled = "background_keep_alive_enabled"
+        case nightlyTranscribeEnabled = "nightly_transcribe_enabled"
+        case recordingQualityTier = "recording_quality_tier"
+        case webdav = "webdav"
+        case timedRecordingEnabled = "timed_recording_enabled"
+        case timedRecordingStart = "timed_recording_start"
+        case timedRecordingEnd = "timed_recording_end"
+        case coldDataDowngradeEnabled = "cold_data_downgrade_enabled"
+        case coldDataDowngradeDays = "cold_data_downgrade_days"
         case autoReconnectEnabled = "auto_reconnect_enabled"
         case cloudEgressConsented = "cloud_egress_consented"
         case isDeveloperMode = "developer_mode"
@@ -167,6 +206,8 @@ struct AppConfig: Codable, Equatable {
         case watchBlinkSpeed = "watch_blink_speed"
         case watchFaceAutoCycle = "watch_face_auto_cycle"
         case watchFaceFrame = "watch_face_frame"
+        case userName = "user_name"
+        case remindersSyncEnabled = "reminders_sync_enabled"
         case fastTransferThresholdKB = "fast_transfer_threshold_kb"
     }
 
@@ -200,6 +241,7 @@ struct AppConfig: Codable, Equatable {
         self.watchBlinkSpeed = try c.decodeIfPresent(String.self, forKey: .watchBlinkSpeed)
         self.watchFaceAutoCycle = try c.decodeIfPresent(Bool.self, forKey: .watchFaceAutoCycle)
         self.watchFaceFrame = try c.decodeIfPresent(Bool.self, forKey: .watchFaceFrame)
+        self.userName = try c.decodeIfPresent(String.self, forKey: .userName)
         self.onDeviceASROffMigrated = true
         // ⚠️ The "primary pointed at ondevice" fix-up deliberately does **not** live here.
         //   At decode time the Keychain secrets have not been re-attached yet, so every cloud
@@ -208,6 +250,14 @@ struct AppConfig: Codable, Equatable {
         self.autoSummarizeAfterTranscription = try c.decodeIfPresent(Bool.self, forKey: .autoSummarizeAfterTranscription) ?? true
         self.localVADEnabled = try c.decodeIfPresent(Bool.self, forKey: .localVADEnabled) ?? true
         self.backgroundKeepAliveEnabled = try c.decodeIfPresent(Bool.self, forKey: .backgroundKeepAliveEnabled) ?? true
+        self.nightlyTranscribeEnabled = try c.decodeIfPresent(Bool.self, forKey: .nightlyTranscribeEnabled) ?? true
+        self.recordingQualityTier = try c.decodeIfPresent(String.self, forKey: .recordingQualityTier)
+        self.webdav = try c.decodeIfPresent(WebDAVConfig.self, forKey: .webdav)
+        self.timedRecordingEnabled = try c.decodeIfPresent(Bool.self, forKey: .timedRecordingEnabled) ?? false
+        self.timedRecordingStart = try c.decodeIfPresent(String.self, forKey: .timedRecordingStart) ?? "23:30"
+        self.timedRecordingEnd = try c.decodeIfPresent(String.self, forKey: .timedRecordingEnd) ?? "07:00"
+        self.coldDataDowngradeEnabled = try c.decodeIfPresent(Bool.self, forKey: .coldDataDowngradeEnabled) ?? false
+        self.coldDataDowngradeDays = try c.decodeIfPresent(Int.self, forKey: .coldDataDowngradeDays) ?? 7
         self.autoReconnectEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoReconnectEnabled) ?? true
         self.cloudEgressConsented = try c.decodeIfPresent(Bool.self, forKey: .cloudEgressConsented) ?? false
         self.isDeveloperMode = try c.decodeIfPresent(Bool.self, forKey: .isDeveloperMode) ?? false
@@ -220,6 +270,7 @@ struct AppConfig: Codable, Equatable {
         self.a1RecordMode = try c.decodeIfPresent(String.self, forKey: .a1RecordMode)
         self.watchFaceStyle = try c.decodeIfPresent(String.self, forKey: .watchFaceStyle)
         self.fastTransferThresholdKB = try c.decodeIfPresent(Int.self, forKey: .fastTransferThresholdKB) ?? 512
+        self.remindersSyncEnabled = try c.decodeIfPresent(Bool.self, forKey: .remindersSyncEnabled) ?? false
     }
 
     init(
@@ -237,6 +288,14 @@ struct AppConfig: Codable, Equatable {
         autoSummarizeAfterTranscription: Bool = true,
         localVADEnabled: Bool = true,
         backgroundKeepAliveEnabled: Bool = true,
+        nightlyTranscribeEnabled: Bool = true,
+        recordingQualityTier: String? = nil,
+        webdav: WebDAVConfig? = nil,
+        timedRecordingEnabled: Bool = false,
+        timedRecordingStart: String = "23:30",
+        timedRecordingEnd: String = "07:00",
+        coldDataDowngradeEnabled: Bool = false,
+        coldDataDowngradeDays: Int = 7,
         autoReconnectEnabled: Bool = true,
         cloudEgressConsented: Bool = false,
         isDeveloperMode: Bool = false,
@@ -252,7 +311,9 @@ struct AppConfig: Codable, Equatable {
         watchBlinkSpeed: String? = nil,
         watchFaceAutoCycle: Bool? = nil,
         watchFaceFrame: Bool? = nil,
-        fastTransferThresholdKB: Int = 512
+        userName: String? = nil,
+        fastTransferThresholdKB: Int = 512,
+        remindersSyncEnabled: Bool = false
     ) {
         self.asrProviders = asrProviders
         self.llmProviders = llmProviders
@@ -268,6 +329,14 @@ struct AppConfig: Codable, Equatable {
         self.autoSummarizeAfterTranscription = autoSummarizeAfterTranscription
         self.localVADEnabled = localVADEnabled
         self.backgroundKeepAliveEnabled = backgroundKeepAliveEnabled
+        self.nightlyTranscribeEnabled = nightlyTranscribeEnabled
+        self.recordingQualityTier = recordingQualityTier
+        self.webdav = webdav
+        self.timedRecordingEnabled = timedRecordingEnabled
+        self.timedRecordingStart = timedRecordingStart
+        self.timedRecordingEnd = timedRecordingEnd
+        self.coldDataDowngradeEnabled = coldDataDowngradeEnabled
+        self.coldDataDowngradeDays = coldDataDowngradeDays
         self.autoReconnectEnabled = autoReconnectEnabled
         self.cloudEgressConsented = cloudEgressConsented
         self.isDeveloperMode = isDeveloperMode
@@ -283,7 +352,9 @@ struct AppConfig: Codable, Equatable {
         self.watchBlinkSpeed = watchBlinkSpeed
         self.watchFaceAutoCycle = watchFaceAutoCycle
         self.watchFaceFrame = watchFaceFrame
+        self.userName = userName
         self.fastTransferThresholdKB = fastTransferThresholdKB
+        self.remindersSyncEnabled = remindersSyncEnabled
     }
 
     /// True when the active configuration would send user data to a cloud
@@ -732,5 +803,35 @@ extension AppConfig.LlmProviders {
         case "custom":     custom = value
         default:           break
         }
+    }
+}
+
+/// ★ 2026-10-29 (饭耳移植 · 规格 §2.3 存储分层): the user's own WebDAV server.
+/// Presets (群晖/威联通/…) only prefill host/port/https + a setup hint — the
+/// protocol underneath is identical for all of them.
+///
+/// `password` is stored in the Keychain via `SecretStore.save(toKey: "webdav.password")`
+/// and stripped from `config.json` on save (ConfigService, same pattern as the
+/// cloud ASR secrets) — it exists in this struct only as the in-memory round trip.
+struct WebDAVConfig: Codable, Equatable {
+    var host: String
+    var port: Int
+    var useHTTPS: Bool
+    var username: String
+    /// Server directory everything lands under, e.g. `/nomily`. Never empty —
+    /// an unset root would sync straight into the server's root, which users
+    /// did not expect.
+    var basePath: String
+    /// Preset label the form used ("群晖"/"坚果云"/…); informational only.
+    var preset: String?
+    /// In-memory only — see struct comment.
+    var password: String?
+    /// 「也传录音」— transcripts always sync; audio only when this is on.
+    var syncAudio: Bool
+
+    var isConfigured: Bool {
+        !host.trimmingCharacters(in: .whitespaces).isEmpty
+            && !username.trimmingCharacters(in: .whitespaces).isEmpty
+            && !(password ?? "").isEmpty
     }
 }

@@ -45,6 +45,12 @@ final class AliyunLiveASR {
     /// ★ 2026-10-26: how many failed batches were kept as on-disk samples
     /// (`diag-aliyun-batch-*.opus` in Documents) — capped at 3.
     private var dumpedFailures = 0
+    /// ★ 2026-10-28 D3200 实时字幕：160 B 帧不再走「Ogg 封装 → AVAssetReader
+    /// → Mp3Convert 兜底」（真机日志：AVAssetReader 每 batch 抛错、Mp3Convert
+    /// 16 kHz/80 B 口径解 48 kHz/160 B 只出 ~14% PCM）——改走
+    /// `SoundcoreLiveDecoder`（JXOpusDecoder 直解 + preskip + 降 16 kHz，
+    /// 与文件播放链 `SoundcoreTranscoder` 同一条已验证的解码链）。
+    private var liveDecoder: SoundcoreLiveDecoder?
 
     private let log = Logger(subsystem: "com.nomily.app", category: "asr.aliyun.live")
 
@@ -134,6 +140,30 @@ final class AliyunLiveASR {
         guard !decoding, !decodeQueue.isEmpty, !closed else { return }
         decoding = true
         let batch = decodeQueue.removeFirst()
+
+        // ★ 2026-10-28 D3200 fast path：160 B 帧直解（详见 `SoundcoreLiveDecoder`
+        // 注释）。batch 恒为整帧对齐（`send` 按 packetBytes 切），直接喂。
+        if profile.packetBytes == SoundcoreOgg.frameSize {
+            if liveDecoder == nil { liveDecoder = SoundcoreLiveDecoder() }
+            let pcm = liveDecoder?.decode(batch) ?? Data()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.decoding = false
+                if !pcm.isEmpty {
+                    self.pcmBytesOut += pcm.count
+                    self.batchesDecoded += 1
+                    if self.batchesDecoded % 10 == 1 {
+                        TicNoteDiagLog.log("XLATE", "aliyun decode progress: batches=\(self.batchesDecoded) pcmOut=\(self.pcmBytesOut)B packetsIn=\(self.packetsIn) (JX→16k)")
+                    }
+                    self.client?.send(pcm: pcm)
+                } else {
+                    TicNoteDiagLog.log("XLATE", "aliyun JX decode empty batch (\(batch.count)B profile \(self.profile.packetBytes)B)")
+                }
+                self.decodeNext()
+            }
+            return
+        }
+
         let ogg = OpusOgg.wrap(rawFrames: batch, serial: 0xA11A_0002, profile: profile)
         guard !ogg.isEmpty else {
             decoding = false

@@ -144,6 +144,14 @@ final class AppEnvironment: ObservableObject {
                 // Same hook as auto-summary — manual, auto-after-download and the resumed
                 // queue all funnel through this one callback, so one line covers all three.
                 TranscriptionBannerCenter.shared.enqueue(clipName: clip)
+                // ★ 2026-10-29 (饭耳移植 · 规格 §2.3): WebDAV backup — new transcripts
+                // sync to the user's server right away. No-op unless WebDAV is
+                // configured (the service checks `webdav.isConfigured` itself);
+                // reads the config when it runs, so edits made meanwhile are picked up.
+                if let config = AppEnvironment.shared?.config {
+                    let cfg = config.config
+                    Task { await WebDAVSyncService.shared.sync(clipName: clip, config: cfg) }
+                }
             }
         }
         self.localization = LocalizationService(selected: config.config.appLanguage)
@@ -168,6 +176,19 @@ final class AppEnvironment: ObservableObject {
         // taps, and this shouldn't rely on the user happening to pass through the Library. It also lets the launch-timing stats
         // count it in (it only pulls the unfinished items out and queues them; it doesn't await itself).
         transcription.resumePending()
+        // ★ 2026-10-29 (饭耳移植): hand the night-shift worker its services, and
+        // submit the first request right away — iOS needs a pending request even
+        // for tonight's window, and re-submitting from scenePhase .background
+        // refreshes it with the newest conditions. The switch itself is read
+        // again at execution time (see `handle`), so turning it off later is
+        // honoured even if a request is already queued with the system.
+        NightlyTranscribeScheduler.shared.configure(transcription: transcription, configService: config)
+        NightlyTranscribeScheduler.shared.schedule()
+        // ★ 2026-10-29 (饭耳移植 · 规格 §3.1): timed overnight recording. The
+        // heartbeat evaluates the window every 30s while the process lives;
+        // auto-start never pops the mic dialog (granted-permission check inside).
+        TimedRecordingScheduler.shared.configure(configService: config, library: library)
+        TimedRecordingScheduler.shared.evaluate()
         // Same reasoning, for the other three kinds of job: resume the unfinished summary / translation / format conversion from last time.
         //
         // ⚠️ Like `transcription.resumePending()`, it's hung off the composition root: this init runs only
@@ -175,10 +196,24 @@ final class AppEnvironment: ObservableObject {
         //    (the moment the user reopens the app). The "process isn't dead, just switching back" path relies on
         //    `RootView`'s scenePhase — both are needed; see the comment there.
         jobs.resume()
+        // ★ 2026-10-29 (用户："常用词汇里面从历史的文档里面提取")：首次启动 +
+        // 每周一次，从全部转写里挖高频专名自动进词表。后台编排，不挡启动。
+        if VocabularyStore.shared.shouldAutoMine() {
+            VocabularyStore.mineOffMain()
+        }
         // ★ 2026-10-22 (任务三): reconcile the AiTask ledger against what the
         // two queues actually replayed — interrupted pipelines get their honest
         // verdict instead of sitting in "transcribing" forever.
         AiTaskCenter.shared.recoverAtLaunch()
+        // ★ 2026-10-29 (饭耳移植 · 规格 §2.2): the cold-data downgrade pass.
+        // Fire-and-forget: re-encoding runs off the main actor inside the
+        // service; the switch and tier are read when it starts. No-op unless
+        // the user picked a tier and turned the toggle on.
+        if config.config.coldDataDowngradeEnabled,
+           config.config.recordingQualityTier != nil {
+            let cfg = config.config
+            Task { await RecordingQualityService.shared.runDowngrade(config: cfg) }
+        }
         let done = Date()
         log.notice("""
             environment ready in \(Self.ms(startedAt, done)) ms \

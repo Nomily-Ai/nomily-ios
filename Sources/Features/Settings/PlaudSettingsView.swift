@@ -68,11 +68,9 @@ struct DirectConnectSection: View {
     @State private var busy = false
     @State private var message: String?
     @State private var showHandoverConfirm = false
-    @State private var handedOver = false
     @State private var showRecoveryConfirm = false
     @State private var showClearCardConfirm = false
     @State private var recoveryDoneShown = false
-    @State private var releasedNote = false
     @State private var showRename = false
     @State private var nameDraft = ""
     @State private var copiedSN = false
@@ -241,7 +239,7 @@ struct DirectConnectSection: View {
         if let msg = direct.syncMessage {
             Text(msg).font(.footnote).foregroundStyle(.secondary)
         }
-        if releasedNote {
+        if direct.releaseOutcome == .acked {
             Label(L10n.Plaud.released, systemImage: "checkmark.circle")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -411,6 +409,38 @@ struct DirectConnectSection: View {
     /// actually decide whether the official app can pair (quit Nomily, forget the
     /// OS-level pairing, then pair). "Unbind but keep recordings" stays as the
     /// non-destructive variant, and deactivate stays as the local-only reset.
+    /// What the CARD actually answered to the hand-back — never a guess.
+    ///
+    /// ★ 2026-10-27 ("点击交还官方 App 没效果"): the old UI printed "已交还"
+    /// the moment the row was tapped, so a release the card never received
+    /// looked like a success and the next launch silently re-bound the card.
+    /// Three honest states now, each with the one action that unblocks it.
+    @ViewBuilder
+    private var releaseResultNote: some View {
+        if let outcome = direct.releaseOutcome {
+            switch outcome {
+            case .acked:
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(L10n.Plaud.handoverDone, systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text(L10n.Plaud.handoverStep1)
+                    Text(L10n.Plaud.handoverStep2)
+                    Text(L10n.Plaud.handoverStep3)
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            case .rejected(let status):
+                Label(L10n.Plaud.handoverRejected(Int(status)), systemImage: "xmark.octagon.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            case .unconfirmed:
+                Label(L10n.Plaud.handoverUnconfirmed, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
     private var handoverSection: some View {
         Section {
             Button(L10n.Plaud.handover) {
@@ -425,8 +455,10 @@ struct DirectConnectSection: View {
             }
             Button(L10n.Plaud.unbindKeep, role: .destructive) {
                 if direct.phase.isConnected {
+                    // ★ 2026-10-27: no more instant "done" note — the service
+                    // now reports the card's own `bleDepair` verdict and the
+                    // section renders that (see `releaseResultNote`).
                     direct.releaseDevice(factoryReset: false)
-                    releasedNote = true
                 } else {
                     message = L10n.Plaud.notConnected
                 }
@@ -449,16 +481,8 @@ struct DirectConnectSection: View {
                     .font(.footnote)
                     .foregroundStyle(.green)
             }
-            if handedOver && direct.pairedSN == nil {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(L10n.Plaud.handoverDone, systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Text(L10n.Plaud.handoverStep1)
-                    Text(L10n.Plaud.handoverStep2)
-                    Text(L10n.Plaud.handoverStep3)
-                }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            if direct.releaseOutcome != nil {
+                releaseResultNote
             }
         } header: {
             Text(L10n.Plaud.handoverHeader)
@@ -472,8 +496,6 @@ struct DirectConnectSection: View {
         ) {
             Button(L10n.Plaud.handoverConfirmAction, role: .destructive) {
                 direct.releaseDevice(factoryReset: true)
-                releasedNote = true
-                handedOver = true
             }
             Button(L10n.Common.cancel, role: .cancel) {}
         } message: {

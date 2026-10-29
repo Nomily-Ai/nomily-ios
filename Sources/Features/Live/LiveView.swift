@@ -856,7 +856,7 @@ private struct LiveContent: View {
     }
 
     /// While recording, the controls mirror DingTalk's Minutes page: three big round buttons,
-    /// centre = pause, right = finish, left = mark (A1 only — marks are that card's concept).
+    /// centre = pause, right = finish, left = mark (A1 / D3200 only — marks are those cards' concept).
     private var runningControlBar: some View {
         HStack(spacing: 0) {
             Group {
@@ -991,7 +991,7 @@ private struct LiveContent: View {
     }
 
     private var canMark: Bool {
-        source is DingTalkA1Link
+        source is DingTalkA1Link || source is SoundcoreLink
     }
 
     private var markButton: some View {

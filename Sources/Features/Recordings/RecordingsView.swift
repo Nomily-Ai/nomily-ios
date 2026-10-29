@@ -61,6 +61,33 @@ struct RecordingsView: View {
         recorderTarget == nil && (plaudDirect.phase.isConnected || plaudDirect.pairedSN != nil)
     }
 
+    // MARK: 冷启动落点（用户 2026-10-28："开屏不要默认是 Plaud 的设备页面，要是上一个设备最后连接的那个页面"）
+
+    /// 台账里"最后连接"的那台设备（与 `RootView.knownDevices` 同一把尺子：按
+    /// `lastConnected` 倒序取第一）。`nil` = 台账为空。
+    private var lastUsedLedgerEntry: (id: String, name: String)? {
+        let sorted = env.config.config.devices.sorted { lhs, rhs in
+            (lhs.value.lastConnected ?? "") > (rhs.value.lastConnected ?? "")
+        }
+        guard let newest = sorted.first else { return nil }
+        return (newest.key, newest.value.name)
+    }
+
+    /// "上一个连接的设备"是卡片（TicNote / 录音豆 / A1）时，从身份缓存重组出它的
+    /// 设备页快照（灰卡 + 重连按钮），**不发起连接**。在线链路（D·NOTE / 卡片 /
+    /// PLAUD 在线）永远优先于这条记忆分支——它在 `deviceContent` 里排在最前。
+    private var rememberedRecorderCard: DiscoveredRecorder? {
+        guard let last = lastUsedLedgerEntry else { return nil }
+        guard !last.id.hasPrefix("plaud-"), env.config.isRecorderRecord(last.id) else { return nil }
+        return bluetooth.rememberedRecorder(recordID: last.id)
+    }
+
+    /// "上一个连接的设备"是 PLAUD 且确实配对过（落 PLAUD 页的前提）。
+    private var plaudIsLastUsedDevice: Bool {
+        guard let last = lastUsedLedgerEntry else { return false }
+        return last.id.hasPrefix("plaud-") && plaudDirect.pairedSN != nil
+    }
+
     @ViewBuilder
     private var deviceContent: some View {
         if let client = bluetooth.client {
@@ -90,11 +117,18 @@ struct RecordingsView: View {
             // (`identityText`) comes from the advertisement and serves as the download-dedup key (`deviceSerial`),
             // and reconstructing it would drop the SN, silently breaking the "already downloaded" check.
             RecorderDeviceView(recorder: matched, session: recorderSession)
-        } else if plaudDirect.phase.isConnected || plaudDirect.pairedSN != nil {
-            // A PLAUD card is on this segment (live or remembered). Its card is
-            // rendered above; the list of recordings **on the card** belongs
-            // here too (user: "the card's recordings should show under the home
-            // device section, not only inside device info").
+        } else if plaudDirect.phase.isConnected {
+            // PLAUD 在线：实时链路优先于一切记忆（与 plaudPill 同一原则）。
+            PlaudCardFilesView()
+        } else if let remembered = rememberedRecorderCard {
+            // ★ 没有任何在线链路：台账里最后连接的是卡片 → 直接落它的设备页
+            // （灰卡形态，页内重连）。开屏不再被配对过的 PLAUD 抢占。
+            RecorderDeviceView(recorder: remembered, session: recorderSession)
+        } else if plaudDirect.pairedSN != nil, plaudIsLastUsedDevice {
+            // 最后连接的就是 PLAUD → 原 PLAUD 设备页（行为不变）。
+            PlaudCardFilesView()
+        } else if plaudDirect.pairedSN != nil, rememberedRecorderCard == nil, lastUsedLedgerEntry == nil {
+            // 台账为空但 PLAUD 配对过（老版本升级上来的记录）：保留 PLAUD 落点。
             PlaudCardFilesView()
         } else {
             EmptyStateView(

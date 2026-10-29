@@ -75,6 +75,16 @@ enum OpusOgg {
         static let dingTalkA1 = Profile(
             packetBytes: 84, channels: 1, sampleRate: 48000,
             samplesPerPacket: 960, preSkip: 312)
+
+        /// soundcore Work D3200（飞书录音豆）：160 B per packet, mono, 48 kHz, 20 ms（64 kbps CBR）。
+        ///
+        /// 8.3.6 复核：切片固定 160 B（`sn u32le | flags u8 | 160B data | pad`），
+        /// 尾部全零是合法的 CBR 包内容——**绝不裁剪**（裁了就是 INVALID_PACKET 杂音）。
+        /// `preSkip` 3840 与 `SoundcoreOgg`（serial 'ARKR'）一致，官方 JX 编码器口径。
+        /// 容器声明 48 kHz（granule 按 48 kHz 计），编码器内部速率未知但音高/时长正确。
+        static let soundcore = Profile(
+            packetBytes: 160, channels: 1, sampleRate: 48000,
+            samplesPerPacket: 960, preSkip: 3840)
     }
 
     /// Alias (for readability: `OpusOgg.dnoteProfile` reads more naturally than `OpusOgg.Profile.dnote`).

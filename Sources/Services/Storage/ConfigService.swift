@@ -176,7 +176,11 @@ final class ConfigService: ObservableObject {
 
     static let presetSecretSlots: [(String, SecretStore.Slot)] = [
         ("qwen", .llmQwen), ("deepseek", .llmDeepSeek), ("doubao", .llmDoubao),
+        // ★ 2026-10-29 (按截图补齐): Kimi / 智谱 GLM / MiniMax。
+        ("kimi", .llmKimi), ("zhipu", .llmZhipu), ("minimax", .llmMiniMax),
     ]
+    /// ★ 2026-10-29 (饭耳移植): WebDAV password Keychain key (string-keyed slot).
+    static let webdavPasswordKey = "webdav.password"
 
     private static func extractSecrets(_ config: AppConfig) -> AppConfig {
         var stripped = config
@@ -200,6 +204,8 @@ final class ConfigService: ObservableObject {
             }
         }
         SecretStore.save(config.wifiAP?.psk, to: .wifiAPPassword)
+        // ★ 2026-10-29 (饭耳移植): WebDAV password never touches config.json.
+        SecretStore.save(config.webdav?.password, toKey: Self.webdavPasswordKey)
 
         stripped.asrProviders.azure?.key = ""
         stripped.asrProviders.custom?.apiKey = nil
@@ -216,6 +222,7 @@ final class ConfigService: ObservableObject {
             for id in ids { stripped.llmProviders.presets?[id]?.apiKey = nil }
         }
         stripped.wifiAP?.psk = ""
+        stripped.webdav?.password = nil
         return stripped
     }
 
@@ -259,6 +266,10 @@ final class ConfigService: ObservableObject {
         Self.mergeArkIntoDoubao(&config)
         if config.wifiAP != nil {
             config.wifiAP?.psk = SecretStore.load(.wifiAPPassword) ?? ""
+        }
+        // ★ 2026-10-29 (饭耳移植): WebDAV password round trip (Keychain).
+        if config.webdav != nil {
+            config.webdav?.password = SecretStore.load(key: Self.webdavPasswordKey)
         }
     }
 

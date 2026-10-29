@@ -101,7 +101,7 @@
 
 /* إعدادات التسجيلات */
 "rec_settings.delete_after_transfer" = "حذف من الجهاز بعد النقل";
-"rec_settings.delete_after_transfer_footer" = "عند التفعيل، يُحذف الملف من الجهاز فور انتهاء نقل BLE وفك التشفير.";
+"rec_settings.delete_after_transfer_footer" = "عند التفعيل، يُحذف الملف من الجهاز فور انتهاء نقل BLE وفك التشفير. (Soundcore bean Wi‑Fi fast transfer: fully transferred recordings are deleted by the bean firmware itself, regardless of this switch.)";
 "rec_settings.decryption" = "فك التشفير";
 "rec_settings.chacha_key" = "مفتاح ChaCha20 (سداسي عشري)";
 "rec_settings.chacha_key_footer" = "64 حرفًا سداسيًا عشريًا (32 بايت). اتركه فارغًا إذا كان الجهاز لا يستخدم التشفير.";

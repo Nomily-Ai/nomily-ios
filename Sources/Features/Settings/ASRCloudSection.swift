@@ -135,12 +135,27 @@ private struct ASRCloudRow: View {
         HStack(spacing: 12) {
             ASRBrandTile(spec: spec)
             VStack(alignment: .leading, spacing: 2) {
-                Text(spec.name).foregroundStyle(.primary)
+                // ★ 2026-10-29（饭耳规格 §1.1）：行首带选型建议角标。
+                HStack(spacing: 4) {
+                    Text(spec.name).foregroundStyle(.primary)
+                    if let rec = spec.recommendation {
+                        Text(rec)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(rec.hasPrefix("推荐") ? Color.green : Color.orange)
+                    }
+                }
                 Text(model.isEmpty ? spec.tagline : model)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                // 价格 + 能力一行小字（"约 0.3 元/小时 · 分说话人"）；没数据的厂商不占位。
+                if model.isEmpty, let meta = spec.metaLine {
+                    Text(meta)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 8)
             if let ms = ASRLatencyMemory.millis(for: spec.id) {
@@ -236,6 +251,14 @@ struct ASRCloudSheet: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(spec.name).font(.headline)
                             Text(spec.tagline).font(.caption2).foregroundStyle(.secondary)
+                            // ★ 2026-10-29（饭耳规格 §1.1）：价格/能力/选型参考。
+                            // 价格是刊例粗算，随时可能调——footer 里也会写明。
+                            if let meta = spec.metaLine {
+                                Text(meta).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            if let rec = spec.recommendation {
+                                Text("选型参考：\(rec)").font(.caption2).foregroundStyle(rec.hasPrefix("推荐") ? Color.green : Color.orange)
+                            }
                         }
                     }
                     ForEach(spec.fields) { field in

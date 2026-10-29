@@ -63,15 +63,28 @@ targets:
         embed: true
       - framework: Frameworks/PlaudWiFiSDK.framework
         embed: true
+    preBuildScripts:
+      # ★ 2026-10-29（用户："关于里的版本每次修改都没增加"）：每次构建把
+      # CFBundleVersion +1。三份 plist（App/Watch/WatchControls）**同步 +1**，
+      # 否则 watchOS 会因 App 与手表 App 版本不一致拒绝安装。
+      # 注意：`xcodegen generate` 会把构建号重置回 project.yml 里的值——重跑
+      # generate 后构建号从 47 重新爬，ShortVersion 变更仍需手改这里。
+      - name: Bump build number
+        script: |
+          for P in "$SRCROOT/Sources/App/Info.plist" "$SRCROOT/Watch/Info.plist" "$SRCROOT/WatchControls/Info.plist"; do
+            N=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$P" 2>/dev/null || echo 0)
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $((N+1))" "$P"
+          done
+          echo "CFBundleVersion -> $((N+1))"
     info:
       path: Sources/App/Info.plist
       properties:
         CFBundleDisplayName: Nomily AI
-        CFBundleShortVersionString: "1.0.1"
+        CFBundleShortVersionString: "1.1.0"
         # Must track `nomily_watch`'s build number — watchOS refuses to install
         # a companion whose version doesn't match its host, and an embedded
         # watch app one build ahead is enough to trip it. Bump both or neither.
-        CFBundleVersion: "6"
+        CFBundleVersion: "47"
         # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
         # appropriate when the app's crypto use is exempt from US export
         # documentation requirements:
@@ -93,7 +106,10 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSBluetoothAlwaysUsageDescription: Nomily AI connects to your D·NOTE recorder over Bluetooth to list, transfer and transcribe recordings.
-        NSLocalNetworkUsageDescription: Nomily AI opens a direct TCP connection to your D·NOTE over its Wi-Fi access point during Fast Transfer.
+        # 2026-10-27: extended for the soundcore Work D3200 (飞书录音豆) — its Wi‑Fi
+        # fast transfer sends UDP keepalives and a WebSocket to the bean's own
+        # SoftAP, which also triggers the local-network prompt on iOS 14+.
+        NSLocalNetworkUsageDescription: Nomily AI connects directly to your recorder (D·NOTE, TicNote, soundcore Work 飞书录音豆) over its Wi-Fi access point during Fast Transfer.
         NSMicrophoneUsageDescription: Live transcription monitors microphone state to coordinate with the device's stream.
         # Scans the QR code the A1 extractor prints on a Mac. The only thing the camera is used
         # for — it is never opened elsewhere, and no frame is stored or sent anywhere.
@@ -117,6 +133,11 @@ targets:
         # 2026-10-22: the find-my-card page is shared by every recorder (TicNote,
         # DingTalk A1, PLAUD), so the prompt must not name one brand.
         NSLocationWhenInUseUsageDescription: Nomily AI records a rough location when your recorder card disconnects, so it can tell you where you last had it. It asks for the position once, only at that moment, and never tracks you.
+        # ★ 2026-10-29 (用户："待办支持同步到 iPhone 里面的待办，需要打开这个开关"):
+        # EventKit Reminders — recording to-dos are written into the iOS Reminders app
+        # when the user flips the sync toggle. No entitlement needed, just usage strings.
+        NSRemindersUsageDescription: Nomily AI can add the to-dos from your recording summaries to the Reminders app, so you never lose an action item. Nothing is read back unless you also tick them in Nomily.
+        NSRemindersFullAccessUsageDescription: Nomily AI can add the to-dos from your recording summaries to the Reminders app, so you never lose an action item. Nothing is read back unless you also tick them in Nomily.
         # `nomily-a1://import/<base64url>` — the deep link behind that QR code, and behind any
         # tapped link. Handled in `NomilyApp.LocalizedRoot.onOpenURL`.
         CFBundleURLTypes:
@@ -128,10 +149,24 @@ targets:
         UIBackgroundModes:
           - audio
           - bluetooth-central
+          # ★ 2026-10-29 (饭耳移植): BGProcessingTask for the night-shift backlog
+          # transcription. The identifier below must match
+          # NightlyTranscribeScheduler.taskIdentifier exactly, or submit() throws.
+          - processing
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.nomily.app.transcription.backlog
     entitlements:
       path: Sources/App/nomily_ios.entitlements
       properties:
         com.apple.developer.networking.HotspotConfiguration: true
+        # ⛔ HealthKit entitlement deliberately NOT here (2026-10-29): adding it
+        # requires regenerating the provisioning profile, and xcodebuild CLI
+        # reports "No Accounts" (the Apple-ID session is only refreshable from
+        # the Xcode GUI). `HealthKitSleepReader` ships anyway and degrades
+        # gracefully — without the entitlement requestAuthorization fails and
+        # the UI shows the spec's "自己定时间" fallback. To enable: add
+        # `com.apple.developer.healthkit: true` back, then open Xcode once to
+        # re-sign.
         # ⛔ **Deliberately NOT including** `com.apple.security.application-groups` (removed 2026-10-12).
         #
         # Two independent reasons, either one is enough:
@@ -224,10 +259,10 @@ targets:
       path: Watch/Info.plist
       properties:
         CFBundleDisplayName: Nomily AI
-        CFBundleShortVersionString: "1.0.1"
+        CFBundleShortVersionString: "1.1.0"
         # Must track the iPhone app's build number — watchOS refuses to install
         # a companion whose version doesn't match its host.
-        CFBundleVersion: "6"
+        CFBundleVersion: "47"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.nomily.app
         NSMicrophoneUsageDescription: Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.
@@ -299,10 +334,10 @@ targets:
       path: WatchControls/Info.plist
       properties:
         CFBundleDisplayName: Nomily AI
-        CFBundleShortVersionString: "1.0.1"
+        CFBundleShortVersionString: "1.1.0"
         # Must match the parent App — when an embedded binary's version numbers differ from the host's, watchOS
         # refuses to install the whole App.
-        CFBundleVersion: "6"
+        CFBundleVersion: "47"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

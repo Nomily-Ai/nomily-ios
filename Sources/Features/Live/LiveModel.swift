@@ -427,12 +427,13 @@ final class LiveModel: ObservableObject {
 
     /// Drop a mark **from the app** (the card's own button is the other source).
     ///
-    /// Only meaningful on the A1, where marks are a real concept with a sidecar and a
-    /// detail-page section; other devices return false and the button isn't shown at all.
+    /// Only meaningful on the A1 and the D3200（豆）, where marks are a real concept with a
+    /// sidecar and a detail-page section; other devices return false and the button isn't shown at all.
     @discardableResult
     func addAppMark() -> Bool {
-        guard let a1 = activeSource as? DingTalkA1Link else { return false }
-        return a1.addMarkNow()
+        if let a1 = activeSource as? DingTalkA1Link { return a1.addMarkNow() }
+        if let bean = activeSource as? SoundcoreLink { return bean.addMarkNow() }
+        return false
     }
 
     // MARK: - start

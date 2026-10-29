@@ -362,6 +362,9 @@ struct RootView: View {
         if phase == .active {
             env.transcription.resumePending()
             env.jobs.resume()
+            // ★ 2026-10-29 (饭耳移植 · 规格 §3.1): catch a timed-recording window
+            // that began while the app sat in the task switcher.
+            TimedRecordingScheduler.shared.evaluate()
             // A toast that finished queuing in the background must not pop up
             // minutes after unlock — drop anything past its shelf life.
             TranscriptionBannerCenter.shared.dropStale()
@@ -373,6 +376,10 @@ struct RootView: View {
             // Nothing to keep alive while suspended; the next foreground start
             // reconnects anyway.
             plaudDirect.stopConnectionKeeper()
+            // ★ 2026-10-29 (饭耳移植): re-arm tonight's backlog window every time
+            // we leave the foreground — the freshest submit wins, and each one
+            // carries the newest config (switch state) implicitly via execution.
+            NightlyTranscribeScheduler.shared.schedule()
         }
     }
 
@@ -644,7 +651,11 @@ struct RootView: View {
     private func connectRecorderDevice(id: String) async {
         bluetooth.disconnect()
         do {
-            _ = try await bluetooth.reconnectRecorder(recordID: id)
+            // ★ nameHint：录音豆（RPA 地址轮换）UUID 匹配失效时按产品名命中。
+            _ = try await bluetooth.reconnectRecorder(
+                recordID: id,
+                nameHint: configService.config.devices[id]?.name
+            )
             let name = configService.config.devices[id]?.name ?? bluetooth.matchedRecorder?.name
                 ?? bluetooth.recorderLink?.displayName ?? "Recorder"
             configService.rememberDevice(id: id, name: name, isRecorder: true)

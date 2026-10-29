@@ -249,10 +249,14 @@ struct RecorderDeviceView: View {
     /// `nil` = nothing to auto‑transfer this time (recording start failed / already transferred).
     @State private var autoTransferSessionID: UInt32?
 
-    /// ★ Auto-delete recordings on the card after transfer (a user-requested feature controlled by the card's settings switch).
-    /// Use `UserDefaults` instead of the card's settings — the card's firmware does not have this switch;
-    /// This is an **App-side behavior**: send a delete command after successful download.
-    @AppStorage("ticnote.delete_after_transfer") private var deleteAfterTransfer = false
+    /// ★ Auto-delete recordings on the card after transfer.
+    ///
+    /// ★ 2026-10-29（用户："传输偏好按键没实际反应，直接不要"）：原来这里是
+    /// `@AppStorage("ticnote.delete_after_transfer")`（UserDefaults），而 Wi‑Fi 快传、
+    /// 设置页全局开关读的都是 `config.autoDeleteAfterTransfer`（config.json）——
+    /// 两套存储互不相通，设备信息弹层里那个开关拨了等于没拨（用户实测）。
+    /// 现在统一读全局配置；`CardTransferPrefsSection` 已删除。
+    private var deleteAfterTransfer: Bool { configService.config.autoDeleteAfterTransfer }
 
     /// Pending deletion recordings (swipe to delete → confirmation dialog).
     @State private var pendingDelete: RecorderRecording?
@@ -342,6 +346,21 @@ struct RecorderDeviceView: View {
 
     var body: some View {
         content
+            // ★ 2026-10-28：手动加入录音豆热点（自动加入失败才出现）。两个按钮都
+            // 会继续导出流程——"去设置"后回来，导出器仍在轮询确认网络。
+            .alert(item: $soundcoreManualJoin) { prompt in
+                Alert(
+                    title: Text("请手动加入录音豆热点"),
+                    message: Text("iOS 没能自动加入「\(prompt.ssid)」。\n\n请到 设置 → 无线局域网，选择「\(prompt.ssid)」，密码：\(prompt.psk)\n\n连好后回到 Nomily 会自动继续（最多等 3 分钟）。"),
+                    primaryButton: .default(Text("去设置")) {
+                        Self.openWiFiSettings()
+                        prompt.resume()
+                    },
+                    secondaryButton: .cancel(Text("已加入，继续")) {
+                        prompt.resume()
+                    }
+                )
+            }
             .task { await enterPage() }
             // The find-card scan costs radio time and is only meaningful while
             // its section is on screen — a page that has been left must not keep
@@ -603,6 +622,10 @@ struct RecorderDeviceView: View {
                 onClose: { fastTransferPlan = nil }
             )
         }
+        // ★ 2026-10-29：D3200 Wi‑Fi 快传的独立页面（对标 V05E 的 FastTransferSheet）。
+        .sheet(item: $soundcoreWifiUI) { model in
+            SoundcoreWifiTransferSheet(model: model, onCancel: { soundcoreWifiExporter?.cancel() })
+        }
         // ⑥ Transfer method —— ★ Sticky at the bottom, no longer scrolls with the list (previously you had to scroll past all recordings to see it,
         //    so users thought the feature was gone). Also changed from a "switch" to a **button**:
         //    The old implementation was a Toggle; tapping it just flipped a bool with no UI change ——
@@ -771,7 +794,12 @@ struct RecorderDeviceView: View {
     /// 4. **Multi-select mode** → switch to `selectionBar` (N selected / Select All / Cancel / Send Selected).
     @ViewBuilder
     private var fastTransferBar: some View {
-        if isSelecting {
+        // ★ 2026-10-27（用户："WiFi 快传的功能在首页设备下面，参考 ticnote 的方式"）：
+        // 豆的快传入口原来埋在"卡片信息"弹层里，首页设备页根本看不到。现在与
+        // TicNote 一样做成**底部常驻栏**：连接即可见，进行中变进度条。
+        if recorder.protocolID == SoundcoreRecorderSpec.identifier {
+            soundcoreWifiBar
+        } else if isSelecting {
             selectionBar
         } else if wifiFallbackNeeded, fastTransferAvailable {
             fastTransferReadyBar
@@ -795,6 +823,304 @@ struct RecorderDeviceView: View {
     ///   removing them from the count would make the button show "0 sent" while still hanging, which is more confusing than not showing it.
     private var pendingRecordings: [RecorderRecording] {
         recordings.filter { savedNames[$0.id] == nil }
+    }
+
+    // MARK: ★ soundcore Wi‑Fi 快传（首页设备页底栏，对齐 TicNote fastTransferBar）
+
+    @State private var soundcoreWifiRunning = false
+    @State private var soundcoreWifiStatus: String?
+    @State private var soundcoreWifiFraction: Double?
+    @State private var soundcoreWifiExporter: SoundcoreWifiExporter?
+    @State private var soundcoreWifiError: String?
+    /// ★ 2026-10-28：自动加入豆热点失败时的手动加入弹窗（同一次导出会话内，
+    /// 因为每次导出都会生成新的 SSID/密码，跨会话手动加入没有意义）。
+    @State private var soundcoreManualJoin: SoundcoreManualJoinPrompt?
+    /// ★ 2026-10-29（用户："参考 V05E 的 WiFi 快传，直接弹出一个页面"）：
+    /// D3200 的 Wi‑Fi 快传也弹独立页——`runSoundcoreWifiExport()` 往这个 model
+    /// 里填阶段/进度/每文件状态，`SoundcoreWifiTransferSheet` 只负责展示。
+    @State private var soundcoreWifiUI: SoundcoreWifiTransferModel?
+
+    private var soundcoreLink: SoundcoreLink? {
+        bluetooth.recorderLink as? SoundcoreLink
+    }
+
+    /// 打开系统的 Wi‑Fi 设置（手动加入热点用）。`App-Prefs:root=WIFI` 在
+    /// 各 iOS 版本都可用；万一被拒，退回本 App 的设置页，用户再点进无线局域网。
+    static func openWiFiSettings() {
+        if let wifi = URL(string: "App-Prefs:root=WIFI") {
+            UIApplication.shared.open(wifi) { ok in
+                guard !ok, let app = URL(string: UIApplication.openSettingsURLString) else { return }
+                UIApplication.shared.open(app)
+            }
+        }
+    }
+
+    /// 快传页面里每行的显示名：fileId 是 unix 秒（≥1e9），能转就转成日期，
+    /// 转不了就原样显示数字。
+    static func soundcoreWifiFileDisplayName(_ id: UInt32) -> String {
+        if id > 1_000_000_000 {
+            let fmt = DateFormatter()
+            fmt.dateFormat = "MM-dd HH:mm"
+            return "录音 " + fmt.string(from: Date(timeIntervalSince1970: TimeInterval(id)))
+        }
+        return "录音 \(id)"
+    }
+
+    @ViewBuilder
+    private var soundcoreWifiBar: some View {
+        if soundcoreWifiRunning {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(soundcoreWifiStatus ?? "…").font(.subheadline)
+                }
+                if let fraction = soundcoreWifiFraction {
+                    ProgressView(value: fraction)
+                }
+                Button("停止") { soundcoreWifiExporter?.cancel() }
+                    .font(.callout)
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+        } else {
+            Button {
+                soundcoreWifiError = nil
+                Task { await runSoundcoreWifiExport() }
+            } label: {
+                Label {
+                    VStack(alignment: .leading) {
+                        Text("Wi‑Fi 快传导出全部录音").font(.body.bold())
+                        Text("通过录音豆热点批量导出\(recordings.isEmpty ? "" : "（\(recordings.count) 条）")，远快于蓝牙")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                } icon: {
+                    Image(systemName: "wifi")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isRecording || soundcoreLink?.isConnected != true)
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+        }
+    }
+
+    /// 豆的 Wi‑Fi 快传：BLE 1A05 让豆开热点 → NEHotspotConfiguration 接入 →
+    /// WebSocket 批量拉取 → 按 `autoDeleteAfterTransfer` 决定是否删豆上录音。
+    /// （原为"卡片信息"弹层里的 section，2026-10-27 移到首页底栏。）
+    private func runSoundcoreWifiExport() async {
+        guard let link = soundcoreLink, link.isConnected else {
+            soundcoreWifiError = "录音豆未连接——请先连接后重试"
+            return
+        }
+        guard !soundcoreWifiRunning else { return }
+        soundcoreWifiRunning = true
+        soundcoreWifiError = nil
+        defer {
+            soundcoreWifiRunning = false
+            soundcoreWifiFraction = nil
+            soundcoreWifiExporter = nil
+        }
+        do {
+            let list = try await link.client.listFilesCompat()
+            guard !list.files.isEmpty else {
+                banner = "豆上没有录音"
+                return
+            }
+            // ★ 2026-10-29：先建页面 model 并弹出，用户立刻看到"这次要传什么"。
+            let ui = SoundcoreWifiTransferModel()
+            ui.setFiles(list.files.map { entry in
+                (id: entry.fileId, name: Self.soundcoreWifiFileDisplayName(entry.fileId), size: entry.estimatedSizeBytes)
+            })
+            soundcoreWifiUI = ui
+            let exporter = SoundcoreWifiExporter(client: link.client)
+            // 每次重开会话（含续传重开）都刷新页面上的热点名/密码。
+            exporter.onSessionStart = { ssid, psk in
+                ui.ssid = ssid
+                ui.psk = psk
+            }
+            // ★ 2026-10-29：续传/重开会话的每一步都让用户看见（重开要 1–2 分钟）。
+            exporter.onStageNote = { note in
+                soundcoreWifiStatus = note
+                ui.stageDetail = note
+            }
+            // ★ 2026-10-29：续传前确保 BLE 可用（1A05 走蓝牙）。重连可能产出新
+            // link/client（旧实例已死），返回最新的给导出器用。
+            // ★★ 2026-10-29（11:50 日志）：豆掐掉 WS 后经常要一两分钟才重新广播
+            // BLE——单次 20 s 重连在 11:50 连败两次，只好存断点等用户手点。改成
+            // 3 次尝试、每次 25 s、间隔 5 s（总窗口 ~90 s），把"中断→自愈"闭环。
+            exporter.onNeedBleReconnect = {
+                if let current = soundcoreLink, current.isConnected { return current.client }
+                for attempt in 1...3 {
+                    soundcoreWifiStatus = "正在重新连接录音豆（蓝牙，第 \(attempt)/3 次）…"
+                    ui.stageDetail = "蓝牙断了，正在重连录音豆（第 \(attempt)/3 次）…"
+                    _ = try? await bluetooth.ensureRecorderLink(recordID: recorder.id.uuidString, timeout: 25)
+                    if let fresh = soundcoreLink, fresh.isConnected { return fresh.client }
+                    if attempt < 3 { try? await Task.sleep(nanoseconds: 5_000_000_000) }
+                }
+                return nil
+            }
+            // iOS 对这类固件 AP 的自动加入成功率不高（Android 走另一套系统 API），
+            // 失败时在同一次会话里请用户手动加入——此时豆的热点还开着。
+            exporter.onNeedManualJoin = { ssid, psk in
+                await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                    soundcoreWifiStatus = "等待手动加入热点「\(ssid)」…"
+                    soundcoreManualJoin = SoundcoreManualJoinPrompt(ssid: ssid, psk: psk) {
+                        cont.resume()
+                    }
+                }
+            }
+            soundcoreWifiExporter = exporter
+            let exported = try await exporter.exportAll(list.files) { p in
+                soundcoreWifiStatus = p.message
+                ui.apply(p)
+                if p.totalFiles > 0, p.fileTotal > 0 {
+                    let within = min(1.0, Double(p.fileBytes) / Double(p.fileTotal))
+                    soundcoreWifiFraction = min(1.0, (Double(p.currentFile - 1) + within) / Double(p.totalFiles))
+                } else {
+                    soundcoreWifiFraction = nil
+                }
+            }
+            guard !exported.isEmpty else {
+                soundcoreWifiUI?.finish(error: "没有可导出的录音")
+                banner = "没有可导出的录音"
+                return
+            }
+
+            // 入库：与 BLE 下载路径一致 —— 逐帧 Opus → PCM → AAC/m4a（时长精确、
+            // iOS 16 可播，见 SoundcoreTranscoder），失败回落 .opus。
+            var saved = 0
+            var partialCount = 0
+            var partialSaved = 0
+            for f in exported {
+                // ★ 2026-10-28（用户："大文件传输还是没完成"）：豆的 WS 单连接
+                // 在 ~55 MB 处就停发，60 MB 这种大录音以前一律被跳过 —— 用户
+                // 拿到的是"什么都没有"。现在按实收率决定：≥50% 照样入库（附
+                // "传输不完整"标注，Opus 流截断仍然能播到断点），<50% 才跳过。
+                if f.partial && f.coverage < 0.5 {
+                    partialCount += 1
+                    ui.markFailed(fileId: f.fileId, message: "只收到 \(Int((f.coverage * 100).rounded()))%，已跳过")
+                    log.warning("partial Wi‑Fi export \(f.fileId, privacy: .public) coverage=\(f.coverage, privacy: .public) skipped for library ingestion")
+                    continue
+                }
+                let partialNote = f.partial
+                    ? " · 传输不完整(\(Int((f.coverage * 100).rounded()))%)"
+                    : ""
+                let startedAt = f.fileId > 1_000_000_000
+                    ? Date(timeIntervalSince1970: TimeInterval(f.fileId))
+                    : nil
+                let clip: RecorderClip
+                if let out = SoundcoreTranscoder.transcode(f.raw) {
+                    clip = RecorderClip(
+                        data: out.data,
+                        fileExtension: out.fileExtension,
+                        duration: out.durationSeconds > 0 ? out.durationSeconds : nil,
+                        formatNote: out.formatNote + " · Wi‑Fi 快传" + partialNote
+                    )
+                } else {
+                    clip = RecorderClip(
+                        data: f.ogg,
+                        fileExtension: "opus",
+                        duration: Double(SoundcoreOgg.rawDurationMs(f.raw.count)) / 1000.0,
+                        formatNote: "Opus 48 kHz mono (D3200 · Wi‑Fi 快传)" + partialNote
+                    )
+                }
+                let name = RecorderClipStore.suggestedName(
+                    protocolID: SoundcoreRecorderSpec.identifier,
+                    startedAt: startedAt,
+                    sessionID: f.fileId,
+                    fileExtension: clip.fileExtension
+                )
+                let storedURL = try RecorderClipStore.store(clip, name: name)
+                library.recordDownload(
+                    name: name,
+                    size: clip.byteCount,
+                    transport: "wifi",
+                    deviceSerial: recorder.identityText,
+                    deviceName: recorder.displayName
+                )
+                saved += 1
+                ui.markSaved(fileId: f.fileId, partial: f.partial, coverage: f.coverage)
+                if f.partial { partialSaved += 1 }
+                if configService.config.autoTranscribeAfterDownload {
+                    Task.detached { @MainActor in
+                        await transcription.enqueueAndWait(fileURL: storedURL, enforceMinDuration: true)
+                        NotificationCenter.default.post(name: .libraryDidChange, object: nil)
+                    }
+                }
+            }
+
+            // ★ 2026-10-27（用户："点击 WiFi 快传会断开安克录音豆"）：豆为了开热点
+            // 会主动断 BLE（传输模式），导出结束后不会自己连回来。这里显式接回，
+            // 后面"删除豆上录音"和列表刷新都要靠这条 BLE。
+            var activeLink = link
+            if activeLink.isConnected == false {
+                soundcoreWifiStatus = "正在重新连接录音豆…"
+                _ = try? await bluetooth.ensureRecorderLink(recordID: recorder.id.uuidString, timeout: 20)
+                if let fresh = soundcoreLink { activeLink = fresh }
+            }
+
+            // "传输后从设备删除"（全局设置）：只删导出成功的（完整）文件。
+            var deleted = 0
+            var deleteFailed = 0
+            var deleteSkipped = false
+            if configService.config.autoDeleteAfterTransfer {
+                if activeLink.isConnected {
+                    for f in exported where !f.partial {
+                        let rec = RecorderRecording(
+                            id: String(f.fileId),
+                            displayTitle: "录音 \(f.fileId)",
+                            sizeBytes: f.ogg.count,
+                            startedAt: nil,
+                            sessionID: f.fileId,
+                            raw: [:]
+                        )
+                        do {
+                            try await activeLink.deleteRecording(rec)
+                            deleted += 1
+                        } catch {
+                            deleteFailed += 1
+                            log.warning("Wi‑Fi export delete-after-transfer failed for \(f.fileId, privacy: .public): \(String(describing: error), privacy: .public)")
+                        }
+                    }
+                } else {
+                    deleteSkipped = true
+                    log.warning("Wi‑Fi export: BLE did not come back — card files left untouched")
+                }
+            }
+            if activeLink.isConnected { await connectAndList(showsLoading: false) }
+
+            var message = "已导出 \(saved)/\(exported.count) 个录音到资料库"
+            if deleted > 0 { message += "，并从豆上删除了 \(deleted) 个" }
+            if deleteFailed > 0 { message += "，\(deleteFailed) 个未能从豆上删除（录音中的那条删不掉）" }
+            if deleteSkipped { message += "；蓝牙没连回来，豆上录音未删除" }
+            // ★ 2026-10-29（用户："自动删除开关是关着的，为啥也删了？"）：
+            // 实锤是**豆固件的"传完即删"**——录音被完整传走后豆自己删（日志里
+            // App 没发过任何删除指令；没传完整的从不被删；飞书传完的也是豆删的）。
+            // 开关只管蓝牙路径。这里如实告知，免得用户以为开关失效。
+            if saved > 0, partialCount == 0, deleted == 0 {
+                message += "；豆上那条已不在了——完整传完的录音豆固件会自动删除，与删除开关无关（录音已在资料库里）"
+            }
+            if partialSaved > 0 { message += "（\(partialSaved) 个只收到一部分，已存断点——再次点 Wi‑Fi 快传会从断点继续，不会重传）" }
+            if partialCount > 0 { message += "（\(partialCount) 个几乎没收到数据，已跳过——可重试）" }
+            banner = message
+            soundcoreWifiUI?.finish(error: nil)
+        } catch is CancellationError {
+            soundcoreWifiUI?.markCancelled()
+            banner = nil
+        } catch {
+            // 失败路径同样要把豆接回来：热点一开 BLE 就断了（用户："点击 WiFi 快传会断开安克录音豆"）。
+            if soundcoreLink?.isConnected == false {
+                _ = try? await bluetooth.ensureRecorderLink(recordID: recorder.id.uuidString, timeout: 20)
+                if soundcoreLink?.isConnected == true { await connectAndList(showsLoading: false) }
+            }
+            soundcoreWifiUI?.failUnfinished(message: "传输中断")
+            soundcoreWifiUI?.finish(error: error.localizedDescription)
+            soundcoreWifiError = error.localizedDescription +
+                "。请保持录音豆在附近、电量充足，且未被飞书 App 占用；" +
+                "若一直提示接入热点失败，可在 设置 → 无线局域网 手动加入录音豆热点后重试。"
+        }
     }
 
     /// Checked in the multi-select. **Returned in list order** (not the hash order of `Set`) —
@@ -1050,8 +1376,15 @@ struct RecorderDeviceView: View {
         // peripheral stops advertising and the radar has nothing to measure.
         FindCardSection(connected: connectedLink?.isConnected ?? false)
 
-        // ⑤
-        CardTransferPrefsSection()
+        // ⑤ ★ 2026-10-29（用户："传输偏好模块可删除，按键没实际反应"）：移除
+        //    `CardTransferPrefsSection`。它写的 `@AppStorage("ticnote.delete_after_transfer")`
+        //    与实际删除逻辑读的 `config.autoDeleteAfterTransfer`（设置页全局开关）
+        //    是两套存储——对 Wi‑Fi 快传完全没有作用。现在 BLE 下载路径也统一读
+        //    全局开关（见本文件 `deleteAfterTransfer` 计算属性），一个开关管所有路径。
+
+        // ⑤b ★ soundcore D3200 Wi‑Fi 快传入口 → 2026-10-27 移到首页设备页
+        //    底栏（fastTransferBar 的 soundcore 分支），与 TicNote 同位；这里
+        //    不再重复放一份（用户："WiFi 快传在首页设备下面，参考 ticnote"）。
 
         // ⚠️ Unbinding this section **is intentionally kept at the outermost level**. When the link is not established (`connectedLink == nil`,
         //    e.g., the card is lost, returned, or this firmware version cannot connect) it **still must be visible** ——
@@ -1319,6 +1652,18 @@ struct RecorderDeviceView: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
+            // ★ 2026-10-29（用户："录音豆和卡片是两个设备，要显示两个电量"）：
+            // D3200 上报两个电量——豆本体（主行）+ 充电盒（这一行）。
+            // 盒电量只在 `getDeviceInfo` 快照里有，keep-alive 推的 0x09 帧只有豆本体。
+            if let secondary = deviceInfo?.secondaryBatteryPercent {
+                HStack {
+                    Label(deviceInfo?.secondaryBatteryLabel ?? "充电盒", systemImage: batterySymbol)
+                    Spacer()
+                    Text("\(secondary)%")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
             // ★ Added 2026-10-13: **charging / not charging** (user asked: "the charging vs not-charging state…
             //   needs to be included").
             //
@@ -1582,13 +1927,23 @@ struct RecorderDeviceView: View {
         // The A1's index carries no size (flag/fid/status per record) — 0 means "unknown",
         // and inventing "0.0 MB · 0 s" from it would read as a broken card.
         guard recording.sizeBytes > 0 else { return recording.id }
-        // Duration is calculated in **bytes**; don't trust the card's timestamp: `recordUnitBytes = 160` = 20 ms.
-        // This conversion matches the card's reported duration on real devices (self-check §13).
-        let seconds = Double(recording.sizeBytes / 160) * 0.02
-        return String(format: "%@ · %.1f MB · %.0f s",
+        // ★ 2026-10-27（用户："录音多少 s 但是到设备的秒数不对"）：优先用协议层给的
+        // `durationMs` —— 豆的 `1B 0E` 条目带 endTime，`endTime − fileId` 是精确秒数；
+        // 在录的那条用设备自报的 currTransportFileDuration（实时增长）。
+        // 只有拿不到时才回落到"按字节数换算"（160 B = 20 ms）。
+        let seconds: Double
+        if let ms = recording.raw["durationMs"] as? Int, ms > 0 {
+            seconds = Double(ms) / 1000
+        } else {
+            seconds = Double(recording.sizeBytes / 160) * 0.02
+        }
+        let durationText = seconds >= 60
+            ? String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60)
+            : String(format: "%.0f s", seconds)
+        return String(format: "%@ · %.1f MB · %@",
                       recording.id,
                       Double(recording.sizeBytes) / 1_048_576,
-                      seconds)
+                      durationText)
     }
 
     // MARK: actions
@@ -2100,11 +2455,12 @@ struct RecorderDeviceView: View {
                 deviceName: recorder.displayName
             )
             savedNames[recording.id] = name
-            // ★ A1 only: copy the marks made on the card during that recording next to the clip,
-            // so the detail page can show "marks" with jumpable timecodes. No-op for other cards
-            // (and for A1 recordings nobody marked).
-            if let fid = recording.sessionID, connectedLink is DingTalkA1Link {
-                A1MarkStore.writeSidecar(fid: fid, clipBase: name)
+            // ★ A1 / D3200：把该段录音期间产生的打点写到 clip 旁边的 sidecar，
+            // 详情页才能显示可跳转的时间点。clipBase 必须去掉扩展名——详情页读的
+            // 就是 `<base>.marks.json`（此前带扩展名写入，A1 的标记一直读不到）。
+            if let fid = recording.sessionID,
+               connectedLink is DingTalkA1Link || connectedLink is SoundcoreLink {
+                A1MarkStore.writeSidecar(fid: fid, clipBase: (name as NSString).deletingPathExtension)
             }
             // ★ Once stored → the bottom "N items pending transfer" counter should decrement, and hide itself when all transfers are complete.
             refreshWifiFallback()
@@ -2600,7 +2956,13 @@ struct RecorderDeviceView: View {
                 banner = L10n.TicNoteCard.deleteFailedFromCard
             }
         } catch {
-            errors[recording.id] = shortReason(error as? RecorderLinkError ?? .timeout)
+            // 豆的删除失败原因（如"录音还在录制中，删不掉"）要原样给用户看，
+            // 不能被 `as? RecorderLinkError ?? .timeout` 一律折成"设备无响应"。
+            if let sc = error as? SoundcoreError {
+                errors[recording.id] = sc.errorDescription ?? String(describing: sc)
+            } else {
+                errors[recording.id] = shortReason(error as? RecorderLinkError ?? .timeout)
+            }
         }
     }
 }
@@ -3300,37 +3662,14 @@ private struct CardSettingsSection: View {
     }
 }
 
-// MARK: - Transfer preferences (App side, card firmware has no such switches)
-
-/// Switch to automatically delete the recording on the card after transfer.
-///
-/// Why placed in **this** popup: the user said "need to add an option in the ticnote device" ,
-/// and the card info popup is the "TicNote device's own settings" screen
-/// (card firmware's 0x08 settings + App-side behavior preferences for this card, only found when combined).
-private struct CardTransferPrefsSection: View {
-
-    /// `@AppStorage` maps directly to UserDefaults — the card firmware lacks this switch,
-    /// this is **App-side behavior**: after a successful download, it conveniently sends a delete command (see `download(_:)`).
-    @AppStorage("ticnote.delete_after_transfer") private var deleteAfterTransfer = false
-
-    var body: some View {
-        Section {
-            Toggle(isOn: $deleteAfterTransfer) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.TicNoteCard.deleteAfterTransfer)
-                    Text(L10n.TicNoteCard.deleteAfterTransferFooter)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        } header: {
-            Text(L10n.TicNoteCard.transferPrefs)
-        } footer: {
-            Text(L10n.TicNoteCard.transferPrefsFooter)
-                .font(.caption2)
-        }
-    }
-}
+// MARK: - Transfer preferences (★ 已删除 2026-10-29)
+//
+// 原来的 `CardTransferPrefsSection`（"传输偏好" section + "传输后从设备删除"
+// Toggle）按用户要求移除："按键没实际反应"。根因是它写
+// `@AppStorage("ticnote.delete_after_transfer")`（UserDefaults），而实际删除逻辑
+// 读 `config.autoDeleteAfterTransfer`（config.json）——两套存储互不相通。
+// 现在 BLE 下载路径也统一读全局配置（`RecorderSheet.deleteAfterTransfer`
+// 计算属性），开关只有设置页一个。
 
 // MARK: - Every frame the card has sent (currently not attached to UI)
 
@@ -3398,4 +3737,15 @@ private struct CardRepliesSection: View {
                 .font(.caption2)
         }
     }
+}
+
+// MARK: - 手动加入豆热点（Wi‑Fi 快传兜底）
+
+/// 自动加入热点失败时的一次性提示。`resume` 在用户处理完（去设置 / 已加入）后
+/// 调用，让导出器继续轮询确认网络是否切换成功。
+private struct SoundcoreManualJoinPrompt: Identifiable {
+    let id = UUID()
+    let ssid: String
+    let psk: String
+    let resume: () -> Void
 }

@@ -340,7 +340,7 @@ enum TodoExtract {
 // fighting the scroll container. This parser covers what our templates actually emit —
 // headings, bullets, numbered items, quotes, rules, paragraphs.
 
-struct MarkdownBlock: Identifiable {
+struct MarkdownBlock: Identifiable, Equatable {
     enum Kind: Equatable {
         case heading(Int)
         case bullet
@@ -353,6 +353,13 @@ struct MarkdownBlock: Identifiable {
     let id = UUID()
     let kind: Kind
     let text: String
+
+    /// `id` 是每次解析都换新的 UUID，等价性看内容和类型即可——
+    /// 这样 `TodoChecklistView` 能用 `onChange(of: blocks)` 在摘要重新生成后
+    /// 再次触发提醒事项同步。
+    static func == (lhs: MarkdownBlock, rhs: MarkdownBlock) -> Bool {
+        lhs.kind == rhs.kind && lhs.text == rhs.text
+    }
 }
 
 enum MarkdownBlocks {
@@ -484,9 +491,16 @@ struct TodoChecklistView: View {
     /// Namespace for the persisted checks: the recording's name.
     let recordingName: String
 
+    @EnvironmentObject private var configService: ConfigService
     @State private var done: Set<String> = []
+    /// ★ 2026-10-29：本次进入页面新同步进「提醒事项」的条数（0/nil = 没有新增）。
+    @State private var remindersCreated = 0
 
     private var defaultsKey: String { "todo.checked.\(recordingName)" }
+
+    /// ★ 2026-10-29（用户："待办支持同步到 iPhone 里面的待办"）：开关打开时，
+    /// 进待办列表就把行写进系统「提醒事项」（幂等：已建过的行不会重复）。
+    private var remindersSyncOn: Bool { configService.config.remindersSyncEnabled }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -500,8 +514,20 @@ struct TodoChecklistView: View {
                     MarkdownBlocksView(blocks: [block])
                 }
             }
+            if remindersCreated > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "checklist")
+                    Text(L10n.Reminders.syncedBadge)
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
         }
-        .onAppear { load() }
+        .onAppear {
+            load()
+            syncToReminders()
+        }
+        .onChange(of: blocks) { _ in syncToReminders() }
     }
 
     private func row(_ block: MarkdownBlock) -> some View {
@@ -509,6 +535,13 @@ struct TodoChecklistView: View {
         return Button {
             if checked { done.remove(block.text) } else { done.insert(block.text) }
             save()
+            // ★ 2026-10-29：勾选状态镜像到「提醒事项」（开关开着才动）。
+            if remindersSyncOn {
+                RemindersSyncService.shared.updateCompletion(
+                    text: block.text,
+                    recordingName: recordingName,
+                    isCompleted: !checked)
+            }
         } label: {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: checked ? "checkmark.circle.fill" : "circle")
@@ -533,5 +566,18 @@ struct TodoChecklistView: View {
 
     private func save() {
         UserDefaults.standard.set(Array(done), forKey: defaultsKey)
+    }
+
+    /// ★ 2026-10-29：开关打开时把待办行同步进「提醒事项」。失败/未授权静默——
+    /// 设置页开关那行才是处理授权的地方，列表里不打扰。
+    private func syncToReminders() {
+        guard remindersSyncOn else { return }
+        Task {
+            let created = await RemindersSyncService.shared.sync(
+                blocks: blocks, recordingName: recordingName)
+            if created > 0 {
+                await MainActor.run { remindersCreated = created }
+            }
+        }
     }
 }

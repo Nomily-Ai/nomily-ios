@@ -112,6 +112,13 @@ enum StorageLocations {
         root.appendingPathComponent("summarize_templates.json", isDirectory: false)
     }
 
+    /// ★ 2026-10-28（饭耳逆向规格 §1.4）：常用词表——用户维护的专名提示
+    ///（人名/产品名/术语），喂给 AI 整理 prompt（「只是提示，不会强行替换」）。
+    /// 放 `root`（工作数据，不是某条录音的产物）。
+    static var vocabularyURL: URL {
+        root.appendingPathComponent("vocabulary.json", isDirectory: false)
+    }
+
     /// The pending-transcription queue (survives across launches).
     ///
     /// Lives in `root` rather than `decryptedDir`: it isn't the product of a recording but the list of "work not yet
