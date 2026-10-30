@@ -48,10 +48,16 @@
 	<string>Nomily AI scans the QR code that carries a DingTalk A1 credential, so it never has to go through the clipboard.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Nomily AI connects directly to your recorder (D·NOTE, TicNote, soundcore Work 飞书录音豆) over its Wi-Fi access point during Fast Transfer.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Nomily AI records a rough location when your recorder card disconnects, so it can tell you where you last had it. It asks for the position once, only at that moment, and never tracks you.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Nomily AI records a rough location when your recorder card disconnects, so it can tell you where you last had it. It asks for the position once, only at that moment, and never tracks you.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Live transcription monitors microphone state to coordinate with the device's stream.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Nomily AI saves an image or video to your photo library only when you ask it to.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Nomily AI only opens your photo library when you choose a photo or video to attach. It never reads your library on its own.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Nomily AI can add the to-dos from your recording summaries to the Reminders app, so you never lose an action item. Nothing is read back unless you also tick them in Nomily.</string>
 	<key>NSRemindersUsageDescription</key>
