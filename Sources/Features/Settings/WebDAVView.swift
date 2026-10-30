@@ -26,14 +26,24 @@ struct WebDAVSetupSheet: View {
                             WebDAVView(initialPreset: item.label)
                         } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: item.symbol)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 28, height: 28)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                            .fill(item.tint.gradient)
-                                    )
+                                // ★ 2026-10-30：有官方 App 图标就用真图标（App Store
+                                //   抓的原 图，圆角由这里裁）；没品牌的回退 SF Symbol。
+                                if let appIcon = item.appIcon {
+                                    Image(appIcon)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 28, height: 28)
+                                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                                } else {
+                                    Image(systemName: item.symbol)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 28, height: 28)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                                .fill(item.tint.gradient)
+                                        )
+                                }
                                 Text(item.label)
                                 Spacer(minLength: 8)
                                 if configService.config.webdav?.preset == item.label {
@@ -63,6 +73,9 @@ struct WebDAVSetupSheet: View {
 }
 
 /// 预设的唯一数据源：弹层与配置页共用（标签/端口/HTTPS/占位符/引导文案 + 弹层图标）。
+/// ★ 2026-10-30（用户："nas 的名称需要把他们的 APP 图标附带上"）：`appIcon` 是
+/// 从 App Store 拿到的各家官方 App 图标（Assets 里的 imageset，512px 原图缩到
+/// 180px）；`其他 WebDAV` 没有品牌，回退到 SF Symbol。
 enum WebDAVPresets {
     struct Item {
         let label: String
@@ -72,21 +85,22 @@ enum WebDAVPresets {
         let hint: String
         let symbol: String
         let tint: Color
+        var appIcon: String? = nil
     }
 
     static let all: [Item] = [
         Item(label: "群晖", port: 5006, https: true, hostPlaceholder: "192.168.1.10",
              hint: "先在套件中心装好「WebDAV Server」，用 DSM 账号登录",
-             symbol: "shippingbox.fill", tint: .blue),
+             symbol: "shippingbox.fill", tint: .blue, appIcon: "NASynology"),
         Item(label: "威联通", port: 5006, https: true, hostPlaceholder: "192.168.1.10",
              hint: "在 App Center 启用 WebDAV 后使用",
-             symbol: "shippingbox.fill", tint: .indigo),
+             symbol: "shippingbox.fill", tint: .indigo, appIcon: "NASQNAP"),
         Item(label: "绿联", port: 9443, https: true, hostPlaceholder: "192.168.1.10",
              hint: "在绿联云的设置里开启 WebDAV",
-             symbol: "shippingbox.fill", tint: .green),
+             symbol: "shippingbox.fill", tint: .green, appIcon: "NASUGREEN"),
         Item(label: "飞牛", port: 5006, https: true, hostPlaceholder: "192.168.1.10",
              hint: "fnOS 应用中心启用 WebDAV 后使用",
-             symbol: "shippingbox.fill", tint: .teal),
+             symbol: "shippingbox.fill", tint: .teal, appIcon: "NASFeiniu"),
         // ★ 2026-10-30：极空间实测（Z4Pro，5005 HTTP 认证通过 + 个人空间可写）。
         //   关键规则：**WebDAV 根目录不可写**（MKCOL/PUT 一律 400/401），可写的根是
         //   用户的个人空间 `/sataXX-账号/`——目录必须填到个人空间下面。
@@ -94,13 +108,13 @@ enum WebDAVPresets {
         //   自动扫描根目录定位个人空间并回填。
         Item(label: "极空间", port: 5005, https: false, hostPlaceholder: "192.168.1.10 或 100.x.y.z",
              hint: "系统设置 → 文件与共享服务 → WebDAV 打开。HTTP 默认 5005；用 HTTPS(5006) 需开「允许自签证书」。目录填个人空间下的路径（形如 /sata11-你的账号/nomily），填错也没关系——测试连接会自动定位",
-             symbol: "externaldrive.fill", tint: .orange),
+             symbol: "externaldrive.fill", tint: .orange, appIcon: "NASZSpace"),
         Item(label: "Nextcloud", port: 443, https: true, hostPlaceholder: "cloud.example.com",
              hint: "填 Nextcloud 域名，路径含 /remote.php/dav/files/用户名/",
-             symbol: "cloud.fill", tint: .cyan),
+             symbol: "cloud.fill", tint: .cyan, appIcon: "NASNextcloud"),
         Item(label: "坚果云", port: 443, https: true, hostPlaceholder: "dav.jianguoyun.com",
              hint: "路径填 /dav；密码要用「应用密码」（账户安全里生成），不是登录密码",
-             symbol: "cloud.fill", tint: .blue),
+             symbol: "cloud.fill", tint: .blue, appIcon: "NASNutstore"),
         Item(label: "其他 WebDAV", port: 443, https: true, hostPlaceholder: "服务器地址",
              hint: "任意标准 WebDAV 服务",
              symbol: "server.rack", tint: .gray),
@@ -151,28 +165,10 @@ struct WebDAVView: View {
 
     var body: some View {
         Form {
-            Section {
-                Picker(L10n.WebDAV.preset, selection: $preset) {
-                    Text(L10n.WebDAV.presetUnpicked).tag("")
-                    ForEach(WebDAVPresets.all, id: \.label) { item in
-                        Text(item.label).tag(item.label)
-                    }
-                }
-                .onChange(of: preset) { newValue in
-                    guard let item = WebDAVPresets.item(named: newValue) else { return }
-                    portText = String(item.port)
-                    useHTTPS = item.https
-                    basePath = newValue == "坚果云" ? "/dav"
-                        : newValue == "Nextcloud" ? basePath
-                        : "/nomily"
-                }
-            } header: {
-                Text(L10n.WebDAV.serverType)
-            } footer: {
-                if let hint = WebDAVPresets.item(named: preset)?.hint {
-                    Text(hint)
-                }
-            }
+            // ★ 2026-10-30（用户："在服务器类型选择了对应的设备里面就不要设置
+            //   服务商可以选择了"）：类型选择只发生在弹层里，进到本页不再出现
+            //   「服务商」Picker——预设的端口/HTTPS/目录在 load() 里按 initialPreset
+            //   预填，品牌提示挪到连接区的 footer。
 
             Section {
                 TextField(hostPlaceholder, text: $host)
@@ -200,7 +196,12 @@ struct WebDAVView: View {
             } header: {
                 Text(L10n.WebDAV.connection)
             } footer: {
-                Text(L10n.WebDAV.basePathFooter)
+                // 品牌引导文案跟着预设走（原来挂在已删除的服务商 Picker 下面）。
+                if let hint = WebDAVPresets.item(named: preset)?.hint {
+                    Text(hint + "\n\n" + L10n.WebDAV.basePathFooter)
+                } else {
+                    Text(L10n.WebDAV.basePathFooter)
+                }
             }
 
             Section {
@@ -271,9 +272,22 @@ struct WebDAVView: View {
         password = cfg?.password ?? ""
         basePath = cfg?.basePath ?? "/nomily"
         syncAudio = cfg?.syncAudio ?? false
-        // ★ 2026-10-30：从类型选择弹层跳进来且还没有配置时，预选该类型——
-        // onChange(of: preset) 会跟着把端口/HTTPS/目录预填好。
+        // ★ 2026-10-30：从类型选择弹层跳进来且还没有配置时，预选该类型并把
+        //   端口/HTTPS/目录预填好（原来靠已删除的 Picker onChange 触发）。
         preset = cfg?.preset ?? initialPreset ?? ""
+        if cfg == nil, let p = initialPreset {
+            applyPresetDefaults(p)
+        }
+    }
+
+    /// 弹层选完类型进来的一次性预填（端口 / HTTPS / 目录）。
+    private func applyPresetDefaults(_ label: String) {
+        guard let item = WebDAVPresets.item(named: label) else { return }
+        portText = String(item.port)
+        useHTTPS = item.https
+        basePath = label == "坚果云" ? "/dav"
+            : label == "Nextcloud" ? basePath
+            : "/nomily"
     }
 
     private func save() {
