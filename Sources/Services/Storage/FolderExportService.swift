@@ -21,12 +21,31 @@ private let log = Logger(subsystem: "com.nomily.app.ios", category: "folder-expo
 final class FolderExportService: ObservableObject {
 
     static let shared = FolderExportService()
-    private init() {}
 
     static let bookmarkKey = "export_folder_bookmark"
+    /// ★ 2026-10-30：自动备份开关（转写完成即写入所选文件夹）。
+    static let autoKey = "export_folder_auto"
+    /// ★ 2026-10-30：自动导出是否连录音一起。把页面上的「也导出录音」持久化
+    /// 到服务里——自动路径没有 UI 在场，得自己读这份状态。
+    static let audioKey = "export_folder_sync_audio"
 
     @Published var isRunning = false
     @Published var lastReport: String?
+    /// ★ 2026-10-30（用户："增加自动上传到 iCloud 或者指定的服务器"）：
+    /// 打开后每次转写完成自动把这条的文本（+可选录音）写进所选文件夹。
+    /// 目标是 iCloud 云盘里的文件夹时，这就是"自动上传 iCloud"。
+    @Published var autoEnabled: Bool {
+        didSet { UserDefaults.standard.set(autoEnabled, forKey: Self.autoKey) }
+    }
+    /// 自动导出是否带录音（视图的「也导出录音」开关直接绑这份持久化状态）。
+    @Published var syncAudio: Bool {
+        didSet { UserDefaults.standard.set(syncAudio, forKey: Self.audioKey) }
+    }
+
+    private init() {
+        autoEnabled = UserDefaults.standard.bool(forKey: Self.autoKey)
+        syncAudio = UserDefaults.standard.bool(forKey: Self.audioKey)
+    }
 
     /// True when the user picked a folder before (bookmark resolves).
     var hasFolder: Bool { bookmarkData != nil }
@@ -73,8 +92,9 @@ final class FolderExportService: ObservableObject {
     }
 
     /// Resolve + start access. Callers MUST call `stopAccessingSecurityScopedResource`
-    /// on the returned URL when done (see `exportAll`).
-    private func resolve() -> URL? {
+    /// on the returned URL when done (see `exportAll`). Internal（非 private）：
+    /// 占用统计（StorageUsageService 里的扩展）也要走同一套书签解析。
+    func resolve() -> URL? {
         guard let data = bookmarkData else { return nil }
         var isStale = false
         guard let url = try? URL(
@@ -88,10 +108,65 @@ final class FolderExportService: ObservableObject {
 
     // MARK: - Export
 
+    private enum CopyResult {
+        case copied, skipped, failed(String)
+    }
+
+    /// Idempotent copy: same-size destination file is skipped, so repeated
+    /// passes (manual sweep or per-clip auto) are cheap and safe.
+    private func copyItem(
+        _ local: URL, into subdirectory: String,
+        folder: URL, fm: FileManager, failures: inout [String]
+    ) -> CopyResult {
+        let destDir = folder.appendingPathComponent(subdirectory, isDirectory: true)
+        let dest = destDir.appendingPathComponent(local.lastPathComponent)
+        if let existingSize = (try? fm.attributesOfItem(atPath: dest.path))?[.size] as? Int,
+           let localSize = (try? fm.attributesOfItem(atPath: local.path))?[.size] as? Int,
+           existingSize == localSize {
+            return .skipped
+        }
+        do {
+            try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+            if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+            try fm.copyItem(at: local, to: dest)
+            return .copied
+        } catch {
+            let text = "\(local.lastPathComponent): \(error.localizedDescription)"
+            failures.append(text)
+            return .failed(text)
+        }
+    }
+
+    /// ★ 2026-10-30：单条自动导出——转写完成钩子调用（见 AppEnvironment）。
+    /// 没开自动备份或没选文件夹时是 no-op；异常只进日志，不打扰用户。
+    func export(clipName: String) async {
+        guard autoEnabled, let folder = resolve() else { return }
+        defer { folder.stopAccessingSecurityScopedResource() }
+        let fm = FileManager.default
+        let dir = StorageLocations.decryptedDir
+        let base = (clipName as NSString).deletingPathExtension
+        let urls = StorageLocations.transcriptURLs(for: clipName)
+        guard fm.fileExists(atPath: urls.txt.path) else { return }
+        var failures: [String] = []
+        copyItem(urls.txt, into: "transcripts", folder: folder, fm: fm, failures: &failures)
+        if fm.fileExists(atPath: urls.json.path) {
+            copyItem(urls.json, into: "transcripts", folder: folder, fm: fm, failures: &failures)
+        }
+        if syncAudio {
+            let audio = dir.appendingPathComponent(clipName)
+            if fm.fileExists(atPath: audio.path) {
+                copyItem(audio, into: "audio", folder: folder, fm: fm, failures: &failures)
+            }
+        }
+        if let first = failures.first {
+            log.error("auto export \(clipName, privacy: .public) failed: \(first, privacy: .public)")
+        }
+    }
+
     /// Copy every transcript (and optionally audio) into `<folder>/transcripts`
     /// and `<folder>/audio`. Mirrors the WebDAV layout on purpose: the two
     /// destinations stay interchangeable.
-    func exportAll(syncAudio: Bool) async {
+    func exportAll() async {
         guard !isRunning else { return }
         guard let folder = resolve() else {
             lastReport = L10n.FolderExport.notPicked
@@ -120,34 +195,27 @@ final class FolderExportService: ObservableObject {
         var skipped = 0
         var failures: [String] = []
 
-        func copyItem(_ local: URL, into subdirectory: String) {
-            let destDir = folder.appendingPathComponent(subdirectory, isDirectory: true)
-            let dest = destDir.appendingPathComponent(local.lastPathComponent)
-            if let existingSize = (try? fm.attributesOfItem(atPath: dest.path))?[.size] as? Int,
-               let localSize = (try? fm.attributesOfItem(atPath: local.path))?[.size] as? Int,
-               existingSize == localSize {
-                skipped += 1
-                return
-            }
-            do {
-                try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
-                if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
-                try fm.copyItem(at: local, to: dest)
-                copied += 1
-            } catch {
-                failures.append("\(local.lastPathComponent): \(error.localizedDescription)")
-            }
-        }
-
         for clip in clips {
             let base = (clip as NSString).deletingPathExtension
             let urls = StorageLocations.transcriptURLs(for: clip)
-            copyItem(urls.txt, into: "transcripts")
+            switch copyItem(urls.txt, into: "transcripts", folder: folder, fm: fm, failures: &failures) {
+            case .copied: copied += 1
+            case .skipped: skipped += 1
+            case .failed: break
+            }
             if fm.fileExists(atPath: urls.json.path) {
-                copyItem(urls.json, into: "transcripts")
+                switch copyItem(urls.json, into: "transcripts", folder: folder, fm: fm, failures: &failures) {
+                case .copied: copied += 1
+                case .skipped: skipped += 1
+                case .failed: break
+                }
             }
             if syncAudio {
-                copyItem(dir.appendingPathComponent(clip), into: "audio")
+                switch copyItem(dir.appendingPathComponent(clip), into: "audio", folder: folder, fm: fm, failures: &failures) {
+                case .copied: copied += 1
+                case .skipped: skipped += 1
+                case .failed: break
+                }
             }
         }
 

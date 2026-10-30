@@ -6,12 +6,16 @@ import UniformTypeIdentifiers
 /// Pick any folder (iCloud Drive / 我的 iPhone / 网盘 App 目录 / Obsidian 库),
 /// export transcripts — and optionally audio — there. Companion destination to
 /// the WebDAV page; same on-disk layout (`transcripts/` + `audio/`).
+///
+/// ★ 2026-10-30（用户："增加自动上传到 iCloud…缺少引导"）：加了「自动备份」
+/// ——转写完成即写入所选文件夹；目标选 iCloud 云盘里的文件夹时，这就是
+/// 自动上传 iCloud。开关状态持久化在 FolderExportService 里（自动路径
+/// 没有 UI 在场，状态必须跟着服务走）。
 struct FolderBackupView: View {
     @ObservedObject private var exporter = FolderExportService.shared
     @EnvironmentObject private var configService: ConfigService
 
     @State private var showPicker = false
-    @State private var syncAudio = false
 
     var body: some View {
         Form {
@@ -42,15 +46,23 @@ struct FolderBackupView: View {
                 Text(L10n.FolderExport.pickFooter)
             }
 
+            // ★ 2026-10-30：自动备份。放在目的地之后、手动导出之前——这是
+            // 主路径（打开就全自动），手动导出只是补跑历史。
             Section {
-                Toggle(L10n.FolderExport.syncAudio, isOn: $syncAudio)
+                Toggle(L10n.FolderExport.auto, isOn: $exporter.autoEnabled)
+            } footer: {
+                Text(L10n.FolderExport.autoFooter)
+            }
+
+            Section {
+                Toggle(L10n.FolderExport.syncAudio, isOn: $exporter.syncAudio)
             } footer: {
                 Text(L10n.FolderExport.syncAudioFooter)
             }
 
             Section {
                 Button {
-                    Task { await exporter.exportAll(syncAudio: syncAudio) }
+                    Task { await exporter.exportAll() }
                 } label: {
                     HStack {
                         Text(L10n.FolderExport.exportNow)

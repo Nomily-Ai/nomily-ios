@@ -40,10 +40,18 @@ final class WatchRecapStore: ObservableObject {
     /// Feed the recaps carried in a phone-pushed application context. Safe to
     /// call with any context — a context without the key (an old phone, or the
     /// watch's own push looped back) changes nothing.
+    ///
+    /// ★ 2026-10-30：空数组是**有效信号**——手机端「回顾摘要」开关关掉时会推一次
+    /// 空列表，这里照做清空本地（否则用户关了开关，腕上还留着旧摘要）。
     func apply(_ context: [String: Any]) {
         guard let data = context[WatchLinkMessage.recapsKey] as? Data,
-              let incoming = try? JSONDecoder().decode([WatchRecap].self, from: data),
-              !incoming.isEmpty else { return }
+              let incoming = try? JSONDecoder().decode([WatchRecap].self, from: data) else { return }
+        if incoming.isEmpty {
+            guard !recaps.isEmpty else { return }
+            recaps = []
+            persist()
+            return
+        }
         // Merge by id: newer `createdAt` wins. A full replace would resurrect
         // a race where the phone's outbox was rebuilt from an older push and
         // quietly deleted recaps that arrived in between — can't happen with
@@ -71,6 +79,14 @@ final class WatchRecapStore: ObservableObject {
     /// the source of truth, and the watch has no channel to ask it to forget.
     func clear() {
         recaps = []
+        persist()
+    }
+
+    /// ★ 2026-10-30（用户："删除的时候不是全部删除摘要，点击删除支持选择删除
+    /// 哪条摘要"）：删单条。只动本地——理由同 `clear()`，手机那份还在，
+    /// 下次上下文推送会把它带回来；要看"真删掉"，得在手机上删除摘要。
+    func remove(id: String) {
+        recaps.removeAll { $0.id == id }
         persist()
     }
 

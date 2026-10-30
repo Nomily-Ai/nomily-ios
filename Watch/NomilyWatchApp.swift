@@ -15,6 +15,8 @@ struct NomilyWatchApp: App {
     @StateObject private var language: WatchLanguageStore
     @StateObject private var link: WatchLink
     @StateObject private var recorder: WatchRecorderModel
+    /// 定时录音补执行需要感知「App 回到前台」。
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         // Built first: its `init` swaps the string bundle, and every `L10n` read
@@ -23,7 +25,22 @@ struct NomilyWatchApp: App {
         let link = WatchLink()
         link.activate()
         _link = StateObject(wrappedValue: link)
-        _recorder = StateObject(wrappedValue: WatchRecorderModel(link: link))
+        let recorder = WatchRecorderModel(link: link)
+        _recorder = StateObject(wrappedValue: recorder)
+        // ★ 2026-10-30：定时录音（手机 → 手表）。见 WatchLinkMessage.timedRecordCommandKey。
+        // start/stop 都幂等（模型里各自有 guard），重复派发无害。
+        link.onTimedRecordCommand = { [weak recorder] command, _, endsAt in
+            switch command {
+            case "start":
+                recorder?.startRemotely()
+                if let endsAt { recorder?.scheduleRemoteStop(at: endsAt) }
+            case "stop":
+                recorder?.stop()
+                recorder?.cancelRemoteStop()
+            default:
+                break
+            }
+        }
     }
 
     var body: some Scene {
@@ -32,6 +49,13 @@ struct NomilyWatchApp: App {
                 .environmentObject(language)
                 .environmentObject(link)
                 .environmentObject(recorder)
+                // ★ 抬腕回前台时补执行没落实的定时开录命令（后台送达时麦克风
+                // 不可用，只能等回到前台）。start/stop 都幂等。
+                .onChange(of: scenePhase) { phase in
+                    guard phase == .active else { return }
+                    recorder.consumePendingToggle()
+                    link.retryUnconfirmedTimedCommand { recorder.remoteStartPending }
+                }
         }
     }
 }

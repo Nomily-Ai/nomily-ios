@@ -159,14 +159,9 @@ targets:
       path: Sources/App/nomily_ios.entitlements
       properties:
         com.apple.developer.networking.HotspotConfiguration: true
-        # ⛔ HealthKit entitlement deliberately NOT here (2026-10-29): adding it
-        # requires regenerating the provisioning profile, and xcodebuild CLI
-        # reports "No Accounts" (the Apple-ID session is only refreshable from
-        # the Xcode GUI). `HealthKitSleepReader` ships anyway and degrades
-        # gracefully — without the entitlement requestAuthorization fails and
-        # the UI shows the spec's "自己定时间" fallback. To enable: add
-        # `com.apple.developer.healthkit: true` back, then open Xcode once to
-        # re-sign.
+        # ★ 2026-10-30：HealthKit 睡眠预填功能整体移除（用户："健康功能不是我们
+        # 的赛道"）——HealthKitSleepReader 与设置页按钮已删，此前"加 entitlement
+        # 需要 Xcode GUI 重签"的问题随之消失，不再需要。
         # ⛔ **Deliberately NOT including** `com.apple.security.application-groups` (removed 2026-10-12).
         #
         # Two independent reasons, either one is enough:

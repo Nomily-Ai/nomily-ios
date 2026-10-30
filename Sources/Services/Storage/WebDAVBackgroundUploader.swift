@@ -35,6 +35,9 @@ final class WebDAVBackgroundUploader: NSObject, URLSessionDelegate, URLSessionTa
     private var session: URLSession!
     /// Held between `handleEvents` and `urlSessionDidFinishEvents`.
     private var backgroundCompletionHandler: (() -> Void)?
+    /// ★ 2026-10-30：跟最近一次 enqueue 的配置走——「允许自签」的 HTTPS 服务器
+    /// 在后台会话里同样会发 server-trust 质询，不放行就传不上去。
+    private var allowSelfSigned = false
 
     private override init() {
         super.init()
@@ -57,6 +60,7 @@ final class WebDAVBackgroundUploader: NSObject, URLSessionDelegate, URLSessionTa
             log.error("bad remote path \(remotePath, privacy: .public)")
             return
         }
+        allowSelfSigned = client.allowSelfSigned
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         let credential = Data("\(client.username):\(client.password)".utf8).base64EncodedString()
@@ -91,6 +95,20 @@ final class WebDAVBackgroundUploader: NSObject, URLSessionDelegate, URLSessionTa
     }
 
     // MARK: - URLSessionTaskDelegate
+
+    /// ★ 2026-10-30：自签证书放行——仅当该次上传的配置开了「允许自签」时，
+    /// 对 server-trust 质询直接采信；其余质询/开关关闭时一律默认处理。
+    func urlSession(_ session: URLSession,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        if allowSelfSigned,
+           challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
+    }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         let path = task.taskDescription ?? "?"

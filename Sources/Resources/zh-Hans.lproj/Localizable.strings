@@ -259,6 +259,9 @@
 "clip_detail.note_default_title" = "总结";
 "clip_detail.todos_empty" = "摘要里没有待办事项。";
 "clip_detail.todos_need_summary" = "先生成摘要，待办事项会汇集在这里。";
+"clip_detail.edit_summary" = "编辑";
+"clip_detail.add_todo" = "添加一条待办";
+"clip_detail.trace_source" = "在原文中定位";
 "clip_detail.search_transcript" = "搜索转录内容";
 "clip_detail.speaker_all" = "全部发言人";
 "clip_detail.more_actions" = "更多";
@@ -532,6 +535,7 @@
 "template.research_discussion" = "研究讨论";
 "template.brainstorm_synthesis" = "头脑风暴总结";
 "template.interview_summary" = "访谈摘要";
+"template.adhd_friendly_summary" = "ADHD 友好笔记";
 "devices.danger_zone" = "危险操作";
 "devices.clear_audio" = "清理媒体文件";
 "devices.clear_audio_message" = "将删除本机存储的所有音频片段。转录文本、摘要和标题将予以保留。";
@@ -713,6 +717,10 @@
 "watch.stop_confirm_message" = "录音会保存并发送到 iPhone。";
 "watch.stop_confirm_action" = "结束";
 "watch.continue_action" = "继续录音";
+/* ★ 2026-10-30 录音断联提醒 */
+"watch.link_lost_title" = "iPhone 已断开";
+"watch.link_lost_message" = "录音仍在手表上继续。把 iPhone 带回附近会自动重连，也可以点「重新连接」。";
+"watch.link_lost_retry" = "重新连接";
 "watch.pending_header" = "等待同步到 iPhone";
 "watch.pending_count" = "%d 项待传";
 "watch.shake_to_record" = "摇一摇开始录音";
@@ -800,6 +808,8 @@
 "template_prompt.research_discussion" = "总结这份研究讨论或期刊俱乐部记录：\n\n## 讨论的论文/主题\n如提到，注明标题和作者。\n\n## 主要发现\n呈现的关键结果或主张。\n\n## 研究方法\n研究如何进行（如讨论到）。\n\n## 优势\n小组认为有说服力的方面。\n\n## 批评与局限性\n对该工作提出的担忧。\n\n## 意义\n为什么重要，讨论到的应用。\n\n## 未决问题\n出现而未解决的科学问题。";
 "template_prompt.brainstorm_synthesis" = "将这次头脑风暴会议综合为有条理的输出：\n\n## 问题陈述\n正在探索的问题或机会。\n\n## 产生的想法\n将相似想法归为不同主题。对于每个主题：\n### [Theme]\n- 提出的具体想法\n- 谁提出的（如能识别）\n- 讨论的优缺点\n\n## 最佳候选\n从小组获得最多关注或支持的想法。\n\n## 异想天开的想法\n值得进一步探索的非常规或有风险的想法。\n\n## 建议的后续步骤\n如何评估或验证最有前景的想法。";
 "template_prompt.interview_summary" = "总结这份访谈记录：\n\n## 受访者\n如提到，注明姓名和背景。\n\n## 关键见解\n分享的最有价值或最令人惊讶的内容，按主题组织。\n\n## 重要引言\n3-5条能很好体现其观点的直接引用。\n\n## 主题\n整个对话中反复出现的主意或关注点。\n\n## 后续问题\n未提出但值得探询的问题。\n\n保留受访者的语气和视角。不要发表评论。";
+/* ★ 2026-10-30 ADHD 模板 */
+"template_prompt.adhd_friendly_summary" = "为这份录音生成一份 ADHD 友好的摘要：短块、前置结论、行动优先。假设读者注意力有限——重要的放最前面，每块都要小，绝不把行动项埋在段落里。\n\n按以下结构输出——没有实际内容的段落直接删掉：\n\n## 30 秒版\n最多 3 条：这段录音讲了什么、定了什么、接下来做什么。每条一行。\n\n## 关键要点\n5-8 条，每条只讲一件事、一句话。重要的排前面。\n\n## 现在就做\n明确的待办，用清单格式（- [ ]）写出执行人和截止时间，执行人和时间用**加粗**。录音里没说的留空——绝不编造。没有就删掉本段。\n\n## 要盯紧\n截止时间、风险、别人在等的事。每条一行。没有就删掉本段。\n\n## 想深入再看\n给想深挖的读者准备的背景——每个话题一小段，选读。\n\n规则：每段不超过 6 行；标题用说话者的语言；只回复 Markdown。";
 
 /* field-level ASR validation, device-file transcribe guidance, pairing shortcut */
 "asr.key_required" = "请输入订阅密钥";
@@ -1094,6 +1104,8 @@
 "template_desc.email_thread_summary" = "快速梳理多封邮件往来的起因、过程与最终结论";
 "template_desc.long_article_to_slide_deck_outline" = "根据长篇文章或报告，快速生成演示文稿的结构大纲";
 "template_desc.turning_scattered_notes_into_a_to_do_list" = "从零散的随手笔记中，梳理出明确的任务清单";
+/* ★ 2026-10-30 ADHD 模板 */
+"template_desc.adhd_friendly_summary" = "短块、前置结论、行动优先——为 ADHD 读者设计的整理方式";
 
 /* ── 回收站（2026-10-15 新增）──────────────────────────────────────── */
 "trash.title" = "回收站";
@@ -1190,8 +1202,6 @@
 "face.blink_speed" = "眨眼节奏";
 "face.eye_color" = "眼睛颜色";
 "face.follow_watch" = "跟随手表";
-"face.frame" = "方框";
-"face.frame_footer" = "在手表首页的眼睛外面画一圈圆角方框。";
 
 // MARK: - 回收站多选 + 手表未佩戴提示（2026-10-16 十四改）
 "trash.select" = "选择";
@@ -1797,11 +1807,30 @@
 "token.footer" = "按字符数 × 0.62 估算的 token，只看趋势，不是账单数字。统计范围：AI 整理与章节大纲。";
 "token.detail" = "约 %@ token · %d 次调用";
 "webdav.title" = "WebDAV 备份";
+"webdav.setup_footer" = "选你的服务器类型，下一步填地址和账号。目录填错也没关系——测试连接会自动定位极空间的个人空间。";
+
 "webdav.preset" = "服务商";
 "webdav.preset_unpicked" = "选择服务器类型…";
 "webdav.server_type" = "服务器类型";
 "webdav.host" = "IP 或域名";
-"webdav.port" = "端口：%d";
+"webdav.port_field" = "端口";
+"webdav.allow_self_signed" = "允许自签证书（极空间等 NAS）";
+"about.title" = "关于 Nomily";
+"about.social_header" = "官方社交媒体";
+"about.legal_header" = "法规";
+"about.row_x" = "X（官方: Nomily）";
+"about.row_xiaohongshu" = "小红书";
+"about.row_discord" = "Discord 社区";
+"about.row_github" = "GitHub（开源主页）";
+"about.row_email" = "写信给我们 (nomily@geekis.com)";
+"about.terms" = "用户协议";
+"about.privacy" = "隐私政策";
+
+"webdav.bad_port" = "端口要在 1–65535 之间";
+"webdav.path_denied" = "账号密码是对的，但这个目录不可访问——极空间的「服务器目录」要填个人空间下的路径，形如 /sata11-你的账号/nomily";
+"webdav.path_missing" = "服务器上没有这个目录（404）——检查「服务器目录」的拼写，或改用测试连接自动定位";
+"webdav.test_ok_discovered" = "连接成功（%d 毫秒），目录已自动定位到 %@";
+
 "webdav.https" = "用 HTTPS";
 "webdav.username" = "用户名";
 "webdav.password" = "密码";
@@ -1835,20 +1864,28 @@
 "folder.bookmark_failed" = "没能记住这个文件夹，请重新选择。";
 "folder.report_all" = "已导出 %d 个，目标已有 %d 个。";
 "folder.report_failures" = "已导出 %d 个，跳过 %d 个，失败 %d 个。首次失败：%@";
-"timed.title" = "定时录音";
-"timed.enable" = "按时间录";
-"timed.enable_footer" = "起止时间内手机麦克风持续录音，到结束时间才停，中途不会自己停。自动开始只在 App 进程活着时生效；没能自动开始时会发通知提醒。";
+
+/* ★ 2026-10-30 自动备份 + 备份引导 */
+"folder.auto" = "自动备份";
+"folder.auto_footer" = "打开后，每完成一段转写就自动把这条录音的文本写进所选文件夹（开了「也导出录音」就连录音一起）。要自动上传 iCloud：目标文件夹选 iCloud 云盘里的即可；选「我的 iPhone」则只存本机。";
+"folder.auto_on" = "自动备份已开";
+"webdav.unconfigured" = "未配置";
+"backup.guide_title" = "怎么选备份方式？";
+"backup.guide_body" = "两条路配好之后都是全自动的：① iCloud——进「导出到文件夹」，选 iCloud 云盘里的文件夹并打开「自动备份」，转写一完成就写进 iCloud，零配置零费用；② NAS / 自有服务器——进「WebDAV 备份」，选品牌（群晖、威联通、绿联、飞牛、极空间、Nextcloud、坚果云等）填地址，转写一完成就自动上传。两个可以同时开。";
+"timed.title" = "定时录音（在手表上录）";
+"timed.enable" = "按时间在手表上录";
+"timed.enable_footer" = "到开始时间，手机会让 Apple Watch 开始录音，到结束时间让它停；抬腕打开手表 App 就能看到录音进行中。手表录的片段会自动传回手机并转写。自动触发只在手机 App 进程活着时生效，没能开始时会发通知提醒。";
 "timed.start" = "开始时间";
 "timed.end" = "结束时间";
-"timed.fill_from_sleep" = "用最近睡眠时间填入（健康）";
 "timed.sleep_filled" = "已按最近的睡眠记录填好。";
 "timed.sleep_missing" = "没读到最近的睡眠记录——在系统设置里允许读取健康数据，或在下面自己定时间。";
-"timed.mic_not_granted" = "还没授权麦克风——先打开 App 手动录一次，否则定时无法自动开始。";
-"timed.recording" = "定时录音中…";
-"timed.saved" = "已保存：%@（接下来自动转写）";
+"timed.watch_command_sent" = "已通知手表开始录音——抬腕打开手表 App 即可看到。";
+"timed.watch_not_recording" = "手表还没开始录：抬起手腕打开手表上的 Nomily。";
+"timed.watch_stopped" = "已通知手表停止，片段会自动传回手机并转写。";
+"timed.recording" = "手表录音中…";
 "timed.missed_title" = "定时录音";
-"timed.missed_body" = "录音时段已到但没能自动开始，打开 Nomily 开始录音。";
-"timed.footer" = "夜间录音在后台继续进行，完成后和普通录音一样入库并自动转写。";
+"timed.missed_body" = "录音时段已到但手表没能开始录音，抬腕打开手表上的 Nomily。";
+"timed.footer" = "只在手表上录音，手机麦克风不参与。手表 App 需已安装且麦克风权限已允许；到点后抬腕进 App 即在录。";
 "privacy.storage" = "录音和文本都只存在这台手机上（用你的口令本地加密）。不开下面的云功能，数据不会离开设备。";
 "privacy.cloud" = "音频/文本只会发送到你自己配置的服务商，只在转写/摘要时发送，不会发给我们。";
 "privacy.backup" = "备份只传到你在下面配置的目的地——你自己的服务器或你自己的文件夹。";
@@ -1881,11 +1918,52 @@
 // ★ 2026-10-29（用户）：称呼确认保存按钮 + Discord 社区入口
 "profile.save" = "保存";
 "social.discord" = "Nomily 的 Discord 社区";
+// ★ 2026-10-30（用户）：底部支持邮箱改为 nomily@geekis.com
+"social.email" = "写信给我们（nomily@geekis.com）";
 
 // ★ 2026-10-29：待办同步到系统提醒事项
+/* ★ 2026-10-30 诊断报告导出 */
+"diag.export" = "导出诊断报告";
+"diag.share" = "分享诊断报告";
+"diag.footer" = "报告只包含运行日志与设备信息，不包含录音、转写内容和任何密钥。遇到问题时可直接邮件发给 nomily@geekis.com。";
+
 "reminders.toggle" = "同步待办到提醒事项";
 "reminders.footer" = "打开后，录音摘要里的每条待办会自动写进 iPhone 自带的「提醒事项」App；在 Nomily 里勾选完成，提醒事项里也会同步打勾。摘要重新生成时只补建新增的条目，删掉的条目会留在提醒事项里。";
 "reminders.denied" = "提醒事项权限被拒绝，去系统设置开启后才能同步。";
 "reminders.open_settings" = "去设置";
 "reminders.source_note" = "来自 Nomily 录音《%@》";
 "reminders.synced_badge" = "已同步到提醒事项";
+"reminders.list_footer" = "这些待办已经在 iPhone 的「提醒事项」里，还剩什么要做一眼能看到。";
+/* ★ 2026-10-30 回顾摘要设置（手机）+ 手表待办同步 */
+"recap.title" = "回顾摘要";
+"recap.toggle" = "向 Apple Watch 发送回顾摘要";
+"recap.footer" = "每次摘要生成后在手表上出现一条回顾，含关键要点和待办。在手表上点某条待办，就会加进这台 iPhone 的「提醒事项」。";
+"watch.recap_todos" = "待办";
+"watch.recap_todo_hint" = "点一条即可加进 iPhone 的提醒事项";
+"face.menu_footer" = "手表的一切设置都在这里：表盘表情、称呼与定时录音。";
+
+/* ★ 2026-10-30 存储占用 */
+"storage.title" = "存储占用";
+"storage.local" = "本机录音数据";
+"storage.local_header" = "本机";
+"storage.local_footer" = "加密录音原件 + 解密副本 + 转写文本的实际磁盘占用。";
+"storage.webdav" = "WebDAV / NAS";
+"storage.server_header" = "服务器";
+"storage.webdav_footer" = "服务器上 transcripts/ + audio/ 的实际占用（向服务器实时查询）。";
+/* ★ 2026-10-30 存储页改成块状卡片 + 图表 */
+"storage.total_label" = "三个位置合计";
+"storage.sources_header" = "设备与资料库";
+"storage.locations_header" = "存储位置";
+"storage.empty_sources" = "这台 iPhone 上还没有录音。";
+"storage.refreshing" = "正在统计…";
+"storage.duration_unknown" = "还没测到时长";
+"storage.duration_hm" = "已录 %d 小时 %d 分";
+"storage.duration_m" = "已录 %d 分钟";
+"storage.duration_s" = "已录 %d 秒";
+"storage.footnote" = "每个数字都是实测：本机是 audio_clips/ 的磁盘占用，NAS 是向服务器 PROPFIND 读回的真实字节，iCloud 通过文件夹书签直接读盘。录音时长取自资料库的时长缓存——还没播放/扫描过的录音暂不显示时长。";
+"storage.folder" = "iCloud / 文件夹";
+"storage.folder_header" = "iCloud / 文件夹";
+"storage.folder_footer" = "所选文件夹里 transcripts/ + audio/ 的实际占用（iCloud 云盘里的文件夹即 iCloud 占用）。";
+"storage.not_configured" = "未配置";
+"storage.unavailable" = "获取失败（%@）";
+"storage.file_count" = "%d 个文件";

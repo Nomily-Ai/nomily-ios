@@ -407,8 +407,26 @@ final class TranscriptionService: ObservableObject {
             if minDuration > 0,
                let duration = OpusOgg.duration(ofOggOpusAt: fileURL),
                duration < Double(minDuration) {
-                log.info("skipping \(key, privacy: .public): duration=\(duration)s < min=\(minDuration)s")
-                throw AsrError.tooShort(duration: duration, minimum: Double(minDuration))
+                // ★ 2026-10-30（用户截图：267 KB 的 .opus 被判"0.0 秒已放弃"）：
+                // granule 解析出 0 多半是异常 mux/部分写入——Ogg 页在、granule≈0，
+                // 但文件本身不小。按线缆字节估一遍时长兜底（166 B ≈ 20 ms；mux 后
+                // 文件带 Ogg 页头，实际 1 s ≈ 200 B 出头，取 200 保守）：估出来够长
+                // 就放行转写，别把 32 秒的真录音扔掉。
+                let size = ((try? FileManager.default.attributesOfItem(
+                    atPath: fileURL.path))?[.size] as? Int) ?? 0
+                let sizeEstimate = Double(size) / 200.0 * 0.02
+                if sizeEstimate >= Double(minDuration) {
+                    log.warning("""
+                        duration gate override \(key, privacy: .public): \
+                        granule=\(duration, format: .fixed(precision: 1))s but \
+                        \(size)B ≈ \(sizeEstimate, format: .fixed(precision: 0))s — proceeding
+                        """)
+                    TicNoteDiagLog.log("ASR",
+                        "min-duration gate override clip=\(key): granule=\(String(format: "%.1f", duration))s size=\(size)B est=\(String(format: "%.0f", sizeEstimate))s — proceeding")
+                } else {
+                    log.info("skipping \(key, privacy: .public): duration=\(duration)s < min=\(minDuration)s")
+                    throw AsrError.tooShort(duration: duration, minimum: Double(minDuration))
+                }
             }
         }
 

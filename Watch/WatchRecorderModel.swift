@@ -53,6 +53,10 @@ final class WatchRecorderModel: NSObject, ObservableObject {
     @Published private(set) var meter = WatchAudioMeter()
     @Published private(set) var pending: [PendingClip] = []
     @Published var errorMessage: String?
+    /// ★ 2026-10-30（用户："录音断联需要状态弹出提醒告知，点击或者在附近就重连"）：
+    /// 录音期间与手机断联的提醒状态。`true` 时录音界面弹 alert，
+    /// 「重连」按钮走 `reconnectNow()`；手机回到附近（可达性恢复）自动清除并补发。
+    @Published private(set) var linkLost = false
 
     private let link: WatchLink
     private var recorder: AVAudioRecorder?
@@ -113,6 +117,10 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         // model existed.
         consumePendingToggle()
         link.onStored = { [weak self] name in self?.discard(named: name) }
+        // ★ 2026-10-30: 可达性变化 → 断联提醒（见 handleReachability）。
+        link.onReachabilityChanged = { [weak self] reachable in
+            Task { @MainActor in self?.handleReachability(reachable) }
+        }
         #if targetEnvironment(simulator)
         // Simulator-only delivery has no transferUserInfo ack path; once the file lands in the shared inbox
         // it counts as delivered (see `WatchLink.transferViaSimulatorSharedInbox`).
@@ -146,6 +154,8 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         // i.e. it was **not** the Action Button path. The only remaining entry point is this function.
         // This line answers "how many times was it called, and what state was it in each time".
         log.info("toggleRecording: isRecording=\(self.isRecording, privacy: .public)")
+        // 用户手动碰了录音键 = 人的意图盖过手机的定时命令，待补的远程 start 作废。
+        remoteStartPending = false
         isRecording ? stop() : requestPermissionAndStart()
     }
 
@@ -168,6 +178,111 @@ final class WatchRecorderModel: NSObject, ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - remote timed recording (phone → watch, ★ 2026-10-30)
+    //
+    // 用户："定时录音……真正在手表上录"。手机在配置窗口内通过
+    // WatchConnectivity 让手表开录/停录，手表只是执行者。
+
+    /// 最近一次 "start" 命令是否还没落实成录音（后台送达/权限未决时为 true，
+    /// `WatchLink.retryUnconfirmedTimedCommand` 据此决定要不要补执行）。
+    private(set) var remoteStartPending = false
+    /// 窗口结束兜底——手机进程死了手表也能自己停。
+    private var remoteStopTask: Task<Void, Never>?
+
+    /// 手机定时录音：开始。已授权麦克风就直接开；没授权走正常授权流程
+    /// （命令只在 App 打开时被执行，弹一次系统权限框不算"半夜偷袭"）。
+    func startRemotely() {
+        remoteStartPending = true
+        guard !isRecording else {
+            remoteStartPending = false
+            return
+        }
+        requestPermissionAndStart()
+    }
+
+    /// 手机定时录音：到窗口结束时刻自己停（幂等：没在录就是空操作）。
+    func scheduleRemoteStop(at date: Date) {
+        remoteStopTask?.cancel()
+        remoteStopTask = Task { [weak self] in
+            let interval = date.timeIntervalSinceNow
+            guard interval > 0 else { return }
+            try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+            guard !Task.isCancelled, let self, self.isRecording else { return }
+            self.stop()
+        }
+    }
+
+    func cancelRemoteStop() {
+        remoteStopTask?.cancel()
+        remoteStopTask = nil
+    }
+
+    // MARK: - link-lost alert (★ 2026-10-30)
+    //
+    // 用户："手表如何在录音断联，需要状态弹出提醒告知，点击或者在附近就重连。"
+    //
+    // ## 为什么有防抖
+    // `isReachable` 要求手机 App 在前台（见 `WatchLink.phoneReachable` 的注释），
+    // 手机锁屏/切走就会瞬间置 false——没有防抖的话，录音 30 秒后手机一锁屏
+    // 手表就弹窗，全是狼来了。所以：掉线要**持续** `reachabilityGrace` 秒才
+    // 认定真断联；恢复则立刻清除并自动重连（补推状态 + 补发队列）。
+    //
+    // ## 代价与兜底
+    // 断联本身不伤录音（文件在表上写盘，传输走后台队列），提醒只解决
+    // 「用户以为传过去了其实没传」的信息差。点「重连」立即重推状态并
+    // 重发队列；哪怕不点，回到附近也会自动补上。
+
+    /// 掉线持续这么久才算真断联（锁屏/切走的瞬时 false 不算）。
+    private static let reachabilityGrace: TimeInterval = 20
+
+    private var reachabilityDebounce: Task<Void, Never>?
+
+    private func handleReachability(_ reachable: Bool) {
+        guard isRecording else { return }
+        if reachable {
+            reachabilityDebounce?.cancel()
+            reachabilityDebounce = nil
+            guard linkLost else { return }
+            // 回到附近：自动重连——立刻把最新状态推过去、把没发出去的
+            // 队列补发一遍，然后撤掉提醒。
+            linkLost = false
+            pushState()
+            resendPending()
+        } else {
+            guard reachabilityDebounce == nil else { return }
+            reachabilityDebounce = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(Self.reachabilityGrace * 1_000_000_000))
+                guard !Task.isCancelled, let self else { return }
+                guard self.isRecording, !self.link.phoneReachable else { return }
+                self.linkLost = true
+                WKInterfaceDevice.current().play(.notification)
+            }
+        }
+    }
+
+    /// 提醒弹窗上的「重连」按钮：立即重推状态、补发队列；手机真回来了
+    /// 就顺手撤掉提醒，没回来弹窗关掉、录音继续（后台队列照常等）。
+    func reconnectNow() {
+        reachabilityDebounce?.cancel()
+        reachabilityDebounce = nil
+        pushState()
+        resendPending()
+        if link.phoneReachable { linkLost = false }
+    }
+
+    /// 录音结束/出错时清掉断联提醒与防抖任务（stop 路径调用）。
+    private func clearLinkLostState() {
+        reachabilityDebounce?.cancel()
+        reachabilityDebounce = nil
+        linkLost = false
+    }
+
+    /// 用户关掉断联提醒（「继续」按钮 / 弹窗 dismiss）。录音不动——
+    /// 手机回来时自动重连逻辑照常生效。
+    func dismissLinkLost() {
+        linkLost = false
     }
 
     private func start() {
@@ -217,6 +332,7 @@ final class WatchRecorderModel: NSObject, ObservableObject {
             meter = WatchAudioMeter()
             isRecording = true
             startedAt = Date()
+            remoteStartPending = false
             WKInterfaceDevice.current().play(Self.confirmation)
             startTimer()
             pushState()
@@ -244,6 +360,11 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         dormantHeartbeat = nil
         isRecording = false
         interrupted = false
+        remoteStartPending = false
+        remoteStopTask?.cancel()
+        remoteStopTask = nil
+        // ★ 2026-10-30: 录音结束，断联提醒与防抖一并撤掉。
+        clearLinkLostState()
         // Zero it rather than leave the last slot: after stopping, the home screen must switch back to the eyes immediately,
         // and keeping a level value would make the waveform flash once before it disappears.
         meter = WatchAudioMeter()

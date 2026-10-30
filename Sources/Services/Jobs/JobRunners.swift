@@ -229,10 +229,17 @@ enum JobRunners {
                 fallbackTitle: RecordingName.displayTitle(for: job.clipName)
             )
             if !digest.points.isEmpty {
+                // ★ 2026-10-30（用户："回顾摘要……在里面可以查看到待办，支持在手表
+                // 里面点击可以同步到手机的待办里面"）：待办随回顾一起推。复用「笔记」
+                // 页同一个提取器（TodoExtract），保证手表上看到的和手机上是同一批。
+                let todos = TodoExtract.fromSummary(text)
+                    .map { RemindersSyncService.stripMarkdown($0.text) }
+                    .filter { !$0.isEmpty }
                 AppEnvironment.shared?.watch.pushRecap(
                     clipName: job.clipName,
                     title: digest.title,
                     points: digest.points,
+                    todos: todos,
                     // Recorded time parsed from the `yyyyMMddHHmmss` name, so
                     // the watch can say "this morning's meeting"; a name that
                     // doesn't parse falls back to now.

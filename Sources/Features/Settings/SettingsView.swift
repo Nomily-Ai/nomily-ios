@@ -1,6 +1,5 @@
 import AVFoundation
 import SwiftUI
-import UserNotifications
 
 struct SettingsView: View {
     @EnvironmentObject private var configService: ConfigService
@@ -16,17 +15,8 @@ struct SettingsView: View {
     /// The number of items sitting in the trash is shown on the right of that row, so it has to be observed — delete
     /// one on the detail page and come back to the settings page, and the number has to follow.
     @ObservedObject private var trash = ClipTrash.shared
-    @State private var versionTapCount = 0
-    @State private var versionTapResetTask: Task<Void, Never>?
-    @State private var devModeToast: String?
-    /// ★ 2026-10-29（用户："那个称呼我都设置了为啥没保存"）：称呼改成草稿态——
-    /// 输入时防抖自动保存，行尾再给一个显式「保存」按钮兜底。旧实现直接绑
-    /// `config.userName`，只有本页 onDisappear 才落盘，杀 App 就丢了。
-    @State private var userNameDraft = ""
-
-    private static let tapsToToggle = 7
-    private static let tapsBeforeHint = 3
-
+    // ★ 2026-10-30：版本彩蛋/开发者模式/诊断导出的状态已随「关于」区
+    // 整体搬进 AboutNomilyView。
     /// Jobs not finished yet: summary / translation / format conversion (`jobs`) + transcription (`transcription`).
     ///
     /// **Both** kinds count: the entry badge answers "is anything still busy in the background", and leaving transcription out
@@ -80,6 +70,15 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            // ★ 2026-10-30（用户："设置下面最顶部加入一个，关于 Nomily"）：
+            // 「关于 Nomily」提到设置页第一行——图标 + 版本 + 官方账号 + GitHub +
+            // 用户协议/隐私政策，参考 Plaud 的关于页。
+            Section {
+                settingsRow(L10n.About.title, icon: "info.circle", tint: .accentColor) {
+                    AboutNomilyView()
+                }
+            }
+
             // ★ 2026-10-22 ("按照苹果的简约风格来"): one flat Section held ten
             // rows in no particular order, so "where do I change the ASR vendor"
             // was a full-page scan. Now four groups, each a place the user would
@@ -150,13 +149,16 @@ struct SettingsView: View {
                 Text(L10n.Settings.groupGeneral)
             }
 
-            // ★ 2026-10-28（饭耳逆向规格 §3.2）：称呼——AI 摘要知道「录音的主人是谁」。
-            userNameSection
-
+            // ★ 2026-10-30（用户："ai 怎么称呼跟定时录音相关功能需要放入在
+            // APPLE WATCH 的设置里面不要放在目录下"）：称呼与定时录音已整体
+            // 搬进 Apple Watch 设置页（WatchFacePickerView，点手表行进入），
+            // 主目录只留手表行本身。
             watchSection
                 .id("watch-\(localization.effective)")
 
-            aboutSection
+            // ★ 2026-10-30（用户："顶部一个关于，下面一个关于是否是重复了"）：
+            // 底部旧「关于」区（版本/诊断/社交图标）已整体搬进顶部 AboutNomilyView，
+            // 设置页不再出现第二个"关于"。
         }
         // ★ 2026-10-22 ("设置里面顶部的录音与转写被顶部遮挡住了"): this Form carried
         // `.padding(.top, -20)` — a leftover from when the page had no navigation
@@ -177,53 +179,8 @@ struct SettingsView: View {
         .onDisappear { configService.saveNow() }
     }
 
-    /// ★ 2026-10-28（饭耳逆向规格 §3.2）：称呼。写进 `AppConfig.userName`，
-    /// `JobRunners.withUserContext` 在每次摘要时带给模型。
-    ///
-    /// ★ 2026-10-29（用户："那个称呼我都设置了为啥没保存……在右侧设置一个
-    /// 输入后自动点击确认保存的按钮"）：改成草稿 + 显式确认——
-    /// · 输入过程中防抖自动保存（250ms 内只写一次盘）；
-    /// · 行尾「保存」按钮：内容有改动才亮，点了立即落盘（不等防抖）；
-    /// · 键盘「完成」也等于按保存。
-    private var userNameSection: some View {
-        Section {
-            HStack(spacing: 12) {
-                TextField(L10n.Profile.userNamePlaceholder, text: $userNameDraft)
-                    .textInputAutocapitalization(.words)
-                    .submitLabel(.done)
-                    .onSubmit(commitUserName)
-                    .onChange(of: userNameDraft) { _ in autosaveUserName() }
-                Button(L10n.Profile.save) {
-                    commitUserName()
-                }
-                .font(.subheadline.weight(.semibold))
-                .disabled(!userNameDirty)
-            }
-        } header: {
-            Text(L10n.Profile.userName)
-        } footer: {
-            Text(L10n.Profile.footer)
-        }
-        .onAppear { userNameDraft = configService.config.userName ?? "" }
-    }
-
-    /// 草稿和已保存的称呼是否不一致（决定「保存」按钮亮不亮）。
-    private var userNameDirty: Bool {
-        userNameDraft != (configService.config.userName ?? "")
-    }
-
-    /// 输入过程中：先把草稿写进内存 config，再防抖落盘——即使不点按钮、
-    /// 即使从本页直接切走，250ms 后也会持久化。
-    private func autosaveUserName() {
-        configService.config.userName = userNameDraft.isEmpty ? nil : userNameDraft
-        configService.scheduleSave()
-    }
-
-    /// 显式确认：立即落盘，不等防抖窗口。
-    private func commitUserName() {
-        configService.config.userName = userNameDraft.isEmpty ? nil : userNameDraft
-        configService.saveNow()
-    }
+    /// ★ 2026-10-30：称呼与定时录音两个分区已整体搬进 WatchFacePickerView
+    /// （Apple Watch 设置页），相关的草稿态/时间工具一并随迁。
 
     /// The watch app ships inside this one, so there's nothing to download —
     /// but that's exactly why it needs explaining. iOS installs it on its own
@@ -251,6 +208,10 @@ struct SettingsView: View {
     /// ⚠️ The check uses `isWatchAppInstalled` **and** `isActivated`: before activation completes that
     ///    flag is necessarily `false` (see the top of `WatchSyncService`), and looking at it alone would misjudge
     ///    the first few seconds after launch as "not installed", so a single tap throws the user over to the Watch App.
+    /// ★ 2026-10-30 二稿（用户："ai 怎么称呼跟定时录音……放入在 APPLE WATCH 的
+    /// 设置里面不要放在目录下"）：分区只留手表行——称呼与定时录音已搬进
+    /// Apple Watch 设置页（WatchFacePickerView）。
+    @ViewBuilder
     private var watchSection: some View {
         Section {
             watchRow
@@ -368,82 +329,8 @@ struct SettingsView: View {
             : L10n.Watch.hintNotInstalled
     }
 
-    private var aboutSection: some View {
-        Section {
-            // HStack + tap gesture rather than LabeledContent so the
-            // whole row (including empty trailing space) is the hit
-            // target — users shouldn't have to aim for the version
-            // string itself.
-            HStack {
-                Text(L10n.Settings.version)
-                Spacer()
-                Text(appVersion)
-                    .foregroundStyle(.secondary)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture { handleVersionTap() }
-
-            if let devModeToast {
-                Text(devModeToast)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .transition(.opacity)
-            } else if configService.config.isDeveloperMode {
-                HStack(spacing: 6) {
-                    Image(systemName: "hammer.fill")
-                    Text(L10n.DeveloperMode.statusOn)
-                }
-                .font(.footnote)
-                .foregroundStyle(.orange)
-            }
-
-            // ★ 2026-10-29（用户："APP 底部增加 X 的主页跟小红书的主页方便用户
-            // 反馈问题"）：官方账号外链。放在「关于」区（设置 tab 底部），比硬塞
-            // 进 TabView 底栏更符合 iOS 习惯——TabView 的 tab 是页面不是链接。
-            // ★ 2026-10-29 二稿（用户给了真实链接 + 加 Discord："小红书的图标按照
-            // 小红书官方图标，其他的 X 跟 discord 也是一样"）：换成官方品牌图标瓦片。
-            // ★ 2026-10-29 三稿（"把底部的三个平台 X，小红书还有的社区，按照 3 个
-            // 图标排列好"）：从三条文字行改成一行三枚图标，居中排开。
-            socialIconsRow
-        } header: {
-            Text(L10n.Settings.about)
-        }
-    }
-
-    /// 「关于」区底部的一行社区入口：X / 小红书 / Discord 三枚官方图标并排，
-    /// 每个图标自己就是一个链接（点击直接跳转），整行居中。
-    private var socialIconsRow: some View {
-        HStack(spacing: 36) {
-            socialIconLink(.x, label: L10n.Social.xHomepage, urlString: Self.xHomepage)
-            socialIconLink(.xiaohongshu, label: L10n.Social.xiaohongshuHomepage, urlString: Self.xiaohongshuHomepage)
-            socialIconLink(.discord, label: L10n.Social.discordCommunity, urlString: Self.discordCommunity)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-    }
-
-    /// 单个图标入口。
-    ///
-    /// ★ 2026-10-29 修 bug（用户："为啥点击小红书也是跳转 X"）：原来用 `Link`，
-    /// 但 `Form` 的一行只有一个点击宿主，行内多个 `Link` 会全部落到**第一个**上
-    /// ——点小红书 / Discord 结果都打开了 X。改成 `Button` + `.buttonStyle(.borderless)`，
-    /// 每枚图标才是各自独立的点击目标。
-    private func socialIconLink(
-        _ brand: SocialMark.Brand, label: String, urlString: String
-    ) -> some View {
-        Button {
-            if let url = URL(string: urlString) { openURL(url) }
-        } label: {
-            SocialMark(brand: brand, size: 44)
-        }
-        .buttonStyle(.borderless)
-        .accessibilityLabel(Text(label))
-    }
-
-    // ★ 2026-10-29：官方主页地址（用户提供）。改账号只动这里。
-    private static let xHomepage = "https://x.com/nomilyai"
-    private static let xiaohongshuHomepage = "https://xhslink.cn/o/Apxk5lURufK"
-    private static let discordCommunity = "https://discord.gg/uQFj3Rfv54"
+    // ★ 2026-10-30：旧「关于」区已整体搬进 AboutNomilyView（用户："顶部一个
+    // 关于，下面一个关于重复了"），设置页底部不再重复。
 
     /// What the Language row shows on the right — the **effective** language,
     /// not the raw stored tag (see `LanguagePickerView.effective`).
@@ -459,60 +346,6 @@ struct SettingsView: View {
         AppTheme.resolve(configService.config.appTheme)
     }
 
-    private var appVersion: String {
-        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        return "\(v) (\(b))"
-    }
-
-    /// Classic "tap the version seven times" easter egg. Taps reset
-    /// after 2 s of inactivity so stray touches don't accumulate.
-    /// When dev mode is already on, the same gesture turns it off so
-    /// it's symmetric — no second hidden path needed.
-    private func handleVersionTap() {
-        versionTapCount += 1
-        versionTapResetTask?.cancel()
-
-        if versionTapCount >= Self.tapsToToggle {
-            versionTapCount = 0
-            configService.config.isDeveloperMode.toggle()
-            configService.scheduleSave()
-            let isOn = configService.config.isDeveloperMode
-            withAnimation {
-                devModeToast = isOn ? L10n.DeveloperMode.toastEnabled : L10n.DeveloperMode.toastDisabled
-            }
-            scheduleToastClear(after: 2)
-            return
-        }
-
-        let remaining = Self.tapsToToggle - versionTapCount
-        if versionTapCount >= Self.tapsBeforeHint {
-            withAnimation {
-                devModeToast = configService.config.isDeveloperMode
-                    ? L10n.DeveloperMode.tapsToDisable(remaining)
-                    : L10n.DeveloperMode.tapsToEnable(remaining)
-            }
-        }
-
-        versionTapResetTask = Task {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            if Task.isCancelled { return }
-            await MainActor.run {
-                versionTapCount = 0
-                withAnimation { devModeToast = nil }
-            }
-        }
-    }
-
-    private func scheduleToastClear(after seconds: Double) {
-        Task {
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            if Task.isCancelled { return }
-            await MainActor.run {
-                withAnimation { devModeToast = nil }
-            }
-        }
-    }
 }
 
 // MARK: - ASR Providers
@@ -1111,7 +944,11 @@ struct ASRProvidersView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             customModelRow
-            TextField(L10n.ASR.customLanguage, text: Binding(
+            // ★ 2026-10-30（用户："转录的内容还有很多不准确的，掺了多种语言"）：
+            // 原来自由文本语言提示几乎没人填 → 服务端自动检测在噪声/静音上跑飞
+            // （Whisper 系的典型症状：往韩语/威尔士语上幻觉）。改成明确的
+            // Picker——常用场景就是"我知道我在说什么语言"，固定下来即可根治。
+            Picker(L10n.ASR.customLanguage, selection: Binding(
                 get: { configService.config.asrProviders.custom?.language ?? "" },
                 set: {
                     writeCustom(AppConfig.AsrProviders.Custom(
@@ -1119,14 +956,20 @@ struct ASRProvidersView: View {
                         apiKey: configService.config.asrProviders.custom?.apiKey,
                         model: configService.config.asrProviders.custom?.model,
                         language: $0.isEmpty ? nil : $0))
-                }))
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+                }
+            )) {
+                Text(L10n.ASR.customLanguageAuto).tag("")
+                Text(L10n.ASR.customLanguageZh).tag("zh")
+                Text(L10n.ASR.customLanguageEn).tag("en")
+                Text(L10n.ASR.customLanguageJa).tag("ja")
+                Text(L10n.ASR.customLanguageKo).tag("ko")
+                Text(L10n.ASR.customLanguageYue).tag("yue")
+            }
             customProbeRow
         } header: {
             Text(L10n.ASR.customServer)
         } footer: {
-            Text(L10n.ASR.customProbeFooter)
+            Text(L10n.ASR.customLanguageFooter)
         }
     }
 
@@ -1706,8 +1549,11 @@ private struct ProviderMark: View {
 /// 图标本身就是「红底 + 白色『小红书』三个字」，直接用文字排版复刻。X 的瓦片
 /// 跟随明暗模式反色（浅色黑底白标 / 深色白底黑标），否则黑瓦片在深色分组
 /// 背景里会隐身。
-private struct SocialMark: View {
-    enum Brand { case x, xiaohongshu, discord }
+/// ★ 2026-10-30：从 private 改为 internal——「关于 Nomily」页（AboutNomilyView）
+/// 也要用这组品牌瓦片。
+struct SocialMark: View {
+    // ★ 2026-10-30：加 .github ——「关于 Nomily」页的开源主页入口。
+    enum Brand { case x, xiaohongshu, discord, email, github }
 
     let brand: Brand
     /// ★ 2026-10-29 三稿：图标行用 44pt，「关于」区离得远也看得清。
@@ -1729,6 +1575,11 @@ private struct SocialMark: View {
             return Color(red: 1.0, green: 0.141, blue: 0.259) // 小红书官方红 #FF2442
         case .discord:
             return Color(red: 0.345, green: 0.396, blue: 0.949) // Discord 官方紫蓝 #5865F2
+        case .email:
+            return Color(red: 0.20, green: 0.62, blue: 0.85) // 邮件蓝（系统 Mail 近似色）
+        case .github:
+            // GitHub 官方黑（深色模式下用深灰，避免和纯黑背景糊在一起）。
+            return Color(uiColor: .darkGray)
         }
     }
 
@@ -1754,6 +1605,18 @@ private struct SocialMark: View {
                 .scaledToFit()
                 .foregroundStyle(.white)
                 .padding(size * 0.18)
+        case .github:
+            // GitHub 没有 BrandX 那样的官方单色素材可白嫖，用"代码"符号
+            // （</>）示意开源/代码托管，识别度足够。
+            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                .font(.system(size: size * 0.42, weight: .bold))
+                .foregroundStyle(.white)
+        case .email:
+            Image(systemName: "envelope.fill")
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(.white)
+                .padding(size * 0.22)
         }
     }
 }
@@ -2300,6 +2163,8 @@ struct RecordingsSettingsView: View {
     // ★ 2026-10-29 (饭耳移植 · 规格 §2.2): the cold-data downgrade runs from here;
     // its @Published progress drives the "downgrade now" button.
     @ObservedObject private var quality = RecordingQualityService.shared
+    // ★ 2026-10-30：文件夹备份状态（行尾"自动备份已开"徽标要实时反映开关）。
+    @ObservedObject private var folderExport = FolderExportService.shared
     @State private var showGeneratedAlert = false
     @State private var encryptionError: String?
     @State private var encryptionBusy = false
@@ -2327,6 +2192,9 @@ struct RecordingsSettingsView: View {
 
     /// ★ 2026-10-29：提醒事项权限被拒时提示去系统设置。
     @State private var remindersDenied = false
+    /// ★ 2026-10-30（用户："归纳到一个 webdav，点击按照类型选择，选择在弹页面设置"）：
+    /// WebDAV 入口改为弹层——先按类型选服务器，再在弹出的页面里配置。
+    @State private var showWebDAVSetup = false
 
     /// ★ 2026-10-29（用户："待办支持同步到 iPhone 里面的待办，需要打开这个开关"）：
     /// 开关打开时请求提醒事项授权；被拒就回拨开关并给「去设置」入口。
@@ -2390,15 +2258,62 @@ struct RecordingsSettingsView: View {
                 }
                 // ★ 2026-10-29（用户："webdav 备份跟导出到文件夹还有相关都放到顶部的
                 // 录音跟传输里面"）：两个备份/导出入口搬到这里。
-                NavigationLink {
-                    WebDAVView()
+                // ★ 2026-10-30（用户："增加自动上传到 iCloud 或者指定的服务器或 nas
+                // 当前里面有但是缺少引导"）：每行右侧加当前状态，分区底部加"怎么选"
+                // 引导——用户不用点进去就知道配没配、自动备份开没开。
+                // ★ 2026-10-30（用户："不要列表式的选择服务器类型的服务商，
+                // 归纳到一个 webdav，点击按照类型选择，在弹页面设置"）：
+                // 入口只有一个「WebDAV 备份」行；点开是类型选择弹层，选完
+                // 在弹层内的二级页配置（预设自动填端口/HTTPS/目录）。
+                Button {
+                    showWebDAVSetup = true
                 } label: {
-                    Label(L10n.WebDAV.title, systemImage: "externaldrive.badge.cloud")
+                    HStack {
+                        Label(L10n.WebDAV.title, systemImage: "externaldrive.badge.cloud")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if let webdav = configService.config.webdav, webdav.isConfigured {
+                            Text(webdav.preset ?? webdav.host)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(L10n.WebDAV.unconfigured)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Color.secondary.opacity(0.6))
+                    }
                 }
                 NavigationLink {
                     FolderBackupView()
                 } label: {
-                    Label(L10n.FolderExport.title, systemImage: "folder.badge.gearshape")
+                    HStack {
+                        Label(L10n.FolderExport.title, systemImage: "folder.badge.gearshape")
+                        Spacer()
+                        if folderExport.autoEnabled {
+                            Text(L10n.FolderExport.autoOn)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else if let name = folderExport.folderName {
+                            Text(name)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                // ★ 2026-10-30（用户："录音文件在本地/nas/iCloud 占用多少需要
+                // 显示出来"）：三处占用实测一页看完。
+                NavigationLink {
+                    StorageUsageView()
+                } label: {
+                    Label(L10n.StorageUsage.title, systemImage: "chart.pie")
+                }
+            } footer: {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.Backup.guideTitle).fontWeight(.semibold)
+                    Text(L10n.Backup.guideBody)
                 }
             }
 
@@ -2431,9 +2346,8 @@ struct RecordingsSettingsView: View {
             // see RecordingQualityService's safety rails.
             recordingQualitySection
 
-            // ★ 2026-10-29 (饭耳移植 · 规格 §3.1 定时录音): overnight window,
-            // prefilled from HealthKit sleep when available.
-            timedRecordingSection
+            // ★ 2026-10-30: 定时录音入口已挪进「设置 → Apple Watch」分区（真正
+            // 在手表上录），这里不再重复出现。
 
             Section {
                 TextField(L10n.RecordingsSettings.ssid, text: wifiSSIDBinding)
@@ -2501,6 +2415,10 @@ struct RecordingsSettingsView: View {
                 client: bluetooth.client,
                 onError: { msg in encryptionError = msg }
             )
+        }
+        // ★ 2026-10-30：WebDAV 类型选择弹层（见 showWebDAVSetup）。
+        .sheet(isPresented: $showWebDAVSetup) {
+            WebDAVSetupSheet()
         }
     }
 
@@ -2681,87 +2599,8 @@ struct RecordingsSettingsView: View {
 
     /// ★ 2026-10-29 (饭耳移植 · 规格 §3.1 定时录音): enable switch, start/end
     /// pickers, HealthKit prefill, and the scheduler's live status line.
-    private var timedRecordingSection: some View {
-        Section {
-            Toggle(isOn: Binding(
-                get: { configService.config.timedRecordingEnabled },
-                set: { on in
-                    configService.config.timedRecordingEnabled = on
-                    configService.scheduleSave()
-                    if on {
-                        // Ask for notification permission once, while the user
-                        // is right here — that's the fallback channel when the
-                        // mic can't auto-start.
-                        UNUserNotificationCenter.current().requestAuthorization(
-                            options: [.alert, .sound]
-                        ) { _, _ in }
-                        TimedRecordingScheduler.shared.evaluate()
-                    }
-                }
-            )) {
-                HStack(spacing: 4) {
-                    Text(L10n.TimedRecording.enable)
-                    InfoTip(text: L10n.TimedRecording.enableFooter)
-                }
-            }
-
-            if configService.config.timedRecordingEnabled {
-                DatePicker(
-                    L10n.TimedRecording.start,
-                    selection: Binding(
-                        get: { Self.timeValue(configService.config.timedRecordingStart) },
-                        set: { configService.config.timedRecordingStart = Self.timeString($0); configService.scheduleSave() }
-                    ),
-                    displayedComponents: .hourAndMinute
-                )
-                DatePicker(
-                    L10n.TimedRecording.end,
-                    selection: Binding(
-                        get: { Self.timeValue(configService.config.timedRecordingEnd) },
-                        set: { configService.config.timedRecordingEnd = Self.timeString($0); configService.scheduleSave() }
-                    ),
-                    displayedComponents: .hourAndMinute
-                )
-                Button {
-                    Task {
-                        if let window = await HealthKitSleepReader.latestSleepWindow() {
-                            configService.config.timedRecordingStart = window.bed
-                            configService.config.timedRecordingEnd = window.wake
-                            configService.scheduleSave()
-                            TimedRecordingScheduler.shared.lastNotice = L10n.TimedRecording.sleepFilled
-                        } else {
-                            TimedRecordingScheduler.shared.lastNotice = L10n.TimedRecording.sleepMissing
-                        }
-                    }
-                } label: {
-                    Label(L10n.TimedRecording.fillFromSleep, systemImage: "bed.double")
-                }
-            }
-
-            if let notice = TimedRecordingScheduler.shared.lastNotice {
-                Text(notice)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            Text(L10n.TimedRecording.title)
-        } footer: {
-            Text(L10n.TimedRecording.footer)
-        }
-    }
-
-    private static func timeValue(_ hhmm: String) -> Date {
-        let parts = hhmm.split(separator: ":").compactMap { Int($0) }
-        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
-        comps.hour = parts.count == 2 ? parts[0] : 23
-        comps.minute = parts.count == 2 ? parts[1] : 30
-        return Calendar.current.date(from: comps) ?? Date()
-    }
-
-    private static func timeString(_ date: Date) -> String {
-        let comps = Calendar.current.dateComponents([.hour, .minute], from: date)
-        return String(format: "%02d:%02d", comps.hour ?? 23, comps.minute ?? 30)
-    }
+    // ★ 2026-10-30: timedRecordingSection 及其时间工具已整体挪进 SettingsView
+    // 的手表分区（"定时录音归纳到 Apple Watch"），这里不再保留副本。
 
     private static func qualityTierLabel(_ tier: RecordingQualityTier) -> String {
         let base: String

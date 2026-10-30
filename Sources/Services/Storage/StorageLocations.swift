@@ -156,8 +156,14 @@ enum StorageLocations {
     /// A side benefit: `Documents/` is a user-visible directory (once `UIFileSharingEnabled` is on
     /// it can be seen directly in the Files app), so users can also send this log to others themselves.
     static var diagLogURL: URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = documentsDir
         return dir.appendingPathComponent("ticnote-ble.log", isDirectory: false)
+    }
+
+    /// The app-sandbox Documents directory — user-visible in the Files app
+    /// (with `UIFileSharingEnabled`), and what exported diagnostics land in.
+    static var documentsDir: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
 }
 

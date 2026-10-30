@@ -150,6 +150,7 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
         "Research Discussion": "template_prompt.research_discussion",
         "Brainstorm Synthesis": "template_prompt.brainstorm_synthesis",
         "Interview Summary": "template_prompt.interview_summary",
+        "ADHD Friendly Summary": "template_prompt.adhd_friendly_summary",
         // The library adopted from Vobot Recorder — prompts localized per
         // language where the .lproj ships `template_prompt.<slug>`; other
         // languages fall back to the stored English prompt (see `localized`).
@@ -229,6 +230,7 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
         "Research Discussion": "template.research_discussion",
         "Brainstorm Synthesis": "template.brainstorm_synthesis",
         "Interview Summary": "template.interview_summary",
+        "ADHD Friendly Summary": "template.adhd_friendly_summary",
         "Detailed Summary": "template.detailed_summary",
         "Meeting Report": "template.meeting_report",
         "Key Points, Decisions, Tasks, Deadlines, and Actions": "template.key_points_decisions_tasks_deadlines_and_actions",
@@ -298,6 +300,7 @@ struct SummarizeTemplate: Identifiable, Codable, Equatable {
         "Customer Call Summary/Analysis": "template_desc.customer_call_summary_analysis",
         "Business Call": "template_desc.business_call",
         "Interview Notes": "template_desc.interview_notes",
+        "ADHD Friendly Summary": "template_desc.adhd_friendly_summary",
         "Panel Discussion": "template_desc.panel_discussion",
         "Case Record": "template_desc.case_record",
         "Psychotherapy Session Record": "template_desc.psychotherapy_session_record",
@@ -827,6 +830,37 @@ final class SummarizeTemplateStore: ObservableObject {
             Questions that weren't asked but would be worth exploring.
 
             Preserve the interviewee's voice and perspective. Don't editorialize.
+            """
+        ),
+
+        // Medical
+        // ★ 2026-10-30（用户："录音模板那个 ADHD 的模板需要有"）：ADHD 友好输出
+        // ——短块、前置结论、行动优先，给注意力有限的读者看的整理方式。
+        SummarizeTemplate(
+            category: "Medical",
+            name: "ADHD Friendly Summary",
+            summary: "Short, chunked, action-first notes designed for ADHD readers.",
+            prompt: """
+            Produce an ADHD-friendly summary of this transcript: short, chunked, action-first. Assume the reader has limited attention — front-load what matters, keep every block tiny, never bury an action inside prose.
+
+            Output exactly these sections — drop any that end up empty:
+
+            ## 30-Second Version
+            At most 3 bullets: what this recording was about, what was decided, what happens next. One line per bullet.
+
+            ## Key Points
+            5-8 bullets, one idea per bullet, one sentence each. Most important first.
+
+            ## Do Now
+            Explicit to-dos as a checklist (- [ ]) with owner and deadline. Bold the owner and the deadline. Leave a blank when the transcript does not say — never invent. Omit the section when there are none.
+
+            ## Watch Out
+            Deadlines, risks, and commitments others are waiting on. One line each. Omit the section when there are none.
+
+            ## Details on Demand
+            Deeper context for readers who want it — one short paragraph per topic, optional reading.
+
+            Rules: no section longer than 6 lines; headings in the speakers' language; reply in Markdown and nothing else.
             """
         ),
     ]

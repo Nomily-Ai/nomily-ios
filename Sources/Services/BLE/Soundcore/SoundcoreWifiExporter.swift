@@ -72,6 +72,10 @@ final class SoundcoreWifiExporter: NSObject {
         /// exportAll 据此**自动重开一次会话**再报错——15:10 日志：加入成功、
         /// 探测失败，其实重发 1A05 就能救，不该甩给用户。
         var isTCPDead: Bool = false
+        /// ★ 2026-10-30（用户截图"无法加入网络 WiFi-…"）：apply 反复成功但
+        /// 始终关联不上——豆的 SoftAP 还没真正广播出来（重开热点比 10 s 慢）。
+        /// 与 isTCPDead 同待遇：上层自动重开会话（换新 SSID），不甩给用户。
+        var isJoinDead: Bool = false
         var errorDescription: String? { message }
     }
 
@@ -132,6 +136,9 @@ final class SoundcoreWifiExporter: NSObject {
     private var openSignalled = false
     private var wsFailure: Error?
     private var wsClosed = false
+    /// ★ 2026-10-30：socket 死后失败回调可能连环触发（19:20 实测 16 ms 内刷了
+    /// 1000+ 条 `ws receive FAILED`）——每条 socket 只记**第一次**失败。
+    private var wsFailureLogged = false
     /// ★ 2026-10-28：WS 收帧统计——"卡在传输中"的分诊数据。设备没发 vs
     /// 我们没收，看这三个数就能分开（错误信息里也会带上）。
     private var wsMessages = 0
@@ -226,9 +233,12 @@ final class SoundcoreWifiExporter: NSObject {
                 TicNoteDiagLog.log("D3200 WIFI", "hotspot applied=\(hotspotApplySucceeded)")
                 onProgress(Progress(phase: .connectWs, message: "正在连接录音豆 \(ep.ip):\(ep.port)…"))
                 try await connectWs(endpoint: ep)
-            } catch let error as WifiExportError where error.isTCPDead {
-                TicNoteDiagLog.log("D3200 WIFI", "initial connect hit dead service — auto-restarting wifi session once")
-                onProgress(Progress(phase: .connectWs, message: "豆的传输服务没响应，正在自动重开传输会话…"))
+            } catch let error as WifiExportError where error.isTCPDead || error.isJoinDead {
+                TicNoteDiagLog.log("D3200 WIFI",
+                    "initial connect hit \(error.isJoinDead ? "unready AP (join dead)" : "dead service") — auto-restarting wifi session once")
+                onProgress(Progress(phase: .connectWs, message: error.isJoinDead
+                    ? "豆的热点没就绪，正在自动换新热点重试…"
+                    : "豆的传输服务没响应，正在自动重开传输会话…"))
                 guard await restartWifiSession() else {
                     // restart 内部已记录 lastResumeFailure 原因；把最原始的错抛出去。
                     throw error
@@ -511,15 +521,27 @@ final class SoundcoreWifiExporter: NSObject {
             // "飞书的 WiFi 快传在手机上连得非常慢"的真相：不是连得慢，是故意等豆
             // 把 SoftAP 完全起好再动手。我们原来只等 3 s，"无法加入网络"的高发
             // 正是撞在这 3 s 上（AP 还没广播出来，NEHotspotConfiguration 直接拒）。
+            // ★ 2026-10-30：**先把同名残留配置摘掉再等**——上一次 apply 失败留下
+            // 的"半死配置"会让下一次 apply 在豆 AP 还没起来时白白关联、撞出系统
+            // 级"无法加入网络"弹窗（App 拦不掉，只能别去撞）。摘掉后 iOS 不再
+            // 对着一个不存在的 SSID 空转，10 s 后豆 AP 起好了再干净地 apply。
+            NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: ssid)
             try? await Task.sleep(nanoseconds: 10_000_000_000)
         }
 
         var lastCode: Int?
-        for attempt in 1...4 {
+        // ★ 2026-10-30：连续"apply 成功但没连上"的次数——就是系统弹
+        // "无法加入网络"的那条路径（豆 AP 还没起好，关联失败）。
+        var notJoinedStreak = 0
+        // ★ 2026-10-30：4→5 次。重开会话后豆的 SoftAP 起得比首连慢（14:12 截图
+        // 的"无法加入网络"就发生在这里），多一次机会换更高的一次成功率。
+        for attempt in 1...5 {
             if cancelled { throw WifiExportError(message: "已取消") }
             // 每次都先移除旧配置：同一 SSID 残留的失败配置会让下一次 apply 直接被拒。
             // ★ 复用凭据时**不 remove**——移除再重加会触发系统重新授权（多弹一次）。
-            if !reuseExisting {
+            // ★★ 关联失败过（apply ok 但没连上）也摘——系统弹"无法加入网络"后，
+            //     残留的就是这种毒配置，不清掉下一发大概率重蹈覆辙。
+            if !reuseExisting || notJoinedStreak > 0 {
                 NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: ssid)
             }
             let config = NEHotspotConfiguration(ssid: ssid, passphrase: psk, isWEP: false)
@@ -552,12 +574,30 @@ final class SoundcoreWifiExporter: NSObject {
                 try? await Task.sleep(nanoseconds: 2_000_000_000) // DHCP 稳定期
                 return
             }
-            TicNoteDiagLog.log("D3200 WIFI", "hotspot apply ok but not on \(ssid) (attempt \(attempt)) — retrying")
-            log.warning("hotspot apply returned ok but current network is not \(ssid, privacy: .public) — retrying")
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            // ★ 2026-10-30：走到这里 = 关联失败，iOS 刚弹过（或即将弹）
+            // "无法加入网络"。豆的 SoftAP 大概率还在重启中——**退避 8 s**
+            // 让它起稳再试，同时清掉这次失败留下的毒配置（下一次循环头部）。
+            notJoinedStreak += 1
+            TicNoteDiagLog.log("D3200 WIFI",
+                "hotspot apply ok but not on \(ssid) (attempt \(attempt), streak=\(notJoinedStreak)) — AP not ready, backing off 8s")
+            log.warning("hotspot apply returned ok but current network is not \(ssid, privacy: .public) — retrying after 8s backoff")
+            onStageNote?(notJoinedStreak >= 2
+                ? "豆的热点还没就绪（系统弹的「无法加入网络」点掉即可），正在等它起稳再试…"
+                : "正在等待录音豆的热点就绪…")
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
         }
 
         hotspotApplySucceeded = false
+        // ★ 2026-10-30：全程"apply 成功但一次都没关联上"= AP 压根没起来，
+        // 跟"TCP 探测全败"同性质的会话级死亡——标 isJoinDead 让上层自动
+        // 重开会话（换新 SSID，8 s 后自动再来），别把用户丢在弹窗上。
+        if notJoinedStreak >= 3 {
+            throw WifiExportError(
+                message: "录音豆的热点「\(ssid)」迟迟没有就绪（连续 \(notJoinedStreak) 次关联失败）。" +
+                    "系统弹的「无法加入网络」点掉即可，Nomily 会自动换新热点再试。",
+                isJoinDead: true
+            )
+        }
 
         // ③ 自动加入失败 → 请用户手动加入（同一次会话内）。iOS 对这类固件 AP 的
         //    自动加入成功率不高，而手动加入是确定通路；此时豆的热点还开着
@@ -590,7 +630,7 @@ final class SoundcoreWifiExporter: NSObject {
         }
 
         throw WifiExportError(message:
-            "iOS 没能自动加入录音豆热点「\(ssid)」（已尝试 4 次\(lastCode.map { "，最后错误码 \($0)" } ?? "")。" +
+            "iOS 没能自动加入录音豆热点「\(ssid)」（已尝试 5 次\(lastCode.map { "，最后错误码 \($0)" } ?? "")。" +
             "请手动加入后重试：设置 → 无线局域网 → 选择「\(ssid)」，密码 \(psk) —— " +
             "连上后回到 Nomily 再点一次快传。若列表里看不到该热点：让豆保持亮灯/靠近手机，等 10 秒再刷新。")
     }
@@ -717,20 +757,16 @@ final class SoundcoreWifiExporter: NSObject {
                 client = fresh
             }
         }
-        // ★ 2026-10-29（用户："只要一次点击加入即可，不要多次点击加入"）：重开会话
-        // 先试**复用同一组热点凭据**——凭据不变时系统里有现成配置，豆重开热点后
-        // 自动回连，全程只弹一次。
-        // ★★ 2026-10-29 第二轮（15:45 日志实锤"传到 92.8% 必死"链）：复用凭据重发
-        // 1A05，豆回 10B 短帧**拒绝在旧热点名上重开传输**；回退沿用旧 endpoint，
-        // 但豆的传输服务此时已经死透，TCP 5 次探测全败 → 92.8% 交卷。而日志里
-        // **换新 SSID 的 1A05 每次都成功**（14:03 / 14:06 / 15:10 / 15:45 全部
-        // attempt 1 通过）。所以复用被拒后必须升级：换全新 SSID/PSK 重发——
-        // 这正是用户手动重试时走的、被反复验证有效的通路。
-        var ms = Int64(Date().timeIntervalSince1970 * 1000)
-        var newSSID = ssid ?? "WiFi-\(ms)"
-        var newPsk = lastPsk ?? "\(ms)"
-        var reuseExisting = (newSSID == ssid && lastPsk != nil)
-        TicNoteDiagLog.log("D3200 WIFI", "restarting wifi session ssid=\(newSSID) reuse=\(reuseExisting)")
+        // ★★ 2026-10-30（10:33–10:40 日志实锤）：复用凭据重发 1A05 **100% 被拒**
+        // （"1A05 reply too short: 10B"）——豆的传输状态机绑在 1A05 会话上，在旧
+        // 热点名上重开必吃 10 B 短帧；随后沿用旧 endpoint 的 TCP 5 次探测也全败。
+        // 而**换新 SSID 的 1A05 每次都成功**（14:03 / 14:06 / 15:10 / 15:45，以及
+        // 10:39 用户手点重试，attempt 1 全过）。所以重开不再先试复用，直接走这条
+        // 被反复验证有效的新 SSID 通路——省掉一轮注定失败的 1A05 + ~30 s 白探测。
+        let ms = Int64(Date().timeIntervalSince1970 * 1000)
+        let newSSID = "WiFi-\(ms)"
+        let newPsk = "\(ms)"
+        TicNoteDiagLog.log("D3200 WIFI", "restarting wifi session with FRESH ssid=\(newSSID) (reuse attempt always rejected by bean — skipped)")
         onStageNote?("正在重开录音豆的传输会话（约 1 分钟）…")
         // 旧连接先收干净
         stopWsPing()
@@ -742,47 +778,23 @@ final class SoundcoreWifiExporter: NSObject {
         wsFailure = nil
         wsClosed = false
         openSignalled = false
+        wsFailureLogged = false
         parser.reset()
+        // 旧热点配置摘掉：豆要开新名，旧的那份只会让 iOS 回连死网络。
+        if let old = ssid {
+            NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: old)
+        }
+        try? await Task.sleep(nanoseconds: 2_000_000_000) // 豆吐旧 AP 缓冲
         do {
-            let ep: SoundcoreClient.WifiEndpoint
-            do {
-                ep = try await client.startWifiExport(ssid: newSSID, psk: newPsk)
-            } catch {
-                guard reuseExisting else { throw error }
-                // ★ 2026-10-29（14:01 实锤"1A05 reply too short: 10B"）：豆还挂在
-                // Wi‑Fi 模式里时，重复下发 1A05 它只回一个 10 B 短帧，解析直接失败。
-                //
-                // ★★ 2026-10-29 升级（15:45 实锤）：沿用旧 endpoint 重连是死路——
-                // 复用被拒意味着豆的传输状态机已经卡死，TCP 5 次探测全败（92.8% 交卷
-                // 的真凶）。唯一被反复验证有效的恢复路是**换新 SSID 重发 1A05**
-                // （用户手动重试走的就是它）。这里直接升级，不再试旧 endpoint。
-                TicNoteDiagLog.log("D3200 WIFI",
-                    "restart: reuse rejected by bean (\(error.localizedDescription)) — escalating to a FRESH ssid")
-                if let old = ssid {
-                    // 旧热点配置摘掉：豆要开新名，旧的那份只会让 iOS 回连死网络。
-                    NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: old)
-                }
-                onStageNote?("豆不肯在旧热点上重开，正在换新热点重新开局…")
-                ms = Int64(Date().timeIntervalSince1970 * 1000)
-                newSSID = "WiFi-\(ms)"
-                newPsk = "\(ms)"
-                reuseExisting = false
-                try? await Task.sleep(nanoseconds: 2_000_000_000) // 豆吐旧 AP 缓冲
-                ep = try await client.startWifiExport(ssid: newSSID, psk: newPsk)
-            }
+            let ep = try await client.startWifiExport(ssid: newSSID, psk: newPsk)
             lastEndpoint = ep
-            // ★ 2026-10-29：重开若换了新热点名，把旧配置从系统里摘掉（防 iOS
-            // 自动回连死热点），并把新名记进历史（下轮开始时统一清理）。
-            // 复用凭据（newSSID == ssid）时什么也不动——那份配置正是要靠它回连。
-            if newSSID != ssid, let old = ssid {
-                NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: old)
-            }
+            // 把新名记进历史（下轮开始时统一清理）。
             Self.rememberHotspotSSID(newSSID)
             ssid = newSSID
             lastPsk = newPsk
             onSessionStart?(newSSID, newPsk)
-            onStageNote?(reuseExisting ? "正在重连录音豆热点（无需再次授权）…" : "正在接入录音豆新热点…")
-            try await joinDeviceAp(ssid: newSSID, psk: newPsk, reuseExisting: reuseExisting)
+            onStageNote?("正在接入录音豆新热点…")
+            try await joinDeviceAp(ssid: newSSID, psk: newPsk)
             onStageNote?("正在重新连接传输通道…")
             try await connectWs(endpoint: ep)
             startKeepalive(ip: ep.ip)
@@ -806,6 +818,9 @@ final class SoundcoreWifiExporter: NSObject {
         // 快速失败会把"还在启动"判成"死了"。放宽到 5 次 × 5 s（≈30 s），
         // 仍不通才标记 isTCPDead 交给上层自动重开会话。
         var probesOK = false
+        // ★ 2026-10-30：探测间隔 5s×5 → **2s×3 + 5s×2**。日志（10:33）显示服务真死
+        // 时探测是"立刻拒连"，5 s 间隔纯属白等；而服务"还在启动"时需要总窗口 ~30 s，
+        // 所以只收紧前 3 次——真死更快判死进重开，慢启动不被误杀。
         probeLoop: for probeAttempt in 1...5 {
             if cancelled { throw WifiExportError(message: "已取消") }
             if await probeTcp(ip: endpoint.ip, port: UInt16(endpoint.port)) {
@@ -813,7 +828,7 @@ final class SoundcoreWifiExporter: NSObject {
                 break probeLoop
             }
             if probeAttempt < 5 {
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                try? await Task.sleep(nanoseconds: probeAttempt <= 3 ? 2_000_000_000 : 5_000_000_000)
             }
         }
         if !probesOK {
@@ -913,6 +928,7 @@ final class SoundcoreWifiExporter: NSObject {
         openSignalled = false
         wsFailure = nil
         wsClosed = false
+        wsFailureLogged = false
         let task = session.webSocketTask(with: request)
         ws = task
         task.resume()
@@ -960,9 +976,17 @@ final class SoundcoreWifiExporter: NSObject {
                     // 13,589 条之后堆了上万个，收帧开始变慢、关闭时刷屏几十条
                     // `Socket未连接`。一条消息只允许一个 outstanding receive。
                 case .failure(let error):
+                    // ★ 2026-10-30：socket 死后这里可能被连环回调（19:20 实测
+                    // 16 ms 1000+ 条），每条 socket 只记一次，然后**立刻掐掉
+                    // socket**——不再让死连接继续吐失败事件；传输循环靠
+                    // `wsFailure` 走会话重开。
+                    guard !self.wsFailureLogged else { return }
+                    self.wsFailureLogged = true
                     log.warning("WS receive failed: \(String(describing: error), privacy: .public)")
                     TicNoteDiagLog.log("D3200 WIFI", "ws receive FAILED: \(error.localizedDescription) (msgs=\(self.wsMessages) in=\(self.wsBytesIn)B)")
                     self.wsFailure = error
+                    self.ws?.cancel(with: .goingAway, reason: nil)
+                    self.ws = nil
                 }
             }
         }
@@ -1196,9 +1220,28 @@ final class SoundcoreWifiExporter: NSObject {
                     // 路是重开 1A05（新热点凭据）再带偏移续传（09:52 验证通过）。
                     // 原来每次断流都要先白烧 30–60 秒的无效重连，才在外层走到
                     // restartWifiSession；现在直接走有效路径。
-                    if !(await restartWifiSession()) {
+                    // ★ 2026-10-30（10:33–10:40 日志实锤）：豆的传输服务半路死掉后，
+                    // 第一次重开常失败（BLE 重连后 TCP 探测仍全不通），但**用户手动再
+                    // 点一次就总能成功**（10:39 手点 → 5 s 传完剩下 2 MB，complete=true）
+                    // ——死掉的只是会话，多试必然成。这里自动补上"再点一次"：
+                    // 重开失败 → 等 8 s 再试，最多 3 次；3 次全败才真正交卷。
+                    var restarted = false
+                    for restartAttempt in 1...3 {
+                        if cancelled { break }
+                        if await restartWifiSession() {
+                            restarted = true
+                            break
+                        }
+                        if restartAttempt < 3 {
+                            TicNoteDiagLog.log("D3200 WIFI",
+                                "file \(fileId): restart attempt \(restartAttempt) failed (\(lastResumeFailure ?? "unknown")) — retrying in 8s")
+                            onStageNote?("重开没成功，8 秒后再试一次…")
+                            try? await Task.sleep(nanoseconds: 8_000_000_000)
+                        }
+                    }
+                    if !restarted {
                         TicNoteDiagLog.log("D3200 WIFI",
-                            "file \(fileId): session restart failed (\(lastResumeFailure ?? "unknown")) — stopping at \(fileBytes)B")
+                            "file \(fileId): session restart failed after 3 attempts (\(lastResumeFailure ?? "unknown")) — stopping at \(fileBytes)B")
                         break
                     }
                     resumeSeqResetPending = fileBytes > 0

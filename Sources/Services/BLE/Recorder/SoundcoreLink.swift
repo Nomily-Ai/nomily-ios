@@ -50,6 +50,12 @@ final class SoundcoreLink: NSObject, RecorderLink {
     /// 最近一个切片的序号——App 内打点的 offset 锚点（seq × 20 ms）。
     private var liveLastSeq = -1
 
+    /// ★ 2026-10-30（用户："把后台划了重新打开，录音时长就重新开始计算了"）：
+    /// 最近一次确认的「豆上正在录的文件」id。来源优先级见 `recordingElapsed`；
+    /// keep-alive 在录音中且未知时用列表的 `currentTransportTimestamp` 补一次
+    /// （豆自己按键开录、App 划掉重连的场景只有列表能给）。
+    private var currentFileId: UInt32?
+
     init(peripheral: CBPeripheral, central: CBCentralManager) {
         self.client = SoundcoreClient(peripheral: peripheral, central: central)
     }
@@ -247,14 +253,18 @@ final class SoundcoreLink: NSObject, RecorderLink {
         // Prefer the device-pushed state (0x18/0x82 + device-info recording
         // flag, refreshed by keep-alive); fall back to one full info read when
         // nothing has been pushed yet this connection.
+        let recording: Bool?
         if let pushed = client.pushedRecording {
-            return RecorderRecordingStatus(isRecording: pushed)
+            recording = pushed
+        } else if let info = client.lastDeviceInfo {
+            recording = info.recording
+        } else {
+            recording = try await client.getDeviceInfo().recording
         }
-        if let info = client.lastDeviceInfo {
-            return RecorderRecordingStatus(isRecording: info.recording)
-        }
-        let info = try await client.getDeviceInfo()
-        return RecorderRecordingStatus(isRecording: info.recording)
+        // ★ 2026-10-30：把「豆上这段已录多久」一并交给上层（fileId 推导，见
+        // `recordingElapsed`）。没有它，`RecorderSessionModel` 在重连后只能
+        // 锚定"现在"，秒表从 0 重数——正是用户报的 bug。
+        return RecorderRecordingStatus(isRecording: recording, deviceElapsed: recordingElapsed)
     }
 
     // MARK: pushed state (device-triggered pushes → UI)
@@ -267,17 +277,56 @@ final class SoundcoreLink: NSObject, RecorderLink {
 
     var pushedChargingState: Bool? { client.pushedCharging }
 
+    /// ★ 2026-10-30（用户："把后台划了，重新打开录音时长就是重新开始计算了"）：
+    /// 豆的 **fileId 就是这段录音开始那一刻的 Unix 秒**（`LiveModel` 一直这么用，
+    /// 日志里的 fileId 与录音日期一一对应），所以
+    ///
+    ///     已录时长 = 当前时间 − fileId
+    ///
+    /// 是豆侧真相，且**不需要豆回报任何新东西**——重连后第一个切片就能对表。
+    /// 此前 `RecorderLink.pushedElapsed` 走协议默认 `nil`、`readRecordingStatus`
+    /// 也不填 `deviceElapsed`，`RecorderSessionModel` 对 D3200 无钟可采，
+    /// 重开后秒表只能锚定"现在"——秒表从 0 重数且永不追上，就是本 bug。
+    ///
+    /// fileId 来源优先级：实时转录的活动文件（最权威）→ live 会话缓存 →
+    /// 列表确认的当前文件 → 开始录音推送。非录音态返回 nil（不供旧值）。
+    /// 负数 / 超过一天 = 豆时钟不可信，宁可不给（宁缺毋滥，避免秒表乱跳）。
+    private var recordingElapsed: TimeInterval? {
+        guard pushedRecordingState == true else { return nil }
+        let fid = client.activeRealtimeFileId ?? liveFileId ?? currentFileId ?? client.lastNewFileId
+        guard let fid, fid > 0 else { return nil }
+        let elapsed = Date().timeIntervalSince1970 - TimeInterval(fid)
+        guard elapsed >= 0, elapsed < 86_400 else { return nil }
+        return elapsed
+    }
+
+    /// `RecorderSessionModel.pollOnce` 每秒读它来校准秒表（覆盖协议默认的 `nil`）。
+    var pushedElapsed: TimeInterval? { recordingElapsed }
+
     // MARK: keep-alive
 
     func startKeepAlive() {
         guard keepAliveTask == nil else { return }
         keepAliveTask = Task { [weak self] in
+            // ★ 2026-10-30：先干活再睡——首拍立即执行。划掉 App 重开时若豆正在录，
+            // 第一拍就把 fileId 要回来（`currentFileId`），秒表马上对上豆的钟；
+            // 旧写法先睡 30 s，重开后头半分钟秒表还是错的。
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(Self.keepAliveInterval * 1_000_000_000))
-                guard let self, self.client.isConnected else { continue }
+                guard let self, self.client.isConnected else {
+                    try? await Task.sleep(nanoseconds: UInt64(Self.keepAliveInterval * 1_000_000_000))
+                    continue
+                }
                 // getDeviceInfo is read-only and refreshes the pushed battery /
                 // storage surfaces while it keeps the link alive.
                 _ = try? await self.client.getDeviceInfo()
+                // ★ 录音中 → 刷新「正在录的文件」id（列表的 currentTransportTimestamp
+                //   是权威来源，覆盖豆自己按键开录/换段的情况）。失败保留旧值。
+                if self.pushedRecordingState == true,
+                   let list = try? await self.client.listFilesCompat(),
+                   let fid = list.currentTransportTimestamp {
+                    self.currentFileId = fid
+                }
+                try? await Task.sleep(nanoseconds: UInt64(Self.keepAliveInterval * 1_000_000_000))
             }
         }
     }

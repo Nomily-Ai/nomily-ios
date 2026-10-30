@@ -10,7 +10,12 @@ struct RecordingsView: View {
     @EnvironmentObject private var bluetooth: BluetoothCoordinator
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var env: AppEnvironment
-    @State private var segment: Segment = .device
+    // ★ 2026-10-30（用户："资料库要在左边，首页的设备在右边"）：默认落点改到
+    //   资料库，但**老用户冷启动仍回设备页**——onAppear 里看台账：有"上一个
+    //   连接的设备"就跳到设备段（2026-10-28 的约定保持住）；台账为空的新用户
+    //   停在资料库，正好看到三条入门示例。
+    @State private var segment: Segment = .library
+    @State private var landingChecked = false
     @State private var pendingSegment: Segment?
     @State private var showCancelSegmentAlert = false
     @State private var showClipDetail = false
@@ -27,8 +32,10 @@ struct RecordingsView: View {
     }
 
     enum Segment: CaseIterable, Identifiable {
-        case device
+        // ★ 2026-10-30（用户："资料库要在左边，设备在右边"）：声明顺序 = 分段控件
+        //   从左到右的顺序，资料库在前。
         case library
+        case device
         var id: Int { hashValue }
         var title: String {
             switch self {
@@ -213,6 +220,16 @@ struct RecordingsView: View {
         .task(id: recorderTargetIdentity) {
             recorderSession.attach(recorderTarget)
         }
+        // ★ 2026-10-30：冷启动落点判定（只跑一次）。默认停在资料库（左边）看
+        // 入门示例；台账里有"上一个连接的设备"→ 老用户，跳回设备段，维持
+        // 2026-10-28 "开屏落在上次的设备页" 的约定。
+        .onAppear {
+            guard !landingChecked else { return }
+            landingChecked = true
+            if lastUsedLedgerEntry != nil || plaudDirect.pairedSN != nil {
+                segment = .device
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .watchClipDidArrive)) { _ in
             // Same landing as a finished device transfer. Skipped mid-BLE-
             // transfer, where switching away is already guarded by an alert.
@@ -281,7 +298,18 @@ struct RecordingsView: View {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         let duration: Double?
         if url.pathExtension.lowercased() == "opus" {
-            duration = OpusOgg.duration(ofOggOpusAt: url)
+            // ★ 2026-10-30：granule 解析异常（0/极小值）但文件不小 → 按线缆字节
+            // 估算时长兜底（≈200 B/s），否则列表和详情页会把真录音显示成 0.0 秒。
+            let parsed = OpusOgg.duration(ofOggOpusAt: url)
+            if let parsed, parsed >= 1 {
+                duration = parsed
+            } else {
+                let size = ((try? FileManager.default.attributesOfItem(
+                    atPath: url.path))?[.size] as? Int) ?? 0
+                // 166 B ≈ 20 ms 线缆 + Ogg 页头 ≈ 10 KB/s；保守估不虚标。
+                let estimate = Double(size) * 0.0001
+                duration = estimate >= 1 ? estimate : parsed
+            }
         } else {
             let d = (try? await AVURLAsset(url: url).load(.duration).seconds) ?? 0
             duration = (d.isFinite && d > 0) ? d : nil

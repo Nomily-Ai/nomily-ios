@@ -107,6 +107,46 @@ final class RemindersSyncService {
         setCompleted(id: id, completed: isCompleted)
     }
 
+    // MARK: - 手表发来的一条待办（★ 2026-10-30）
+
+    /// 手表 Recap 详情里点了一条待办 → 手机把它写进默认提醒列表。
+    ///
+    /// 与 `sync(blocks:recordingName:)` 的区别：这里是**单条、用户显式点击**，
+    /// 所以不看「待办同步」总开关（那是批量自动同步的开关）；幂等性靠
+    /// `manualCreatedTitles` 这份 UserDefaults 标题表保证——同一条要点两次
+    /// 不会建出两条提醒。
+    @discardableResult
+    func createReminder(title: String, source: String) async -> Bool {
+        let text = Self.stripMarkdown(title)
+        guard !text.isEmpty else { return false }
+        guard await ensureAccess() else { return false }
+        guard let list = store.defaultCalendarForNewReminders() else {
+            log.error("no default reminders calendar")
+            return false
+        }
+        var created = Set(UserDefaults.standard.stringArray(forKey: Self.manualTitlesKey) ?? [])
+        guard !created.contains(text) else { return true }
+
+        let reminder = EKReminder(eventStore: store)
+        reminder.title = text
+        reminder.calendar = list
+        if !source.isEmpty {
+            reminder.notes = String(format: L10n.Reminders.sourceNote, source)
+        }
+        do {
+            try store.save(reminder, commit: true)
+            created.insert(text)
+            UserDefaults.standard.set(Array(created), forKey: Self.manualTitlesKey)
+            return true
+        } catch {
+            log.error("watch reminder save failed: \(String(describing: error), privacy: .public)")
+            return false
+        }
+    }
+
+    /// 手表手动加入过的待办标题（去重用，见 `createReminder`）。
+    private static let manualTitlesKey = "reminders.manual.titles"
+
     private func setCompleted(id: String, completed: Bool) {
         // iOS 17 起标记 deprecated（新写法在 EKEventStore 上没有单条查询的
         // 非 optional 版本），但依旧可用且只产生警告。

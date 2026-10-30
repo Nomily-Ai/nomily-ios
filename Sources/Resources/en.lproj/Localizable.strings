@@ -253,6 +253,9 @@
 "clip_detail.tab_todos" = "To-dos";
 "clip_detail.todos_empty" = "No action items in the summary.";
 "clip_detail.todos_need_summary" = "Generate a summary to collect action items here.";
+"clip_detail.edit_summary" = "Edit";
+"clip_detail.add_todo" = "Add a to-do";
+"clip_detail.trace_source" = "Jump to source in transcript";
 "clip_detail.search_transcript" = "Search transcript";
 "clip_detail.speaker_all" = "All speakers";
 "clip_detail.more_actions" = "More";
@@ -691,6 +694,15 @@
 "watch.stop_confirm_message" = "The take will be saved and sent to your iPhone.";
 "watch.stop_confirm_action" = "End";
 "watch.continue_action" = "Keep recording";
+"recap.title" = "Recap";
+"recap.toggle" = "Send recaps to Apple Watch";
+"recap.footer" = "Each finished summary appears on the watch with its key points and to-dos. Tap a to-do there and it lands in this iPhone's Reminders app.";
+"watch.recap_todos" = "To-dos";
+"watch.recap_todo_hint" = "Tap one to add it to Reminders on your iPhone";
+"face.menu_footer" = "Everything about your watch: face, name and timed recording.";
+"watch.link_lost_title" = "iPhone disconnected";
+"watch.link_lost_message" = "The recording keeps running on the watch. Bring the iPhone nearby — it reconnects automatically, or tap Reconnect.";
+"watch.link_lost_retry" = "Reconnect";
 "watch.pending_header" = "Waiting for iPhone";
 "watch.pending_count" = "%d to send";
 "watch.shake_to_record" = "Shake to Record";
@@ -1071,6 +1083,7 @@
 "template_desc.email_thread_summary" = "Quickly organizes the origin, process, and final outcome of a multi-email exchange";
 "template_desc.long_article_to_slide_deck_outline" = "Quickly generates a presentation structure outline from a long article or report";
 "template_desc.turning_scattered_notes_into_a_to_do_list" = "Organizes clear task lists from scattered, off-the-cuff notes";
+"template_desc.adhd_friendly_summary" = "Short, chunked, action-first notes designed for ADHD readers";
 
 /* ── Recently Deleted / recycle bin (added 2026-10-15) ─────────────── */
 "trash.title" = "Recently Deleted";
@@ -1467,11 +1480,30 @@
 "summarize.inspiration" = "Inspiration";
 "summarize.mine_space_footer" = "Language and model are saved as your defaults.";
 "webdav.title" = "WebDAV backup";
+"webdav.setup_footer" = "Pick your server type, then fill in the address and account. A wrong folder is fine — Test connection auto-locates the ZSpace personal space.";
+
 "webdav.preset" = "Server";
 "webdav.preset_unpicked" = "Pick a server type…";
 "webdav.server_type" = "Server type";
 "webdav.host" = "IP or domain";
-"webdav.port" = "Port: %d";
+"webdav.port_field" = "Port";
+"webdav.allow_self_signed" = "Allow self-signed certificates (ZSpace etc.)";
+"about.title" = "About Nomily";
+"about.social_header" = "Official social media";
+"about.legal_header" = "Legal";
+"about.row_x" = "X (Official: Nomily)";
+"about.row_xiaohongshu" = "Xiaohongshu";
+"about.row_discord" = "Discord Community";
+"about.row_github" = "GitHub (Open source)";
+"about.row_email" = "Email us (nomily@geekis.com)";
+"about.terms" = "Terms of Service";
+"about.privacy" = "Privacy Policy";
+
+"webdav.bad_port" = "Port must be 1–65535";
+"webdav.path_denied" = "Credentials are correct, but this folder is not accessible — on ZSpace the folder must be under your personal space, e.g. /sata11-<account>/nomily";
+"webdav.path_missing" = "The folder does not exist on the server (404) — check the spelling, or run Test connection again to auto-locate it";
+"webdav.test_ok_discovered" = "Connected (%d ms), folder auto-located at %@";
+
 "webdav.https" = "Use HTTPS";
 "webdav.username" = "Username";
 "webdav.password" = "Password";
@@ -1505,12 +1537,19 @@
 "folder.bookmark_failed" = "Could not remember the folder. Try picking it again.";
 "folder.report_all" = "Exported %d, already there %d.";
 "folder.report_failures" = "Exported %d, skipped %d, failed %d. First failure: %@";
+
+/* ★ 2026-10-30 auto backup + backup guide */
+"folder.auto" = "Auto backup";
+"folder.auto_footer" = "When on, each finished transcript is written into the chosen folder automatically (audio too if \"Export audio\" is on). To back up to iCloud automatically, pick a folder inside iCloud Drive; \"On My iPhone\" keeps it local.";
+"folder.auto_on" = "Auto backup on";
+"webdav.unconfigured" = "Not set up";
+"backup.guide_title" = "Which backup should I use?";
+"backup.guide_body" = "Both destinations are fully automatic once set up: ① iCloud — open \"Export to Folder\", pick a folder in iCloud Drive and turn on Auto backup; finished transcripts are written to iCloud right away. ② NAS / your own server — open \"WebDAV Backup\", pick your brand (Synology, QNAP, UGREEN, fnOS, Zspace, Nextcloud, Jianguoyun…), fill in the address, and finished transcripts upload automatically. You can enable both at once.";
 "timed.title" = "Timed recording";
 "timed.enable" = "Record on a schedule";
 "timed.enable_footer" = "Between the start and end times, the phone microphone records continuously — it only stops when the end time arrives. Auto-start works while the app process is alive; if it can't start, you'll get a notification.";
 "timed.start" = "Start at";
 "timed.end" = "Stop at";
-"timed.fill_from_sleep" = "Fill from recent sleep (Health)";
 "timed.sleep_filled" = "Filled from your latest sleep record.";
 "timed.sleep_missing" = "Couldn't read a recent sleep record — allow Health access in Settings, or set the times below yourself.";
 "timed.mic_not_granted" = "Microphone permission not granted yet — open the app and record once, or the schedule can't auto-start.";
@@ -1522,3 +1561,33 @@
 "privacy.storage" = "Recordings and transcripts stay on this phone only (encrypted at rest with your passphrase). Nothing leaves the device unless you turn on a cloud feature below.";
 "privacy.cloud" = "Audio/text is sent only to the provider you configure yourself, only when you transcribe or summarize, and never to us.";
 "privacy.backup" = "Backups go only to the destination you configured below — your own server or your own folder.";
+
+/* ★ 2026-10-30 diagnostics export */
+"diag.export" = "Export Diagnostics Report";
+"diag.share" = "Share Diagnostics Report";
+"diag.footer" = "The report contains the run log and device info only — no recordings, transcripts or keys. Email it to nomily@geekis.com when something misbehaves.";
+
+/* ★ 2026-10-30 storage usage */
+"storage.title" = "Storage Usage";
+"storage.local" = "On-device recordings";
+"storage.local_header" = "This device";
+"storage.local_footer" = "Actual disk usage of encrypted originals + decrypted copies + transcripts.";
+"storage.webdav" = "WebDAV / NAS";
+"storage.server_header" = "Server";
+"storage.webdav_footer" = "Actual usage of transcripts/ + audio/ on the server (queried live).";
+"storage.folder" = "iCloud / Folder";
+"storage.folder_header" = "iCloud / Folder";
+"storage.folder_footer" = "Actual usage of transcripts/ + audio/ in the chosen folder (iCloud Drive folder = iCloud usage).";
+"storage.not_configured" = "Not set up";
+"storage.unavailable" = "Unavailable (%@)";
+"storage.file_count" = "%d files";
+"storage.total_label" = "Used across every location";
+"storage.sources_header" = "Devices & library";
+"storage.locations_header" = "Locations";
+"storage.empty_sources" = "No recordings on this iPhone yet.";
+"storage.refreshing" = "Measuring…";
+"storage.duration_unknown" = "Duration not measured yet";
+"storage.duration_hm" = "%dh %dm recorded";
+"storage.duration_m" = "%dm recorded";
+"storage.duration_s" = "%ds recorded";
+"storage.footnote" = "Every number is measured on disk: local bytes scanned in audio_clips/, NAS bytes read back from the server with PROPFIND, iCloud bytes read through the folder bookmark. Recording time comes from the library duration cache — clips not yet played or scanned show no duration.";

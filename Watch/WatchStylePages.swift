@@ -89,65 +89,16 @@ struct WatchColorStyleView: View {
                 }
 
                 // ★ Ninth revision: the "Gradient" row (the solid / gradient capsule pair) is deleted entirely —
-                // user: "remove the gradient". The space it held now goes to the breathing light, and the page reads cleaner:
-                // a page with just two things left: "which color" and "how fast the breathing light".
+                // user: "remove the gradient".
 
-                // ★ Breathing light speed. **That small heading is a must**: `off/slow/medium/fast` on its own
-                // can't say what it controls (the gradient row's "solid/gradient" speaks for itself,
-                // this one can't). The heading costs two characters in Chinese at most — far cheaper than making users guess.
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.Watch.styleBreathing)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    pillRow(WatchBreathing.allCases.map { option in
-                        (label: option.label,
-                         selected: store.style.breathing == option,
-                         action: { store.style.breathing = option })
-                    })
-                }
+                // ★ 2026-10-30（用户："手表的设置里面呼吸灯这个删除，这个功能没用了"）：
+                // 「呼吸灯」速度选择整块删掉。页面现在只回答一个问题——「表盘眼睛是什么颜色」。
+                // 模型里的 `WatchBreathing` 保留（已存的 `WatchRingStyle` JSON 还要能解码），
+                // 只是不再有 UI 去改它，呼吸效果按默认档位继续跑。
             }
             .padding(.horizontal, 4)
         }
         .navigationTitle(L10n.Watch.styleAppearance)
-    }
-
-    /// A row of equal-width capsule selectors.
-    ///
-    /// ★ After the ninth revision its only caller is the **breathing light** (the gradient's caller was deleted).
-    /// It wasn't inlined away because this capsule row's shape (equal width, rounded, theme-color fill when selected)
-    /// is the sole exemplar of the "selector" concept on this page; keeping it as a named component
-    /// is easier to recognize than kneading it into `body`.
-    private func pillRow(
-        _ options: [(label: String, selected: Bool, action: () -> Void)]
-    ) -> some View {
-        HStack(spacing: 4) {
-            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
-                Button(action: option.action) {
-                    Text(option.label)
-                        .font(.system(size: 12, weight: .medium))
-                        // ★ Twelfth revision: the selected capsule's background is the palette's `solid`,
-                        // so the text color must invert against it — otherwise selecting `white` yields
-                        // white text on white (until now the default happened to be white, so the problem never showed).
-                        .foregroundStyle(
-                            option.selected
-                                ? store.style.palette.onSolid
-                                : Color.white
-                        )
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .padding(.vertical, 6)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            Capsule().fill(
-                                option.selected
-                                    ? store.style.palette.solid.opacity(0.9)
-                                    : Color.white.opacity(0.12)
-                            )
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
     }
 }
 

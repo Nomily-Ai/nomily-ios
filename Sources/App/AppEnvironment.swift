@@ -152,6 +152,11 @@ final class AppEnvironment: ObservableObject {
                     let cfg = config.config
                     Task { await WebDAVSyncService.shared.sync(clipName: clip, config: cfg) }
                 }
+                // ★ 2026-10-30（用户："增加自动上传到 iCloud 或者指定的服务器"）：
+                // 文件夹目的地走同一条钩子——所选文件夹在 iCloud 云盘里时，
+                // 这就是"自动上传 iCloud"。服务自检 autoEnabled + 书签，
+                // 没开/没选就是 no-op。
+                Task { await FolderExportService.shared.export(clipName: clip) }
             }
         }
         self.localization = LocalizationService(selected: config.config.appLanguage)
@@ -184,10 +189,11 @@ final class AppEnvironment: ObservableObject {
         // honoured even if a request is already queued with the system.
         NightlyTranscribeScheduler.shared.configure(transcription: transcription, configService: config)
         NightlyTranscribeScheduler.shared.schedule()
-        // ★ 2026-10-29 (饭耳移植 · 规格 §3.1): timed overnight recording. The
-        // heartbeat evaluates the window every 30s while the process lives;
-        // auto-start never pops the mic dialog (granted-permission check inside).
-        TimedRecordingScheduler.shared.configure(configService: config, library: library)
+        // ★ 2026-10-29 (饭耳移植 · 规格 §3.1): timed overnight recording.
+        // ★ 2026-10-30 (用户："定时录音……真正在手表上录"): the scheduler now
+        // drives the WATCH (WatchConnectivity command), not the phone mic; the
+        // wrist clip flows back through the existing transfer pipeline.
+        TimedRecordingScheduler.shared.configure(configService: config, watch: watch)
         TimedRecordingScheduler.shared.evaluate()
         // Same reasoning, for the other three kinds of job: resume the unfinished summary / translation / format conversion from last time.
         //

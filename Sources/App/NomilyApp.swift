@@ -64,6 +64,12 @@ struct NomilyApp: App {
         // `NightlyTranscribeScheduler.shared.configure(...)` in `AppEnvironment.init`,
         // which runs right after this — see that class for the full wiring map.
         _ = NightlyTranscribeScheduler.register()
+        // ★ 2026-10-30（用户："新人用户下载…需要一个介绍展示示例音频跟对应文档"）：
+        // 首次启动往资料库播三条示例（使用指南 / 欢迎信 / 带完整产物的示例会议录音）。
+        // 幂等 + 只跑一次；丢后台队列，不拖慢启动（新用户首次进资料库时已就位）。
+        Task.detached(priority: .utility) {
+            DemoContent.seedIfNeeded()
+        }
     }
 
     var body: some Scene {

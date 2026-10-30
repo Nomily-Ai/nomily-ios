@@ -195,6 +195,9 @@ struct TranscriptSegmentRow: View {
     /// singleton so this row stays a pure function of its inputs — it is also used
     /// by the full-screen transcript, which gets the map from the same page.
     var speakerNames: [String: String] = [:]
+    /// ★ 2026-10-30（纪要溯源跳转）：这一行是「摘要/待办点溯源」刚跳到的目标——
+    /// 短暂黄底，几秒后由页面清掉。
+    var isTraced: Bool = false
     var onTap: () -> Void
 
     /// ★ 2026-10-26 (user: "打点要在转录里作为重点标记，而不是文字"): live
@@ -255,7 +258,9 @@ struct TranscriptSegmentRow: View {
             .padding(.horizontal, 4)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(isActive ? Color.appAccent.opacity(0.07) : Color.clear)
+                    .fill(isTraced
+                          ? Color.yellow.opacity(0.18)
+                          : (isActive ? Color.appAccent.opacity(0.07) : Color.clear))
             )
             .contentShape(Rectangle())
             }
@@ -311,6 +316,26 @@ enum TodoExtract {
         "待确认", "待定", "未决", "风险", "背景", "说明", "概述", "议程", "总结", "结论",
     ]
 
+    /// ★ 2026-10-30（用户："待办事项需要根据摘要识别精准"）：不是待办的句子踢掉。
+    /// 模板在行动项下面常跟着"备注：…""以上事项待确认""暂无"这类**说明性**行，
+    /// 以前被当成待办列出来，用户勾了半天发现勾的是废话。
+    static let noisePrefixes = [
+        "备注", "注：", "注:", "说明：", "说明:", "提示：", "提示:",
+        "以上", "以下", "暂无", "总计", "合计", "—", "-", "（", "(",
+    ]
+
+    /// 归一化：去掉行内 markdown 记号、序号前缀、多余空白——既用于去重，
+    /// 也用于和手写待办比对（手抄一遍同一条不该出现两次）。
+    static func normalize(_ text: String) -> String {
+        var s = text
+        s = s.replacingOccurrences(of: #"^\s*[-*•]\s+"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"^\s*\d{1,2}[.)、]\s*"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"^\s*\[[ xX]\]\s*"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: "**", with: "")
+        s = s.replacingOccurrences(of: "`", with: "")
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func fromSummary(_ markdown: String) -> [MarkdownBlock] {
         var result: [MarkdownBlock] = []
         /// Level of the heading that opened the to-do block; `nil` = not collecting.
@@ -329,7 +354,23 @@ enum TodoExtract {
             }
             if openLevel != nil { result.append(block) }
         }
-        return result
+
+        // ★ 2026-10-30：逐条清洗——去空、去说明行、去重（同一条只留第一次出现）。
+        var seen = Set<String>()
+        var cleaned: [MarkdownBlock] = []
+        for block in result {
+            if case .heading = block.kind {
+                cleaned.append(block)
+                continue
+            }
+            let text = normalize(block.text)
+            guard text.count >= 4 else { continue }
+            if noisePrefixes.contains(where: { text.hasPrefix($0) }) { continue }
+            let key = text.replacingOccurrences(of: " ", with: "").lowercased()
+            guard seen.insert(key).inserted else { continue }
+            cleaned.append(MarkdownBlock(kind: block.kind, text: text))
+        }
+        return cleaned
     }
 }
 
@@ -421,6 +462,10 @@ enum MarkdownBlocks {
 struct MarkdownBlocksView: View {
 
     let blocks: [MarkdownBlock]
+    /// ★ 2026-10-30（纪要溯源跳转）：给了回调就在每个内容块（要点/段落）行尾
+    /// 显示一枚「跳到原文」小按钮——点它把这条要点在转写里定位出来。
+    /// 传 nil（如待办列表里的标题行）就不显示。
+    var onTrace: ((String) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -436,12 +481,14 @@ struct MarkdownBlocksView: View {
                     HStack(alignment: .top, spacing: 6) {
                         Text("•").font(.body).foregroundStyle(.secondary)
                         Text(inline(block.text)).font(.callout)
+                        traceButton(block)
                     }
 
                 case .ordered(let number):
                     HStack(alignment: .top, spacing: 6) {
                         Text("\(number).").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                         Text(inline(block.text)).font(.callout)
+                        traceButton(block)
                     }
 
                 case .quote:
@@ -452,20 +499,40 @@ struct MarkdownBlocksView: View {
                         Text(inline(block.text))
                             .font(.callout)
                             .foregroundStyle(.secondary)
+                        traceButton(block)
                     }
 
                 case .rule:
                     Divider()
 
                 case .paragraph:
-                    Text(inline(block.text))
-                        .font(.callout)
-                        .lineSpacing(4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(inline(block.text))
+                            .font(.callout)
+                            .lineSpacing(4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        traceButton(block)
+                    }
                 }
             }
         }
         .textSelection(.enabled)
+    }
+
+    /// 行尾的「跳到原文」小按钮。没有回调时是透明占位（不渲染）。
+    @ViewBuilder
+    private func traceButton(_ block: MarkdownBlock) -> some View {
+        if let onTrace {
+            Button {
+                onTrace(block.text)
+            } label: {
+                Image(systemName: "arrow.right.circle")
+                    .font(.caption2)
+                    .foregroundStyle(Color.secondary.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(L10n.ClipDetail.traceSource))
+        }
     }
 
     /// Renders `**bold**` / `*italic*` / `` `code` `` without pulling in a Markdown engine.
@@ -490,13 +557,27 @@ struct TodoChecklistView: View {
     let blocks: [MarkdownBlock]
     /// Namespace for the persisted checks: the recording's name.
     let recordingName: String
+    /// ★ 2026-10-30（纪要溯源跳转）：给了回调就在每条待办行尾显示「跳到原文」
+    /// 小按钮（行主体仍是勾选/取消勾选）。
+    var onTrace: ((String) -> Void)? = nil
 
     @EnvironmentObject private var configService: ConfigService
     @State private var done: Set<String> = []
     /// ★ 2026-10-29：本次进入页面新同步进「提醒事项」的条数（0/nil = 没有新增）。
     @State private var remindersCreated = 0
+    /// ★ 2026-10-30（用户："待办支持手写待办不只是总结出来的待办"）：用户自己加的行。
+    /// 存在 UserDefaults 里（key 按录音名），跟着录音走，重新生成摘要也不会丢。
+    @State private var manual: [String] = []
+    /// 输入框草稿。
+    @State private var newTodo = ""
 
     private var defaultsKey: String { "todo.checked.\(recordingName)" }
+    private var manualKey: String { "todo.manual.\(recordingName)" }
+
+    /// 手写待办是否已有内容——父视图据此决定"没有摘要待办时要不要显示本视图"。
+    static func hasManual(_ recordingName: String) -> Bool {
+        !(UserDefaults.standard.stringArray(forKey: "todo.manual.\(recordingName)") ?? []).isEmpty
+    }
 
     /// ★ 2026-10-29（用户："待办支持同步到 iPhone 里面的待办"）：开关打开时，
     /// 进待办列表就把行写进系统「提醒事项」（幂等：已建过的行不会重复）。
@@ -514,6 +595,22 @@ struct TodoChecklistView: View {
                     MarkdownBlocksView(blocks: [block])
                 }
             }
+
+            // ★ 2026-10-30：手写待办排在摘要待办之后——"我自己记的"和"AI 提取的"
+            // 混在一起会看不出边界，但都带同一个勾选框，操作一致。
+            ForEach(manual, id: \.self) { text in
+                row(MarkdownBlock(kind: .bullet, text: text), isManual: true)
+            }
+
+            // 没有可提取的待办、也没手写过——说明为什么，而不是给一个空列表。
+            if blocks.isEmpty && manual.isEmpty {
+                Text(L10n.ClipDetail.todosNeedSummary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            addTodoRow
+
             if remindersCreated > 0 {
                 HStack(spacing: 4) {
                     Image(systemName: "checklist")
@@ -522,41 +619,126 @@ struct TodoChecklistView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             }
+
+            // ★ 2026-10-30（用户："同步到手机待办这个是同步到手机的提醒事项方便查看
+            // 需要做的事情"）：开关开着就常驻一行说明——不是"刚建了几条"的瞬时提示，
+            // 而是告诉用户**去哪儿看还剩什么要做**（否则同步了也等于没同步）。
+            if remindersSyncOn && !(blocks.isEmpty && manual.isEmpty) {
+                Text(L10n.Reminders.listFooter)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+            }
         }
         .onAppear {
             load()
+            loadManual()
             syncToReminders()
         }
         .onChange(of: blocks) { _ in syncToReminders() }
     }
 
-    private func row(_ block: MarkdownBlock) -> some View {
-        let checked = done.contains(block.text)
-        return Button {
-            if checked { done.remove(block.text) } else { done.insert(block.text) }
-            save()
-            // ★ 2026-10-29：勾选状态镜像到「提醒事项」（开关开着才动）。
-            if remindersSyncOn {
-                RemindersSyncService.shared.updateCompletion(
-                    text: block.text,
-                    recordingName: recordingName,
-                    isCompleted: !checked)
+    /// 手写一条待办：输入框 + 「+」。回车也能提交。
+    private var addTodoRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "plus.circle")
+                .font(.body)
+                .foregroundStyle(Color.secondary)
+            TextField(L10n.ClipDetail.addTodoPlaceholder, text: $newTodo)
+                .font(.callout)
+                .submitLabel(.done)
+                .onSubmit(addManualTodo)
+            if !newTodo.trimmingCharacters(in: .whitespaces).isEmpty {
+                Button(L10n.Common.done) { addManualTodo() }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.appAccent)
             }
-        } label: {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: checked ? "checkmark.circle.fill" : "circle")
-                    .font(.body)
-                    .foregroundStyle(checked ? Color.green : Color.secondary)
-                Text(block.text)
-                    .font(.callout)
-                    .strikethrough(checked, color: .secondary)
-                    .foregroundStyle(checked ? Color.secondary : Color.primary)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .padding(.top, 2)
+    }
+
+    private func row(_ block: MarkdownBlock, isManual: Bool = false) -> some View {
+        let checked = done.contains(block.text)
+        return HStack(alignment: .top, spacing: 6) {
+            Button {
+                if checked { done.remove(block.text) } else { done.insert(block.text) }
+                save()
+                // ★ 2026-10-29：勾选状态镜像到「提醒事项」（开关开着才动）。
+                if remindersSyncOn {
+                    RemindersSyncService.shared.updateCompletion(
+                        text: block.text,
+                        recordingName: recordingName,
+                        isCompleted: !checked)
+                }
+            } label: {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: checked ? "checkmark.circle.fill" : "circle")
+                        .font(.body)
+                        .foregroundStyle(checked ? Color.green : Color.secondary)
+                    Text(block.text)
+                        .font(.callout)
+                        .strikethrough(checked, color: .secondary)
+                        .foregroundStyle(checked ? Color.secondary : Color.primary)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if let onTrace {
+                Button {
+                    onTrace(block.text)
+                } label: {
+                    Image(systemName: "arrow.right.circle")
+                        .font(.caption2)
+                        .foregroundStyle(Color.secondary.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(L10n.ClipDetail.traceSource))
+            }
+        }
+        // 只有手写的行给删除——摘要提取的行以摘要为准，重生成会自己更新。
+        .contextMenu {
+            if isManual {
+                Button(role: .destructive) {
+                    removeManual(block.text)
+                } label: {
+                    Label(L10n.Common.delete, systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    // MARK: - 手写待办（★ 2026-10-30）
+
+    private func loadManual() {
+        manual = UserDefaults.standard.stringArray(forKey: manualKey) ?? []
+    }
+
+    private func addManualTodo() {
+        let text = newTodo.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        // 与摘要里已有的条目去重：手抄一遍同一条不该出现两次。
+        let normalized = TodoExtract.normalize(text)
+        let existing = blocks.map { TodoExtract.normalize($0.text) }
+        guard !existing.contains(normalized), !manual.contains(normalized) else {
+            newTodo = ""
+            return
+        }
+        manual.append(normalized)
+        UserDefaults.standard.set(manual, forKey: manualKey)
+        newTodo = ""
+        syncToReminders()
+    }
+
+    private func removeManual(_ text: String) {
+        manual.removeAll { $0 == text }
+        UserDefaults.standard.set(manual, forKey: manualKey)
+        if done.contains(text) {
+            done.remove(text)
+            save()
+        }
     }
 
     private func load() {
@@ -572,9 +754,13 @@ struct TodoChecklistView: View {
     /// 设置页开关那行才是处理授权的地方，列表里不打扰。
     private func syncToReminders() {
         guard remindersSyncOn else { return }
+        // ★ 2026-10-30：手写待办也一起同步——用户在 App 里写下的，正是他希望在
+        // 手机「提醒事项」里看到的。
+        let all = blocks + manual.map { MarkdownBlock(kind: .bullet, text: $0) }
+        guard !all.isEmpty else { return }
         Task {
             let created = await RemindersSyncService.shared.sync(
-                blocks: blocks, recordingName: recordingName)
+                blocks: all, recordingName: recordingName)
             if created > 0 {
                 await MainActor.run { remindersCreated = created }
             }

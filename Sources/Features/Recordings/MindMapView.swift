@@ -186,7 +186,17 @@ struct MindMapLayout {
     /// (see `foldPoints(in:showingLevels:)`). That's what lets one heavy
     /// branch stay folded while the rest of the map is open, and what lets a
     /// tap open exactly the branch that was tapped.
-    static func build(tree: OutlineNode, collapsed: Set<Int> = []) -> MindMapLayout {
+    ///
+    /// ★ 2026-10-30 ("思维导图显示有问题"): `rootLabel` has to reach the
+    /// measurement step. When a summary has several top-level sections the
+    /// parser synthesises a root with an **empty** title and the screen draws
+    /// `rootLabel` in its place — but the size was measured for the empty
+    /// string, so the root chip came out at its 56×30 minimum and the real
+    /// title wrapped inside it, glyphs overlapping. Measuring the *displayed*
+    /// text keeps the box honest; the same substitution the node view makes
+    /// (`title.isEmpty && depth == 0 → rootLabel`) is mirrored here so the two
+    /// can never disagree again.
+    static func build(tree: OutlineNode, collapsed: Set<Int> = [], rootLabel: String = "") -> MindMapLayout {
         // ---- 1. Flatten the tree, stopping at folded nodes --------------
         struct Visible {
             let node: OutlineNode
@@ -216,8 +226,17 @@ struct MindMapLayout {
         var childrenOf: [Int: [Int]] = [:]
         var byID: [Int: Visible] = [:]
         for entry in visible {
+            // Measure the text that will actually be drawn — see the
+            // `rootLabel` note on this method for why the substitution here
+            // must match `MindMapNodeView.text`.
+            let displayTitle: String
+            if entry.node.title.isEmpty, entry.node.depth == 0, !rootLabel.isEmpty {
+                displayTitle = rootLabel
+            } else {
+                displayTitle = entry.node.title
+            }
             sizes[entry.node.id] = nodeSize(
-                title: entry.node.title,
+                title: displayTitle,
                 depth: entry.node.depth,
                 hasChildren: !entry.node.children.isEmpty
             )
@@ -605,7 +624,9 @@ struct MindMapScreen: View {
         self.tree = parsed
         _expandLevel = State(initialValue: level)
         _collapsed = State(initialValue: folded)
-        _layout = State(initialValue: parsed.map { MindMapLayout.build(tree: $0, collapsed: folded) })
+        _layout = State(initialValue: parsed.map {
+            MindMapLayout.build(tree: $0, collapsed: folded, rootLabel: fallbackTitle)
+        })
     }
 
     var body: some View {
@@ -691,7 +712,7 @@ struct MindMapScreen: View {
 
     private func rebuildLayout() {
         guard let tree else { return }
-        layout = MindMapLayout.build(tree: tree, collapsed: collapsed)
+        layout = MindMapLayout.build(tree: tree, collapsed: collapsed, rootLabel: fallbackTitle)
     }
 
     /// Floating zoom / fit controls, kept over the map's bottom edge so the
@@ -1019,7 +1040,7 @@ struct MindMapPreviewCard: View {
         let topSections = tree.children.count
         let levels = topSections > 8 ? 1 : min(2, max(1, tree.maxDepth))
         let folded = MindMapLayout.foldPoints(in: tree, showingLevels: levels)
-        self.layout = MindMapLayout.build(tree: tree, collapsed: folded)
+        self.layout = MindMapLayout.build(tree: tree, collapsed: folded, rootLabel: title)
     }
 
     var body: some View {

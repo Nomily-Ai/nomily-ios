@@ -128,7 +128,8 @@ final class WebDAVSyncService: ObservableObject {
         }
         // `try?` on a throwing tuple-returning call yields an optional tuple —
         // unwrap via `result?.1`; any failure (network, TLS, non-2xx) means upload.
-        let result = try? await URLSession.shared.data(for: req)
+        // ★ 2026-10-30：走 client.session —— 「允许自签」的配置这里是放行版会话。
+        let result = try? await client.session.data(for: req)
         let status = (result?.1 as? HTTPURLResponse)?.statusCode ?? 0
         return status != 200
     }
@@ -144,7 +145,8 @@ final class WebDAVSyncService: ObservableObject {
             useHTTPS: cfg.useHTTPS,
             username: cfg.username,
             password: cfg.password ?? "",
-            basePath: cfg.basePath
+            basePath: cfg.basePath,
+            allowSelfSigned: cfg.allowSelfSigned
         )
     }
 
@@ -164,8 +166,7 @@ extension WebDAVClient {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.timeoutInterval = 30
-        let credential = Data("\(username):\(password)".utf8).base64EncodedString()
-        req.setValue("Basic \(credential)", forHTTPHeaderField: "Authorization")
+        req.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
         return req
     }
 }
