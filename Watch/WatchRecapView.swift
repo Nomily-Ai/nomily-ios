@@ -1,4 +1,5 @@
 import SwiftUI
+import WatchKit
 
 /// The wrist Recap page (★ 2026-10-23, "watch 那边能否靠 Siri Recap 的看齐").
 ///
@@ -18,6 +19,8 @@ import SwiftUI
 /// most 8 entries and nothing about it needs custom paging or gesture plumbing.
 struct WatchRecapView: View {
     @ObservedObject private var store = WatchRecapStore.shared
+    /// 清空全部的二次确认开关（★ 2026-10-30）。
+    @State private var showClearConfirm = false
 
     var body: some View {
         Group {
@@ -41,6 +44,15 @@ struct WatchRecapView: View {
                         } label: {
                             row(recap)
                         }
+                        // ★ 2026-10-30（用户："删除的时候不是全部删除摘要，点击删除
+                        // 支持选择删除哪条摘要"）：左滑删**这一条**，不再只能清空全部。
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                withAnimation { store.remove(id: recap.id) }
+                            } label: {
+                                Label(L10n.Common.delete, systemImage: "trash")
+                            }
+                        }
                     }
                 }
             }
@@ -49,13 +61,24 @@ struct WatchRecapView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if !store.recaps.isEmpty {
+                    // 清空全部退到二次确认——单条删除已经在行上，这里只留"全清"。
                     Button {
-                        store.clear()
+                        showClearConfirm = true
                     } label: {
                         Image(systemName: "trash")
                     }
                 }
             }
+        }
+        .confirmationDialog(
+            L10n.Watch.recapClearAll,
+            isPresented: $showClearConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.Watch.recapClearAllConfirm, role: .destructive) {
+                withAnimation { store.clear() }
+            }
+            Button(L10n.Common.cancel, role: .cancel) {}
         }
     }
 
@@ -82,6 +105,9 @@ struct WatchRecapView: View {
 /// the same bulleted points the list used to inline.
 struct WatchRecapDetailView: View {
     let recap: WatchRecap
+    @EnvironmentObject private var link: WatchLink
+    /// ★ 2026-10-30：已经点过的待办（本地即时反馈，避免重复点）。
+    @State private var sent: Set<String> = []
 
     var body: some View {
         ScrollView {
@@ -114,6 +140,43 @@ struct WatchRecapDetailView: View {
                                 .foregroundStyle(.primary)
                         }
                     }
+                }
+
+                // ★ 2026-10-30（用户："在里面可以查看到待办，支持在手表里面点击可以
+                // 同步到手机的待办里面"）：点一条 → 手机写进「提醒事项」。
+                if !recap.todos.isEmpty {
+                    Text(L10n.Watch.recapTodos)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 6)
+
+                    ForEach(recap.todos, id: \.self) { todo in
+                        Button {
+                            guard !sent.contains(todo) else { return }
+                            sent.insert(todo)
+                            link.requestReminder(title: todo, source: recap.title)
+                            WKInterfaceDevice.current().play(.click)
+                        } label: {
+                            HStack(alignment: .top, spacing: 5) {
+                                Image(systemName: sent.contains(todo)
+                                      ? "checkmark.circle.fill" : "plus.circle")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(sent.contains(todo) ? Color.green : Color.accentColor)
+                                    .padding(.top, 1)
+                                Text(todo)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(sent.contains(todo) ? Color.secondary : Color.primary)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Text(L10n.Watch.recapTodoHint)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 1)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

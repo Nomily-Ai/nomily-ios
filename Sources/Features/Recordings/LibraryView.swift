@@ -1912,8 +1912,18 @@ actor LibraryScanner {
         if url.pathExtension.lowercased() == "opus" {
             return OpusOgg.duration(ofOggOpusAt: url)
         }
-        let seconds = (try? await AVURLAsset(url: url).load(.duration).seconds) ?? 0
-        return (seconds.isFinite && seconds > 0) ? seconds : nil
+        if let seconds = (try? await AVURLAsset(url: url).load(.duration).seconds),
+           seconds.isFinite, seconds > 0 {
+            return seconds
+        }
+        // ★ 2026-10-27（用户："录音传输过去没有显示时长"）：D3200 的 mp3 来自
+        // PlaudBleSDK 的 Mp3Convert（VBR、无 Xing/LAME 头），AVURLAsset 对这种
+        // 文件可能给不出时长。AVAudioFile 走 CoreAudio 逐帧解析，长度是精确的。
+        if let file = try? AVAudioFile(forReading: url) {
+            let seconds = Double(file.length) / file.processingFormat.sampleRate
+            if seconds.isFinite, seconds > 0 { return seconds }
+        }
+        return nil
     }
 
     private func loadDurationCacheIfNeeded() {

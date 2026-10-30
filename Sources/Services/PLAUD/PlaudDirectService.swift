@@ -141,6 +141,20 @@ final class PlaudDirectService: NSObject, ObservableObject {
     @Published private(set) var recordStartedAt: Date?
     @Published private(set) var deviceElapsed: TimeInterval?
     @Published private(set) var recordSessionID: Int?
+    /// ★ 2026-10-26 (user: "没有录音结束了，但是在实时页面显示上一次的录音时长"):
+    /// a one-way tombstone for the take.
+    ///
+    /// `isRecording` / `isPaused` are `@Published` and get flipped on the main
+    /// queue, but the three audio callbacks (`onPCM`, `blePcmData`, and the
+    /// file-probe reply) each `DispatchQueue.main.async` their clock write.
+    /// Those blocks can land *after* `finishTake` cleared the clock, so every
+    /// one of them used to re-arm `deviceElapsed` / `recordStartedAt` for a take
+    /// that no longer existed — the live page then showed the finished take's
+    /// duration forever.
+    ///
+    /// Set synchronously at the very top of `finishTake`, cleared only when a
+    /// new take is confirmed — so no late audio block can pass this gate.
+    private var takeEnded = true
     /// Live file on the card for this session (bytes written so far) — the SDK's
     /// "real-time duration through the sync-file offset".
     @Published private(set) var recordBytes: Int = 0
@@ -193,6 +207,33 @@ final class PlaudDirectService: NSObject, ObservableObject {
     @Published private(set) var liveSegments: [PlaudLiveSegment] = []
     /// The in-flight hypothesis (not yet a committed line).
     @Published private(set) var livePartial = ""
+    /// What the live panel is allowed to show **right now** — Plaud / vobot
+    /// parity.
+    ///
+    /// Both apps treat the live panel as a view onto *the take that is running*:
+    /// press stop, the panel closes and its words belong to the recording, not
+    /// to the live view. Ours kept painting the finished take's text under a
+    /// clock that had already gone back to 0:00, so the screen claimed a new
+    /// take already had words in it (user, 2026-10-26: "上一次的实时转录结束了，
+    /// 实时字幕的文字也要清除").
+    ///
+    /// The strings themselves are **not** dropped here: `saveLiveTranscript`
+    /// writes them next to the clip the card is about to hand over — that file
+    /// is the only place the detail page can read a transcript from — so the
+    /// data lives until the transfer lands. Display is gated, data is kept.
+    var liveSegmentsVisible: [PlaudLiveSegment] {
+        isRecording || isPaused ? liveSegments : []
+    }
+    var livePartialVisible: String {
+        isRecording || isPaused ? livePartial : ""
+    }
+    /// A finished take whose text is still waiting for its clip. The panel says
+    /// so instead of showing an unexplained empty box.
+    var hasLiveTextAwaitingClip: Bool {
+        !isRecording && !isPaused
+            && liveTranscriptSavedTo == nil
+            && (!liveSegments.isEmpty || !livePartial.isEmpty)
+    }
     /// Why live transcription is silent (`nil` = working / not started). Shown
     /// instead of an empty box, because "no text" and "no permission" look
     /// identical on screen and only one of them is the user's to fix.
@@ -214,6 +255,15 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Clip name the live transcript was already written next to (`nil` = not
     /// saved into the library yet). The Live screen shows this as proof.
     @Published private(set) var liveTranscriptSavedTo: String?
+    /// Words of takes that have already **ended** but whose clip has not landed
+    /// yet, keyed by the take's session id.
+    ///
+    /// Why a stash and not just `liveSegments`: the panel is cleared the moment a
+    /// take stops (Plaud / vobot behaviour), and the next take clears the state
+    /// too — but a clip can only receive its transcript when the transfer
+    /// finishes, which may be minutes later or after another recording. Without
+    /// this, "录两段" silently lost the first take's text.
+    private var stashedLiveTranscripts: [Int: (text: String, segments: [AsrSegment])] = [:]
     /// Bookmarks pressed on the card during THIS recording ("打点"). The card
     /// pushes them via `bleMarking`; there is no "how many" query mid-recording,
     /// so this is "what we heard" — same contract as the A1's remark count.
@@ -244,6 +294,31 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// different claims. Same rule as the A1 `sizeBytes` trap: never let an
     /// unknown masquerade as a measurement.
     @Published private(set) var cardFileCount: Int?
+    /// ★ 2026-10-27 ("点击交还官方 App 没效果"): the last hand-back's real
+    /// outcome. The UI used to print "已交还" the instant the button was
+    /// tapped, whatever the card answered — this is the honest replacement.
+    /// `nil` = no hand-back attempted in this session.
+    enum ReleaseOutcome: Equatable {
+        /// The card acked `bleDepair` with status 0 — it really is released.
+        case acked
+        /// The card answered with a non-zero status (it refused).
+        case rejected(Int32)
+        /// No answer within the watchdog window — command sent, outcome unknown.
+        case unconfirmed
+    }
+    @Published private(set) var releaseOutcome: ReleaseOutcome?
+    /// ★ 2026-10-27 ("点击解绑还是跟 Nomily 绑定的蓝牙" — the real bug): after a
+    /// hand-back the card MUST NOT be re-connected automatically. The keeper
+    /// scanned and re-bound it **4 s** after `depair` (diag 11:08:05 → 11:08:09
+    /// "PLAUD bound 8810A3…"), which mints a fresh ownership lock and quietly
+    /// undoes the release the card had just performed (its storage had already
+    /// dropped 61.9 MB → 704 KB, i.e. the wipe DID run). While this is true the
+    /// keeper stands down and no scan auto-binds; only an explicit user action
+    /// (scan / pair / reconnect tap) clears it.
+    /// Persisted: a relaunch must not undo a hand-back either — with an
+    /// unconfirmed release the card is still `pairedSN`, and the launch-time
+    /// keeper would re-bind it within seconds.
+    @Published private(set) var handoverHold = UserDefaults.standard.bool(forKey: "plaud.handover_hold")
     /// The card the user tapped in the scan list (before credentials exist —
     /// the official app shows cards + SN first, key comes after).
     @Published private(set) var selectedCard: ScannedCard?
@@ -311,9 +386,19 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// never beat the old segment's 90 s). This offset is what keeps one pause
     /// looking like one recording.
     private var elapsedBase: TimeInterval = 0
+    /// ★ 2026-10-26: true when the live decryptor is still attached to the
+    /// **same** session id as before a pause (this firmware's resume does not
+    /// renumber the session, contra the Android RE note above) — its `seconds`
+    /// then already span the whole take and must NOT have `elapsedBase` added.
+    /// Set by `openLiveStream`, read by the `onPCM` / `blePcmData` clock paths.
+    private var liveDecoderOwnsWholeTake = false
     /// Every segment id of the current take, oldest first. A take is no longer
     /// guaranteed to be one file on the card.
     private var recordSegmentIDs: [Int] = []
+    /// ★ 2026-10-27: a hand-back that is waiting for the card's `bleDepair`
+    /// answer. Non-nil = a release is in flight (see `releaseDevice`).
+    private var pendingRelease: (factoryReset: Bool, sn: String)?
+    private var releaseWatchdog: DispatchWorkItem?
     private var userToken: String?
     private var userTokenAt = Date.distantPast
     private var isInitialized = false
@@ -349,6 +434,28 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// after two silent attempts instead of injecting a dead command every few
     /// seconds into the same channel that carries the audio.
     private var markingProbeStrikes = 0
+    /// ★ 2026-10-26 (E1): observability for the marks poll — see the long note
+    /// in `startStatePolling`. `lastMarksProbeSID` changes exactly when the poll
+    /// goes from "no session to ask about" to "asking", which is the edge that
+    /// decides whether `penCollect` can ever be read during a take.
+    private var lastMarksProbeSID: Int?
+    private var lastMarksProbeAt: Date?
+    /// Set true only by the user's stop tap (`stopRecording`). A stop that
+    /// arrives **without** this flag while the take is paused is the card
+    /// sealing the paused segment on its own — 16:03:49 in the 2026-10-26 log,
+    /// 1.0 s after `pause acked` — and must NOT tear the take down, or the
+    /// live transcript ("点暂停后实时字幕的内容也被清空了") and the clock die
+    /// with it.
+    private var userStopRequested = false
+    /// Set while we are waiting for the **post-take** `getMarking` answer
+    /// (`probeMarksAfterTake`). Only used to tell that answer apart from the
+    /// in-take poll's, so the exact timestamps can be merged into the transcript
+    /// instead of being stamped "when the poll noticed".
+    private var postTakeMarkProbeSID: Int?
+    /// ★ 2026-10-26: `getRecordMarkingTags` (the `0x26` request) is allowed to run
+    /// **once per app launch** — see `probeMarkTagsOnce`. It trapped the SDK twice
+    /// when it was polled during a take; that must never become a loop again.
+    private var postTakeTagsProbeDone = false
     /// Set once the card ever answers `getMarking`. When false the UI says the
     /// count arrives after the recording instead of showing a permanent "—".
     @Published private(set) var marksAvailableLive = true
@@ -678,6 +785,13 @@ final class PlaudDirectService: NSObject, ObservableObject {
             self.liveSegments = dying.segments
             self.livePartial = dying.partial
             self.liveTranscript = Self.joinedTranscript(dying.segments, partial: dying.partial)
+            // ★ 2026-10-26: these are the *tail* sentences — they only arrive
+            // after `stop()`, i.e. after `finishTake` already parked the
+            // snapshot. Keep the parked copy current so the clip's transcript
+            // does not end mid-sentence.
+            if let sid, let snap = self.liveSnapshot() {
+                self.stashedLiveTranscripts[sid] = snap
+            }
         }
         dying.onFailure = nil      // a dying engine must not trigger a fallback
         dying.stop()
@@ -709,16 +823,145 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// gets stamped on the card's clock. On this firmware `getMarking` is
     /// ignored, so the stamp is the moment the `penCollect` poll noticed the
     /// change — accurate to the poll interval, never claimed to be exact.
+    /// ★ 2026-10-26 (E2): ask for this take's marks once it is over.
+    ///
+    /// Why after: the in-take `getMarking` poll is ignored by this firmware (52
+    /// requests, 0 answers, 2026-10-21). Everything about the card's own key that
+    /// we cannot see while recording may still be perfectly readable **when
+    /// idle** — a mark table does not disappear with the stream. One request,
+    /// 2 s after the stop, so it does not race the file-list refresh or the last
+    /// audio packets. `bleMarking` takes it from there.
+    ///
+    /// This is the experiment the RE doc (`Plaud-卡片按键打点-逆向与实现方向.md`)
+    /// asks for, done from the safe side: no raw frames (the Plaud link is
+    /// ChaCha20-encrypted inside `BleAgent`, so we cannot write `02 26 …` by
+    /// hand) — `getRecordMarkingTags` **is** that `0x26` request, already built
+    /// by the SDK, so calling it is the same wire traffic without touching the
+    /// transport.
+    private func probeMarksAfterTake(sid: Int?) {
+        guard let sid, sid > 0 else {
+            TicNoteDiagLog.log("PLAUD-REC", "post-take getMarking skipped (no session id)")
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self, self.phase.isConnected else { return }
+            self.postTakeMarkProbeSID = sid
+            TicNoteDiagLog.log("PLAUD-REC", "post-take getMarking sid=\(sid) (E2: does the card answer while idle?)")
+            PlaudDeviceAgent.shared.bleAgent?.getMarking(sid)
+            // Verdict if nothing comes back — otherwise "silent" and "never sent"
+            // stay indistinguishable, which is how this bug survived six rounds.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [weak self] in
+                guard let self, self.postTakeMarkProbeSID == sid else { return }
+                self.postTakeMarkProbeSID = nil
+                TicNoteDiagLog.log("PLAUD-REC", "post-take getMarking SILENT (firmware ignores it when idle too)")
+            }
+            self.probeMarkTagsOnce(sid: sid)
+        }
+    }
+
+    /// ★ 2026-10-26 (RE 回复 §5 step 1): the decisive `0x26` test.
+    ///
+    /// History: `getRecordMarkingTags` was called every 3 s **during** a take on
+    /// 2026-10-26 and the SDK trapped twice (`BleAgent.dataOfGetRecordMarkingTags`,
+    /// `EXC_BREAKPOINT`) — that is the "结束录音直接闪退" report. Two things are
+    /// different this time, both deliberate:
+    ///   · **not while recording** — `getFileList` is documented as unavailable
+    ///     mid-recording and "poisons the command queue"; a request builder that
+    ///     force-unwraps the live session would trap exactly the way it did;
+    ///   · **once per app launch**, never in a loop, so a trap can cost one
+    ///     relaunch and not repeat.
+    ///
+    /// Arguments come straight from the RE wire format: `[3..6]` uid, `[7..10]`
+    /// start, `[11..14]` end, all u32 LE. `end` is clamped to `Int32.max` on
+    /// purpose — the doc says `0xFFFFFFFF`, but if the builder packs an `Int`
+    /// that would overflow to -1; every real epoch second is below 2 147 483 647
+    /// until 2038, so this window is "all of them" without the overflow risk.
+    private func probeMarkTagsOnce(sid: Int) {
+        guard !postTakeTagsProbeDone else { return }
+        postTakeTagsProbeDone = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            guard let self, self.phase.isConnected else { return }
+            let start = 0
+            let end = Int(Int32.max)
+            TicNoteDiagLog.log("PLAUD-REC", "post-take getRecordMarkingTags uid=\(sid) start=\(start) end=\(end) (0x26, one-shot)")
+            PlaudDeviceAgent.shared.bleAgent?.getRecordMarkingTags(uid: sid,
+                                                                  startTimestamp: start,
+                                                                  endTimestamp: end)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
+                TicNoteDiagLog.log("PLAUD-REC", "post-take getRecordMarkingTags: survived (no trap) — see any 'marking tags' line above")
+            }
+        }
+    }
+
+    /// Fold the card's **exact** mark offsets into what the transcript already
+    /// holds. App-pressed marks are kept — the card never hears about them, so a
+    /// plain overwrite would delete them; anything within 2 s of an exact offset
+    /// is treated as the same mark seen from the other side.
+    private func mergeExactMarkTimes(_ times: [TimeInterval]) {
+        var merged = times.sorted()
+        for existing in liveMarkers where !merged.contains(where: { abs($0 - existing) <= 2 }) {
+            merged.append(existing)
+        }
+        liveMarkers = merged.sorted()
+        recordMarkCount = max(recordMarkCount, merged.count)
+        // The panel already stopped showing this take's text, but `saveLiveTranscript`
+        // may not have written the clip yet — refresh the parked snapshot so the
+        // file it is about to write carries the corrected offsets.
+        if takeEnded, let sid = liveTranscriptSessionID, let snap = liveSnapshot() {
+            stashedLiveTranscripts[sid] = snap
+        }
+    }
+
     func applyMarkCount(_ count: Int, explicitTimes: [UInt32] = []) {
         guard count > recordMarkCount else { return }
         let added = count - recordMarkCount
         if explicitTimes.count >= count {
             liveMarkers = explicitTimes.map(Self.secondsFromMark)
         } else {
-            let at = deviceElapsed ?? 0
+            // ★ 2026-10-26: stamp on the card's clock, falling back to the wall
+            // anchor while the decoder has not caught up yet — a mark must never
+            // land at 0:00 just because the first PCM round was still in flight.
+            let at = deviceElapsed
+                ?? recordStartedAt.map { max(0, Date().timeIntervalSince($0)) }
+                ?? 0
             liveMarkers.append(contentsOf: Array(repeating: at, count: added))
         }
+        if added > 0 {
+            TicNoteDiagLog.log("PLAUD-REC", "marks +\(added) (count=\(count)) total=\(liveMarkers.count) at=\(Int(liveMarkers.last ?? 0))s")
+        }
         recordMarkCount = count
+    }
+
+    /// How many marks the UI should show this take: everything the card's key
+    /// reported (`recordMarkCount`) and everything pressed in the app
+    /// (`liveMarkers`) — usually the same marks seen from two sides, so `max`
+    /// never double-counts and never drops one.
+    var liveMarkCount: Int {
+        max(recordMarkCount, liveMarkers.count)
+    }
+
+    /// ★ 2026-10-26 (user: "实时转录的时候有一个打标记的需要"): the app's own
+    /// bookmark button on the recording stage / live page.
+    ///
+    /// It behaves exactly like a mark pressed on the card's key: a marker line
+    /// appears **in the live transcript at the moment it is pressed** (the same
+    /// `liveMarkers` channel the card key feeds), and `liveTranscriptWithMarks`
+    /// writes it into the saved transcript. One caveat, documented because it
+    /// matters: the card only knows its own key, so its `penCollect` count can
+    /// never exceed `recordMarkCount` — `applyMarkCount`'s `count >` guard
+    /// simply never fires for marks it has not seen, and app marks are never
+    /// overwritten by it.
+    @MainActor func addLiveMark() {
+        guard isRecording || isPaused else { return }
+        // The card's clock — the same time base the transcript lines are
+        // stamped with, so the marker line lands between the right sentences.
+        // Wall anchor as fallback while the decoder has not caught up.
+        let at = deviceElapsed
+            ?? recordStartedAt.map { max(0, Date().timeIntervalSince($0)) }
+            ?? 0
+        liveMarkers.append(at)
+        recordMarkCount += 1
+        TicNoteDiagLog.log("PLAUD-REC", "in-app mark at=\(Int(at))s total=\(recordMarkCount)")
     }
 
     // MARK: - Saving the live transcript into the library
@@ -728,6 +971,39 @@ final class PlaudDirectService: NSObject, ObservableObject {
         var lines: [(at: TimeInterval, text: String)] = liveSegments.map { ($0.at, $0.text) }
         lines += liveMarkers.map { ($0, L10n.Plaud.liveMarkLine(PlaudLiveSegment.clock($0))) }
         return lines.sorted { $0.at < $1.at }.map(\.text).joined(separator: "\n")
+    }
+
+    /// The current take's words exactly as they would be written to disk.
+    ///
+    /// One builder for two consumers: the writer (`saveLiveTranscript`) and the
+    /// stash a finished take leaves behind (see `stashedLiveTranscripts`).
+    private func liveSnapshot() -> (text: String, segments: [AsrSegment])? {
+        let text = liveTranscriptWithMarks().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        // Timestamps: each line ends at its own card clock, the previous line's
+        // clock is its start (the same shape `LiveModel.buildAsrSegments` uses).
+        // ★ 2026-10-26 (user: "打点要在转录里作为重点标记，而不是文字"): every
+        // merged item carries `isMark`, and marker segments are saved with
+        // `speaker = "mark"` so the detail page can render them as key-point
+        // bookmarks instead of ordinary transcript lines.
+        let merged: [(at: TimeInterval, text: String, isMark: Bool)] = {
+            var items: [(at: TimeInterval, text: String, isMark: Bool)] =
+                liveSegments.map { ($0.at, $0.text, false) }
+            items += liveMarkers.map {
+                ($0, L10n.Plaud.liveMarkLine(PlaudLiveSegment.clock($0)), true)
+            }
+            return items.sorted { $0.at < $1.at }
+        }()
+        let segments: [AsrSegment] = merged.enumerated().map { index, item in
+            let start = index > 0 ? merged[index - 1].at : 0
+            let end = max(item.at, start)
+            return AsrSegment(speaker: item.isMark ? "mark" : nil,
+                              text: item.text,
+                              start: (start * 10).rounded() / 10,
+                              end: (end * 10).rounded() / 10,
+                              duration: ((end - start) * 10).rounded() / 10)
+        }
+        return (text, segments)
     }
 
     /// Write the live transcript next to the clip the card just produced, and
@@ -743,38 +1019,35 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// Call on the main thread (it reads `configService.config` and registers in
     /// the library, both main-actor bound).
     @MainActor func saveLiveTranscript(sessionID: Int, clipName: String, size: Int) {
-        guard sessionID == liveTranscriptSessionID, liveTranscriptSavedTo == nil else { return }
-        let text = liveTranscriptWithMarks().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-
-        // Timestamps: each line ends at its own card clock, the previous line's
-        // clock is its start (the same shape `LiveModel.buildAsrSegments` uses).
-        let merged: [(at: TimeInterval, text: String)] = {
-            var items: [(at: TimeInterval, text: String)] = liveSegments.map { ($0.at, $0.text) }
-            items += liveMarkers.map { ($0, L10n.Plaud.liveMarkLine(PlaudLiveSegment.clock($0))) }
-            return items.sorted { $0.at < $1.at }
-        }()
-        let segments: [AsrSegment] = merged.enumerated().map { index, item in
-            let start = index > 0 ? merged[index - 1].at : 0
-            let end = max(item.at, start)
-            return AsrSegment(speaker: nil, text: item.text,
-                              start: (start * 10).rounded() / 10,
-                              end: (end * 10).rounded() / 10,
-                              duration: ((end - start) * 10).rounded() / 10)
+        guard liveTranscriptSavedTo == nil else { return }
+        // ★ 2026-10-26: the words of a *finished* take no longer sit in
+        // `liveSegments` once the next take starts (Plaud / vobot bind the text
+        // to the recording, not to the live view). Its clip can still land
+        // minutes later, so the finished take's snapshot is stashed by session
+        // id and looked up here — without this, recording twice in a row dropped
+        // the first take's transcript on the floor.
+        let snapshot: (text: String, segments: [AsrSegment])?
+        if sessionID == liveTranscriptSessionID {
+            snapshot = liveSnapshot()
+        } else {
+            snapshot = stashedLiveTranscripts[sessionID]
         }
+        guard let snapshot, !snapshot.text.isEmpty else { return }
 
         let url = StorageLocations.transcriptURLs(for: clipName)
         let locale = configService?.config.lastSourceLang ?? Locale.current.identifier
         do {
-            try text.data(using: .utf8)?.write(to: url.txt, options: .atomic)
+            try snapshot.text.data(using: .utf8)?.write(to: url.txt, options: .atomic)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let result = AsrResult(text: text, segments: segments, provider: "live", locale: locale)
+            let result = AsrResult(text: snapshot.text, segments: snapshot.segments,
+                                   provider: "live", locale: locale)
             try encoder.encode(result).write(to: url.json, options: .atomic)
         } catch {
             log.error("plaud live transcript write failed: \(error.localizedDescription, privacy: .public)")
             return
         }
+        stashedLiveTranscripts[sessionID] = nil
         liveTranscriptSavedTo = clipName
         library?.recordDownload(
             name: clipName,
@@ -1004,6 +1277,9 @@ final class PlaudDirectService: NSObject, ObservableObject {
     /// a tap needs no extra round trip; failure is non-fatal — scanning is a
     /// pure BLE operation under the hood.
     func startScan() {
+        // ★ 2026-10-27: an explicit scan is the user saying "I want this card
+        // back" — it is what lifts the post-hand-back hold (see `handoverHold`).
+        clearHandoverHold("scan")
         Task {
             if isConfigured {
                 try? await ensureInitialized()
@@ -1013,6 +1289,15 @@ final class PlaudDirectService: NSObject, ObservableObject {
             reconnectTarget = nil
             PlaudDeviceAgent.shared.startScan()
         }
+    }
+
+    /// Lift the post-hand-back hold — only ever on an explicit user gesture.
+    private func clearHandoverHold(_ why: String) {
+        guard handoverHold else { return }
+        handoverHold = false
+        UserDefaults.standard.set(false, forKey: "plaud.handover_hold")
+        releaseOutcome = nil
+        TicNoteDiagLog.log("PLAUD-REC", "release: hold lifted by \(why)")
     }
 
     /// Reconnect a **previously paired** card without making the user pick it
@@ -1052,6 +1337,7 @@ final class PlaudDirectService: NSObject, ObservableObject {
             var misses = 0
             while !Task.isCancelled {
                 guard self.pairedSN != nil,
+                      !self.handoverHold,
                       !self.phase.isConnected,
                       !self.phase.isBusy,
                       !self.isRecording,
@@ -1083,6 +1369,11 @@ final class PlaudDirectService: NSObject, ObservableObject {
     }
 
     func reconnect() {
+        // ★ 2026-10-27: every caller is a user gesture — the pill, the
+        // reconnect button, a card switch — and the keeper, which is blocked
+        // by `handoverHold` before it gets here. So this is a safe place to
+        // lift a post-hand-back hold.
+        clearHandoverHold("reconnect")
         guard let sn = pairedSN else {
             startScan()
             return
@@ -1240,6 +1531,9 @@ final class PlaudDirectService: NSObject, ObservableObject {
             setPhase(.failed(L10n.Plaud.cardGone))
             return
         }
+        // Tapping a card in the scan list is an explicit "bind this one" —
+        // it lifts a hand-back hold (the card is being paired on purpose).
+        clearHandoverHold("card tap")
         firmware = nil
         setPhase(.connecting(name: card.name))
         // 8.1: capture the advertised name here — `connect` is the one place
@@ -1503,6 +1797,11 @@ final class PlaudDirectService: NSObject, ObservableObject {
     func stopRecording() {
         guard phase.isConnected else { return }
         setRecordNotice(nil)
+        // ★ 2026-10-26: only a user stop may end a paused take. The card emits
+        // its own `bleRecordStop` ~1 s after a pause (segment sealed) — without
+        // this flag that callback is indistinguishable from "user pressed stop"
+        // and the pause looked like it wiped the transcript.
+        userStopRequested = true
         PlaudDeviceAgent.shared.stopRecord()
     }
 
@@ -1567,6 +1866,13 @@ final class PlaudDirectService: NSObject, ObservableObject {
             guard !moved else { return }
             TicNoteDiagLog.log("PLAUD-REC", "\(command.rawValue) failed twice — surfacing it")
             self.setRecordNotice(command == .pause ? L10n.Plaud.pauseFailed : L10n.Plaud.resumeFailed)
+            if command == .resume {
+                // ★ 2026-10-26: the card refused to continue a take we still show
+                // as paused (its own stop-after-pause really did end it). Leave
+                // the UI parked on a pause button that can never work and the
+                // user is stuck; end the take the honest way instead.
+                self.finishTake(cardInitiated: false)
+            }
         }
     }
 
@@ -1908,7 +2214,27 @@ final class PlaudDirectService: NSObject, ObservableObject {
                 //     (`getFile(sessionId:)` → `bleFileList` with one item) and
                 //     reads `penCollect`. If `getMarking` is a no-op on this
                 //     firmware, the file's own mark counter still moves.
-                if let sid = self.activeRecordSessionID {
+                //
+                // ★ 2026-10-26 (E1, "卡片按键打点没反应" 的最后一块盲区): until
+                //   now only the **replies** of this probe were in the diag log.
+                //   The one take we could inspect showed exactly two replies in
+                //   4½ minutes and both said `want=nil` — they arrived *after*
+                //   the stop. So "the card answered 0" and "we never asked"
+                //   looked identical, and the RE doc's whole plan (poll `0x26`
+                //   / read `penCollect`) rests on that one unknown.
+                //   One line per send, at most every 15 s, plus immediately
+                //   whenever the session id changes (that is the interesting
+                //   edge: a take that has no session id is unprobeable by
+                //   definition, see `activeRecordSessionID`).
+                let probeSID = self.activeRecordSessionID
+                let now = Date()
+                if self.lastMarksProbeSID != probeSID
+                    || self.lastMarksProbeAt.map({ now.timeIntervalSince($0) > 15 }) ?? true {
+                    self.lastMarksProbeSID = probeSID
+                    self.lastMarksProbeAt = now
+                    TicNoteDiagLog.log("PLAUD-REC", "marks poll sid=\(probeSID.map(String.init) ?? "nil") rec=\(self.isRecording) strikes=\(self.markingProbeStrikes)")
+                }
+                if let sid = probeSID {
                     if self.markingProbeStrikes < 2 {
                         self.markingProbeStrikes += 1
                         log.info("plaud marks probe #\(self.markingProbeStrikes): getMarking sid=\(sid) (bleAgent=\(PlaudDeviceAgent.shared.bleAgent != nil))")
@@ -1918,10 +2244,19 @@ final class PlaudDirectService: NSObject, ObservableObject {
                             // a live count is coming and tell the UI the truth.
                             DispatchQueue.main.async { self.marksAvailableLive = false }
                         }
-                    } else if tick % 2 == 1 {
+                    } else {
                         // getMarking is being ignored on this firmware — fall back
                         // to the file entry's own counter (cheap, one command).
-                        log.info("plaud marks fallback: getFile sid=\(sid)")
+                        //
+                        // ⚠️★ 2026-10-26: do **not** call
+                        // `getRecordMarkingTags` here. It is the official
+                        // app's channel in theory, but this SDK build crashes
+                        // inside `BleAgent.dataOfGetRecordMarkingTags` while
+                        // parsing the answer on this firmware (two SIGTRAP
+                        // crashes at 14:29 / 14:30, both on the poll thread —
+                        // that is the "结束录音直接闪退" report). Until the
+                        // wire format is RE'd and issued by hand, card-key
+                        // marks come from `penCollect` only.
                         self.fileProbeForMarks = true
                         PlaudDeviceAgent.shared.getFile(sessionId: sid)
                     }
@@ -1951,43 +2286,98 @@ final class PlaudDirectService: NSObject, ObservableObject {
     ///      Best-effort: the card-side depair is what actually frees the
     ///      hardware; the cloud record only matters for SDK recovery flows.
     func releaseDevice(factoryReset: Bool) {
-        guard case .connected(let sn) = phase else { return }
-        log.info("plaud release (factoryReset=\(factoryReset)) sn=\(sn, privacy: .public)")
+        guard case .connected(let sn) = phase else {
+            // ★ 2026-10-27: this used to `return` silently. A tap that landed
+            // a beat after the card slept (or while a reconnect was in
+            // flight) therefore looked exactly like a dead button.
+            TicNoteDiagLog.log("PLAUD-REC", "release: aborted — phase is not connected")
+            setSyncMessage(L10n.Plaud.notConnected)
+            return
+        }
+        TicNoteDiagLog.log("PLAUD-REC", "release: requested factoryReset=\(factoryReset) sn=\(sn)")
+        releaseOutcome = nil
+        // Hold the keeper off from this instant — not after the outcome. The
+        // 4-second re-bind in the 11:08 log happened while we were still
+        // waiting for an ack.
+        handoverHold = true
+        UserDefaults.standard.set(true, forKey: "plaud.handover_hold")
+        setSyncMessage(L10n.Plaud.releasing)
         if liveStreaming { PlaudDeviceAgent.shared.stopSyncFile() }
         stopStatePolling()
+        // A scan already in flight could bind the card the instant the depair
+        // lands, so cancel it and forget the reconnect target too.
+        PlaudDeviceAgent.shared.stopScan()
+        reconnectTarget = nil
         Task { @MainActor in self.stopLiveTranscription() }
+        pendingRelease = (factoryReset, sn)
         PlaudDeviceAgent.shared.depair(clear: factoryReset)
-        // ★ 2026-10-21 (8th round, "切换回官方 App"): `depair` releases the keys it
-        // stored, but it does not necessarily drop the central-side link. If we
-        // keep it, the official app can see the card on scan and still fail to
-        // connect — which reads as "官方 App 用不了". So free the radio here:
-        // disconnect the agent and drop the scan results.
+        // ★★ 2026-10-27 ("点击交还官方 App 没效果" — root cause): this used to
+        // call `disconnect()` on the very next line. `depair` is an async BLE
+        // command, so dropping the link immediately killed it before it left
+        // the radio: the card stayed bound, the app forgot it, and the next
+        // launch simply re-bound it again (diag 10:48:34 / 10:52:39 "PLAUD
+        // bound 8810A30346423315" after three launches). Now we wait for the
+        // card's own `bleDepair` answer and only then release the radio.
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.pendingRelease != nil else { return }
+            TicNoteDiagLog.log("PLAUD-REC", "release: no depair ack within \(Int(Self.releaseAckTimeout))s")
+            self.completeRelease(.unconfirmed)
+        }
+        releaseWatchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.releaseAckTimeout, execute: work)
+    }
+
+    /// How long the card gets to answer `depair` before the outcome is
+    /// reported as unknown. The recovery path already waited 1.5 s "for the
+    /// command to reach the card"; 5 s is the same idea with a real answer.
+    private static let releaseAckTimeout: TimeInterval = 5.0
+
+    /// Finish a hand-back exactly once, with the card's own verdict.
+    ///
+    /// Only an **acked** release lets go of everything. On a refusal or a
+    /// silent timeout the local binding (ledger row, SN, key) is kept: a card
+    /// that is still bound to us while the app has forgotten it is precisely
+    /// the "locked out of every app" state that only 卡片恢复 can undo.
+    private func completeRelease(_ outcome: ReleaseOutcome) {
+        guard let pending = pendingRelease else { return }
+        pendingRelease = nil
+        releaseWatchdog?.cancel()
+        releaseWatchdog = nil
         PlaudDeviceAgent.shared.disconnect()
         scanned = []
         selectedCard = nil
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.ensureInitialized()
-                try await self.cloudUnbind(sn: sn)
-            } catch {
-                log.warning("plaud cloud unbind skipped: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-        pendingDownloads.removeAll()
-        currentExportSession = nil
-        // The card is handed back, so it must also leave the user-visible
-        // device list — a released card is not "my device" any more (same
-        // concluding step `RecorderDeviceView.unbindAndRemove` does).
-        forgetLedger(sn: sn)
-        pairedSN = nil
-        UserDefaults.standard.removeObject(forKey: "plaud.paired_sn")
-        battery = nil
-        storageFree = nil
-        storageTotal = nil
-        cardFileCount = nil
+        releaseOutcome = outcome
         isRecording = false
         setPhase(.idle)
+        switch outcome {
+        case .acked:
+            TicNoteDiagLog.log("PLAUD-REC", "release: ACKED — card released, forgetting local binding")
+            pendingDownloads.removeAll()
+            currentExportSession = nil
+            forgetLedger(sn: pending.sn)
+            pairedSN = nil
+            UserDefaults.standard.removeObject(forKey: "plaud.paired_sn")
+            battery = nil
+            storageFree = nil
+            storageTotal = nil
+            cardFileCount = nil
+            setSyncMessage(L10n.Plaud.handoverDone)
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.ensureInitialized()
+                    try await self.cloudUnbind(sn: pending.sn)
+                } catch {
+                    log.warning("plaud cloud unbind skipped: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        case .rejected(let status):
+            TicNoteDiagLog.log("PLAUD-REC", "release: card REFUSED (status \(status)) — binding kept")
+            setSyncMessage(nil)
+        case .unconfirmed:
+            TicNoteDiagLog.log("PLAUD-REC", "release: unconfirmed — binding kept so a retry is possible")
+            setSyncMessage(nil)
+        }
     }
 
     private func cloudUnbind(sn: String) async throws {
@@ -2016,6 +2406,44 @@ final class PlaudDirectService: NSObject, ObservableObject {
         fileListProbeOnly = false
         setSyncMessage(nil)
         PlaudDeviceAgent.shared.getFileList(startSessionId: 0)
+    }
+
+    /// ★ 2026-10-26 (user: "卡上有 56.6MB 但卡上没有一条录音"): wipe every file the
+    /// card still holds, then re-read BOTH the list and the storage answer.
+    ///
+    /// Why a dedicated action and not the existing 恢复出厂: that one also drops
+    /// the binding, so it is not something to reach for when the only problem is
+    /// "space is taken, list is empty". `clearAllFiles()` (low-level agent) is
+    /// the narrow version. The follow-up reads matter too — if the card answers
+    /// "still 56.6 MB used, still 0 files", the space is orphaned inside the
+    /// card's own filesystem and no command we have can reclaim it (that needs a
+    /// format, i.e. 恢复出厂), so the UI must not pretend otherwise.
+    func clearCardFiles() {
+        guard phase.isConnected, !isRecording, !isSyncing else { return }
+        let usedNow = max(0, (storageTotal ?? 0) - (storageFree ?? 0))
+        TicNoteDiagLog.log("PLAUD-REC", "clear all files requested (cardFiles=\(cardFiles.count), used=\(usedNow))")
+        setSyncMessage(L10n.Plaud.clearCardRunning)
+        PlaudDeviceAgent.shared.clearAllFiles()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            guard self.phase.isConnected else { return }
+            PlaudDeviceAgent.shared.bleAgent?.getStorage()
+            self.refreshCardRecordings()
+            // ★ 2026-10-26 (user: "点击清空卡片的反馈也需要优化"): the button used
+            // to do its work silently. Report the numbers, and say plainly what a
+            // non-moving "used" means — the residue lives below the card's file
+            // index and no command we have can reach it (log 16:31:12→14: used
+            // 57 344 000 before and after). 恢复出厂 or a card-side format is the
+            // only way back.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                let used = max(0, (self.storageTotal ?? 0) - (self.storageFree ?? 0))
+                let before = usedNow
+                let msg = used >= before - 1024
+                    ? L10n.Plaud.clearCardDone(PlaudCardFilesView.sizeText(used))
+                    : L10n.Plaud.clearCardFreed(PlaudCardFilesView.sizeText(before - used))
+                self.setSyncMessage(msg)
+                TicNoteDiagLog.log("PLAUD-REC", "clear result: used before=\(before) after=\(used)")
+            }
+        }
     }
 
     /// Ask the card "how many recordings do you hold?" **without** queueing any
@@ -2107,6 +2535,12 @@ final class PlaudDirectService: NSObject, ObservableObject {
             !syncedSessions.contains($0.sessionId) && !stalledSessions.contains($0.sessionId)
         }
         log.info("plaud file list: \(files.count) on card, \(fresh.count) new (probe=\(probeOnly))")
+        // ★ 2026-10-26: the diag log only ever saw the single-file probe replies,
+        // never a full listing, so "卡上没有一条录音" could not be told apart from
+        // "the app dropped them". One line per listing, with the ids and sizes.
+        let listText = files.prefix(8).map { "\($0.sessionId)/c\($0.penCollect)/s\($0.size)" }
+                           .joined(separator: ",")
+        TicNoteDiagLog.log("PLAUD-REC", "file list: \(files.count) item(s) probe=\(probeOnly) [\(listText)]")
         if probeOnly { return }
         // ★ 2026-10-21 (6th round): a file list that lands **while a transfer is
         // running** must extend the queue, not replace it. Replacing it dropped
@@ -2593,10 +3027,23 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         let nowRecording = (state == Self.penStateRecording)
         let wasRecording = isRecording
         if wasRecording != nowRecording {
-            TicNoteDiagLog.log("PLAUD-REC", "pen state \(state) — recording \(wasRecording) → \(nowRecording)")
+            // The "(paused — ignored)" suffix matters: the raw log line used to
+            // read like the pause had been undone, sending debugging down the
+            // wrong path. The gate below is what decides.
+            let note = (isPaused && nowRecording) ? " (paused — ignored)" : ""
+            TicNoteDiagLog.log("PLAUD-REC", "pen state \(state) — recording \(wasRecording) → \(nowRecording)\(note)")
         }
         DispatchQueue.main.async {
-            self.isRecording = nowRecording
+            // ★ 2026-10-26: a paused take still answers 4099 "recording" from the
+            // heartbeat (log 16:42:09.539 — 0.35 s after `pause acked`). blindly
+            // writing `isRecording = true` here un-paused the UI state machine
+            // while the card was still sealed, and the clock/words drifted. When
+            // we are parked on a pause, the pen-state answer is describing the
+            // still-open session, not the button the user pressed — keep both
+            // flags as the pause left them.
+            if !(self.isPaused && nowRecording) {
+                self.isRecording = nowRecording
+            }
             // The card stopped on its own (key press / out of space): clear the
             // clock here too, otherwise the timer keeps running on screen.
             if wasRecording && !nowRecording { self.clearRecordClock() }
@@ -2681,15 +3128,28 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         pendingAttachSessionID = sid
         fileProbeForMarks = true
         PlaudDeviceAgent.shared.getFile(sessionId: sid)
-        // If the card never answers the probe, keep audio flowing the old way
-        // (from 0) — the clock stays honest thanks to the session-id anchor.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            guard let self, self.pendingAttachSessionID == sid else { return }
-            self.pendingAttachSessionID = nil
-            self.fileProbeForMarks = false
-            log.warning("plaud attach: file probe timed out — opening sync at 0")
-            self.openLiveStream(sid: sid, start: 0)
-            Task { @MainActor in self.startLiveTranscription(sessionID: sid) }
+        // ★ 2026-10-26 round 3: the probe used to get ONE 2 s window; when it
+        // timed out the stream fell back to start=0 and replayed the WHOLE
+        // take into the ASR (log 18:12:21 — 7 min of backlog right after a
+        // reconnect, when BLE is still settling). Give it three windows,
+        // re-sending each time; the reply path clears `pendingAttachSessionID`,
+        // which ends the loop early.
+        Task { @MainActor [weak self] in
+            for attempt in 1...3 {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self, self.pendingAttachSessionID == sid else { return }
+                guard self.liveStreaming, self.recordSessionID == sid else { return }
+                if attempt == 3 {
+                    self.pendingAttachSessionID = nil
+                    self.fileProbeForMarks = false
+                    TicNoteDiagLog.log("PLAUD-PCM", "attach: file probe timed out x3 — opening sync at 0 (full replay, clock rides the sid anchor)")
+                    self.openLiveStream(sid: sid, start: 0)
+                    self.startLiveTranscription(sessionID: sid)
+                    return
+                }
+                TicNoteDiagLog.log("PLAUD-PCM", "attach: file probe timeout #\(attempt) — retrying")
+                PlaudDeviceAgent.shared.getFile(sessionId: sid)
+            }
         }
     }
 
@@ -2726,7 +3186,12 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             return
         }
         DispatchQueue.main.async {
+            // ★ 2026-10-26: a re-emitted `bleRecordStart` for the *same* take is
+            // not a new take — it must not reset an anchor that is already right.
+            let newTake = self.recordSessionID != sessionId
             self.isRecording = true
+            self.takeEnded = false
+            self.userStopRequested = false
             self.recordSessionID = sessionId
             // Raising the stage on the same tick as `isRecording` means the
             // user sees the take begin, not a button that "did something".
@@ -2751,9 +3216,14 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             } else {
                 self.recordStartedAt = Date()
             }
-            // `start` > 0 = the card was already recording: the elapsed byte
-            // count alone can't give seconds, so let the PCM clock correct it.
-            if start == 0 { self.deviceElapsed = nil }
+            // ★ 2026-10-26 (user: "在实时页面显示上一次的录音时长"): `deviceElapsed`
+            // is the *card's* counter, and it still held the value of the take
+            // that just ended. `elapsedText` prefers it over `recordStartedAt`,
+            // so a new take opened on the previous take's duration and only
+            // corrected itself once the card's first PCM block arrived. A new
+            // session id now always starts from `recordStartedAt` (the card's
+            // own `startTime` when it was already recording), i.e. from 0:00.
+            if newTake { self.deviceElapsed = nil }
         }
         // ★ Open the sync-file channel: that is what makes the SDK push
         // `blePcmData` (real-time duration + audio for live transcription).
@@ -2809,7 +3279,8 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         // request the SDK sends (start 0, end 640 = `…80020000`) through the
         // low-level sender with `decode: false`, which delivers the raw blocks
         // to `bleData` → `PlaudLiveDecryptor`.
-        liveStartOffset = max(start, 1024)
+        // (The pull cursor is decided further down, together with the
+        // same-sid/restart branch — see `decoderOwnsWholeTake`.)
         // ★ 2026-10-23: wire the self-decryption pipeline. `onPCM` replicates
         // exactly what `blePcmData` does for the SDK path (byte counter the
         // watchdog reads, level meter, card clock, live sink) — one producer
@@ -2821,19 +3292,60 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             let publishLevel = Date().timeIntervalSince(self.lastLevelPublish) > 0.05
             if publishLevel { self.lastLevelPublish = Date() }
             DispatchQueue.main.async {
-                if seconds > 0 {
-                    self.deviceElapsed = max(self.deviceElapsed ?? 0, self.elapsedBase + seconds)
+                // ★ 2026-10-26 (user: "没有录音了，但是在实时页面显示上一次的
+                // 录音时长"): `pumpLocked(final:)` runs one last time *after* the
+                // take ended, and this handler used to write `deviceElapsed` /
+                // `recordStartedAt` unconditionally — so the final chunk of
+                // audio re-armed a clock that `clearRecordClock()` had just
+                // cleared, and the live page showed the finished take's
+                // duration forever. The tail audio must still reach the ASR;
+                // the *clock* may only move while a take is live.
+                let live = !self.takeEnded && (self.isRecording || self.isPaused)
+                if live, seconds > 0 {
+                    // Same-sid resume: the decryptor never restarted, so its
+                    // seconds already span the whole take — adding elapsedBase
+                    // double-counts (the "+30s" pause jump).
+                    let base = self.liveDecoderOwnsWholeTake ? 0 : self.elapsedBase
+                    self.deviceElapsed = max(self.deviceElapsed ?? 0, base + seconds)
                 }
-                if self.recordStartedAt == nil {
+                if live, self.recordStartedAt == nil {
                     self.recordStartedAt = Date().addingTimeInterval(-max(0, seconds))
                 }
                 self.livePCMBytes += bytes
                 if publishLevel { self.liveLevel = level }
-                if !self.isRecording { self.isRecording = true }
+                if !self.isRecording && live { self.isRecording = true }
                 self.liveAudioSink?(pcm, seconds)
             }
         }
         liveDecryptor.onEvent = { TicNoteDiagLog.log("PLAUD-PCM", $0) }
+        // ★★ 2026-10-26 round 2 (device log 17:58–18:00): THIS firmware's
+        // resume keeps the **same** session id and the **same** growing file
+        // (`resume acked sid=1793008705`, probe size only ever increases). The
+        // decryptor's `start(sessionId:)` then no-ops on its same-sid guard and
+        // keeps decoding the one continuous file — its `seconds` already cover
+        // the whole take. Adding `elapsedBase` on top double-counted every
+        // pre-pause second: after a resume the clock climbed at ~2× speed and
+        // the next pause locked the inflated value in (the "+30s" the user
+        // saw). Same sid → seconds are absolute, add nothing; new sid → the
+        // decryptor really restarted and needs the take base added.
+        let decoderOwnsWholeTake = (liveDecryptor.sessionId == sid)
+        liveDecoderOwnsWholeTake = decoderOwnsWholeTake
+        if decoderOwnsWholeTake {
+            // ★★ 2026-10-26 round 3 ("重连之后语音时间对不上"): when the decryptor
+            // continues the same file, the pull cursor MUST be where OUR
+            // assembly stands (`receivedEnd`), never the card's write position
+            // from the resume/attach ack. Jumping the cursor forward left a
+            // multi-MB hole in the plaintext (log 18:12–18:13: decryptor at
+            // ~1 MB, resume reopened at 2 080 768) — the OGG converter stalls
+            // at the hole, the transcript freezes mid-take and the clock stops
+            // moving while the card keeps recording: the "对不上". Starting
+            // from `receivedEnd` instead re-reads the missed range (a fresh
+            // sync session serves it again) and the backlog drains paced.
+            liveStartOffset = max(Int(liveDecryptor.receivedEnd), 1024)
+        } else {
+            liveStartOffset = max(start, 1024)
+        }
+        TicNoteDiagLog.log("PLAUD-PCM", "live stream sid=\(sid) decoder \(decoderOwnsWholeTake ? "continues (same sid — seconds absolute)" : "restarts (base \(Int(elapsedBase))s)") pull from \(liveStartOffset) (ack start=\(start))")
         liveDecryptor.start(sessionId: sid)
         DispatchQueue.main.async {
             self.liveStreaming = true
@@ -2964,9 +3476,19 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
                     continue
                 }
                 quiet += 1
-                if quiet == 4 {   // ~12 s of nothing at all
-                    TicNoteDiagLog.log("PLAUD-PCM", "no bytes from card 12s after open sid=\(sid) offset=\(seen) — panel told")
-                    self.liveASRNotice = L10n.Plaud.liveNoStream
+                if quiet == 4 {   // ~12 s without a single new byte
+                    // ★ 2026-10-26 (device log 10:29): this used to tell the
+                    // panel "no stream" even when 47 KB had already arrived and
+                    // the transcript was fine — the card simply had a slow
+                    // stretch. A notice is only honest when **nothing at all**
+                    // ever arrived; a stall after audio did flow is a log line,
+                    // not a message that makes the user think it is broken.
+                    if seen == 0 && self.livePCMBytes == 0 {
+                        TicNoteDiagLog.log("PLAUD-PCM", "no bytes from card 12s after open sid=\(sid) — panel told")
+                        self.liveASRNotice = L10n.Plaud.liveNoStream
+                    } else {
+                        TicNoteDiagLog.log("PLAUD-PCM", "stalled 12s at \(seen)B sid=\(sid) (audio already flowing — panel left alone)")
+                    }
                 }
             }
         }
@@ -2995,11 +3517,22 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.recordSessionID = sessionId
             self.recordBytes = start
             self.pausedAt = nil
+            self.userStopRequested = false
+            // ★ 2026-10-26 ("点暂停…重新启动会增加时长，而不是上一次的时间开始"):
+            // the base must be the card's own position, not just what the decoder
+            // had reached when the pause landed. While paused the file probes
+            // keep `deviceElapsed` pinned to the card's file duration; if the
+            // decoder lagged at pause, `elapsedBase` alone snapped the clock
+            // backwards here and the next probe/PCM reply then jumped it forward
+            // — the "增加" the user saw. Taking the max makes the clock start
+            // exactly where the card is, and the probes confirm instead of move.
+            let base = max(self.elapsedBase, self.deviceElapsed ?? 0)
+            self.elapsedBase = base
             // Hand the clock over to `elapsedBase`: the new segment's own
             // millisecond counter starts at 0, so anything derived from it alone
             // would snap the display back to 00:00.
             self.deviceElapsed = nil
-            self.recordStartedAt = Date().addingTimeInterval(-self.elapsedBase)
+            self.recordStartedAt = Date().addingTimeInterval(-base)
             self.recordNotice = nil
         }
         // ★ The card stopped pushing PCM when it paused; resuming the recording
@@ -3033,17 +3566,38 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.pausedAt = Date()
             // The card just sealed this segment (`PauseRecordRsp(fileSize:)`), so
             // freeze the clock here and let the next segment build on top.
+            //
+            // ★★ 2026-10-26 round 2 ("点击暂停上面时长直接加了 30s"): freeze the
+            // clock at the number the user can actually SEE. `deviceElapsed` is
+            // the same clock the display has been ticking; `wall` trusts the
+            // card's `startTime` anchor, and whenever that anchor is offset
+            // (card clock drift, key-started takeover) folding it into the max
+            // made the number JUMP the instant pause landed. Wall is now only
+            // the fallback for a decoder that never produced a clock at all.
             let wall = self.recordStartedAt.map { Date().timeIntervalSince($0) } ?? 0
-            self.elapsedBase = max(self.elapsedBase, self.deviceElapsed ?? wall)
+            let shown = self.deviceElapsed ?? 0
+            self.elapsedBase = shown > 0 ? max(self.elapsedBase, shown) : max(self.elapsedBase, wall)
             self.deviceElapsed = self.elapsedBase
-            self.recordBytes = fileSize > 0 ? fileSize : self.recordBytes
+            self.recordBytes = fileSize > 0 && fileSize < 0x10000 ? fileSize : self.recordBytes
         }
     }
 
     func bleRecordStop(sessionId: Int, reason: Int, fileExist: Bool, fileSize: Int) {
         log.info("plaud record stop sid=\(sessionId) reason=\(reason) exist=\(fileExist) size=\(fileSize)")
-        TicNoteDiagLog.log("PLAUD-REC", "stop acked sid=\(sessionId) reason=\(reason) size=\(fileSize)")
-        finishTake(cardInitiated: false)
+        TicNoteDiagLog.log("PLAUD-REC", "stop acked sid=\(sessionId) reason=\(reason) size=\(fileSize) userStop=\(userStopRequested) paused=\(isPaused)")
+        // ★ 2026-10-26 ("点暂停后实时字幕的内容也被清空了"): a stop that follows a
+        // pause **without a user stop tap** is the card sealing the paused
+        // segment (log 16:03:49.407, 1.0 s after `pause acked`). The take is
+        // still alive on the card — the next `bleRecordResume` proves it — so
+        // stay paused with the words and the clock intact. Decision on the main
+        // queue: `isPaused` / `userStopRequested` are main-bound state.
+        DispatchQueue.main.async {
+            if self.isPaused, !self.userStopRequested {
+                TicNoteDiagLog.log("PLAUD-REC", "stop after pause without user stop — take stays paused (segment sealed)")
+                return
+            }
+            self.finishTake(cardInitiated: false)
+        }
     }
 
     /// Common teardown for a finished take — whether the app stopped it, the card
@@ -3054,6 +3608,9 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
     /// card-initiated stop leaves the live clock ticking on screen (which is
     /// exactly what the user saw: "在卡片上已经停止录音了但实时转写还显示录音时长").
     private func finishTake(cardInitiated: Bool) {
+        // ★ First statement, before any queue hop: from here on the take is
+        // over, and no audio callback may move the clock again (see `takeEnded`).
+        takeEnded = true
         if cardInitiated {
             TicNoteDiagLog.log("PLAUD-REC", "card-ended take reconciled (no bleRecordStop arrived)")
         }
@@ -3073,9 +3630,27 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.livePumpTask = nil
             self.recordStateWatchdog?.cancel()
             self.recordStateWatchdog = nil
+            // ★ 2026-10-26: the panel stops showing these words the moment the
+            // take ends (see `liveSegmentsVisible`), but the clip they belong to
+            // has not landed yet. Park them so `saveLiveTranscript` can still
+            // attach them when it does — including after another take started.
+            if let sid = self.liveTranscriptSessionID, let snap = self.liveSnapshot() {
+                self.stashedLiveTranscripts[sid] = snap
+                if self.stashedLiveTranscripts.count > 8 {
+                    self.stashedLiveTranscripts = [sid: snap]
+                }
+            }
+            // ★ 2026-10-26 (E2): one `getMarking` **after** the take, because the
+            // in-take poll is the part this firmware ignores. If the card answers
+            // here, marks get exact timestamps and the transcript can be corrected
+            // a second later — and "按键打点" is solved without any RE at all.
+            // Zero crash risk: `getMarking` only ever goes unanswered (the call
+            // that crashed was `getRecordMarkingTags`, see the warning above).
+            self.probeMarksAfterTake(sid: self.liveTranscriptSessionID ?? self.recordSessionID)
             self.clearRecordClock()
             self.isRecording = false
             self.isPaused = false
+            self.userStopRequested = false
             self.liveStreaming = false
             // The stage goes away with the take it was showing.
             self.showRecordingStage = false
@@ -3160,21 +3735,30 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         let publishLevel = Date().timeIntervalSince(lastLevelPublish) > 0.05
         if publishLevel { lastLevelPublish = Date() }
         DispatchQueue.main.async {
+            // ★ 2026-10-26: same tombstone as the decryptor path (see `takeEnded`).
+            // A block that belongs to a take `finishTake` already closed must not
+            // resurrect the clock; a block for a *different* session id is a take
+            // the card started on its own key before `bleRecordStart` arrived, so
+            // it is still allowed to arm it.
+            let sameTake = !self.takeEnded || self.recordSessionID == sessionId
             // ⚠️ `millsec == 0` means the card did not stamp this block. Taking
             // it at face value pinned the clock at 0:00 while audio flowed
             // (seen on hardware); only a positive, non-decreasing report may
             // move `deviceElapsed`, otherwise the local anchor keeps ticking.
-            if seconds > 0 {
-                // + `elapsedBase`: this block belongs to the *current* segment, and
-                // a segment after a pause restarts its own counter at 0.
-                self.deviceElapsed = max(self.deviceElapsed ?? 0, self.elapsedBase + seconds)
+            if sameTake, seconds > 0 {
+                // + `elapsedBase` only when the decoder restarted with a new
+                // segment. Same-sid resume (this firmware): the card's
+                // millsec already counts the whole take — adding the base
+                // double-counts, exactly like the decryptor path did.
+                let base = self.liveDecoderOwnsWholeTake ? 0 : self.elapsedBase
+                self.deviceElapsed = max(self.deviceElapsed ?? 0, base + seconds)
             }
-            if self.recordStartedAt == nil {
+            if sameTake, self.recordStartedAt == nil {
                 self.recordStartedAt = Date().addingTimeInterval(-max(0, seconds))
             }
             self.livePCMBytes += bytes
             if publishLevel { self.liveLevel = level }
-            if !self.isRecording { self.isRecording = true }
+            if sameTake, !self.isRecording { self.isRecording = true }
         }
         liveAudioSink?(pcmData, seconds)
     }
@@ -3195,9 +3779,65 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
             self.markingProbeStrikes = 0
             self.marksAvailableLive = true
             self.recordMarks = markList
-            self.applyMarkCount(markList.count, explicitTimes: markList)
+            let wasPostTake = self.postTakeMarkProbeSID != nil
+            if wasPostTake {
+                // ★ 2026-10-26 (E2): the answer we were waiting for. Take the
+                // offsets as-is (they are the card's own clock) instead of the
+                // "stamp it when the poll noticed" fallback.
+                self.postTakeMarkProbeSID = nil
+                TicNoteDiagLog.log("PLAUD-REC", "post-take getMarking ANSWERED count=\(markList.count) → exact offsets")
+                self.mergeExactMarkTimes(markList.map(Self.secondsFromMark))
+            } else {
+                self.applyMarkCount(markList.count, explicitTimes: markList)
+            }
             self.marksSessionID = sessionId
         }
+    }
+
+    /// ★ 2026-10-26: the official hardware-mark channel. The official app polls
+    /// `getRecordTagsLastMinute` while recording (RE: `RecordTagsManager`); this
+    /// SDK exposes the same call as `getRecordMarkingTags` and answers here —
+    /// with **exact timestamps**, not a count to be stamped "when noticed".
+    func bleGetRecordMarkingTags(uid: Int, totals: Int, index: Int, tags: [BleRecordMarkingTag]) {
+        let head = tags.prefix(8).map { "\($0.timestamp)/t\($0.type)/s\($0.status)" }
+                      .joined(separator: ",")
+        log.info("plaud marking tags uid=\(uid) totals=\(totals) index=\(index) count=\(tags.count) [\(head)]")
+        TicNoteDiagLog.log("PLAUD-REC", "marking tags uid=\(uid) totals=\(totals) count=\(tags.count) [\(head)]")
+        guard !tags.isEmpty else { return }
+        DispatchQueue.main.async {
+            self.applyMarkTags(tags.map { TimeInterval($0.timestamp) })
+        }
+    }
+
+    /// Turn raw tag timestamps into marker lines on the take's clock.
+    ///
+    /// The wire value is `uint32`; the firmware is not documented on whether it
+    /// is unix time or an offset, so interpret defensively: above the unix epoch
+    /// it is unix (subtract the take's start), below it is taken as
+    /// take-relative seconds. Either way dedupe within a second — the poll
+    /// re-reports the same tags every tick.
+    @MainActor private func applyMarkTags(_ rawTimes: [TimeInterval]) {
+        guard isRecording || isPaused else { return }
+        var added = 0
+        for raw in rawTimes {
+            let rel: TimeInterval
+            if raw > 1_600_000_000 {
+                guard let start = recordStartedAt else { continue }
+                rel = raw - start.timeIntervalSince1970
+            } else {
+                rel = raw
+            }
+            guard rel >= 0, rel < 24 * 3600 else { continue }
+            guard !liveMarkers.contains(where: { abs($0 - rel) < 1 }) else { continue }
+            liveMarkers.append(rel)
+            added += 1
+        }
+        guard added > 0 else { return }
+        // Tags carry exact times, which makes them the better source for the
+        // card's marks: lift the counter so the count-based `penCollect` path
+        // never re-adds the same marks with "noticed now" stamps.
+        recordMarkCount = max(recordMarkCount, liveMarkers.count)
+        TicNoteDiagLog.log("PLAUD-REC", "marking tags applied +\(added) total=\(liveMarkers.count)")
     }
 
     func bleSyncFileStop() {
@@ -3242,6 +3882,14 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
 
     func bleDepair(_ status: Int) {
         log.info("plaud depair status \(status)")
+        // ★ 2026-10-27: this is the ONLY proof that a hand-back actually
+        // happened. It used to be logged and thrown away, so "did the card
+        // release?" had no answer anywhere in the app.
+        TicNoteDiagLog.log("PLAUD-REC", "release: depair ack status=\(status)")
+        DispatchQueue.main.async {
+            guard self.pendingRelease != nil else { return }
+            self.completeRelease(status == 0 ? .acked : .rejected(Int32(status)))
+        }
     }
 
     func bleDeviceDisconnectErr() {
@@ -3262,9 +3910,23 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
 
     func bleStorage(total: Int, free: Int, duration: Int) {
         log.info("plaud storage total=\(total) free=\(free)")
+        // ★ 2026-10-26 (user: "卡上有 56.6MB 但卡上没有一条录音"): the storage
+        // answer was os.log-only, so a "used 56.6 MB with an empty list" report
+        // could not be checked against the numbers the card actually sent. Both
+        // halves now land in the diag log, together with the list that should
+        // have accounted for them.
+        TicNoteDiagLog.log("PLAUD-REC", "storage total=\(total) free=\(free) used=\(max(0, total - free)) dur=\(duration) cardFiles=\(cardFileCount.map(String.init) ?? "nil")")
         DispatchQueue.main.async {
             self.storageTotal = total
             self.storageFree = free
+            // Used-space bookkeeping for the "no recordings but no space" case:
+            // if the card reports a large `used` while its own file list is
+            // empty, the space is orphaned (deleted files never reclaimed), not
+            // something we can list or delete. Say so once, in the log.
+            let used = max(0, total - free)
+            if used > 5 * 1024 * 1024, self.cardFilesLoaded, self.cardFiles.isEmpty {
+                TicNoteDiagLog.log("PLAUD-REC", "storage anomaly: used \(used) bytes but 0 files listed")
+            }
         }
     }
 
@@ -3312,24 +3974,50 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
         // list down to a single row).
         if fileProbeForMarks {
             fileProbeForMarks = false
-            if let sid = activeRecordSessionID,
-               let entry = bleFiles.first(where: { $0.sessionId == sid }) {
+            // ★ 2026-10-26: log the reply **before** any matching — the
+            // single-file answer used to be dropped silently when its
+            // `sessionId` did not equal the live session id (an in-progress
+            // file may well be listed differently), and "card-key mark does
+            // nothing" was indistinguishable from "the probe never ran".
+            let reply = bleFiles.map { "\($0.sessionId)/c\($0.penCollect)/s\($0.size)" }
+                          .joined(separator: ",")
+            TicNoteDiagLog.log("PLAUD-REC", "file probe reply: \(bleFiles.count) item(s) [\(reply)] want=\(activeRecordSessionID.map(String.init) ?? "nil")")
+            let sid = activeRecordSessionID
+            let entry = bleFiles.first(where: { $0.sessionId == sid })
+                // A single-item reply is the answer to our probe even when the
+                // id does not match — it is the file being written right now.
+                ?? (bleFiles.count == 1 ? bleFiles.first : nil)
+            if let entry {
                 let collect = entry.penCollect
                 let size = entry.size
                 // ⚠️ `duration` is milliseconds (same trap as the file list).
                 let seconds = size > 0 ? Double(entry.duration()) / 1000.0 : 0
                 let stamp = entry.utsStamp()
-                log.info("plaud file probe sid=\(sid) penCollect=\(collect) size=\(size) duration=\(Int(seconds))s stamp=\(stamp)")
+                let sidText = sid.map(String.init) ?? "-"
+                log.info("plaud file probe sid=\(sidText) penCollect=\(collect) size=\(size) duration=\(Int(seconds))s stamp=\(stamp)")
+                // ★ 2026-10-26: this branch was invisible in the diag log (it
+                // only wrote to os.log), so "card-key mark does nothing" could
+                // not be told apart from "the probe never ran". One line per
+                // probe, with the number that matters.
+                TicNoteDiagLog.log("PLAUD-REC", "penCollect probe sid=\(sidText) collect=\(collect) size=\(size)")
                 let attaching = pendingAttachSessionID == sid
                 DispatchQueue.main.async {
                     self.applyMarkCount(collect)
-                    // The card's own duration beats every local guess — this is
-                    // what a relaunch during a take needs to land on the right
-                    // second instead of starting from 0:00.
-                    if seconds > 0 {
+                    // ★ 2026-10-26: a probe reply that overtakes a stop must not
+                    // re-arm the clock of the take it described (see `takeEnded`).
+                    guard !self.takeEnded else { return }
+                    // ★ 2026-10-26 ("点暂停然后上面的录音时长会增加"): the card's own
+                    // duration is the anchor of LAST resort — it exists for the
+                    // relaunch-attach case where we have nothing better. During a
+                    // take WE started, `recordStartedAt` is already anchored (and
+                    // re-anchored on every resume), and the card's byte→duration
+                    // conversion overstates on this firmware, so folding it in on
+                    // every 3 s probe was exactly the "clock grows while paused"
+                    // the user watched. Only adopt it when we have no anchor.
+                    if seconds > 0, self.recordStartedAt == nil {
                         self.deviceElapsed = max(self.deviceElapsed ?? 0, seconds)
                         self.recordStartedAt = Date().addingTimeInterval(-seconds)
-                    } else if stamp > 0 {
+                    } else if seconds > 0, self.recordStartedAt == nil, stamp > 0 {
                         let started = Date(timeIntervalSince1970: TimeInterval(stamp))
                         if abs(started.timeIntervalSinceNow) < 2 * 86_400 {
                             self.recordStartedAt = started
@@ -3337,7 +4025,7 @@ extension PlaudDirectService: PlaudDeviceAgentProtocol {
                         }
                     }
                 }
-                if attaching {
+                if attaching, let sid {
                     pendingAttachSessionID = nil
                     // ★ From the CURRENT end, not byte 0: opening at 0 made the
                     // card replay the whole file, so the app heard a backlog

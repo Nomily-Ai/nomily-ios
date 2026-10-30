@@ -22,13 +22,23 @@ import SwiftUI
 struct PlaudLiveScreen: View {
     @ObservedObject private var direct = PlaudDirectService.shared
     @State private var showFullTranscript = false
+    /// ★ 2026-10-26 (user: "需要提供一个点击的方式方便切换到当前手机的麦克风"):
+    /// the tab no longer carries a source picker, so the phone mic needs one
+    /// honest entry point from the card's live screen. Non-nil → the button
+    /// renders; `LiveView` supplies the switch.
+    var onRequestPhoneMic: (() -> Void)?
     /// Epoch anchor for `TimelineView` — `.now` re-phases on every body
     /// evaluation and makes the seconds stutter (the trap `RecorderControl`
     /// documents).
     private let tickAnchor = Date(timeIntervalSince1970: 0)
 
     private var isConnected: Bool { direct.phase.isConnected }
-    private var hasText: Bool { !direct.liveSegments.isEmpty || !direct.livePartial.isEmpty }
+    /// ★ 2026-10-26: reads the *visible* transcript, not the stored one. See
+    /// `liveSegmentsVisible` — a finished take's words must not stay on the
+    /// live page (Plaud / vobot both clear the panel when the take ends).
+    private var hasText: Bool {
+        !direct.liveSegmentsVisible.isEmpty || !direct.livePartialVisible.isEmpty
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -112,6 +122,20 @@ struct PlaudLiveScreen: View {
                 // the take (and its transcript) alive — this is not "stop then
                 // start a second file".
                 if direct.isRecording || direct.isPaused {
+                    // ★ 2026-10-26 (user: "打标记需要也在实时转录的时候生效"):
+                    // an in-app bookmark, same channel as the card's key — the
+                    // marker line appears in the live transcript immediately.
+                    Button {
+                        direct.addLiveMark()
+                    } label: {
+                        Label(L10n.Plaud.liveAddMark, systemImage: "bookmark.fill")
+                            .font(.headline)
+                            .foregroundStyle(.orange)
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 14)
+                    }
+                    .buttonStyle(.bordered)
+
                     Button {
                         if direct.isPaused {
                             direct.resumeRecording()
@@ -129,6 +153,18 @@ struct PlaudLiveScreen: View {
                 }
             }
             .padding(.horizontal)
+            // ★ 2026-10-26: the one-tap way to the phone microphone from the
+            // card's live screen (the tab itself has no source picker any more).
+            if let onRequestPhoneMic {
+                Button(action: onRequestPhoneMic) {
+                    Label(L10n.Phone.modePhone, systemImage: "mic.fill")
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.bordered)
+                .padding(.horizontal)
+            }
             if direct.isPaused {
                 Text(L10n.Plaud.pausedHint)
                     .font(.caption2)
@@ -160,43 +196,12 @@ struct PlaudLiveScreen: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
             }
-            marksRow
+            // ★ 2026-10-26 (user: "不要在设备开始录音下面显示几处打点"): the
+            // marks row is gone. A mark is a marker line inside the transcript
+            // (pressed card key or 打标记 button → orange bookmark line in
+            // place), not a counter under the record buttons.
         }
         .padding(.vertical, 10)
-    }
-
-    /// Marks pressed on the card. ★ 2026-10-22 on request: nothing is shown at
-    /// all while there is no count — the old row said "the card reports marks
-    /// when the take ends" for the whole recording, which is noise. What the
-    /// user wanted instead is the **time** of each mark, shown right here next
-    /// to the clock.
-    @ViewBuilder
-    private var marksRow: some View {
-        if direct.recordMarkCount > 0 {
-            HStack(spacing: 6) {
-                Image(systemName: "bookmark.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                Text(L10n.Plaud.marksCount(direct.recordMarkCount))
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                ForEach(Array(direct.markTimestamps.prefix(6).enumerated()), id: \.offset) { _, time in
-                    Text(PlaudLiveLine.stamp(time))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.orange.opacity(0.14)))
-                }
-                if direct.markTimestamps.count > 6 {
-                    Text("+\(direct.markTimestamps.count - 6)")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal)
-        }
     }
 
     // MARK: - Transcript
@@ -310,41 +315,61 @@ struct PlaudLiveScreen: View {
 
     @ViewBuilder
     private var transcriptBody: some View {
-        if hasText {
-            VStack(spacing: 0) {
-                PlaudLiveTranscriptList(segments: direct.liveSegments,
-                                        partial: direct.livePartial,
+        VStack(spacing: 0) {
+            if hasText {
+                PlaudLiveTranscriptList(segments: direct.liveSegmentsVisible,
+                                        partial: direct.livePartialVisible,
                                         markers: direct.liveMarkers)
+            } else {
+                emptyTranscript
+            }
+            // The save footer outlives the text on purpose: once the take ends
+            // the words leave the panel, but "this take still has no clip to be
+            // saved next to" is exactly the thing the user needs to see.
+            if hasText || direct.hasLiveTextAwaitingClip {
                 saveFooter
             }
-            .background(Color(uiColor: .secondarySystemGroupedBackground))
-        } else {
-            VStack(spacing: 8) {
-                Spacer()
-                if let notice = direct.liveASRNotice {
-                    Text(notice)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else if !isConnected {
-                    Text(L10n.Plaud.liveNeedConnect)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else if direct.isRecording {
-                    ProgressView().controlSize(.small)
-                    Text(L10n.Plaud.liveWaiting)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text(L10n.Plaud.liveIdle)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 32)
-            .background(Color(uiColor: .secondarySystemGroupedBackground))
         }
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
+    }
+
+    /// No live words right now — and the reason why.
+    @ViewBuilder
+    private var emptyTranscript: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            if direct.hasLiveTextAwaitingClip {
+                // Plaud / vobot parity: the take is over, its text went with
+                // it. Say that plainly instead of showing an empty box (which
+                // reads as "the transcription was lost").
+                Image(systemName: "checkmark.bubble")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                Text(L10n.Plaud.liveTakeEnded)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if let notice = direct.liveASRNotice {
+                Text(notice)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if !isConnected {
+                Text(L10n.Plaud.liveNeedConnect)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if direct.isRecording {
+                ProgressView().controlSize(.small)
+                Text(L10n.Plaud.liveWaiting)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(L10n.Plaud.liveIdle)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 32)
     }
 }

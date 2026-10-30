@@ -346,6 +346,10 @@ final class OnDeviceLiveASR {
     private var decoding = false
     private var closed = false
     private var started = false
+    /// ★ 2026-10-28 D3200 实时字幕：160 B 帧直解（`SoundcoreLiveDecoder`，
+    /// 与阿里云 live 同一条已验证解码链）。AVAssetReader 解不了自封装的
+    /// Ogg/Opus（每 batch 抛「这项操作无法完成」），这个兜底链同样要绕开。
+    private var liveDecoder: SoundcoreLiveDecoder?
 
     /// ~3 s of audio: `packetBytes` per 20 ms ⇒ 50 packets/s.
     private static let batchSeconds = 3
@@ -429,6 +433,26 @@ final class OnDeviceLiveASR {
         guard !decoding, !decodeQueue.isEmpty, !closed else { return }
         decoding = true
         let batch = decodeQueue.removeFirst()
+
+        // ★ 2026-10-28 D3200 fast path：160 B 帧直解出 16 kHz mono PCM，
+        // 直接构 `AVAudioPCMBuffer` 喂识别请求（绕开 Ogg/AVAssetReader 死路）。
+        if profile.packetBytes == SoundcoreOgg.frameSize {
+            if liveDecoder == nil { liveDecoder = SoundcoreLiveDecoder() }
+            let pcm = liveDecoder?.decode(batch) ?? Data()
+            Task.detached(priority: .userInitiated) { [weak self] in
+                await MainActor.run {
+                    guard let self else { return }
+                    self.decoding = false
+                    if let buffer = Self.pcmBuffer(fromMono16k: pcm) {
+                        self.request?.append(buffer)
+                        self.onLevels?(Self.loudness(of: [buffer]))
+                    }
+                    self.decodeNext()
+                }
+            }
+            return
+        }
+
         let ogg = OpusOgg.wrap(rawFrames: batch, serial: 0xA1D1_0001, profile: profile)
         guard !ogg.isEmpty else {
             decoding = false
@@ -461,6 +485,23 @@ final class OnDeviceLiveASR {
                 self.decodeNext()
             }
         }
+    }
+
+    /// 16 kHz mono 16-bit LE PCM → `AVAudioPCMBuffer`（int16 交织单声道）。
+    private static func pcmBuffer(fromMono16k pcm: Data) -> AVAudioPCMBuffer? {
+        let frames = pcm.count / 2
+        guard frames > 0,
+              let format = AVAudioFormat(commonFormat: .pcmFormatInt16,
+                                         sampleRate: 16_000, channels: 1, interleaved: true),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format,
+                                            frameCapacity: AVAudioFrameCount(frames)) else { return nil }
+        pcm.withUnsafeBytes { raw in
+            if let dst = buffer.int16ChannelData?[0] {
+                raw.copyBytes(to: UnsafeMutableBufferPointer(start: dst, count: frames))
+            }
+        }
+        buffer.frameLength = AVAudioFrameCount(frames)
+        return buffer
     }
 
     /// Split each decoded buffer into ~8 slices and RMS-normalise each into 0...1.

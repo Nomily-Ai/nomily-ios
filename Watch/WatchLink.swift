@@ -14,6 +14,15 @@ final class WatchLink: NSObject, ObservableObject {
     /// confirm it wrote them. Until a clip clears both, the wrist copy is the
     /// only one that definitely exists.
     @Published private(set) var deliveredNames: Set<String> = []
+    /// ★ 2026-10-30（用户："录音断联需要状态弹出提醒告知"）：手机当前是否可达。
+    ///
+    /// ⚠️ 语义提醒：`isReachable` 要求**对端 App 在前台**——手机 App 退到后台
+    /// 后这里就会变 false，哪怕蓝牙还连着、transferFile 照样能送达。所以这个
+    /// 值只用于「提醒用户」场景（见 `WatchRecorderModel.handleReachability`），
+    /// 不参与任何传输判断——传输走的是后台队列，从来不依赖可达性。
+    @Published private(set) var phoneReachable = false
+    /// 可达性变化回调（true = 手机回到前台/重新可达）。
+    var onReachabilityChanged: ((Bool) -> Void)?
 
     /// Fired when the phone confirms the clip is stored — not merely that
     /// WatchConnectivity delivered the bytes — so the recorder can drop the
@@ -122,6 +131,20 @@ final class WatchLink: NSObject, ObservableObject {
         )
     }
 
+    /// 把一条待办发回手机，让手机写进系统「提醒事项」（★ 2026-10-30）。
+    ///
+    /// 走 `transferUserInfo` 而不是 `sendMessage`：这是一次**事件**，不能因为
+    /// 手机此刻不可达就丢掉——排队等手机下次醒来照样送达。手表端不等待回执，
+    /// 点击时先给一个触感反馈（用户要的是"点到了"）。
+    func requestReminder(title: String, source: String) {
+        guard WCSession.isSupported(),
+              WCSession.default.activationState == .activated else { return }
+        var info: [String: Any] = [WatchLinkMessage.reminderTitleKey: title]
+        if !source.isEmpty { info[WatchLinkMessage.reminderSourceKey] = source }
+        WCSession.default.transferUserInfo(info)
+        log.info("reminder requested: \(title, privacy: .public)")
+    }
+
     /// Take in the face settings pushed from the phone.
     ///
     /// ★ Added in the thirteenth revision (expression), ★ extended 2026-10-20
@@ -139,6 +162,43 @@ final class WatchLink: NSObject, ObservableObject {
         // travels together — see `WatchLinkMessage.recapsKey`). The store is
         // indifferent to missing keys, so an old phone's context is harmless.
         WatchRecapStore.shared.apply(context)
+        applyTimedRecordCommand(context)
+    }
+
+    // MARK: - Timed recording command (phone → watch, ★ 2026-10-30)
+
+    /// 手机定时录音命令到达时回调（`"start"` / `"stop"`）。由 `NomilyWatchApp`
+    /// 接到 `WatchRecorderModel` 上。
+    var onTimedRecordCommand: ((_ command: String, _ issuedAt: Date, _ endsAt: Date?) -> Void)?
+
+    /// 最近一次收到的命令。保留它（而不是用完即弃）是因为 watchOS 的麦克风
+    /// 只在前台可用：命令可能在后台送达、开录失败——抬腕进 App 时
+    /// `retryUnconfirmedTimedCommand` 会补执行。
+    private(set) var lastTimedCommand: (command: String, issuedAt: Date, endsAt: Date?)?
+
+    private func applyTimedRecordCommand(_ context: [String: Any]) {
+        guard let command = context[WatchLinkMessage.timedRecordCommandKey] as? String,
+              let issued = context[WatchLinkMessage.timedRecordIssuedAtKey] as? Double
+        else { return }
+        let issuedAt = Date(timeIntervalSince1970: issued)
+        let endsAt = (context[WatchLinkMessage.timedRecordEndsAtKey] as? Double)
+            .map { Date(timeIntervalSince1970: $0) }
+        lastTimedCommand = (command, issuedAt, endsAt)
+        onTimedRecordCommand?(command, issuedAt, endsAt)
+    }
+
+    /// App 变为前台（scenePhase → active）时调用：最后一次 "start" 若还没录上
+    /// （后台送达 / 麦克风权限未决），现在补开。由回调方用闭包判断要不要真的
+    /// 重试——start 本身幂等，重复派发无害。
+    func retryUnconfirmedTimedCommand(retryIf: () -> Bool) {
+        guard let command = lastTimedCommand, command.command == "start" else { return }
+        // 窗口早结束了还补什么——扔掉。
+        if let endsAt = command.endsAt, Date() > endsAt.addingTimeInterval(300) {
+            lastTimedCommand = nil
+            return
+        }
+        guard retryIf() else { return }
+        onTimedRecordCommand?(command.command, command.issuedAt, command.endsAt)
     }
 }
 
@@ -157,8 +217,20 @@ extension WatchLink: WCSessionDelegate {
         let pending = session.receivedApplicationContext
         Task { @MainActor in
             self.refreshQueue()
+            self.phoneReachable = session.isReachable
             self.apply(remoteContext: pending)
             if activated { self.onActivated?() }
+        }
+    }
+
+    /// ★ 2026-10-30: 手机进出前台/蓝牙范围时系统回调。只更新可达性状态——
+    /// 传输从不依赖它（transferFile 的后台队列自己会等），消费方是录音模型
+    /// 的「断联提醒」逻辑。
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        let reachable = session.isReachable
+        Task { @MainActor in
+            self.phoneReachable = reachable
+            self.onReachabilityChanged?(reachable)
         }
     }
 

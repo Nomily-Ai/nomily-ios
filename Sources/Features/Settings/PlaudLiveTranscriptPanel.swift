@@ -173,8 +173,8 @@ struct PlaudTranscriptSheet: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    PlaudLiveTranscriptList(segments: direct.liveSegments,
-                                            partial: direct.livePartial,
+                    PlaudLiveTranscriptList(segments: direct.liveSegmentsVisible,
+                                            partial: direct.livePartialVisible,
                                             markers: direct.liveMarkers)
                 }
             }

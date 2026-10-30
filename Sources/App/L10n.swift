@@ -36,6 +36,11 @@ enum L10n {
         static var cloudMessage: String { NSLocalizedString("privacy.cloud_message", value: "You've set up a cloud transcription or AI provider (e.g. Azure, OpenAI). Your audio and text are sent to that third-party service to be processed. Nothing goes to a Nomily server, but the data does leave your device. For fully on-device processing, use a local ASR server and a local (Ollama) or no AI model.", comment: "Cloud-egress consent body") }
         static var cloudAgree: String { NSLocalizedString("privacy.cloud_agree", value: "I Understand, Continue", comment: "") }
         static var cloudGoLocal: String { NSLocalizedString("privacy.cloud_go_local", value: "Provider Settings", comment: "") }
+        // ★ 2026-10-29 (饭耳移植 · 规格 #10 隐私话术系统化) — rendered by
+        // `PrivacyNote`; claims must match actual behaviour, see that file.
+        static var storageNote: String { NSLocalizedString("privacy.storage", comment: "") }
+        static var cloudNote: String { NSLocalizedString("privacy.cloud", comment: "") }
+        static var backupNote: String { NSLocalizedString("privacy.backup", comment: "") }
     }
 
     // MARK: - Common
@@ -321,6 +326,23 @@ enum L10n {
         static var deactivate: String { NSLocalizedString("plaud.deactivate", value: "Deactivate direct connect", comment: "") }
         static var unbindKeep: String { NSLocalizedString("plaud.unbind_keep", value: "Unbind card (keep recordings)", comment: "Release the card so another app can pair it; recordings stay") }
         static var factoryReset: String { NSLocalizedString("plaud.factory_reset", value: "Factory reset (erase card)", comment: "Unbind AND wipe all recordings — for returns") }
+        // ★ 2026-10-26 ("卡上有 56.6MB 但是卡上没有一条录音"): wipe the card's files
+        // WITHOUT dropping the binding — the narrow version of 恢复出厂.
+        static var clearCardFiles: String { NSLocalizedString("plaud.clear_card_files", value: "Erase recordings on card", comment: "Delete every file on the card, keep the binding") }
+        static var clearCardFilesConfirmTitle: String { NSLocalizedString("plaud.clear_card_files_title", value: "Erase every recording on the card?", comment: "") }
+        static var clearCardFilesConfirmAction: String { NSLocalizedString("plaud.clear_card_files_action", value: "Erase", comment: "") }
+        static var clearCardFilesConfirmMsg: String { NSLocalizedString("plaud.clear_card_files_msg", value: "Only the card is wiped — the binding stays, and recordings already in the library are untouched.", comment: "") }
+        static func cardSpaceOrphaned(_ value: String) -> String {
+            String(format: NSLocalizedString("plaud.card_space_orphaned", value: "The card reports %@ used but lists no files — leftover data inside the card. Try erasing the card, or format it on the device.", comment: "%@ = size like 56.6 MB"), value)
+        }
+        // ★ 2026-10-26: feedback for 清空卡片录音 — running / freed / (residue) honest.
+        static var clearCardRunning: String { NSLocalizedString("plaud.clear_card_running", value: "Erasing card…", comment: "") }
+        static func clearCardFreed(_ value: String) -> String {
+            String(format: NSLocalizedString("plaud.clear_card_freed", value: "Card erased — %@ reclaimed.", comment: "%@ = size"), value)
+        }
+        static func clearCardDone(_ value: String) -> String {
+            String(format: NSLocalizedString("plaud.clear_card_done", value: "Erase sent. Card still reports %@ used — that is leftover below the card's file index; only Factory reset or formatting the card itself can reclaim it.", comment: "%@ = size"), value)
+        }
         static var factoryResetTitle: String { NSLocalizedString("plaud.factory_reset_title", value: "Erase everything on the card?", comment: "") }
         static var factoryResetMsg: String { NSLocalizedString("plaud.factory_reset_msg", value: "All recordings on the card will be erased and the binding released — the card becomes like new. This cannot be undone.", comment: "") }
         static var erase: String { NSLocalizedString("plaud.erase", value: "Erase", comment: "") }
@@ -334,6 +356,13 @@ enum L10n {
         static var handoverConfirmMsg: String { NSLocalizedString("plaud.handover_confirm_msg", value: "This releases Nomily's binding and erases every recording on the card — it goes back to factory state, so the official PLAUD app can pair it like a new card. Erased recordings cannot be recovered; pull anything you need first.", comment: "") }
         static var handoverConfirmAction: String { NSLocalizedString("plaud.handover_confirm_action", value: "Unbind and erase", comment: "") }
         static var handoverDone: String { NSLocalizedString("plaud.handover_done", value: "Handed back — binding released, card erased.", comment: "") }
+        // ★ 2026-10-27: the hand-back now reports what the CARD answered
+        // instead of claiming success the moment the button was tapped.
+        static var releasing: String { NSLocalizedString("plaud.releasing", value: "Handing the card back… keep it close to the phone.", comment: "In-flight hand-back, waiting for the card's depair ack") }
+        static func handoverRejected(_ status: Int) -> String {
+            String(format: NSLocalizedString("plaud.handover_rejected", value: "The card REFUSED the release (status %d). If privacy mode is on, switch it off on the card first — the firmware forbids unbinding while it is enabled. Then try again.", comment: "The card answered depair with a non-zero status"), status)
+        }
+        static var handoverUnconfirmed: String { NSLocalizedString("plaud.handover_unconfirmed", value: "Release command sent, but the card did not answer. If the card's used space already dropped to almost nothing, it DID run the wipe and release — Nomily will not reconnect it any more, so go ahead and pair it in the official app. If that still fails, come back and tap Reconnect.", comment: "No depair ack within the watchdog window") }
         static var handoverStep1: String { NSLocalizedString("plaud.handover_step1", value: "① Swipe Nomily away (a full quit, not just background) — otherwise our Bluetooth link still holds the card.", comment: "") }
         static var handoverStep2: String { NSLocalizedString("plaud.handover_step2", value: "② Settings → Bluetooth: if a PLAUD entry is still listed, tap ⓘ and Forget This Device.", comment: "") }
         static var handoverStep3: String { NSLocalizedString("plaud.handover_step3", value: "③ Open the official PLAUD app → Add device → scan and pair. Wake the card with a short press first.", comment: "") }
@@ -390,8 +419,14 @@ enum L10n {
         static var liveBadge: String { NSLocalizedString("plaud.live_badge", value: "Live", comment: "Small badge next to the live transcript title while the card is recording") }
         static var liveWaiting: String { NSLocalizedString("plaud.live_waiting", value: "Listening — text shows up after the first sentence.", comment: "Live transcript placeholder while the engine has not produced any text yet") }
         static var liveIdle: String { NSLocalizedString("plaud.live_idle", value: "Nothing transcribed yet. Text appears here while the card records.", comment: "Live transcript placeholder when no take has been transcribed") }
+        /// Shown right after a take ends: the live words are gone from the panel
+        /// on purpose (Plaud / vobot clear the live view when the take stops).
+        static var liveTakeEnded: String { NSLocalizedString("plaud.live_take_ended", value: "This take has ended, so its live text is cleared — it is saved with the recording once the file lands.", comment: "Live panel after a take stopped: the text belongs to the recording now") }
         static var liveExpand: String { NSLocalizedString("plaud.live_expand", value: "Full transcript", comment: "Open the live transcript full screen") }
         static var liveCollapse: String { NSLocalizedString("plaud.live_collapse", value: "Minimise", comment: "Close the floating recording stage and keep recording in the background") }
+        /// The in-app bookmark button on the stage / live page — drops a marker
+        /// line into the live transcript at the moment it is pressed.
+        static var liveAddMark: String { NSLocalizedString("plaud.live_add_mark", value: "Mark", comment: "Button that inserts a bookmark into the live transcript while recording") }
         static var liveCopy: String { NSLocalizedString("plaud.live_copy", value: "Copy", comment: "Copy the live transcript") }
         static var liveCopied: String { NSLocalizedString("plaud.live_copied", value: "Copied", comment: "Confirmation after copying the live transcript") }
         static var liveNeedsPermission: String { NSLocalizedString("plaud.live_needs_permission", value: "Live transcription needs Speech Recognition permission — allow it in Settings → Nomily, or the card still records without text.", comment: "Live transcript unavailable: speech permission missing") }
@@ -838,6 +873,292 @@ enum L10n {
             NSLocalizedString("setup.assistant_hint", value: "Run it on your computer; it installs local transcription + Ollama and prints the values to fill in here.",
                               comment: "What the setup prompt does, so tapping the row needs no explanation elsewhere")
         }
+        static var pasteTitle: String {
+            NSLocalizedString("setup.paste_title", value: "Paste AI Setup Result",
+                              comment: "Row next to the copy row: parses the NOMILY-SETUP block the desktop AI printed and auto-fills the config")
+        }
+        static var pasteHint: String {
+            NSLocalizedString("setup.paste_hint", value: "Copy the NOMILY-SETUP block (or the four values) the AI printed, then tap here.",
+                              comment: "Tells the user what to paste")
+        }
+        static var pasteEmpty: String {
+            NSLocalizedString("setup.paste_empty", value: "Clipboard is empty — copy the AI's result first.",
+                              comment: "Nothing on the pasteboard when the paste row is tapped")
+        }
+        static var pasteNotFound: String {
+            NSLocalizedString("setup.paste_not_found", value: "No setup values found in the clipboard text.",
+                              comment: "The pasted text carried no recognizable asr_host/llm_base_url lines")
+        }
+        static func pasteDone(_ what: String) -> String {
+            String(format: NSLocalizedString("setup.paste_done", value: "Filled in: %@", comment: "What the paste actually wrote, e.g. 'ASR 192.168.1.5:12300 · Ollama http://…'"), what)
+        }
+    }
+
+    // MARK: - Profile (称呼, 2026-10-28 · FanEar spec §3.2)
+
+    enum Profile {
+        static var userName: String {
+            NSLocalizedString("profile.user_name", value: "Your Name for the AI", comment: "Settings row: how the AI addresses the user / labels their own speech")
+        }
+        static var userNamePlaceholder: String {
+            NSLocalizedString("profile.user_name_placeholder", value: "e.g. Angel", comment: "Placeholder in the user-name field")
+        }
+        static var footer: String {
+            NSLocalizedString("profile.footer", value: "Rides along with every AI summary: the model knows who the recording belongs to and can mark their own speech as “Name (me)”.",
+                              comment: "What the user name is used for")
+        }
+        static var save: String {
+            NSLocalizedString("profile.save", value: "Save", comment: "Confirm button next to the user-name field")
+        }
+    }
+
+    // MARK: - Social (★ 2026-10-29 用户反馈入口：X / 小红书)
+
+    enum Social {
+        static var xHomepage: String {
+            NSLocalizedString("social.x", value: "Nomily on X", comment: "Link row to the X (Twitter) homepage")
+        }
+        static var xiaohongshuHomepage: String {
+            NSLocalizedString("social.rednote", value: "Nomily on 小红书", comment: "Link row to the Xiaohongshu (RED) homepage")
+        }
+        static var discordCommunity: String {
+            NSLocalizedString("social.discord", value: "Nomily community on Discord", comment: "Link row to the Discord community")
+        }
+        /// ★ 2026-10-30：底部第四枚图标——支持邮箱（mailto 唤起系统邮件）。
+        static var supportEmail: String {
+            NSLocalizedString("social.email", value: "Email us (nomily@geekis.com)", comment: "Icon that opens a mail draft to the support address")
+        }
+    }
+
+    // MARK: - Diagnostics export (★ 2026-10-30 一键导出诊断报告)
+
+    enum Diagnostics {
+        static var export: String {
+            NSLocalizedString("diag.export", value: "Export Diagnostics Report", comment: "Button that bundles the run log + device info into a shareable file")
+        }
+        static var share: String {
+            NSLocalizedString("diag.share", value: "Share Diagnostics Report", comment: "ShareLink for the generated diagnostics file")
+        }
+        static var footer: String {
+            NSLocalizedString("diag.footer", value: "The report contains the run log and device info only — no recordings, transcripts or keys. Email it to nomily@geekis.com when something misbehaves.", comment: "Footer under the diagnostics export row")
+        }
+    }
+
+    // MARK: - Storage usage (★ 2026-10-30 本地/NAS/iCloud 占用大小)
+
+    enum StorageUsage {
+        static var title: String { NSLocalizedString("storage.title", comment: "") }
+        static var local: String { NSLocalizedString("storage.local", comment: "") }
+        static var localHeader: String { NSLocalizedString("storage.local_header", comment: "") }
+        static var localFooter: String { NSLocalizedString("storage.local_footer", comment: "") }
+        static var webdav: String { NSLocalizedString("storage.webdav", comment: "") }
+        static var serverHeader: String { NSLocalizedString("storage.server_header", comment: "") }
+        static var webdavFooter: String { NSLocalizedString("storage.webdav_footer", comment: "") }
+        static var folder: String { NSLocalizedString("storage.folder", comment: "") }
+        static var folderHeader: String { NSLocalizedString("storage.folder_header", comment: "") }
+        static var folderFooter: String { NSLocalizedString("storage.folder_footer", comment: "") }
+        static var notConfigured: String { NSLocalizedString("storage.not_configured", comment: "") }
+        static func unavailable(_ reason: String) -> String {
+            String(format: NSLocalizedString("storage.unavailable", comment: ""), reason)
+        }
+        static func fileCount(_ n: Int) -> String {
+            String(format: NSLocalizedString("storage.file_count", comment: ""), n)
+        }
+
+        // ★ 2026-10-30 二稿（用户："按照块状显示，设备与资料库，显示统计那个设备
+        // 记录时长还有手表的，多一点图表动效"）：块状卡片用到的文案。
+        static var totalLabel: String {
+            NSLocalizedString("storage.total_label", value: "Used across every location", comment: "Storage page: caption under the big total number")
+        }
+        static var sourcesHeader: String {
+            NSLocalizedString("storage.sources_header", value: "Devices & library", comment: "Storage page: card grid header for per-source usage")
+        }
+        static var locationsHeader: String {
+            NSLocalizedString("storage.locations_header", value: "Locations", comment: "Storage page: card list header for local / NAS / iCloud")
+        }
+        static var emptySources: String {
+            NSLocalizedString("storage.empty_sources", value: "No recordings on this iPhone yet.", comment: "Storage page: empty state for the per-source cards")
+        }
+        static var refreshing: String {
+            NSLocalizedString("storage.refreshing", value: "Measuring…", comment: "Storage page: shown while the scan is running")
+        }
+        static var durationUnknown: String {
+            NSLocalizedString("storage.duration_unknown", value: "Duration not measured yet", comment: "Storage page: source card when no clip has a cached duration")
+        }
+        static func durationHM(_ h: Int, _ m: Int) -> String {
+            String(format: NSLocalizedString("storage.duration_hm", value: "%dh %dm recorded", comment: "Storage page: recorded time, hours and minutes"), h, m)
+        }
+        static func durationM(_ m: Int) -> String {
+            String(format: NSLocalizedString("storage.duration_m", value: "%dm recorded", comment: "Storage page: recorded time, minutes only"), m)
+        }
+        static func durationS(_ s: Int) -> String {
+            String(format: NSLocalizedString("storage.duration_s", value: "%ds recorded", comment: "Storage page: recorded time, seconds only"), s)
+        }
+        static var footnote: String {
+            NSLocalizedString(
+                "storage.footnote",
+                value: "Every number is measured on disk: local bytes scanned in audio_clips/, NAS bytes read back from the server with PROPFIND, iCloud bytes read through the folder bookmark. Recording time comes from the library's duration cache — clips not yet played or scanned show no duration.",
+                comment: "Storage page footnote explaining how the figures are measured")
+        }
+    }
+
+    // MARK: - Watch recap settings (★ 2026-10-30 回顾摘要接进手机设置)
+
+    enum Recap {
+        static var title: String {
+            NSLocalizedString("recap.title", value: "Recap", comment: "Apple Watch settings section: the wrist recap digest")
+        }
+        static var toggle: String {
+            NSLocalizedString("recap.toggle", value: "Send recaps to Apple Watch", comment: "Toggle: push summary digests to the watch")
+        }
+        static var footer: String {
+            NSLocalizedString(
+                "recap.footer",
+                value: "Each finished summary appears on the watch with its key points and to-dos. Tap a to-do there and it lands in this iPhone's Reminders app.",
+                comment: "Footer explaining the wrist recap and the tap-to-sync to-dos")
+        }
+    }
+
+    // MARK: - Reminders sync (★ 2026-10-29 待办同步到系统提醒事项)
+
+    enum Reminders {
+        static var toggle: String {
+            NSLocalizedString("reminders.toggle", value: "Sync to-dos to Reminders", comment: "Toggle that pushes recording to-dos into the iOS Reminders app")
+        }
+        static var footer: String {
+            NSLocalizedString("reminders.footer", value: "After turning this on, every to-do in a recording's summary is added to the iPhone's Reminders app (checking it in Nomily also checks it there). Regenerated summaries only add new items — removed ones stay in Reminders.", comment: "Footer under the reminders sync toggle")
+        }
+        static var denied: String {
+            NSLocalizedString("reminders.denied", value: "Reminders access was declined. Enable it in Settings to sync.", comment: "Shown when reminders permission is denied")
+        }
+        static var openSettings: String {
+            NSLocalizedString("reminders.open_settings", value: "Open Settings", comment: "Button that opens the app's system settings page")
+        }
+        static var sourceNote: String {
+            NSLocalizedString("reminders.source_note", value: "From the Nomily recording “%@”", comment: "Notes field of a reminder created from a recording's to-dos; %@ = recording name")
+        }
+        static var syncedBadge: String {
+            NSLocalizedString("reminders.synced_badge", value: "Synced to Reminders", comment: "Small status line under a recording's to-do list")
+        }
+        /// ★ 2026-10-30（用户："同步到手机待办这个是同步到手机的提醒事项方便查看需要做的事情"）：
+        /// 待办列表底部的常驻说明——不是"刚才新建了几条"的瞬时提示，而是告诉用户
+        /// **去哪儿能看到还剩什么要做**。
+        static var listFooter: String {
+            NSLocalizedString("reminders.list_footer",
+                              value: "These to-dos are in the iPhone Reminders app — open Reminders to see what's left.",
+                              comment: "Persistent footnote under a recording's to-do list while reminders sync is on")
+        }
+    }
+
+    // MARK: - Token usage (每日用量热力图, 2026-10-28 · FanEar spec §1.2)
+
+    enum TokenUsage {
+        static var title: String {
+            NSLocalizedString("token.title", value: "AI Usage", comment: "Settings row + page title for the daily token heatmap")
+        }
+        static var dailyUsage: String {
+            NSLocalizedString("token.daily_usage", value: "Daily usage", comment: "Heatmap section header on the LLM page")
+        }
+        static var today: String { NSLocalizedString("token.today", value: "Today", comment: "Heatmap summary card") }
+        static var thisMonth: String { NSLocalizedString("token.this_month", value: "This month", comment: "Heatmap summary card") }
+        static var less: String { NSLocalizedString("token.less", value: "Less", comment: "Heatmap legend, left end") }
+        static var more: String { NSLocalizedString("token.more", value: "More", comment: "Heatmap legend, right end") }
+        static var noUse: String {
+            NSLocalizedString("token.no_use", value: "No AI use on this day.", comment: "Tapping an empty day cell")
+        }
+        static var footer: String {
+            NSLocalizedString("token.footer", value: "Estimated tokens (characters × 0.62) for trend only — not a billing figure. Counts AI summaries and chapter outlines.",
+                              comment: "Honest caveat under the heatmap")
+        }
+        static func detail(_ tokens: String, _ calls: Int) -> String {
+            String(format: NSLocalizedString("token.detail", value: "About %@ tokens · %d AI calls", comment: "Day detail line: estimated tokens and number of completions"), tokens, calls)
+        }
+    }
+
+    // MARK: - Vocabulary (常用词, 2026-10-28 · FanEar spec §1.4)
+
+    enum Vocabulary {
+        static var title: String {
+            NSLocalizedString("vocab.title", value: "Custom Vocabulary", comment: "Settings row + editor page title")
+        }
+        // ★ 2026-10-29 (截图 5 布局)：搜索 / 用量卡 / 频率来源 / 挖掘。
+        static var searchPlaceholder: String {
+            NSLocalizedString("vocab.search", value: "Search vocabulary", comment: "Search field at the top of the vocabulary editor")
+        }
+        static func usedCount(_ used: Int, _ limit: Int) -> String {
+            String(format: NSLocalizedString("vocab.used_count", value: "%d of %d used", comment: "Usage card headline"), used, limit)
+        }
+        static var usageNote: String {
+            NSLocalizedString("vocab.usage_note",
+                              value: "On-device transcription does not use the vocabulary; it is handed to the LLM when summarizing.",
+                              comment: "Usage card explanatory line")
+        }
+        static func autoAdded(_ n: Int) -> String {
+            String(format: NSLocalizedString("vocab.auto_added", value: "Auto-added %d in the last 7 days", comment: "Recent auto-mined words line"), n)
+        }
+        static var seeSources: String {
+            NSLocalizedString("vocab.see_sources", value: "Sources", comment: "Button to view where auto-added words came from")
+        }
+        static var autoTag: String {
+            NSLocalizedString("vocab.auto_tag", value: "Auto", comment: "Badge on auto-mined vocabulary entries")
+        }
+        static func sourceLine(_ sources: String) -> String {
+            String(format: NSLocalizedString("vocab.source_line", value: "From: %@", comment: "Per-entry source clips line"), sources)
+        }
+        static func sourceTotal(_ n: Int) -> String {
+            String(format: NSLocalizedString("vocab.source_total", value: "Seen %d times in total", comment: "Total occurrences in the sources sheet"), n)
+        }
+        static var sourcesHeader: String {
+            NSLocalizedString("vocab.sources_header", value: "Source recordings", comment: "Header of the sources sheet list")
+        }
+        static var sourcesTitle: String {
+            NSLocalizedString("vocab.sources_title", value: "Sources", comment: "Sources sheet title")
+        }
+        static var promptFooter: String {
+            NSLocalizedString("vocab.prompt_footer",
+                              value: "Given to the transcription service and the LLM as hints — they are nudged to recognize these words, never forced to replace others with them.",
+                              comment: "Footer under the word list (semantic boundary, kept verbatim)")
+        }
+        static var mineButton: String {
+            NSLocalizedString("vocab.mine", value: "Extract from past transcripts", comment: "Button to run the vocabulary miner over all transcripts")
+        }
+        static var miningStarted: String {
+            NSLocalizedString("vocab.mining_started", value: "Mining in the background — new words will appear with an Auto tag.", comment: "Notice after starting the miner")
+        }
+        static var addField: String {
+            NSLocalizedString("vocab.add_field", value: "Add a word (name / product / jargon)", comment: "Text field placeholder in the vocabulary editor")
+        }
+        static var importButton: String {
+            NSLocalizedString("vocab.import", value: "Import from Clipboard", comment: "Bulk import button")
+        }
+        static var exportButton: String {
+            NSLocalizedString("vocab.export", value: "Copy All to Clipboard", comment: "Export button")
+        }
+        static var importFooter: String {
+            NSLocalizedString("vocab.import_footer", value: "One word per line; commas (, ，、;) also split. Hints only — the AI is never forced to replace other words with these.",
+                              comment: "Import format + the semantic promise from the spec")
+        }
+        static var exported: String {
+            NSLocalizedString("vocab.exported", value: "Copied — paste anywhere to back up.", comment: "After export to clipboard")
+        }
+        static var pasteEmpty: String {
+            NSLocalizedString("vocab.paste_empty", value: "Clipboard is empty.", comment: "Import with nothing on the pasteboard")
+        }
+        static var importNone: String {
+            NSLocalizedString("vocab.import_none", value: "No new words found in the text.", comment: "Import found nothing to add (all duplicates/empty)")
+        }
+        static var full: String {
+            NSLocalizedString("vocab.full", value: "The list is full (2000 words max).", comment: "Adding beyond the cap")
+        }
+        static func duplicate(_ word: String) -> String {
+            NSLocalizedString("vocab.duplicate", value: "Already in the list.", comment: "Adding a word that exists")
+        }
+        static func imported(_ n: Int) -> String {
+            String(format: NSLocalizedString("vocab.imported", value: "Added %d new words.", comment: "Bulk import result"), n)
+        }
+        static func countFooter(_ used: Int, _ limit: Int) -> String {
+            String(format: NSLocalizedString("vocab.count_footer", value: "%d / %d words. These ride along with every AI summary as hints, never as forced replacements.", comment: "Usage counter footer"), used, limit)
+        }
     }
 
     // MARK: - ASR
@@ -917,6 +1238,8 @@ enum L10n {
         // what they need to judge is "will it keep going after I switch away" and "will it drain the battery / make strange noises".
         static var backgroundKeepAlive: String { NSLocalizedString("asr.background_keep_alive", comment: "") }
         static var backgroundKeepAliveFooter: String { NSLocalizedString("asr.background_keep_alive_footer", comment: "") }
+        static var nightlyTranscribe: String { NSLocalizedString("asr.nightly_transcribe", comment: "") }
+        static var nightlyTranscribeFooter: String { NSLocalizedString("asr.nightly_transcribe_footer", comment: "") }
         static var queueTitle: String { NSLocalizedString("asr.queue_title", comment: "") }
         static func queueRunning(_ n: Int) -> String {
             String(format: NSLocalizedString("asr.queue_running", comment: ""), n)
@@ -1050,7 +1373,28 @@ enum L10n {
         static var customLanguage: String { NSLocalizedString(
             "asr.custom_language",
             value: "Language hint (optional, e.g. zh)",
-            comment: "Placeholder for the custom ASR language hint"
+            comment: "Label for the custom ASR language picker"
+        ) }
+        // ★ 2026-10-30：语言提示从自由文本改成 Picker（掺韩语等幻觉的根治项）。
+        static var customLanguageAuto: String { NSLocalizedString(
+            "asr.custom_language_auto",
+            value: "Auto detect",
+            comment: "Custom ASR language picker — let the server decide"
+        ) }
+        static var customLanguageZh: String { NSLocalizedString(
+            "asr.custom_language_zh", value: "中文", comment: "Custom ASR language picker option") }
+        static var customLanguageEn: String { NSLocalizedString(
+            "asr.custom_language_en", value: "English", comment: "Custom ASR language picker option") }
+        static var customLanguageJa: String { NSLocalizedString(
+            "asr.custom_language_ja", value: "日本語", comment: "Custom ASR language picker option") }
+        static var customLanguageKo: String { NSLocalizedString(
+            "asr.custom_language_ko", value: "한국어", comment: "Custom ASR language picker option") }
+        static var customLanguageYue: String { NSLocalizedString(
+            "asr.custom_language_yue", value: "粤语", comment: "Custom ASR language picker option") }
+        static var customLanguageFooter: String { NSLocalizedString(
+            "asr.custom_language_footer",
+            value: "Transcribing Chinese audio but seeing Korean or gibberish lines? That is the server's auto language detection going off on noise — pin the language here to fix it. Aliyun file ASR decides language by the model configured in its NLS project.",
+            comment: "Footer under the custom ASR section explaining why pinning the language matters"
         ) }
         static var customProbe: String { NSLocalizedString(
             "asr.custom_probe",
@@ -1400,6 +1744,38 @@ enum L10n {
         // One section, no 国内/国外 split: 2026-10-22 "不要分国内外，直接都按照模型加入进去".
         // Which vendor is Chinese is not a distinction the app acts on — the
         // endpoint, the key and the model are the same three fields either way.
+        // ★ 2026-10-29 (截图布局): addProvider/providersSection/currentModelCard 等。
+        static var addProvider: String {
+            NSLocalizedString("llm.add_provider", value: "Add provider", comment: "Row + page title for picking an unconfigured provider")
+        }
+        static var providersSection: String {
+            NSLocalizedString("llm.providers_section", value: "Providers", comment: "Section header above the configured provider list")
+        }
+        static var summarizeUsing: String {
+            NSLocalizedString("llm.summarize_using", value: "Summarizing with", comment: "Current-model card caption")
+        }
+        static var switchModel: String {
+            NSLocalizedString("llm.switch_model", value: "Switch", comment: "Menu button on the current-model card")
+        }
+        static var noModelPicked: String {
+            NSLocalizedString("llm.no_model", value: "No model yet", comment: "Current-model card when a provider has no model chosen")
+        }
+        static var customGroup: String {
+            NSLocalizedString("llm.custom_group", value: "Custom", comment: "Section header for the bring-your-own-endpoint row")
+        }
+        static var customSubtitle: String {
+            NSLocalizedString("llm.custom_subtitle",
+                              value: "Any OpenAI-compatible address — one address can serve many models",
+                              comment: "Custom provider row subtitle (screenshot wording)")
+        }
+        static var keychainFooter: String {
+            NSLocalizedString("llm.keychain_footer",
+                              value: "Keys are stored in this phone's Keychain and are sent only to the address you enter — never to us.",
+                              comment: "Footer under the provider lists (screenshot wording)")
+        }
+        static var noKeySignup: String {
+            NSLocalizedString("llm.no_key_signup", value: "No key yet? Sign up", comment: "Direct link to the provider's key-signup page, shown while the key field is empty")
+        }
         static var gridTitle: String {
             NSLocalizedString("llm.grid.title", value: "Providers",
                               comment: "Section header for the single provider list (no domestic/overseas split)")
@@ -1636,9 +2012,153 @@ enum L10n {
 
     // MARK: - Recordings Settings
 
+    // ★ 2026-10-29 (饭耳移植 · 规格 §3.1 定时录音)
+    enum TimedRecording {
+        static var title: String { NSLocalizedString("timed.title", comment: "") }
+        static var enable: String { NSLocalizedString("timed.enable", comment: "") }
+        static var enableFooter: String { NSLocalizedString("timed.enable_footer", comment: "") }
+        static var start: String { NSLocalizedString("timed.start", comment: "") }
+        static var end: String { NSLocalizedString("timed.end", comment: "") }
+        // ★ 2026-10-30：fillFromSleep/sleepFilled/sleepMissing 已随 HealthKit 预填移除。
+        /// ★ 2026-10-30：start 命令已发出（手表端抬腕进 App 后才会真正开录）。
+        static var watchCommandSent: String { NSLocalizedString("timed.watch_command_sent", comment: "") }
+        /// ★ 2026-10-30：发了 start 但表端心跳一直说没在录。
+        static var watchNotRecording: String { NSLocalizedString("timed.watch_not_recording", comment: "") }
+        /// ★ 2026-10-30：stop 命令已发出。
+        static var watchStopped: String { NSLocalizedString("timed.watch_stopped", comment: "") }
+        static var recording: String { NSLocalizedString("timed.recording", comment: "") }
+        static var missedTitle: String { NSLocalizedString("timed.missed_title", comment: "") }
+        static var missedBody: String { NSLocalizedString("timed.missed_body", comment: "") }
+        static var footer: String { NSLocalizedString("timed.footer", comment: "") }
+    }
+
+    // ★ 2026-10-29 (饭耳移植 · 规格 §2.3 文件 App 导出路线)
+    enum FolderExport {
+        static var title: String { NSLocalizedString("folder.title", comment: "") }
+        static var destination: String { NSLocalizedString("folder.destination", comment: "") }
+        static var pickFolder: String { NSLocalizedString("folder.pick", comment: "") }
+        static var noFolder: String { NSLocalizedString("folder.none", comment: "") }
+        static var clearFolder: String { NSLocalizedString("folder.clear", comment: "") }
+        static var pickFooter: String { NSLocalizedString("folder.pick_footer", comment: "") }
+        static var syncAudio: String { NSLocalizedString("folder.sync_audio", comment: "") }
+        static var syncAudioFooter: String { NSLocalizedString("folder.sync_audio_footer", comment: "") }
+        static var exportNow: String { NSLocalizedString("folder.export_now", comment: "") }
+        static var exportFooter: String { NSLocalizedString("folder.export_footer", comment: "") }
+        static var notPicked: String { NSLocalizedString("folder.not_picked", comment: "") }
+        static var bookmarkFailed: String { NSLocalizedString("folder.bookmark_failed", comment: "") }
+        static func reportAll(_ copied: Int, _ skipped: Int) -> String {
+            String(format: NSLocalizedString("folder.report_all", comment: ""), copied, skipped)
+        }
+        static func reportFailures(_ copied: Int, _ skipped: Int, _ failures: Int, _ first: String) -> String {
+            String(format: NSLocalizedString("folder.report_failures", comment: ""), copied, skipped, failures, first)
+        }
+        // ★ 2026-10-30：自动备份（转写完成即写入所选文件夹 = 自动上传 iCloud）。
+        static var auto: String { NSLocalizedString("folder.auto", comment: "") }
+        static var autoFooter: String { NSLocalizedString("folder.auto_footer", comment: "") }
+        static var autoOn: String { NSLocalizedString("folder.auto_on", comment: "") }
+    }
+
+    // ★ 2026-10-30：备份引导（设置页两个备份入口的"怎么选"说明）。
+    enum Backup {
+        static var guideTitle: String { NSLocalizedString("backup.guide_title", comment: "") }
+        static var guideBody: String { NSLocalizedString("backup.guide_body", comment: "") }
+    }
+
+    // ★ 2026-10-30（用户："设置最顶部加入关于 Nomily"）：关于页文案。
+    enum About {
+        static var title: String { NSLocalizedString("about.title", value: "About Nomily", comment: "About page navigation title") }
+        static var socialHeader: String { NSLocalizedString("about.social_header", value: "Official social media", comment: "Section header of the official account links") }
+        static var legalHeader: String { NSLocalizedString("about.legal_header", value: "Legal", comment: "Section header of terms / privacy") }
+        static var xRow: String { NSLocalizedString("about.row_x", value: "X (Official: Nomily)", comment: "Row label of the X account link") }
+        static var xiaohongshuRow: String { NSLocalizedString("about.row_xiaohongshu", value: "Xiaohongshu", comment: "Row label of the Xiaohongshu link") }
+        static var discordRow: String { NSLocalizedString("about.row_discord", value: "Discord Community", comment: "Row label of the Discord invite link") }
+        static var githubRow: String { NSLocalizedString("about.row_github", value: "GitHub (Open Source)", comment: "Row label of the GitHub project link") }
+        static var emailRow: String { NSLocalizedString("about.row_email", value: "Email Us (nomily@geekis.com)", comment: "Row label of the support email link") }
+        static var terms: String { NSLocalizedString("about.terms", value: "Terms of Service", comment: "Row label of the terms of service") }
+        static var privacy: String { NSLocalizedString("about.privacy", value: "Privacy Policy", comment: "Row label of the privacy policy") }
+    }
+
+    // ★ 2026-10-29 (饭耳移植 · 规格 §2.3 WebDAV 存储分层)
+    enum WebDAV {
+        static var title: String { NSLocalizedString("webdav.title", comment: "") }
+        static var preset: String { NSLocalizedString("webdav.preset", comment: "") }
+        static var presetUnpicked: String { NSLocalizedString("webdav.preset_unpicked", comment: "") }
+        static var serverType: String { NSLocalizedString("webdav.server_type", comment: "") }
+        static var host: String { NSLocalizedString("webdav.host", comment: "") }
+        /// ★ 2026-10-30（用户："端口要支持输入而不是+−这样方式"）：Stepper 换文本框。
+        static var portField: String { NSLocalizedString("webdav.port_field", comment: "") }
+        /// ★ 2026-10-30：极空间等 NAS 的 HTTPS 用自签证书，默认握手会被拒。
+        static var allowSelfSigned: String { NSLocalizedString("webdav.allow_self_signed", comment: "") }
+        /// 端口非法（空/越界）时的提示。
+        static var badPort: String { NSLocalizedString("webdav.bad_port", comment: "") }
+        /// ★ 2026-10-30：极空间把"目录不可访问"也报成 401——根目录认证通过时
+        /// 换这套话，免得用户以为密码错了。
+        static var pathDenied: String { NSLocalizedString("webdav.path_denied", comment: "") }
+        static var pathMissing: String { NSLocalizedString("webdav.path_missing", comment: "") }
+        /// 连接成功且自动定位到了个人空间目录。
+        static func testOkDiscovered(_ ms: Int, _ space: String) -> String {
+            String(format: NSLocalizedString("webdav.test_ok_discovered", comment: ""), ms, space)
+        }
+        static var https: String { NSLocalizedString("webdav.https", comment: "") }
+        static var username: String { NSLocalizedString("webdav.username", comment: "") }
+        static var password: String { NSLocalizedString("webdav.password", comment: "") }
+        static var basePath: String { NSLocalizedString("webdav.base_path", comment: "") }
+        static var basePathFooter: String { NSLocalizedString("webdav.base_path_footer", comment: "") }
+        static var connection: String { NSLocalizedString("webdav.connection", comment: "") }
+        static var syncAudio: String { NSLocalizedString("webdav.sync_audio", comment: "") }
+        static var syncAudioFooter: String { NSLocalizedString("webdav.sync_audio_footer", comment: "") }
+        static var test: String { NSLocalizedString("webdav.test", comment: "") }
+        static func testOk(_ ms: Int) -> String {
+            String(format: NSLocalizedString("webdav.test_ok", comment: ""), ms)
+        }
+        static var syncNow: String { NSLocalizedString("webdav.sync_now", comment: "") }
+        static var syncNowFooter: String { NSLocalizedString("webdav.sync_now_footer", comment: "") }
+        static var notConfigured: String { NSLocalizedString("webdav.not_configured", comment: "") }
+        // ★ 2026-10-30：设置页行尾状态（未配置时的灰字提示）。
+        static var unconfigured: String { NSLocalizedString("webdav.unconfigured", comment: "") }
+        /// ★ 2026-10-30：类型选择弹层的引导语。
+        static var setupFooter: String { NSLocalizedString("webdav.setup_footer", comment: "") }
+        static func reportAll(_ uploaded: Int, _ skipped: Int) -> String {
+            String(format: NSLocalizedString("webdav.report_all", comment: ""), uploaded, skipped)
+        }
+        static func reportFailures(_ uploaded: Int, _ skipped: Int, _ failures: Int, _ first: String) -> String {
+            String(format: NSLocalizedString("webdav.report_failures", comment: ""), uploaded, skipped, failures, first)
+        }
+    }
+
     enum RecordingsSettings {
         static var deleteAfterTransfer: String { NSLocalizedString("rec_settings.delete_after_transfer", comment: "") }
         static var deleteAfterTransferFooter: String { NSLocalizedString("rec_settings.delete_after_transfer_footer", comment: "") }
+        // ★ 2026-10-29 (饭耳移植 · 规格 §2.2 录音质量 + 冷数据降级)
+        static var qualityTitle: String { NSLocalizedString("rec_settings.quality_title", comment: "") }
+        static var qualityFooter: String { NSLocalizedString("rec_settings.quality_footer", comment: "") }
+        static var qualityTierAsIs: String { NSLocalizedString("rec_settings.quality_as_is", comment: "") }
+        static var qualityTierStandard: String { NSLocalizedString("rec_settings.quality_standard", comment: "") }
+        static var qualityTierCompact: String { NSLocalizedString("rec_settings.quality_compact", comment: "") }
+        static var qualityTierMinimal: String { NSLocalizedString("rec_settings.quality_minimal", comment: "") }
+        static var coldDowngrade: String { NSLocalizedString("rec_settings.cold_downgrade", comment: "") }
+        static var coldDowngradeFooter: String { NSLocalizedString("rec_settings.cold_downgrade_footer", comment: "") }
+        static func coldDowngradeDays(_ d: Int) -> String {
+            String(format: NSLocalizedString("rec_settings.cold_downgrade_days", comment: ""), d)
+        }
+        static var qualityRunNow: String { NSLocalizedString("rec_settings.quality_run_now", comment: "") }
+        static var qualityRunning: String { NSLocalizedString("rec_settings.quality_running", comment: "") }
+        static var qualityNothingCold: String { NSLocalizedString("rec_settings.quality_nothing_cold", comment: "") }
+        static func qualityReport(_ done: Int, _ skipped: Int) -> String {
+            String(format: NSLocalizedString("rec_settings.quality_report", comment: ""), done, skipped)
+        }
+        // ★ 2026-10-29 (饭耳移植 · 规格 §2.2 试听)
+        static var auditionLoad: String { NSLocalizedString("rec_settings.audition_load", comment: "") }
+        static var auditionOriginal: String { NSLocalizedString("rec_settings.audition_original", comment: "") }
+        static var auditionTier: String { NSLocalizedString("rec_settings.audition_tier", comment: "") }
+        static func auditionClipLabel(_ name: String) -> String {
+            String(format: NSLocalizedString("rec_settings.audition_clip", comment: ""), name)
+        }
+        static func qualityTierLabel(_ base: String, _ sizePerHour: String, _ recommendation: String?) -> String {
+            var s = "\(base) · \(sizePerHour)"
+            if let recommendation { s += "（\(recommendation)）" }
+            return s
+        }
         static var decryption: String { NSLocalizedString("rec_settings.decryption", comment: "") }
         static var chachaKey: String { NSLocalizedString("rec_settings.chacha_key", comment: "") }
         static var chachaKeyFooter: String { NSLocalizedString("rec_settings.chacha_key_footer", comment: "") }
@@ -2206,6 +2726,29 @@ enum L10n {
                 comment: "Cancel button in the stop confirmation"
             )
         }
+        /// ★ 2026-10-30（用户："录音断联需要状态弹出提醒告知，点击或者在附近就重连"）：
+        /// 录音期间与手机断联的提醒弹窗。
+        static var linkLostTitle: String {
+            NSLocalizedString(
+                "watch.link_lost_title",
+                value: "iPhone disconnected",
+                comment: "Alert title when the phone is out of reach during a watch recording"
+            )
+        }
+        static var linkLostMessage: String {
+            NSLocalizedString(
+                "watch.link_lost_message",
+                value: "The recording keeps running on the watch. Bring the iPhone nearby — it reconnects automatically, or tap Reconnect.",
+                comment: "Body of the link-lost alert"
+            )
+        }
+        static var linkLostRetry: String {
+            NSLocalizedString(
+                "watch.link_lost_retry",
+                value: "Reconnect",
+                comment: "Button in the link-lost alert that re-pushes state and re-sends queued clips"
+            )
+        }
         static var pendingHeader: String { NSLocalizedString("watch.pending_header", comment: "") }
         static var sending: String { NSLocalizedString("watch.sending", comment: "") }
         static var waiting: String { NSLocalizedString("watch.waiting", comment: "") }
@@ -2366,6 +2909,24 @@ enum L10n {
             NSLocalizedString("watch.recap_no_points", value: "No key points for this summary",
                               comment: "Watch recap detail page: empty body")
         }
+        /// ★ 2026-10-30：详情页的待办区标签（点一条 → 手机「提醒事项」）。
+        static var recapTodos: String {
+            NSLocalizedString("watch.recap_todos", value: "To-dos",
+                              comment: "Watch recap detail page: label above the tappable to-do rows")
+        }
+        /// 待办区的操作提示——不点不知道能点，所以要写出来。
+        static var recapTodoHint: String {
+            NSLocalizedString("watch.recap_todo_hint", value: "Tap one to add it to Reminders on your iPhone",
+                              comment: "Watch recap detail page: hint under the to-do rows")
+        }
+        /// ★ 2026-10-30：清空全部回顾的二次确认（单条删除已在行上左滑）。
+        static var recapClearAll: String {
+            NSLocalizedString("watch.recap_clear_all", value: "Delete every recap on this watch?",
+                              comment: "Confirmation title before clearing all recaps")
+        }
+        static var recapClearAllConfirm: String {
+            NSLocalizedString("watch.recap_clear_all_confirm", value: "Delete all", comment: "Destructive button that clears every recap")
+        }
 
         // MARK: Ring appearance (directly called on the watch face)
         //
@@ -2487,6 +3048,11 @@ enum L10n {
             NSLocalizedString("face.row_footer", value: "Choose the expression the watch shows on its home screen.",
                               comment: "Settings row footer: what the home face setting does")
         }
+        /// ★ 2026-10-30：Apple Watch 菜单页里「表盘表情」行下方的说明。
+        static var menuFooter: String {
+            NSLocalizedString("face.menu_footer", value: "Everything about your watch: face, name and timed recording.",
+                              comment: "Apple Watch settings page footer, above the menu rows")
+        }
         /// The explanation at the bottom of the picker page.
         static var footer: String {
             NSLocalizedString("face.footer", value: "The face still blinks and looks around on its own. Tap it on the watch to see another expression.",
@@ -2569,13 +3135,8 @@ enum L10n {
         static var followWatch: String {
             NSLocalizedString("face.follow_watch", value: "Follow Watch", comment: "Eye-color option: don't override the colour the watch itself picked")
         }
-        static var frame: String {
-            NSLocalizedString("face.frame", value: "Square Frame", comment: "Toggle: show a rounded-square outline around the watch face")
-        }
-        static var frameFooter: String {
-            NSLocalizedString("face.frame_footer", value: "Draws a rounded-square border around the eyes on the watch face.",
-                              comment: "Footer for the square-frame toggle")
-        }
+        // ★ 2026-10-30：face.frame / face.frame_footer 已删——「方框」功能整体下线
+        //（用户第二次点名删除），手机端推送恒为不显示。
     }
 
     // MARK: - Device Files
@@ -3256,6 +3817,22 @@ enum L10n {
                               value: "Rename speakers",
                               comment: "Button/menu entry opening the speaker rename sheet")
         }
+        /// ★ 2026-10-30（纪要溯源跳转）：摘要要点/待办行尾的小按钮——
+        /// 把这条内容在转写里定位出来（滚动 + 高亮 + 从那里播放）。
+        static var traceSource: String {
+            NSLocalizedString("clip_detail.trace_source",
+                              value: "Jump to source in transcript",
+                              comment: "Accessibility label for the small per-block button that locates the sentence in the transcript")
+        }
+        /// ★ 2026-10-30（用户："笔记来源要支持能够直接在摘要进行编辑"）：
+        /// 摘要标题栏的编辑入口——带文字，不再是一枚看不出用途的小铅笔。
+        static var editSummary: String {
+            NSLocalizedString("clip_detail.edit_summary", value: "Edit", comment: "Button in the summary header that opens the inline markdown editor")
+        }
+        /// ★ 2026-10-30（用户："待办支持手写待办"）：待办区底部的输入框。
+        static var addTodoPlaceholder: String {
+            NSLocalizedString("clip_detail.add_todo", value: "Add a to-do", comment: "Placeholder of the free-text row that adds a manual to-do")
+        }
         static var renameSpeakers: String {
             NSLocalizedString("clip_detail.rename_speakers",
                               value: "Speaker names",
@@ -3364,6 +3941,12 @@ enum L10n {
             String(format: NSLocalizedString("clip_detail.speaker", comment: ""), id)
         }
         // ---- "Marks" pressed on the recorder card while recording ----
+        /// Label on the key-point row for a live-transcript bookmark
+        /// (`speaker == "mark"` in the saved segments).
+        static var markKeyPoint: String {
+            NSLocalizedString("clip_detail.mark_key_point", value: "重点标记",
+                              comment: "Key-point row label for a live-transcript bookmark in the transcript")
+        }
         static var remarks: String {
             NSLocalizedString("clip_detail.remarks", value: "Remarks",
                               comment: "Section listing the markers the recorder card dropped while recording")
@@ -3667,6 +4250,12 @@ enum L10n {
     enum Live {
         static var noDeviceConnected: String { NSLocalizedString("live.no_device", comment: "") }
         static var noDeviceMessage: String { NSLocalizedString("live.no_device_message", comment: "") }
+        // ★ 2026-10-26: third segment of the live-tab source picker — the PLAUD
+        // card's own PCM pipeline. Brand name, not translated.
+        static var sourcePlaud: String { NSLocalizedString("live.source_plaud", value: "PLAUD", comment: "Segment label for the PLAUD card's live screen") }
+        // ★ 2026-10-26: the mic button on the card's live screen leads here; this
+        // is the way back to the card.
+        static var backToCard: String { NSLocalizedString("live.back_to_card", value: "Back to card", comment: "Return from the phone-mic live screen to the card's live screen") }
         static var viewInLibrary: String { NSLocalizedString("live.view_in_library", comment: "") }
         /// After stopping recording **auto-save failed**, but when there are still bytes on hand, that button (user 2026-10-12 request).
         static var saveToLibrary: String { NSLocalizedString("live.save_to_library", comment: "") }

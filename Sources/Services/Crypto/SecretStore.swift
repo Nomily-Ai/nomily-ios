@@ -46,6 +46,10 @@ enum SecretStore {
         case llmDeepSeek     = "llm.deepseek.api_key"
         case llmDoubao       = "llm.doubao.api_key"
         case llmArk          = "llm.ark.api_key"
+        /// ★ 2026-10-29 (按截图补齐的 preset): Kimi / 智谱 GLM / MiniMax。
+        case llmKimi         = "llm.kimi.api_key"
+        case llmZhipu        = "llm.zhipu.api_key"
+        case llmMiniMax      = "llm.minimax.api_key"
         case wifiAPPassword  = "wifi_ap.psk"
         /// DingTalk A1 credentials (a JSON **array** of `DingTalkA1Credential`, see
         /// `DingTalkA1CredentialStore`). One slot for all A1 cards: the `Slot` enum is meant to be

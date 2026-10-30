@@ -267,6 +267,22 @@ struct WatchRecorderView: View {
         } message: { message in
             Text(message)
         }
+        // ★ 2026-10-30（用户："录音断联需要状态弹出提醒告知，点击或者在附近就重连"）：
+        // 录音期间与手机断联（掉线持续 20 s 才弹，锁屏/切走的瞬时断开不算）。
+        // 「重连」立即补推状态+补发队列；「继续」关掉弹窗、录音照跑——
+        // 手机回到附近时模型会自动重连并撤掉提醒。
+        .alert(
+            L10n.Watch.linkLostTitle,
+            isPresented: Binding(
+                get: { model.linkLost },
+                set: { if !$0 { model.dismissLinkLost() } }
+            )
+        ) {
+            Button(L10n.Watch.linkLostRetry) { model.reconnectNow() }
+            Button(L10n.Common.ok, role: .cancel) { model.dismissLinkLost() }
+        } message: {
+            Text(L10n.Watch.linkLostMessage)
+        }
         .onAppear {
             syncShakeDetector()
         }
@@ -467,35 +483,52 @@ struct WatchRecorderView: View {
     /// One menu page. When `items` is empty it shows "add some in settings" rather than a blank page --
     /// a blank page looks broken.
     private func menuPane(_ items: [WatchHomeMenu]) -> some View {
-        VStack(spacing: 8) {
-            Spacer(minLength: 0)
-
-            if items.isEmpty {
-                VStack(spacing: 5) {
-                    Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.secondary)
-                    Text(L10n.Watch.quickMenuEmpty)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-            } else {
-                ForEach(items) { item in
-                    NavigationLink {
-                        item.destination
-                    } label: {
-                        menuTile(item)
+        // ★ 2026-10-30（用户："手表滑动到侧边菜单栏不支持上下滑动选择需要优化，
+        // 因为下面还有"）：原来是一个 `VStack` + 两个 `Spacer` 居中，条目多出
+        // 屏幕高度后**直接被裁掉**，下面的条目根本够不着。现在包进竖向
+        // `ScrollView`：条目少时靠上排（不再上下顶开），条目多时整页可以滚。
+        //
+        // ⚠️ 与横向翻页手势不冲突：`pageDrag` 只接受"明显横向"的滑动
+        //    （`abs(dx) > abs(dy)`），竖向从来交给 ScrollView。内容超高时
+        //    关掉 `pageDrag`（`canPage`），否则滚动的起手会被误判成翻页。
+        // ★ 2026-10-30 第二轮（用户："在手表首页左滑后要支持往下往上滑动"）：
+        //   第一轮只是把内容包进 `ScrollView`，但滚动**看起来仍然不动**，两个原因：
+        //   ① `pageDrag` 每帧都写 `dragX = translation.width`，竖滑时手指那点横向
+        //      抖动会把整页左右蹭走（`.clipped()` 一裁，用户看到的就是"卡住/被挡住"），
+        //      松手再弹回去，永远不会出现滚动的位移感 —— 现在 onChanged 里先判方向，
+        //      竖向一律 `dragX = 0`，横向位移完全交给 ScrollView；
+        //   ② 内容贴边：第一块砖被顶部页码条压住、最后一块被底边裁掉，看起来"下面还有
+        //      但够不着"。现在上下各留出避让空间（顶部 12pt 让页码条，底部 8pt 兜底）。
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 7) {
+                if items.isEmpty {
+                    VStack(spacing: 6) {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.secondary)
+                        Text(L10n.Watch.quickMenuEmpty)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
-                    .buttonStyle(.plain)
+                    .padding(.vertical, 10)
+                } else {
+                    ForEach(items) { item in
+                        NavigationLink {
+                            item.destination
+                        } label: {
+                            menuTile(item)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+
+                editTile
             }
-
-            editTile
-
-            Spacer(minLength: 0)
+            .padding(.horizontal, 5)
+            .padding(.top, 13)
+            .padding(.bottom, 8)
         }
-        .padding(.horizontal, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -507,25 +540,33 @@ struct WatchRecorderView: View {
     /// the 2nd menu item that neon green, so under one theme the face is one color while
     /// the menu is another. That's one of the sources of last round's "green" complaint.
     private func menuTile(_ item: WatchHomeMenu) -> some View {
-        HStack(spacing: 8) {
+        // ★ 2026-10-30（用户："这个菜单选择需要大一点，不要太小了"）：整块从
+        //   "38pt 高、14pt 字"放大到 **约 50pt 高、16pt 字**，图标底盘 28 → 32。
+        //   40mm 表盘上一行 50pt 正好是"一屏三块半"，既点得准又不至于一屏只放得下两块。
+        //   这也是"方框"优化的正题：原来方框偏矮、文字贴边，底部一行压着屏幕边缘，
+        //   现在方框有固定的最小高度、内边距左右一致、圆角跟着高度走，视觉上不再被裁。
+        HStack(spacing: 9) {
             Image(systemName: item.symbol)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(styleStore.style.tint)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(Color.white.opacity(0.13)))
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(Color.white.opacity(0.14)))
             Text(item.title)
-                .font(.system(size: 14, weight: .medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .font(.system(size: 16, weight: .semibold))
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.10))
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.white.opacity(0.12))
         )
-        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .accessibilityLabel(item.title)
     }
 
@@ -535,27 +576,30 @@ struct WatchRecorderView: View {
         NavigationLink {
             WatchQuickMenuSettingsView()
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 9) {
                 Image(systemName: "plus.circle")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 28, height: 28)
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 32, height: 32)
                 Text(L10n.Watch.quickMenuAdd)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .font(.system(size: 15, weight: .medium))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .strokeBorder(
                         Color.white.opacity(0.18),
                         style: StrokeStyle(lineWidth: 1, dash: [4, 3])
                     )
             )
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(L10n.Watch.quickMenuAdd)
@@ -579,6 +623,14 @@ struct WatchRecorderView: View {
                 tx.disablesAnimations = true
 
                 let raw = value.translation.width
+                // ★ 2026-10-30（用户："左滑后要支持往下往上滑动"）：**先判方向再动手**。
+                //   竖向滑动一律不参与翻页——手指竖着划的时候横向分量总有十几点抖，
+                //   以前直接写进 `dragX`，整页被左右蹭走再弹回，用户的体感就是"滑不动"。
+                //   这里把竖滑干净地让给 `ScrollView`，只在明显横向时才驱动位移。
+                guard abs(value.translation.width) > abs(value.translation.height) else {
+                    if dragX != 0 { withTransaction(tx) { dragX = 0 } }
+                    return
+                }
                 // Already at the start/end and still swiping outward → damp to 1/4. It gives a bit of "you've pulled to the end" feel,
                 // otherwise the user thinks it's stuck and swipes harder.
                 let pastStart = page == 0 && raw > 0

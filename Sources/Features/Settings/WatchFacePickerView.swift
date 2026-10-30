@@ -1,4 +1,183 @@
 import SwiftUI
+import UserNotifications
+
+/// Apple Watch 设置菜单（★ 2026-10-30 用户："点击 Nomily 里面设置的 apple watch
+/// 手表表情需要放一个菜单而不是直接占满，因为这个相当于手表的设置"）。
+///
+/// 之前这一页**就是**表盘表情选择器本身：十几行表情铺满整页，而它其实是「手表设置」的
+/// 入口——用户进来先该看到"有哪些可以设"，再点进去改。现在这一页是一张菜单：
+/// 表盘表情（二级页 `WatchFaceStyleSettingsView`）、AI 怎么称呼你、定时录音、
+/// 回顾摘要与待办。
+struct WatchFacePickerView: View {
+    @EnvironmentObject private var configService: ConfigService
+    @EnvironmentObject private var watch: WatchSyncService
+
+    // ★ 2026-10-30：称呼草稿（从主设置页搬来，逻辑不变）。
+    @State private var userNameDraft = ""
+
+    /// 当前表情（菜单行右侧显示，让用户不用点进去就知道现在选的是哪个）。
+    private var currentStyle: BotFaceStyle {
+        BotFaceStyle.decode(configService.config.watchFaceStyle) ?? .calm
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                NavigationLink {
+                    WatchFaceStyleSettingsView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Label(L10n.Face.title, systemImage: "face.smiling")
+                        Spacer(minLength: 0)
+                        Text(currentStyle.title)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } footer: {
+                Text(L10n.Face.menuFooter)
+            }
+
+            userNameSection
+
+            timedRecordingSection
+
+            recapSection
+        }
+        // 手表相关的一切都收在这一页，标题就是设备名。
+        .navigationTitle("Apple Watch")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { userNameDraft = configService.config.userName ?? "" }
+    }
+
+    // MARK: - 回顾摘要（★ 2026-10-30）
+
+    /// 用户："回顾摘要要支持在手机设置里面支持设置，在里面可以查看到待办，支持在手表里面
+    /// 点击可以同步到手机的待办里面"。
+    ///
+    /// 开关关掉时不仅停止推送，还会把手机上那份「待发回顾」清空并推一次空列表——
+    /// 否则手表上留着旧摘要，用户会以为开关没生效。
+    private var recapSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { configService.config.watchRecapEnabled },
+                set: { on in
+                    configService.config.watchRecapEnabled = on
+                    configService.saveNow()
+                    watch.setRecapEnabled(on)
+                }
+            )) {
+                Text(L10n.Recap.toggle)
+            }
+        } header: {
+            Text(L10n.Recap.title)
+        } footer: {
+            Text(L10n.Recap.footer)
+        }
+    }
+
+    // MARK: - AI 怎么称呼你（★ 2026-10-30 自主设置页搬入）
+
+    /// 称呼。写进 `AppConfig.userName`，`JobRunners.withUserContext` 在每次
+    /// 摘要时带给模型（数据全局，只是入口归到 Apple Watch 设置页）。
+    /// ★ 2026-10-30（用户："AI 怎么称呼我我新增修改都没办法点击那个保存"）：
+    ///   原来 onChange 每敲一个字就写进 config，「保存」的 disabled 条件
+    ///   `draft == 已保存值` 恒成立 → 按钮永远点不了。改成：输入只动草稿，
+    ///   保存按钮 / 键盘回车才落盘；草稿与已存值不同时按钮可用。
+    private var userNameSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                TextField(L10n.Profile.userNamePlaceholder, text: $userNameDraft)
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.done)
+                    .onSubmit(commitUserName)
+                Button(L10n.Profile.save) {
+                    commitUserName()
+                }
+                .font(.subheadline.weight(.semibold))
+                .disabled(userNameDraft == (configService.config.userName ?? ""))
+            }
+        } header: {
+            Text(L10n.Profile.userName)
+        } footer: {
+            Text(L10n.Profile.footer)
+        }
+    }
+
+    private func commitUserName() {
+        configService.config.userName = userNameDraft.isEmpty ? nil : userNameDraft
+        configService.saveNow()
+    }
+
+    // MARK: - 定时录音（★ 2026-10-30 自主设置页搬入）
+
+    /// 到点命令 **手表** 开录/停录（`TimedRecordingScheduler`）。只在装了
+    /// 表 App 时能进到本页，正好与"只对手表有效"的语义对齐。
+    private var timedRecordingSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { configService.config.timedRecordingEnabled },
+                set: { on in
+                    configService.config.timedRecordingEnabled = on
+                    configService.scheduleSave()
+                    if on {
+                        // 顺手要一次通知权限——手表迟迟没录上时的兜底提醒通道。
+                        UNUserNotificationCenter.current().requestAuthorization(
+                            options: [.alert, .sound]
+                        ) { _, _ in }
+                        TimedRecordingScheduler.shared.evaluate()
+                    }
+                }
+            )) {
+                HStack(spacing: 4) {
+                    Text(L10n.TimedRecording.enable)
+                    InfoTip(text: L10n.TimedRecording.enableFooter)
+                }
+            }
+
+            if configService.config.timedRecordingEnabled {
+                DatePicker(
+                    L10n.TimedRecording.start,
+                    selection: Binding(
+                        get: { Self.timeValue(configService.config.timedRecordingStart) },
+                        set: { configService.config.timedRecordingStart = Self.timeString($0); configService.scheduleSave() }
+                    ),
+                    displayedComponents: .hourAndMinute
+                )
+                DatePicker(
+                    L10n.TimedRecording.end,
+                    selection: Binding(
+                        get: { Self.timeValue(configService.config.timedRecordingEnd) },
+                        set: { configService.config.timedRecordingEnd = Self.timeString($0); configService.scheduleSave() }
+                    ),
+                    displayedComponents: .hourAndMinute
+                )
+            }
+
+            if let notice = TimedRecordingScheduler.shared.lastNotice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(L10n.TimedRecording.title)
+        } footer: {
+            Text(L10n.TimedRecording.footer)
+        }
+    }
+
+    private static func timeValue(_ hhmm: String) -> Date {
+        let parts = hhmm.split(separator: ":").compactMap { Int($0) }
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        comps.hour = parts.count == 2 ? parts[0] : 23
+        comps.minute = parts.count == 2 ? parts[1] : 30
+        return Calendar.current.date(from: comps) ?? Date()
+    }
+
+    private static func timeString(_ date: Date) -> String {
+        let comps = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", comps.hour ?? 23, comps.minute ?? 30)
+    }
+}
 
 /// Which expression the watch home face wears (Settings → Apple Watch → Home Face).
 ///
@@ -11,6 +190,10 @@ import SwiftUI
 ///    auto-cycle toggle, blink pace, eye colour, square frame. All four ride the same
 ///    `updateApplicationContext` as the style (see `WatchSyncService.sendFaceSettings` — that
 ///    call *replaces* the whole context, so every push must carry all five keys).
+///
+/// ★ 2026-10-30 二稿（用户："点击设置的 apple watch 手表表情需要放一个菜单而不是
+/// 直接占满，因为这个相当于手表的设置"）：本页退回**二级页**——Apple Watch 菜单
+/// （`WatchFacePickerView`）才是总入口，表情选择、闪烁节奏、颜色、方框都在这里改。
 ///
 /// ## One row = one expression, and the left is what it **really** looks like
 /// The left of each row isn't an icon or text but **a directly drawn pair of eyes** —
@@ -28,7 +211,7 @@ import SwiftUI
 /// When a custom colour is in force the preview therefore gets a small dark chip behind it —
 /// the closest a phone row gets to the real surface. No colour picked (`nil`) keeps the plain
 /// foreground-colour preview, same as before.
-struct WatchFacePickerView: View {
+struct WatchFaceStyleSettingsView: View {
     @EnvironmentObject private var configService: ConfigService
     @EnvironmentObject private var watch: WatchSyncService
 
@@ -89,15 +272,13 @@ struct WatchFacePickerView: View {
                 Text(L10n.Face.eyeColor)
             }
 
-            Section {
-                Toggle(L10n.Face.frame, isOn: Binding(
-                    get: { configService.config.watchFaceFrame ?? true },
-                    set: { configService.config.watchFaceFrame = $0; persistAndPush() }
-                ))
-            } footer: {
-                Text(L10n.Face.frameFooter)
-            }
+            // ★ 2026-10-30（用户第二次点名，截图指定："是删除这个里面的方框"）：
+            //   「方框」开关整行撤掉——眼睛外圈那个圆角方框功能本身下线。
+            //   推送侧保持"不显示"（`watchFaceFrame = false`），旧手表端收到
+            //   false 不会画框；watchFaceFrame 字段保留只为旧配置解码。
         }
+        // ★ 2026-10-30 二稿：本页退回「表盘表情」二级页——Apple Watch 菜单页
+        // 才是手表设置的总入口（用户："不要直接占满"）。
         .navigationTitle(L10n.Face.title)
         .navigationBarTitleDisplayMode(.inline)
     }

@@ -164,16 +164,28 @@ struct RecorderDeviceInfo: Equatable {
     /// These are **explanations for users**, not logs: they should answer "why is there a block of hex here".
     let notes: [String]
 
+    /// ★ 2026-10-29（用户："录音豆和卡片是两个设备，要显示两个电量"）：
+    /// 第二个电量（如 D3200 的充电盒）。`nil` = 该协议没有/没读到，UI 不显示这一行。
+    /// 规则同 `batteryPercent`：读不到是 `nil`，不是 0。
+    let secondaryBatteryPercent: Int?
+
+    /// 第二个电量的名字（"充电盒"/"卡片"…）。`nil` 时 UI 用默认"充电盒"。
+    let secondaryBatteryLabel: String?
+
     init(batteryPercent: Int? = nil,
          isCharging: Bool? = nil,
          storage: RecorderStorageInfo? = nil,
          rawReplies: [UInt16: Data] = [:],
-         notes: [String] = []) {
+         notes: [String] = [],
+         secondaryBatteryPercent: Int? = nil,
+         secondaryBatteryLabel: String? = nil) {
         self.batteryPercent = batteryPercent
         self.isCharging = isCharging
         self.storage = storage
         self.rawReplies = rawReplies
         self.notes = notes
+        self.secondaryBatteryPercent = secondaryBatteryPercent
+        self.secondaryBatteryLabel = secondaryBatteryLabel
     }
 
     /// The card didn't answer with a single item. The UI uses this to distinguish "read 0 items" from "the card stayed silent" —

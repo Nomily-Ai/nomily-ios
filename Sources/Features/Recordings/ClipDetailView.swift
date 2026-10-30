@@ -112,12 +112,16 @@ struct ClipDetailView: View {
     /// repaints every row and chip behind it.
     @ObservedObject private var speakerStore = SpeakerNameStore.shared
     @State private var showSpeakerEditor = false
+    // ★ 2026-10-30（纪要溯源跳转）：摘要/待办点「跳到原文」后的瞬态状态。
+    /// 刚定位到的转写行（黄底高亮，几秒后自动清除）。
+    @State private var tracedSegmentStart: Double?
+    /// 让 ScrollViewReader 滚过去的目标行（onChange 消费后清空）。
+    @State private var traceScrollTo: Double?
     /// Q&A state lives in the page, not in the section: the input bar is pinned to the bottom
     /// while the answers stay in the scrolling list.
+    /// ★ 2026-10-30：底部入口条（"方框"）已删——aiChat 保留但当前无入口，
+    /// 等确认新的挂载点（如"更多"菜单）再接回 showAskSheet。
     @StateObject private var aiChat = AIChatModel()
-    /// The Q&A conversation is a sheet, not an in-page panel (17:04 screenshot:
-    /// the panel covered the player and left a void above the keyboard).
-    @State private var showAskSheet = false
     /// ★ 2026-10-23 ("生成的摘要需要能够支持编辑点击能够写入修改"): tap 编辑 on a
     /// note page and the markdown becomes a `TextEditor`; 保存 writes straight
     /// back to the page's file — the same file the reader, share poster and
@@ -163,7 +167,10 @@ struct ClipDetailView: View {
         // (`navTabs`, a `principal` toolbar item) — Plaud's layout. The old
         // separate strip below the title is gone entirely, so the page starts
         // right under the navigation bar.
-        VStack(spacing: 0) {
+        // ★ 2026-10-30（纪要溯源跳转）：外面包一层 ScrollViewReader——「跳到原文」
+        // 要把转写列表滚到定位的那一行。
+        ScrollViewReader { proxy in
+            VStack(spacing: 0) {
             Form {
             switch detailTab {
             case .source:
@@ -201,28 +208,25 @@ struct ClipDetailView: View {
             // the Form up under the tab strip also clipped the top of the player
             // card — visible in the 17:04 screenshot. The tab strip now carries
             // its own divider, so the Form keeps its normal inset.
-        }
+            }
+            .onChange(of: traceScrollTo) { target in
+                // 纪要溯源：滚到定位的那一行（清掉目标避免重复滚动）。
+                guard let target else { return }
+                withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(target, anchor: .center) }
+                self.traceScrollTo = nil
+            }
+            }
         .navigationTitle(item.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         // ★ (2026-10-19) The three tabs belong to the app's home shell. Keeping them on a
         // recording detail page wastes the bottom strip on navigation the user has already
         // made a decision about — and the Q&A bar needs that strip.
         .toolbar(.hidden, for: .tabBar)
-        // Answers live in their own sheet, the bar does not. Both tabs ask —
-        // the context has always carried SUMMARY + TRANSCRIPT, so a question on
-        // 来源 is answered from the transcript.
-        // ★ 2026-10-23 ("这个布局排版都是有问题的需要优化"): the bar no longer
-        //  expands into the page. It is one short row; tapping it opens
-        //  `AIChatSheet`. Wording follows Plaud per tab (笔记 = their exact
-        //  "对此笔记提问").
-        .safeAreaInset(edge: .bottom) {
-            if aiChat.isAvailable {
-                AIChatAskBar(placeholder: askPlaceholder) { showAskSheet = true }
-            }
-        }
-        .sheet(isPresented: $showAskSheet) {
-            AIChatSheet(model: aiChat, placeholder: askPlaceholder)
-        }
+        // ★ 2026-10-30（用户第二次点名："方框不是删除了，为啥直接在我手机上显示"）：
+        //   底部那条 AI 问答入口条（AIChatAskBar）就是要删的"方框"——它悬浮在
+        //   页面底部，把待办输入行等底部内容挡住。入口条连同挂载的 sheet 一起
+        //   撤掉；AIChatModel / AIChatSheet 的代码保留，以后想从"更多"菜单
+        //   重新接入随时可以。
         // ★ 2026-10-15: The detail page counts as "opened" the moment it appears, and the red dot on the list row goes away with it.
         //
         // Hooked here rather than in the list's tap callback: the detail page has several entry points (library,
@@ -852,6 +856,67 @@ struct ClipDetailView: View {
         return segments.lastIndex { $0.start <= player.currentTime }
     }
 
+    // MARK: - 纪要溯源跳转（★ 2026-10-30）
+
+    /// 摘要要点 / 待办行点「跳到原文」：
+    /// 切到来源 tab → 文本匹配定位到最像的转写段 → 滚过去（黄底高亮几秒）
+    /// → 播放器 seek 到那句话开头开始播。
+    private func traceToSource(_ text: String) {
+        guard let doc = transcript, !doc.segments.isEmpty,
+              let seg = Self.bestMatchingSegment(for: text, in: doc.segments) else { return }
+        // 摘要在笔记 tab——先切回来源，转写行才有机会出现。
+        let alreadyOnSource = detailTab == .source
+        if !alreadyOnSource {
+            withAnimation(.easeOut(duration: 0.16)) { detailTab = .source }
+        }
+        // 播放器对准那句话开头（跟转写行 tap-to-seek 同一套：回退 0.3s 缓冲）。
+        if let url = item.url {
+            player.load(url)
+            player.seek(to: max(0, seg.start - 0.3))
+            if !player.isPlaying { player.play() }
+        }
+        tracedSegmentStart = seg.start
+        // 刚切 tab 时行还没挂上 id，稍等一拍再滚。
+        Task { @MainActor in
+            if !alreadyOnSource {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+            }
+            traceScrollTo = seg.start
+            // 黄底高亮 8 秒后自动消退。
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            if tracedSegmentStart == seg.start { tracedSegmentStart = nil }
+        }
+    }
+
+    /// 文本 → 最像的转写段。摘要/待办是模型改写过的话，不逐字等于转写，
+    /// 所以按**字符二元组重合度**打分（对中文分词不敏感），取最高分且超过
+    /// 阈值的那段；低于阈值 = 找不到可信来源，不动。
+    static func bestMatchingSegment(for text: String, in segments: [AsrSegment]) -> AsrSegment? {
+        let needle = Self.characterBigrams(text)
+        guard needle.count >= 2 else { return nil }
+        var best: (segment: AsrSegment, score: Double)?
+        for seg in segments {
+            let hay = Self.characterBigrams(seg.text)
+            guard !hay.isEmpty else { continue }
+            let score = Double(needle.intersection(hay).count) / Double(needle.count)
+            if score >= 0.2, score > (best?.score ?? 0) {
+                best = (seg, score)
+            }
+        }
+        return best?.segment
+    }
+
+    /// 小写化、去掉标点空白后取相邻字符二元组（"周报"→"周报"前 2 字 → "周","报" 组合）。
+    private static func characterBigrams(_ text: String) -> Set<String> {
+        let chars = Array(text.lowercased().filter { $0.isLetter || $0.isNumber })
+        guard chars.count >= 2 else { return [] }
+        var grams = Set<String>()
+        for i in 0..<(chars.count - 1) {
+            grams.insert(String(chars[i...(i + 1)]))
+        }
+        return grams
+    }
+
     // MARK: transcript search & speaker filter (★ 2026-10-19, DingTalk parity)
 
     /// Search field + speaker chips. Hidden for single-speaker short transcripts where
@@ -928,10 +993,10 @@ struct ClipDetailView: View {
                         segment: seg,
                         isActive: activeSegmentIndex(doc.segments).map { doc.segments[$0].start == seg.start } ?? false,
                         highlight: transcriptQuery.isEmpty ? nil : transcriptQuery,
-                        speakerNames: speakerMap
+                        speakerNames: speakerMap,
+                        isTraced: tracedSegmentStart == seg.start
                     ) {
-                        player.seek(to: max(0, seg.start - 0.3))
-                        if !player.isPlaying { player.play() }
+                        seekToSegment(seg)
                     }
                 }
                 if matches.count > 40 {
@@ -948,19 +1013,29 @@ struct ClipDetailView: View {
                 TranscriptSegmentRow(
                     segment: seg,
                     isActive: activeSegmentIndex(doc.segments).map { doc.segments[$0].start == seg.start } ?? false,
-                    speakerNames: speakerMap
+                    speakerNames: speakerMap,
+                    isTraced: tracedSegmentStart == seg.start
                 ) {
-                    player.seek(to: max(0, seg.start - 0.3))
-                    if !player.isPlaying { player.play() }
+                    seekToSegment(seg)
                 }
             }
         }
     }
 
+    /// ★ 2026-10-30：抽出来给转写行 tap 和溯源跳转共用——seek 到该句开头
+    /// （回退 0.3 s 缓冲）并保证在播。（原来内联在行闭包里，加了溯源参数后
+    /// 表达式复杂到 Swift 编译器超时，拆方法顺便统一。）
+    private func seekToSegment(_ seg: AsrSegment) {
+        player.seek(to: max(0.0, seg.start - 0.3))
+        if !player.isPlaying { player.play() }
+    }
+
     private func distinctSpeakers(_ segments: [AsrSegment]) -> [String] {
         var seen: [String] = []
         for segment in segments {
-            guard let speaker = segment.speaker, !speaker.isEmpty else { continue }
+            // ★ 2026-10-26: `mark` rows are bookmarks, not a speaker — they
+            // must not appear in the speaker chips / rename sheet.
+            guard let speaker = segment.speaker, !speaker.isEmpty, speaker != "mark" else { continue }
             if !seen.contains(speaker) { seen.append(speaker) }
         }
         return seen
@@ -994,7 +1069,9 @@ struct ClipDetailView: View {
         var order: [String] = []
         var counts: [String: Int] = [:]
         for segment in segments {
-            guard let speaker = segment.speaker, !speaker.isEmpty else { continue }
+            // ★ 2026-10-26: `mark` rows are bookmarks, not a speaker (see
+            // `distinctSpeakers`).
+            guard let speaker = segment.speaker, !speaker.isEmpty, speaker != "mark" else { continue }
             if counts[speaker] == nil { order.append(speaker) }
             counts[speaker, default: 0] += 1
         }
@@ -1050,9 +1127,13 @@ struct ClipDetailView: View {
             let todos = pages
                 .compactMap { NotePages.text(of: $0, for: item.name) }
                 .flatMap { TodoExtract.fromSummary($0) }
-            if !todos.isEmpty {
+            // ★ 2026-10-30（用户："待办支持手写待办不只是总结出来的待办"）：
+            // 只要转写过就显示待办区——没有摘要待办时也能自己写一条，
+            // 不能因为"AI 没提取到"就把整个入口锁死。
+            if !todos.isEmpty || transcript != nil {
                 // ★ 2026-10-23: checklist rows with a tap-to-strike circle.
-                TodoChecklistView(blocks: todos, recordingName: item.name)
+                // ★ 2026-10-30: 每行行尾加「跳到原文」。
+                TodoChecklistView(blocks: todos, recordingName: item.name, onTrace: traceToSource)
             } else if !pages.isEmpty {
                 Text(L10n.ClipDetail.todosEmpty)
                     .font(.callout)
@@ -1456,7 +1537,18 @@ struct ClipDetailView: View {
                     //   a 14-block teaser behind a link.
                     // ★ 2026-10-23 ("笔记也是，无需收纳"): the "view full summary"
                     //   push is gone — this page IS the full document.
-                    MarkdownBlocksView(blocks: MarkdownBlocks.parse(text))
+                    // ★ 2026-10-30（纪要溯源跳转）：要点块行尾加「跳到原文」。
+                    MarkdownBlocksView(blocks: MarkdownBlocks.parse(text), onTrace: traceToSource)
+                        // 长按正文也能进编辑——用户直觉是"点摘要本身改它"，
+                        // 而不是先去找标题栏那枚按钮。
+                        .contextMenu {
+                            Button {
+                                editedSummary = text
+                                isEditingSummary = true
+                            } label: {
+                                Label(L10n.ClipDetail.editSummary, systemImage: "pencil")
+                            }
+                        }
                 }
 
                 // ★ 2026-10-23 ("参考一下页面布局跟结构", Plaud 4028/4025): the mind
@@ -1496,12 +1588,16 @@ struct ClipDetailView: View {
                 if currentPageText != nil {
                     // ★ 2026-10-23 ("生成的摘要需要能够支持编辑"): one pencil next
                     // to 重新生成 — tap to edit, save writes the file back.
+                    // ★ 2026-10-30（用户："知识库里面笔记来源要支持能够直接在摘要
+                    // 进行编辑"）：原来只有一枚小铅笔，几乎看不见。这里改成带文字的
+                    // 「编辑」，并在摘要正文上挂长按菜单——两个入口都通向同一个编辑器。
                     Button {
                         editedSummary = currentPageText ?? ""
                         isEditingSummary = true
                     } label: {
-                        Image(systemName: "pencil")
+                        Label(L10n.ClipDetail.editSummary, systemImage: "pencil")
                             .font(.caption)
+                            .labelStyle(.titleAndIcon)
                     }
                     .disabled(isEditingSummary)
                     if selectedPageID == NotePage.primaryID {

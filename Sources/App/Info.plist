@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.nomily.app.transcription.backlog</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -17,7 +21,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.1</string>
+	<string>1.1.0</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -30,7 +34,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>7</string>
+	<string>53</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>
@@ -43,7 +47,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Nomily AI scans the QR code that carries a DingTalk A1 credential, so it never has to go through the clipboard.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Nomily AI opens a direct TCP connection to your D·NOTE over its Wi-Fi access point during Fast Transfer.</string>
+	<string>Nomily AI connects directly to your recorder (D·NOTE, TicNote, soundcore Work 飞书录音豆) over its Wi-Fi access point during Fast Transfer.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Nomily AI records a rough location when your recorder card disconnects, so it can tell you where you last had it. It asks for the position once, only at that moment, and never tracks you.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
@@ -54,6 +58,10 @@
 	<string>Nomily AI saves an image or video to your photo library only when you ask it to.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Nomily AI only opens your photo library when you choose a photo or video to attach. It never reads your library on its own.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Nomily AI can add the to-dos from your recording summaries to the Reminders app, so you never lose an action item. Nothing is read back unless you also tick them in Nomily.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Nomily AI can add the to-dos from your recording summaries to the Reminders app, so you never lose an action item. Nothing is read back unless you also tick them in Nomily.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Nomily AI turns your recordings into text on this iPhone, using Apple's on-device speech recogniser. On that path the audio never leaves the device.</string>
 	<key>UIApplicationSceneManifest</key>
@@ -65,6 +73,7 @@
 	<array>
 		<string>audio</string>
 		<string>bluetooth-central</string>
+		<string>processing</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict>

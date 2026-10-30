@@ -464,6 +464,9 @@ enum RecorderProtocolRegistry {
         DnoteRecorderSpec.self,
         TicNoteRecorderSpec.self,
         DingTalkA1Spec.self,
+        // ★ soundcore Work D3200（飞书录音豆）— BLE 控制通道与 TicNote 同构
+        //   （08EE/09FF 帧 + ECDH 会话加密文件），走同一套 RecorderLink 抽象。
+        SoundcoreRecorderSpec.self,
     ]
 
     /// Protocol visible to users: `exposure != .hidden`.

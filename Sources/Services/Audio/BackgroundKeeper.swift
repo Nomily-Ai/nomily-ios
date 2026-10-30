@@ -41,6 +41,10 @@ final class BackgroundKeeper {
         /// and it needs to run in the background". Export and transcription are **the same kind** of problem (suspended half-way),
         /// so they share this one setup rather than starting another.
         case export
+        /// ★ 2026-10-29 (饭耳移植 · 规格 §3.1): timed overnight recording — held by
+        /// `TimedRecordingScheduler` for the whole scheduled window so the mic
+        /// engine survives suspension without any screen in the foreground.
+        case timedRecording
     }
 
     /// Mirrors `config.backgroundKeepAliveEnabled`. When off, only the ~30 seconds of

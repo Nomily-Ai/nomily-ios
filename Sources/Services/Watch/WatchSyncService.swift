@@ -318,7 +318,7 @@ final class WatchSyncService: NSObject, ObservableObject {
             colorHex: colorHex,
             blinkSpeed: blinkSpeed,
             autoCycle: autoCycle ?? true,
-            frameVisible: frameVisible ?? true
+            frameVisible: false  // ★ 2026-10-30：方框功能下线，恒为不显示
         )
         // ★ 2026-10-23: persisted, because `pushRecap` (which can fire after an
         // app relaunch, straight out of the job queue) must be able to rebuild
@@ -330,37 +330,79 @@ final class WatchSyncService: NSObject, ObservableObject {
     }
 
     /// One `updateApplicationContext` push carrying **everything** the phone
-    /// owns: face settings + recaps.
+    /// owns: face settings + recaps + (if any) the timed-recording command.
     ///
     /// ⚠️ Every push must be a full context — the call *replaces* the previous
     ///    one wholesale (see the block at `WatchLinkMessage.faceStyleKey`), so
     ///    pushing recaps alone would wipe the face settings off the watch and
     ///    vice versa. That is why both `pushFaceSettings` and `pushRecap`
     ///    funnel into here instead of writing the session directly.
-    private func pushCurrentContext(face: FaceContext) {
+    private func pushCurrentContext(face: FaceContext? = nil) {
         guard WCSession.isSupported() else { return }
+        let resolvedFace = face ?? savedFaceContext()
+        guard let resolvedFace else { return }
         var context: [String: Any] = [
-            WatchLinkMessage.faceStyleKey: face.style,
-            WatchLinkMessage.faceAutoCycleKey: face.autoCycle,
-            WatchLinkMessage.faceFrameKey: face.frameVisible,
+            WatchLinkMessage.faceStyleKey: resolvedFace.style,
+            WatchLinkMessage.faceAutoCycleKey: resolvedFace.autoCycle,
+            WatchLinkMessage.faceFrameKey: resolvedFace.frameVisible,
         ]
-        if let colorHex = face.colorHex {
+        if let colorHex = resolvedFace.colorHex {
             context[WatchLinkMessage.faceColorKey] = colorHex
         }
-        if let blinkSpeed = face.blinkSpeed {
+        if let blinkSpeed = resolvedFace.blinkSpeed {
             context[WatchLinkMessage.blinkSpeedKey] = blinkSpeed
         }
         if let data = try? JSONEncoder().encode(loadRecapOutbox()) {
             context[WatchLinkMessage.recapsKey] = data
         }
+        // ★ 2026-10-30：定时录音命令随完整上下文一起走（持久化了，所以手机
+        // 重启后的任何一次推送都会带上；手表端按 issuedAt 去重，重发无害）。
+        if let command = Self.loadTimedCommand() {
+            context[WatchLinkMessage.timedRecordCommandKey] = command.command
+            context[WatchLinkMessage.timedRecordIssuedAtKey] = command.issuedAt.timeIntervalSince1970
+            if let endsAt = command.endsAt {
+                context[WatchLinkMessage.timedRecordEndsAtKey] = endsAt.timeIntervalSince1970
+            }
+        }
         do {
             try WCSession.default.updateApplicationContext(context)
-            log.info("watch context pushed: style=\(face.style, privacy: .public) recaps=\(Self.recapOutbox.count, privacy: .public)")
+            log.info("watch context pushed: style=\(resolvedFace.style, privacy: .public) recaps=\(Self.recapOutbox.count, privacy: .public)")
         } catch {
             // You reach here when the session hasn't activated yet. The activation callback pushes again, so this time
             // failing isn't fatal — a log line is enough; don't show the user anything.
             log.error("watch context push failed: \(String(describing: error), privacy: .public)")
         }
+    }
+
+    // MARK: - Timed recording command (★ 2026-10-30, "定时录音在手表上录")
+
+    private struct TimedCommand: Codable {
+        let command: String   // "start" | "stop"
+        let issuedAt: Date
+        let endsAt: Date?
+    }
+
+    /// 命令持久化键——pushCurrentContext 可在手机重启后被任何设置变更触发，
+    /// 必须能从磁盘重建完整上下文（同 `faceContextKey` 的理由）。
+    private static let timedCommandKey = "watch.timed.command"
+
+    /// 定时录音：让手表开始/停止录音。`endsAt` = 窗口结束时刻，手表用它
+    /// 自己兜底停止（手机进程死了也停得下来）。
+    ///
+    /// ⚠️ 不检查可达性（理由同 `sendFaceStyle`）：applicationContext 由守护
+    /// 进程转交，手表 App 下次运行时一定拿到。
+    func sendTimedRecordCommand(start: Bool, endsAt: Date?) {
+        let command = TimedCommand(command: start ? "start" : "stop", issuedAt: Date(), endsAt: endsAt)
+        if let data = try? JSONEncoder().encode(command) {
+            UserDefaults.standard.set(data, forKey: Self.timedCommandKey)
+        }
+        pushCurrentContext()
+        log.info("timed record command → \(command.command, privacy: .public) endsAt=\(command.endsAt.map { String(describing: $0) } ?? "nil", privacy: .public)")
+    }
+
+    private static func loadTimedCommand() -> TimedCommand? {
+        guard let data = UserDefaults.standard.data(forKey: timedCommandKey) else { return nil }
+        return try? JSONDecoder().decode(TimedCommand.self, from: data)
     }
 
     // MARK: - Recaps (★ 2026-10-23, "watch 那边能否靠 Siri Recap 的看齐")
@@ -371,6 +413,12 @@ final class WatchSyncService: NSObject, ObservableObject {
     // out while the watch is asleep is re-delivered with the *next* context
     // push, and so a recap survives this app being killed before WCSession
     // accepts the context.
+
+    /// ★ 2026-10-30（用户："回顾里能看到待办这个为啥只能存 5 条？这个需要优化"）：
+    /// 一条回顾最多带多少条待办。原来是硬编码 5 条，长会议（十几条行动项）会被截断，
+    /// 手表上就"看不到最后那几条"——现在放到 30，够一小时的会用量，手表详情页
+    /// 本身是可滚动的，多几条不影响观感。
+    static let recapTodoLimit = 30
 
     private static let recapOutboxKey = "watch.recap.outbox.v1"
     private static let faceContextKey = "watch.face.context.v1"
@@ -386,7 +434,23 @@ final class WatchSyncService: NSObject, ObservableObject {
     }
 
     /// Called by the summarize runner when a summary lands. Fire-and-forget.
-    func pushRecap(clipName: String, title: String, points: [String], recordedAt: Date) {
+    ///
+    /// ★ 2026-10-30（用户："回顾摘要要支持在手机设置里面支持设置，在里面可以查看到
+    /// 待办"）：两个变化——
+    /// ① `todos`：摘要里明确承诺的待办随回顾一起推给手表（最多 5 条），手表详情页
+    ///    列出来，点一下就能同步进手机的「提醒事项」；
+    /// ② 设置里的开关关掉时**什么都不推**（连队列都不写），避免用户关了还在腕上看到。
+    func pushRecap(
+        clipName: String,
+        title: String,
+        points: [String],
+        todos: [String] = [],
+        recordedAt: Date
+    ) {
+        guard config.config.watchRecapEnabled else {
+            log.info("recap skipped: disabled in settings")
+            return
+        }
         var recaps = loadRecapOutbox()
         // Re-summarising the same clip replaces its recap (id = clip name).
         recaps.removeAll { $0.id == clipName }
@@ -395,6 +459,7 @@ final class WatchSyncService: NSObject, ObservableObject {
                 id: clipName,
                 title: title,
                 points: points,
+                todos: Array(todos.prefix(Self.recapTodoLimit)),
                 recordedAt: recordedAt,
                 createdAt: Date()
             ),
@@ -410,10 +475,28 @@ final class WatchSyncService: NSObject, ObservableObject {
             colorHex: config.config.watchEyeColor,
             blinkSpeed: config.config.watchBlinkSpeed,
             autoCycle: config.config.watchFaceAutoCycle ?? true,
-            frameVisible: config.config.watchFaceFrame ?? true
+            frameVisible: false  // ★ 2026-10-30：方框功能下线，恒为不显示
         )
         pushCurrentContext(face: face)
-        log.info("recap pushed: \(clipName, privacy: .public) points=\(points.count, privacy: .public)")
+        log.info("recap pushed: \(clipName, privacy: .public) points=\(points.count, privacy: .public) todos=\(todos.count, privacy: .public)")
+    }
+
+    /// ★ 2026-10-30：设置里的「回顾摘要」开关变化。关掉时把待发队列清空并推一次
+    /// 空列表——手表收到空数组会清掉本地回顾，用户才看得出开关真的生效了。
+    func setRecapEnabled(_ enabled: Bool) {
+        if !enabled {
+            Self.recapOutbox = []
+            UserDefaults.standard.removeObject(forKey: Self.recapOutboxKey)
+        }
+        let face = savedFaceContext() ?? FaceContext(
+            style: config.config.watchFaceStyle ?? BotFaceStyle.calm.rawValue,
+            colorHex: config.config.watchEyeColor,
+            blinkSpeed: config.config.watchBlinkSpeed,
+            autoCycle: config.config.watchFaceAutoCycle ?? true,
+            frameVisible: false  // ★ 2026-10-30：方框功能下线，恒为不显示
+        )
+        pushCurrentContext(face: face)
+        log.info("recap enabled → \(enabled, privacy: .public)")
     }
 
     private static var recapOutbox: [WatchRecap] = []
@@ -523,6 +606,20 @@ extension WatchSyncService: WCSessionDelegate {
         didReceiveApplicationContext applicationContext: [String: Any]
     ) {
         Task { @MainActor in self.apply(watchState: applicationContext) }
+    }
+
+    /// ★ 2026-10-30（用户："支持在手表里面点击可以同步到手机的待办里面"）：
+    /// 手表 Recap 详情里点了一条待办，走 `transferUserInfo` 送到这里。
+    /// 写进系统「提醒事项」——权限没给就静默失败（手表端已经打了确认触感，
+    /// 设置页的开关那行才是处理授权的地方）。
+    nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        guard let title = userInfo[WatchLinkMessage.reminderTitleKey] as? String,
+              !title.isEmpty else { return }
+        let source = (userInfo[WatchLinkMessage.reminderSourceKey] as? String) ?? ""
+        Task { @MainActor in
+            let ok = await RemindersSyncService.shared.createReminder(title: title, source: source)
+            log.info("watch reminder request: \(title, privacy: .public) ok=\(ok, privacy: .public)")
+        }
     }
 
     nonisolated func sessionDidBecomeInactive(_ session: WCSession) {}

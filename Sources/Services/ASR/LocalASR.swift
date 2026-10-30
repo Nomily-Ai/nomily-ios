@@ -205,6 +205,12 @@ struct LocalASR {
             let seconds = loaded.seconds
             if seconds.isFinite, seconds > 0 { return seconds }
         }
+        // ★ 2026-10-27: SDK Mp3Convert 产出的 mp3（VBR 无 Xing 头）AVAsset 可能
+        // 探不到时长——AVAudioFile 逐帧解析兜底（与 LibraryView.probeDuration 同款）。
+        if let file = try? AVAudioFile(forReading: url) {
+            let seconds = Double(file.length) / file.processingFormat.sampleRate
+            if seconds.isFinite, seconds > 0 { return seconds }
+        }
         return nil
     }
 

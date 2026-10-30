@@ -101,7 +101,7 @@
 
 /* Configuraci\u00f3n de grabaciones */
 "rec_settings.delete_after_transfer" = "Eliminar del dispositivo despu\u00e9s de transferir";
-"rec_settings.delete_after_transfer_footer" = "Cuando est\u00e1 activado, el archivo se elimina del dispositivo una vez que la transferencia BLE + descifrado finaliza.";
+"rec_settings.delete_after_transfer_footer" = "Cuando est\u00e1 activado, el archivo se elimina del dispositivo una vez que la transferencia BLE + descifrado finaliza. (Soundcore bean Wi‑Fi fast transfer: fully transferred recordings are deleted by the bean firmware itself, regardless of this switch.)";
 "rec_settings.decryption" = "Descifrado";
 "rec_settings.chacha_key" = "Clave ChaCha20 (hex)";
 "rec_settings.chacha_key_footer" = "64 caracteres hexadecimales (32 bytes). D\u00e9jalo en blanco si el dispositivo no usa cifrado.";

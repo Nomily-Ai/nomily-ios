@@ -49,6 +49,29 @@ struct AppConfig: Codable, Equatable {
     /// Turning it off leaves only `beginBackgroundTask`'s ~30-second grace — short jobs still finish,
     /// long ones get cut. There's a switch because the user should have the right to refuse "tricking the background with silent audio".
     var backgroundKeepAliveEnabled: Bool
+    /// ★ 2026-10-29 (饭耳移植): night-shift backlog transcription via BGProcessingTask.
+    /// When on, iOS may wake the app overnight (charging + network) to transcribe
+    /// recordings that never got a transcript. Off = never wake in the background.
+    var nightlyTranscribeEnabled: Bool
+    /// ★ 2026-10-29 (饭耳移植 · 规格 §3.1): timed overnight recording. Between
+    /// `timedRecordingStart`/`timedRecordingEnd` ("HH:mm") the phone mic records
+    /// until the window ends. Off by default — auto-recording at night is a
+    /// decision the user must make explicitly.
+    var timedRecordingEnabled: Bool
+    var timedRecordingStart: String
+    var timedRecordingEnd: String
+    /// ★ 2026-10-29 (饭耳移植 · 规格 §2.3): WebDAV backup destination. `nil` =
+    /// not configured. The password travels through `SecretStore` (Keychain)
+    /// and is stripped before `config.json` is written — see ConfigService.
+    var webdav: WebDAVConfig?
+    /// ★ 2026-10-29 (饭耳移植 · 规格 §2.2): the cold-data downgrade tier —
+    /// `RecordingQualityTier.rawValue`. `nil`/`asIs` = keep original quality (default).
+    var recordingQualityTier: String?
+    /// When on, clips older than `coldDataDowngradeDays` that already have a
+    /// transcript get re-encoded down to `recordingQualityTier` in place.
+    var coldDataDowngradeEnabled: Bool
+    /// Cold-data age threshold, days (spec default: 7).
+    var coldDataDowngradeDays: Int
     /// When on, the app reconnects to the most recent device by itself after
     /// an unexpected drop (device powered off/on, out of range). When off the
     /// app stays disconnected until the user taps the connection pill.
@@ -113,6 +136,18 @@ struct AppConfig: Codable, Equatable {
     var watchFaceAutoCycle: Bool?
     /// Whether the rounded-square frame is drawn around the watch face. `nil` = `true`.
     var watchFaceFrame: Bool?
+    /// ★ 2026-10-28（饭耳逆向规格 §3.2）：用户称呼。AI 摘要/整理 prompt 里用
+    /// 它交代「录音的主人是谁」，转写说话人标注也能对上「X（我）」。
+    /// `nil`/空 = 用户没填，prompt 里不加这条（保持旧行为）。
+    var userName: String?
+    /// ★ 2026-10-30（用户："回顾摘要要支持在手机设置里面支持设置"）：
+    /// 是否把「回顾摘要」推到手表（默认开）。关掉后手机不再推送，并把待发队列
+    /// 清空、推一次空列表，让手表也清掉旧摘要。
+    var watchRecapEnabled: Bool
+    /// ★ 2026-10-29（用户："待办支持同步到 iPhone 里面的待办，需要打开这个开关"）：
+    /// 开启后录音摘要里的待办行会写进系统「提醒事项」App（EventKit Reminders），
+    /// App 内勾选/取消勾选也会同步提醒事项的完成状态。`false` = 不同步（默认）。
+    var remindersSyncEnabled: Bool
     /// Backlog size (in KB) above which the Wi-Fi fast-transfer button
     /// is offered on the device-files screen. 0 disables the suggestion
     /// and the button never appears.
@@ -152,6 +187,14 @@ struct AppConfig: Codable, Equatable {
         case autoSummarizeAfterTranscription = "auto_summarize_after_transcription"
         case localVADEnabled = "local_vad_enabled"
         case backgroundKeepAliveEnabled = "background_keep_alive_enabled"
+        case nightlyTranscribeEnabled = "nightly_transcribe_enabled"
+        case recordingQualityTier = "recording_quality_tier"
+        case webdav = "webdav"
+        case timedRecordingEnabled = "timed_recording_enabled"
+        case timedRecordingStart = "timed_recording_start"
+        case timedRecordingEnd = "timed_recording_end"
+        case coldDataDowngradeEnabled = "cold_data_downgrade_enabled"
+        case coldDataDowngradeDays = "cold_data_downgrade_days"
         case autoReconnectEnabled = "auto_reconnect_enabled"
         case cloudEgressConsented = "cloud_egress_consented"
         case isDeveloperMode = "developer_mode"
@@ -167,6 +210,9 @@ struct AppConfig: Codable, Equatable {
         case watchBlinkSpeed = "watch_blink_speed"
         case watchFaceAutoCycle = "watch_face_auto_cycle"
         case watchFaceFrame = "watch_face_frame"
+        case userName = "user_name"
+        case remindersSyncEnabled = "reminders_sync_enabled"
+        case watchRecapEnabled = "watch_recap_enabled"
         case fastTransferThresholdKB = "fast_transfer_threshold_kb"
     }
 
@@ -200,6 +246,7 @@ struct AppConfig: Codable, Equatable {
         self.watchBlinkSpeed = try c.decodeIfPresent(String.self, forKey: .watchBlinkSpeed)
         self.watchFaceAutoCycle = try c.decodeIfPresent(Bool.self, forKey: .watchFaceAutoCycle)
         self.watchFaceFrame = try c.decodeIfPresent(Bool.self, forKey: .watchFaceFrame)
+        self.userName = try c.decodeIfPresent(String.self, forKey: .userName)
         self.onDeviceASROffMigrated = true
         // ⚠️ The "primary pointed at ondevice" fix-up deliberately does **not** live here.
         //   At decode time the Keychain secrets have not been re-attached yet, so every cloud
@@ -208,6 +255,14 @@ struct AppConfig: Codable, Equatable {
         self.autoSummarizeAfterTranscription = try c.decodeIfPresent(Bool.self, forKey: .autoSummarizeAfterTranscription) ?? true
         self.localVADEnabled = try c.decodeIfPresent(Bool.self, forKey: .localVADEnabled) ?? true
         self.backgroundKeepAliveEnabled = try c.decodeIfPresent(Bool.self, forKey: .backgroundKeepAliveEnabled) ?? true
+        self.nightlyTranscribeEnabled = try c.decodeIfPresent(Bool.self, forKey: .nightlyTranscribeEnabled) ?? true
+        self.recordingQualityTier = try c.decodeIfPresent(String.self, forKey: .recordingQualityTier)
+        self.webdav = try c.decodeIfPresent(WebDAVConfig.self, forKey: .webdav)
+        self.timedRecordingEnabled = try c.decodeIfPresent(Bool.self, forKey: .timedRecordingEnabled) ?? false
+        self.timedRecordingStart = try c.decodeIfPresent(String.self, forKey: .timedRecordingStart) ?? "23:30"
+        self.timedRecordingEnd = try c.decodeIfPresent(String.self, forKey: .timedRecordingEnd) ?? "07:00"
+        self.coldDataDowngradeEnabled = try c.decodeIfPresent(Bool.self, forKey: .coldDataDowngradeEnabled) ?? false
+        self.coldDataDowngradeDays = try c.decodeIfPresent(Int.self, forKey: .coldDataDowngradeDays) ?? 7
         self.autoReconnectEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoReconnectEnabled) ?? true
         self.cloudEgressConsented = try c.decodeIfPresent(Bool.self, forKey: .cloudEgressConsented) ?? false
         self.isDeveloperMode = try c.decodeIfPresent(Bool.self, forKey: .isDeveloperMode) ?? false
@@ -220,6 +275,8 @@ struct AppConfig: Codable, Equatable {
         self.a1RecordMode = try c.decodeIfPresent(String.self, forKey: .a1RecordMode)
         self.watchFaceStyle = try c.decodeIfPresent(String.self, forKey: .watchFaceStyle)
         self.fastTransferThresholdKB = try c.decodeIfPresent(Int.self, forKey: .fastTransferThresholdKB) ?? 512
+        self.remindersSyncEnabled = try c.decodeIfPresent(Bool.self, forKey: .remindersSyncEnabled) ?? false
+        self.watchRecapEnabled = try c.decodeIfPresent(Bool.self, forKey: .watchRecapEnabled) ?? true
     }
 
     init(
@@ -237,6 +294,14 @@ struct AppConfig: Codable, Equatable {
         autoSummarizeAfterTranscription: Bool = true,
         localVADEnabled: Bool = true,
         backgroundKeepAliveEnabled: Bool = true,
+        nightlyTranscribeEnabled: Bool = true,
+        recordingQualityTier: String? = nil,
+        webdav: WebDAVConfig? = nil,
+        timedRecordingEnabled: Bool = false,
+        timedRecordingStart: String = "23:30",
+        timedRecordingEnd: String = "07:00",
+        coldDataDowngradeEnabled: Bool = false,
+        coldDataDowngradeDays: Int = 7,
         autoReconnectEnabled: Bool = true,
         cloudEgressConsented: Bool = false,
         isDeveloperMode: Bool = false,
@@ -252,7 +317,10 @@ struct AppConfig: Codable, Equatable {
         watchBlinkSpeed: String? = nil,
         watchFaceAutoCycle: Bool? = nil,
         watchFaceFrame: Bool? = nil,
-        fastTransferThresholdKB: Int = 512
+        userName: String? = nil,
+        fastTransferThresholdKB: Int = 512,
+        remindersSyncEnabled: Bool = false,
+        watchRecapEnabled: Bool = true
     ) {
         self.asrProviders = asrProviders
         self.llmProviders = llmProviders
@@ -268,6 +336,14 @@ struct AppConfig: Codable, Equatable {
         self.autoSummarizeAfterTranscription = autoSummarizeAfterTranscription
         self.localVADEnabled = localVADEnabled
         self.backgroundKeepAliveEnabled = backgroundKeepAliveEnabled
+        self.nightlyTranscribeEnabled = nightlyTranscribeEnabled
+        self.recordingQualityTier = recordingQualityTier
+        self.webdav = webdav
+        self.timedRecordingEnabled = timedRecordingEnabled
+        self.timedRecordingStart = timedRecordingStart
+        self.timedRecordingEnd = timedRecordingEnd
+        self.coldDataDowngradeEnabled = coldDataDowngradeEnabled
+        self.coldDataDowngradeDays = coldDataDowngradeDays
         self.autoReconnectEnabled = autoReconnectEnabled
         self.cloudEgressConsented = cloudEgressConsented
         self.isDeveloperMode = isDeveloperMode
@@ -283,7 +359,10 @@ struct AppConfig: Codable, Equatable {
         self.watchBlinkSpeed = watchBlinkSpeed
         self.watchFaceAutoCycle = watchFaceAutoCycle
         self.watchFaceFrame = watchFaceFrame
+        self.userName = userName
         self.fastTransferThresholdKB = fastTransferThresholdKB
+        self.remindersSyncEnabled = remindersSyncEnabled
+        self.watchRecapEnabled = watchRecapEnabled
     }
 
     /// True when the active configuration would send user data to a cloud
@@ -732,5 +811,110 @@ extension AppConfig.LlmProviders {
         case "custom":     custom = value
         default:           break
         }
+    }
+}
+
+/// ★ 2026-10-29 (饭耳移植 · 规格 §2.3 存储分层): the user's own WebDAV server.
+/// Presets (群晖/威联通/…) only prefill host/port/https + a setup hint — the
+/// protocol underneath is identical for all of them.
+///
+/// `password` is stored in the Keychain via `SecretStore.save(toKey: "webdav.password")`
+/// and stripped from `config.json` on save (ConfigService, same pattern as the
+/// cloud ASR secrets) — it exists in this struct only as the in-memory round trip.
+struct WebDAVConfig: Codable, Equatable {
+    var host: String
+    var port: Int
+    var useHTTPS: Bool
+    var username: String
+    /// Server directory everything lands under, e.g. `/nomily`. Never empty —
+    /// an unset root would sync straight into the server's root, which users
+    /// did not expect.
+    var basePath: String
+    /// Preset label the form used ("群晖"/"坚果云"/…); informational only.
+    var preset: String?
+    /// In-memory only — see struct comment.
+    var password: String?
+    /// 「也传录音」— transcripts always sync; audio only when this is on.
+    var syncAudio: Bool
+    /// ★ 2026-10-30（用户接极空间 Z4Pro）：允许自签证书。极空间等 NAS 的 HTTPS
+    /// 端口用的是厂商自签证书（实测 5006 的证书 issuer == subject，CN=jikongjian），
+    /// URLSession 默认直接拒握。开了这个开关就信任该服务器的任何证书——
+    /// 只对这一条备份配置生效，且默认关闭；走 Tailscale/局域网时 HTTP 也够安全。
+    var allowSelfSigned: Bool
+
+    var isConfigured: Bool {
+        !host.trimmingCharacters(in: .whitespaces).isEmpty
+            && !username.trimmingCharacters(in: .whitespaces).isEmpty
+            && !(password ?? "").isEmpty
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case host, port, useHTTPS, username, basePath, preset, password, syncAudio
+        case allowSelfSigned = "allow_self_signed"
+    }
+
+    init(host: String,
+         port: Int,
+         useHTTPS: Bool,
+         username: String,
+         basePath: String,
+         preset: String? = nil,
+         password: String? = nil,
+         syncAudio: Bool = false,
+         allowSelfSigned: Bool = false) {
+        self.host = host
+        self.port = port
+        self.useHTTPS = useHTTPS
+        self.username = username
+        self.basePath = basePath
+        self.preset = preset
+        self.password = password
+        self.syncAudio = syncAudio
+        self.allowSelfSigned = allowSelfSigned
+    }
+
+    /// 手写解码：老配置文件里没有 `allow_self_signed`，缺了按 false 处理，
+    /// 不能让升级用户的所有 WebDAV 配置解码失败。
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        host = try c.decode(String.self, forKey: .host)
+        port = try c.decode(Int.self, forKey: .port)
+        useHTTPS = try c.decode(Bool.self, forKey: .useHTTPS)
+        username = try c.decode(String.self, forKey: .username)
+        basePath = try c.decode(String.self, forKey: .basePath)
+        preset = try c.decodeIfPresent(String.self, forKey: .preset)
+        password = try c.decodeIfPresent(String.self, forKey: .password)
+        syncAudio = try c.decodeIfPresent(Bool.self, forKey: .syncAudio) ?? false
+        allowSelfSigned = try c.decodeIfPresent(Bool.self, forKey: .allowSelfSigned) ?? false
+    }
+}
+
+// MARK: - 用户输入归一
+
+extension String {
+    /// 全角数字/字母/冒号 → 半角。中文键盘在 IP / 账号里埋全角字符是最隐蔽的
+    /// 连接失败原因（肉眼看一模一样），提交前统一归一。
+    var fullwidthNormalized: String {
+        applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? self
+    }
+
+    /// ★ 2026-10-30：账号 / 密码的最终形态（Basic 认证真正发出去的字节）。
+    ///
+    /// 极空间 401 那一轮的教训：服务器端用同一串账号密码 curl 是 207，App 里
+    /// 打进去就 401 —— 唯一解释是**发出去的字符不一样**。iOS 上最容易混进来
+    /// 的是看不见的东西：从微信/备忘录复制带的零宽字符、不换行空格、全角空格、
+    /// 结尾换行，以及中文键盘的全角数字/小数点。这些都是"密码错"却怎么重打
+    /// 都错不完的典型。
+    ///
+    /// 只清"看不见的"和首尾空白：密码中间真正的半角空格是合法的，不能动。
+    var credentialNormalized: String {
+        var s = fullwidthNormalized
+        s.removeAll { ch in
+            ch == "\u{200B}" || ch == "\u{200C}" || ch == "\u{200D}"   // 零宽空格/连接符
+                || ch == "\u{FEFF}"                                    // BOM
+                || ch == "\u{00A0}" || ch == "\u{3000}"                 // 不换行/全角空格
+                || ch == "\n" || ch == "\r" || ch == "\t"
+        }
+        return s.trimmingCharacters(in: .whitespaces)
     }
 }

@@ -400,7 +400,11 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
     /// to open `RecorderSheet`; in fast or early‑exit paths it is `nil` (no advertisement to assemble),
     /// the caller must tolerate that — now the fast path also **reconstructs this shape from the cache**, see
     /// the comment in `fastReconnectRecorder`.
-    func reconnectRecorder(recordID: String, timeout: TimeInterval = 100) async throws -> any RecorderLink {
+    func reconnectRecorder(
+        recordID: String,
+        nameHint: String? = nil,
+        timeout: TimeInterval = 100
+    ) async throws -> any RecorderLink {
         matchedRecorder = nil
         // If the already connected card is this one, do nothing.
         if let link = recorderLink, link.isConnected,
@@ -415,15 +419,29 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
                 log.warning("recorder fast reconnect failed, falling back to scan: \(String(describing: error), privacy: .public)")
             }
         }
-        return try await scanAndConnectRecorder(recordID: recordID, timeout: timeout)
+        return try await scanAndConnectRecorder(recordID: recordID, nameHint: nameHint, timeout: timeout)
     }
 
     /// Pure scanning legacy path (fallback when fast path is unavailable). Behavior is **identical word‑for‑word** to the pre‑change version.
-    private func scanAndConnectRecorder(recordID: String, timeout: TimeInterval) async throws -> any RecorderLink {
+    ///
+    /// ★ 2026-10-27（用户："设备列表点安克录音豆不切换"）：录音豆的广播 MAC 是
+    /// RPA（每次轮换），iOS 的 `CBPeripheral.identifier` 跟着地址走，所以按
+    /// recordID 匹配会在地址轮换后永远扫不到 → 100 s 超时。对 D3200 追加
+    /// **归一化产品名**（mergeKey）匹配——与扫描去重同一把尺子。
+    private func scanAndConnectRecorder(
+        recordID: String,
+        nameHint: String? = nil,
+        timeout: TimeInterval
+    ) async throws -> any RecorderLink {
+        let hintKey = nameHint.map { SoundcoreRecorderSpec.mergeKey(for: $0) }
         startScan(duration: timeout)
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if let match = discoveredRecorders.first(where: { $0.id.uuidString == recordID }) {
+            if let match = discoveredRecorders.first(where: {
+                if $0.id.uuidString == recordID { return true }
+                guard let hintKey, $0.protocolID == SoundcoreRecorderSpec.identifier else { return false }
+                return SoundcoreRecorderSpec.mergeKey(for: $0.advertisement.displayName) == hintKey
+            }) {
                 stopScan()
                 matchedRecorder = match
                 return try await connectRecorder(match)
@@ -560,8 +578,38 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
         return link
     }
 
+    /// 冷启动落点（用户 2026-10-28："开屏不要默认是 Plaud 的设备页面，要是上一个设备
+    /// 最后连接的那个页面"）：按台账 id 从 `RecorderIdentityStore` 重组该卡片上次
+    /// 连接时的 `DiscoveredRecorder`——与 `fastReconnectRecorder` 同一手法，但
+    /// **不发起连接**（retrieved peripheral 未连时设备页以灰卡呈现，重连按钮就是
+    /// 它自己的入口）。失败（无缓存 / 系统还没交出 peripheral）返回 nil，调用方走原落点。
+    func rememberedRecorder(recordID: String) -> DiscoveredRecorder? {
+        guard let identity = RecorderIdentityStore.shared.identity(peripheralUUID: recordID),
+              let uuid = UUID(uuidString: identity.peripheralUUID) else { return nil }
+        guard let peripheral = central.retrievePeripherals(withIdentifiers: [uuid])
+            .first(where: { $0.identifier == uuid }) else { return nil }
+        return DiscoveredRecorder(
+            id: uuid,
+            peripheral: peripheral,
+            protocolID: identity.protocolID,
+            advertisement: RecorderAdvertisement(
+                protocolID: identity.protocolID,
+                family: identity.family,
+                modelName: identity.modelName,
+                firmware: nil,
+                hardware: nil,
+                battery: nil,
+                powerState: nil,
+                identity: identity.identity,
+                raw: [:]
+            ),
+            localName: identity.localName.isEmpty ? nil : identity.localName,
+            rssi: identity.rssi,
+            lastSeen: identity.lastConnectedAt
+        )
+    }
+
     /// Common wrap-up after connecting (shared by the normal connect / fast path / auto-reconnect paths).
-    ///
     /// Three things, all of which should happen "only once while a link is alive":
     ///   1. Record "who this card is" → so the next reconnect can skip scanning (`RecorderIdentityStore`);
     ///   2. **Start keep-alive** → the proper fix for the user-reported "link goes to sleep" (see `RecorderLink.startKeepAlive`);
@@ -637,6 +685,10 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
     private func rawConnectRecorder(_ recorder: DiscoveredRecorder) async throws -> any RecorderLink {
         let link: any RecorderLink
         switch recorder.protocolID {
+        case SoundcoreRecorderSpec.identifier:
+            // 飞书录音豆（D3200）：GATT + ECDH 会话在其 `completeHandshake` 内完成。
+            // 红线：不传任何绑定/复位命令，豆与飞书 App 长期并行。
+            link = SoundcoreLink(peripheral: recorder.peripheral, central: central)
         case TicNoteRecorderSpec.identifier:
             // The SN must be passed in here: the Wi-Fi fast-transfer hotspot name and password are **derived entirely from it**
             // (`SSID = "TicNote-"+last 4 of SN`, `password = last 8 of SN`, see `protocol-notes.md` §18.1),
@@ -1117,11 +1169,59 @@ extension BluetoothCoordinator: CBCentralManagerDelegate {
         // ⚠️ **Never match protocols by device name**. Users can rename the device name of both card types.
         //    (D·NOTE has `btNameShort`/`btNameLong`; TicNote has `setDeviceIdentity`),
         //    Names can only be used for "display", not for "identification".
-        guard let localName = advertisementData[CBAdvertisementDataLocalNameKey] as? String,
-              !localName.isEmpty else { return }
-        guard (advertisementData[CBAdvertisementDataIsConnectable] as? NSNumber)?.boolValue == true else { return }
+        // ⚠️ **Never match protocols by device name**. Users can rename the device name of both card types.
+        //    (D·NOTE has `btNameShort`/`btNameLong`; TicNote has `setDeviceIdentity`),
+        //    Names can only be used for "display", not for "identification".
+        //
+        // ★ soundcore Work D3200（飞书录音豆）必须在本地名 guard **之前**匹配：
+        //   其识别信号刻意宽松（服务 UUID / 厂商数据 / 本地名任一命中），且 iOS
+        //   隐私策略下广播本地名可能为空。广播 MAC 是 RPA（每条广播都换），按
+        //   归一化产品名去重（与 Android `DeviceScanner.mergeKey` 一致）。
+        let localNameOpt = advertisementData[CBAdvertisementDataLocalNameKey] as? String
+        let localName = localNameOpt ?? ""
         let mfgData = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
         let advServiceUUIDs = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]
+        if let soundcoreAdv = SoundcoreRecorderSpec.parseAdvertisement(
+            manufacturerData: mfgData,
+            localName: localNameOpt,
+            serviceUUIDs: advServiceUUIDs
+        ) {
+            let key = SoundcoreRecorderSpec.mergeKey(for: soundcoreAdv.displayName)
+            Task { @MainActor in
+                if let idx = self.discoveredRecorders.firstIndex(where: {
+                    $0.protocolID == SoundcoreRecorderSpec.identifier &&
+                    SoundcoreRecorderSpec.mergeKey(for: $0.advertisement.displayName) == key
+                }) {
+                    // 同一颗豆的新广播：保留稳定 id（ledger 键 / 列表行身份），
+                    // 换上最新的 peripheral（连接目标）与最新 RSSI。
+                    let old = self.discoveredRecorders[idx]
+                    self.discoveredRecorders[idx] = DiscoveredRecorder(
+                        id: old.id,
+                        peripheral: peripheral,
+                        protocolID: soundcoreAdv.protocolID,
+                        advertisement: soundcoreAdv,
+                        localName: localNameOpt,
+                        rssi: RSSI.intValue,
+                        lastSeen: Date()
+                    )
+                } else {
+                    log.info("discovered soundcore name=\"\(soundcoreAdv.displayName, privacy: .public)\" rssi=\(RSSI.intValue, privacy: .public)")
+                    self.discoveredRecorders.append(DiscoveredRecorder(
+                        id: peripheral.identifier,
+                        peripheral: peripheral,
+                        protocolID: soundcoreAdv.protocolID,
+                        advertisement: soundcoreAdv,
+                        localName: localNameOpt,
+                        rssi: RSSI.intValue,
+                        lastSeen: Date()
+                    ))
+                }
+            }
+            return
+        }
+
+        guard !localName.isEmpty else { return }
+        guard (advertisementData[CBAdvertisementDataIsConnectable] as? NSNumber)?.boolValue == true else { return }
 
         // The registry order defines priority; take the first recognized one.
         var winner: (any RecorderProtocolSpec.Type)?

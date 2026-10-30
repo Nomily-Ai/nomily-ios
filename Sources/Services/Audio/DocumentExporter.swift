@@ -97,7 +97,9 @@ enum DocumentExporter {
             guard let tree = MarkdownOutline.parse(summary) else {
                 throw ExportError.missing(L10n.Jobs.sourceSummary)
             }
-            let layout = MindMapLayout.build(tree: tree)
+            // ★ 2026-10-30: 传 rootLabel——根节点无标题时导出用 stem 补名，
+            // 测量必须按显示文本算（同 MindMapScreen 的修复）。
+            let layout = MindMapLayout.build(tree: tree, rootLabel: stem)
             guard let image = MindMapExporter.image(
                 layout: layout, rootLabel: stem, dark: false, scale: 2
             ), let data = image.pngData() else {

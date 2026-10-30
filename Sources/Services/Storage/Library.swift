@@ -60,6 +60,53 @@ final class Library: ObservableObject {
     init() {
         self.entries = Self.loadFromDisk()
         rebuildSourceIndex()
+        migrateExtensionlessLiveClips()
+    }
+
+    /// ★ 2026-10-28 一次性自愈：早期实时转录保存时用了"纯 fileId"当文件名，
+    /// 没有扩展名 —— `PostDownload` 认不出格式，文件被丢在 `audioDir` 根目录，
+    /// 录音列表（读 `decryptedDir`）里永远看不到。这里把这一类文件
+    /// （根目录 + 纯数字名 + OggS 头）复制成 `decryptedDir/<name>.opus` 并补进
+    /// 清单，用户之前"消失"的实时录音就能回来了。幂等：迁移后根目录不再有
+    /// 无点号文件，重复执行是空操作。
+    private func migrateExtensionlessLiveClips() {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: StorageLocations.audioDir.path) else { return }
+        var changed = false
+        for name in names where !name.contains(".") && UInt32(name) != nil {
+            let src = StorageLocations.audioDir.appendingPathComponent(name)
+            guard let head = try? FileHandle(forReadingFrom: src),
+                  let prefix = try? head.read(upToCount: 4),
+                  prefix == Data("OggS".utf8) else { continue }
+            try? head.close()
+            guard let size = (try? fm.attributesOfItem(atPath: src.path))?[.size] as? Int else { continue }
+            let newName = "\(name).opus"
+            let dst = StorageLocations.decryptedDir.appendingPathComponent(newName)
+            do {
+                try fm.createDirectory(at: StorageLocations.decryptedDir, withIntermediateDirectories: true)
+                if !fm.fileExists(atPath: dst.path) {
+                    try fm.copyItem(at: src, to: dst)
+                }
+                let iso = ISO8601DateFormatter()
+                iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                entries[Self.key(name: newName, deviceSerial: nil)] = Entry(
+                    size: size,
+                    downloadedAt: iso.string(from: Date()),
+                    transport: "stream",
+                    localName: newName,
+                    deviceSerial: nil,
+                    deviceName: nil,
+                    source: nil
+                )
+                changed = true
+            } catch {
+                continue
+            }
+        }
+        if changed {
+            rebuildSourceIndex()
+            saveNow()
+        }
     }
 
     // MARK: queries

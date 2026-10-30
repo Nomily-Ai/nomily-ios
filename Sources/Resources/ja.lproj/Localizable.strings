@@ -101,7 +101,7 @@
 
 /* 録音設定 */
 "rec_settings.delete_after_transfer" = "転送後にデバイスから削除";
-"rec_settings.delete_after_transfer_footer" = "オンにすると、BLE 転送と復号が完了した時点でデバイスからファイルが削除されます。";
+"rec_settings.delete_after_transfer_footer" = "オンにすると、BLE 転送と復号が完了した時点でデバイスからファイルが削除されます。 （录音豆のWi‑Fi転送では適用外：完全に転送できた録音はデバイスのファームウェアが自動削除します）";
 "rec_settings.decryption" = "復号";
 "rec_settings.chacha_key" = "ChaCha20 キー（16進数）";
 "rec_settings.chacha_key_footer" = "16 進数 64 文字（32 バイト）。デバイスが暗号化を使用していない場合は空欄のままにしてください。";

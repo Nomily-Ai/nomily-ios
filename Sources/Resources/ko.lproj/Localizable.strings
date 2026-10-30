@@ -101,7 +101,7 @@
 
 /* 녹음 설정 */
 "rec_settings.delete_after_transfer" = "전송 후 기기에서 삭제";
-"rec_settings.delete_after_transfer_footer" = "켜면 BLE 전송 및 복호화가 완료된 후 기기에서 파일이 자동 삭제됩니다.";
+"rec_settings.delete_after_transfer_footer" = "켜면 BLE 전송 및 복호화가 완료된 후 기기에서 파일이 자동 삭제됩니다. (Soundcore bean Wi‑Fi fast transfer: fully transferred recordings are deleted by the bean firmware itself, regardless of this switch.)";
 "rec_settings.decryption" = "복호화";
 "rec_settings.chacha_key" = "ChaCha20 키(16진수)";
 "rec_settings.chacha_key_footer" = "16진수 64자(32바이트). 기기가 암호화를 사용하지 않으면 비워 두세요.";

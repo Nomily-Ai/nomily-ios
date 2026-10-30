@@ -73,6 +73,9 @@ struct LLMProviderSpec: Identifiable, Equatable {
         case "custom":     return (0.45, 0.47, 0.52)
         case "qwen":       return (0.42, 0.36, 1.00)
         case "deepseek":   return (0.28, 0.42, 0.98)
+        case "kimi":       return (0.08, 0.08, 0.10)   // Kimi 黑
+        case "zhipu":      return (0.25, 0.45, 0.95)   // 智谱蓝
+        case "minimax":    return (0.90, 0.25, 0.35)   // MiniMax 红橙
         default:           return (0.16, 0.44, 0.84)   // 豆包 / 火山方舟
         }
     }
@@ -99,6 +102,23 @@ struct LLMProviderSpec: Identifiable, Equatable {
         }
     }
 
+    /// ★ 2026-10-29（按截图补）：注册页直链——"还没有 key？去注册 ↗" 那一行。
+    var signupURL: String? {
+        switch id {
+        case "openai":     return "https://platform.openai.com/api-keys"
+        case "claude":     return "https://console.anthropic.com/settings/keys"
+        case "gemini":     return "https://aistudio.google.com/apikey"
+        case "openRouter": return "https://openrouter.ai/keys"
+        case "qwen":       return "https://bailian.console.aliyun.com/?apiKey=1"
+        case "deepseek":   return "https://platform.deepseek.com/api_keys"
+        case "kimi":       return "https://platform.moonshot.cn/console/api-keys"
+        case "zhipu":      return "https://open.bigmodel.cn/usercenter/apikeys"
+        case "minimax":    return "https://platform.minimaxi.com/user-center/basic-information/interface-key"
+        case "doubao":     return "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey"
+        default:           return nil   // ollama / custom：没有"注册"一说
+        }
+    }
+
     // MARK: - Catalogue
 
     /// One flat list. 2026-10-22:
@@ -111,7 +131,7 @@ struct LLMProviderSpec: Identifiable, Equatable {
     /// aggregator, the local runtime, and finally the catch-all.
     static let all: [LLMProviderSpec] = [
         chatgpt, claude, gemini,
-        qwen, deepseek, doubao,
+        qwen, deepseek, doubao, kimi, zhipu, minimax,
         openRouter, ollama, custom,
     ]
 
@@ -207,11 +227,15 @@ struct LLMProviderSpec: Identifiable, Equatable {
         note: "任何 OpenAI 兼容的 /v1 地址（中转、自建 vLLM、LM Studio 都算）。密钥可以留空。"
     )
 
-    // Domestic three, derived from `LLMPreset` so the endpoint/model lists are
+    // Domestic presets, derived from `LLMPreset` so the endpoint/model lists are
     // written down exactly once.
     static let qwen = from(LLMPreset.qwen)
     static let deepseek = from(LLMPreset.deepseek)
     static let doubao = from(LLMPreset.doubao)
+    // ★ 2026-10-29 (按截图补齐): Kimi / 智谱 GLM / MiniMax。
+    static let kimi = from(LLMPreset.kimi)
+    static let zhipu = from(LLMPreset.zhipu)
+    static let minimax = from(LLMPreset.minimax)
 
     private static func from(_ preset: LLMPreset) -> LLMProviderSpec {
         LLMProviderSpec(

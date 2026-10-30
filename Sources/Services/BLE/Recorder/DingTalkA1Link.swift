@@ -1306,8 +1306,11 @@ extension DingTalkA1Link: LiveAudioSource {
 
     func liveListFiles() async -> [LiveDeviceFile]? {
         guard let list = try? await listRecordings() else { return nil }
+        // ⚠️ 名字必须带 `.opus`：LiveModel 用它交给 `PostDownload.process`，
+        // 只有 `.opus` 结尾才会被封装并写进 `decryptedDir`（录音列表读那里）。
+        // 纯 fid 当名字会让实时录音落在 audioDir 根目录且无扩展名——列表里看不到。
         return list.map {
-            LiveDeviceFile(name: $0.id, size: $0.sizeBytes, sessionID: $0.sessionID)
+            LiveDeviceFile(name: "\($0.id).opus", size: $0.sizeBytes, sessionID: $0.sessionID)
         }
     }
 
@@ -1425,7 +1428,8 @@ extension DingTalkA1Link: LiveAudioSource {
         try? await setUploadStream(false)
         // The file lands on the card when the recorder stops; the fid is known from the
         // stream/status even though the size isn't (the index carries none).
-        let file = fid.map { LiveDeviceFile(name: String($0), size: 0, sessionID: $0) }
+        // 名字带 `.opus`（见 liveListFiles）：否则保存出来的文件不是可入库的容器。
+        let file = fid.map { LiveDeviceFile(name: "\($0).opus", size: 0, sessionID: $0) }
         return LiveStopOutcome(file: file, deviceInitiated: false)
     }
 

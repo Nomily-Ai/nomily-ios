@@ -116,7 +116,11 @@ enum JobRunners {
         // here (the runner), not in the sheet, so the queue re-runs after an app
         // kill take exactly the same path.
         let adapted = Self.adaptedPrompt(templatePrompt: prompt, source: source)
-        let effectivePrompt = adapted.text
+        // ★ 2026-10-28（饭耳逆向规格 §1.4 / §3.2）：用户称呼 + 常用词表随 prompt
+        // 注入——词表是提示不是词典（「只是提示，不会把别的词强行换成它」），
+        // 称呼让模型知道录音的主人是谁。附加块放在模板尾部，模板自身的
+        // 结构指令（标题/分节）不受影响。
+        let effectivePrompt = Self.withUserContext(templateText: adapted.text, config: config)
 
         BackgroundKeeper.shared.acquire(.summary)
         defer { BackgroundKeeper.shared.release(.summary) }
@@ -163,6 +167,11 @@ enum JobRunners {
         TicNoteDiagLog.log(
             "LLM",
             "summarize ok clip=\(job.clipName) provider=\(outcome.providerKey) chars=\(completion.text.count) truncated=\(completion.truncated)"
+        )
+        // ★ 2026-10-28（饭耳逆向规格 §1.2）：每日 token 用量（估算）——热力图数据源。
+        TokenUsageStore.shared.record(
+            inputChars: effectivePrompt.count + source.count,
+            outputChars: completion.text.count
         )
         try Task.checkCancellation()
 
@@ -220,10 +229,17 @@ enum JobRunners {
                 fallbackTitle: RecordingName.displayTitle(for: job.clipName)
             )
             if !digest.points.isEmpty {
+                // ★ 2026-10-30（用户："回顾摘要……在里面可以查看到待办，支持在手表
+                // 里面点击可以同步到手机的待办里面"）：待办随回顾一起推。复用「笔记」
+                // 页同一个提取器（TodoExtract），保证手表上看到的和手机上是同一批。
+                let todos = TodoExtract.fromSummary(text)
+                    .map { RemindersSyncService.stripMarkdown($0.text) }
+                    .filter { !$0.isEmpty }
                 AppEnvironment.shared?.watch.pushRecap(
                     clipName: job.clipName,
                     title: digest.title,
                     points: digest.points,
+                    todos: todos,
                     // Recorded time parsed from the `yyyyMMddHHmmss` name, so
                     // the watch can say "this morning's meeting"; a name that
                     // doesn't parse falls back to now.
@@ -560,6 +576,20 @@ enum JobRunners {
     ///    "this feature works sometimes and not others".
     ///
     /// ⇒ Always forward to `summarizableText`, **letter-for-letter the same source** as the detail page.
+    /// ★ 2026-10-28（饭耳逆向规格）：模板尾部附加「用户上下文」——称呼 + 常用词。
+    /// 两者都没配置时返回原文（不产生空行差异）。
+    static func withUserContext(templateText: String, config: AppConfig) -> String {
+        var lines: [String] = []
+        if let name = config.userName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            lines.append("录音的主人（用户本人）叫「\(name)」；转写里 TA 本人说的话可以标注为「\(name)（我）」。")
+        }
+        if let hint = VocabularyStore.shared.promptHint() {
+            lines.append("常用词表（只是提示，帮助识别专有名词，不会把别的词强行换成它）：\(hint)")
+        }
+        guard !lines.isEmpty else { return templateText }
+        return templateText + "\n\n" + lines.joined(separator: "\n")
+    }
+
     private static func transcriptText(for clipName: String) throws -> String {
         let urls = StorageLocations.transcriptURLs(for: clipName)
         // Prefer `.asr.json`: it has the segments and speakers, which `summarizableText` needs.
@@ -689,6 +719,12 @@ enum JobRunners {
         )
         let chapters = ClipChapter.parse(outcome.completion.text)
         guard !chapters.isEmpty else { throw ClipChapterError.unparsable }
+
+        // ★ 2026-10-28：大纲也是一次大模型消耗，计入每日用量。
+        TokenUsageStore.shared.record(
+            inputChars: instruction.count + timeline.count,
+            outputChars: outcome.completion.text.count
+        )
 
         ClipChapterStore.save(chapters, for: job.clipName)
         reporter.notes(notices(for: outcome, config: config), false)
