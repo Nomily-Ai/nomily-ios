@@ -1519,6 +1519,16 @@
 "webdav.not_configured" = "Fill in the connection details first.";
 "webdav.report_all" = "Uploaded %d, already on server %d.";
 "webdav.report_failures" = "Uploaded %d, skipped %d, failed %d. First failure: %@";
+// ★ 2026-11-02: server folder browser (selectable upload folder).
+"webdav.browse_folders" = "Browse folders on server…";
+"webdav.reset_folder" = "Reset to auto";
+"webdav.use_this_folder" = "Use this folder";
+"webdav.parent_folder" = "Go up one level";
+"webdav.subfolders" = "Subfolders";
+"webdav.no_subfolders" = "No subfolders here";
+"webdav.pick_folder" = "Pick a folder";
+"webdav.pick_folder_footer" = "Tap a folder to descend, then \"Use this folder\" to commit. The list is queried from the server live; failures usually mean wrong credentials or permissions.";
+
 "rec_settings.audition_load" = "Load a recent recording to audition";
 "rec_settings.audition_original" = "Original";
 "rec_settings.audition_tier" = "Downgraded";

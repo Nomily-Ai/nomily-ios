@@ -1846,6 +1846,16 @@
 "webdav.not_configured" = "先填好连接信息。";
 "webdav.report_all" = "已上传 %d 条，服务器已有 %d 条。";
 "webdav.report_failures" = "已上传 %d 条，跳过 %d 条，失败 %d 条。首次失败：%@";
+// ★ 2026-11-02: server folder browser (selectable upload folder).
+"webdav.browse_folders" = "在服务器上选择文件夹…";
+"webdav.reset_folder" = "恢复自动";
+"webdav.use_this_folder" = "使用这个目录";
+"webdav.parent_folder" = "返回上一级";
+"webdav.subfolders" = "子文件夹";
+"webdav.no_subfolders" = "这里没有子文件夹";
+"webdav.pick_folder" = "选择文件夹";
+"webdav.pick_folder_footer" = "点文件夹逐层下钻，选好点「使用这个目录」。列表来自服务器实时查询；列不出来一般是账号密码或目录权限的问题。";
+
 "rec_settings.audition_load" = "加载最近一段录音试听";
 "rec_settings.audition_original" = "原声";
 "rec_settings.audition_tier" = "降级后";
