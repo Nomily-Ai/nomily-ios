@@ -4403,6 +4403,14 @@ enum L10n {
         static var sectionAvailable: String { NSLocalizedString("scanner.section_available", comment: "") }
         static var sectionAdded: String { NSLocalizedString("scanner.section_added", comment: "") }
         static var addedBadge: String { NSLocalizedString("scanner.added_badge", comment: "") }
+        /// ★ 2026-11-02（对齐规格书 §2.2）：录音豆广播 `flags&0x80` 绑定位的展示徽标。
+        static var soundcoreBoundBadge: String {
+            NSLocalizedString(
+                "scanner.soundcore_bound_badge",
+                value: "Bound",
+                comment: "Badge on a soundcore Work bean already bound to the Feishu app"
+            )
+        }
         static var wakeAndRetry: String { NSLocalizedString(
             "scanner.wake_and_retry",
             value: "Device not found. Press and hold the device button for 1 second to wake it, then try again.",

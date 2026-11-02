@@ -270,8 +270,22 @@ struct ScannerSheet: View {
                     //   used daily on real devices; adding an orange experimental label in the list would only make people think it is unreliable.
                     //   `RecorderExposure` itself **remains** (the registry still uses it to determine visibility),
                     //   Only the UI no longer consumes its “tagging” part.
-                    Text(recorder.displayName)
-                        .font(.body.weight(.medium))
+                    HStack(spacing: 6) {
+                        Text(recorder.displayName)
+                            .font(.body.weight(.medium))
+                        // ★ 2026-11-02（对齐规格书 §2.2，审计 G3）：录音豆广播的
+                        //   绑定位（flags&0x80）——已在飞书 App 里绑过的豆给个
+                        //   灰徽标，纯展示；绑定命令仍是红线不碰。
+                        if recorder.protocolID == SoundcoreRecorderSpec.identifier,
+                           let bound = recorder.advertisement.raw["bound"] as? Bool, bound {
+                            Text(L10n.Scanner.soundcoreBoundBadge)
+                                .font(.caption2)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.secondary.opacity(0.15), in: Capsule())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     Text(recorder.modelName)
                         .font(.caption)
                         .foregroundStyle(.secondary)

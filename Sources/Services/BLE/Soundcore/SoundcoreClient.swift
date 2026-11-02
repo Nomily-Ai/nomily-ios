@@ -48,6 +48,11 @@ final class SoundcoreClient: NSObject, ObservableObject {
     @Published private(set) var pushedRecording: Bool?
     @Published private(set) var pushedBatteryPercent: Int?
     @Published private(set) var pushedCharging: Bool?
+    /// ★ 2026-11-02（对齐规格书 §5.2，审计 G4 附带）：`01 03` / `01 04` 推送的
+    /// 第二字节是**充电盒**的电量 / 充电态——此前被丢弃，实时推送通道只剩豆本体。
+    /// 设备信息页的 boxBattery 来自 `01 01` 全量读，推送通道补上实时性。
+    @Published private(set) var pushedCaseBatteryPercent: Int?
+    @Published private(set) var pushedCaseCharging: Bool?
 
     /// Device pushes a new recording's file id while recording (0x1A/0x06).
     private(set) var lastNewFileId: UInt32?
@@ -573,16 +578,25 @@ final class SoundcoreClient: NSObject, ObservableObject {
             pushedCharging = info.charging
             respQueue.push(pkt.raw)
         case SoundcoreRxCmd.batteryId:
-            // Live battery push: payload = micBattery, caseBattery (§6.1).
+            // Live battery push: payload = micBattery, caseBattery (§5.2).
             if pkt.payload.count >= 1 {
                 let mic = SoundcoreDeviceInfo.batteryRemaining(Int(pkt.payload[pkt.payload.startIndex]))
                 if let mic { pushedBatteryPercent = mic }
+            }
+            // ★ 2026-11-02：第二字节 = 充电盒电量（桶换算同口径），不再丢弃。
+            if pkt.payload.count >= 2 {
+                pushedCaseBatteryPercent = SoundcoreDeviceInfo.batteryRemaining(
+                    Int(pkt.payload[pkt.payload.index(after: pkt.payload.startIndex)]))
             }
             respQueue.push(pkt.raw)
         case SoundcoreRxCmd.chargingId:
             // Live charging push: payload = micCharging, caseCharging (§6.1).
             if pkt.payload.count >= 1 {
                 pushedCharging = Int(pkt.payload[pkt.payload.startIndex]) == 1
+            }
+            // ★ 2026-11-02：第二字节 = 充电盒充电态。
+            if pkt.payload.count >= 2 {
+                pushedCaseCharging = Int(pkt.payload[pkt.payload.index(after: pkt.payload.startIndex)]) == 1
             }
             respQueue.push(pkt.raw)
         default:
