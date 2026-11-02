@@ -152,6 +152,9 @@ struct WebDAVView: View {
 
     @State private var probing = false
     @State private var probe: (ok: Bool, text: String)?
+    /// ★ 2026-11-02（用户拿分享链接当 WebDAV 地址）：粘贴的是网页分享链接
+    ///   （`/f/<id>`、`/s/<token>`）时给出纠正引导，而不是默默存一条必挂的配置。
+    @State private var pasteNote: String?
 
     /// `portText` → 有效端口；非法（空/越界）返回 nil，由调用方报错。
     private var parsedPort: Int? {
@@ -230,6 +233,19 @@ struct WebDAVView: View {
                 }
             }
 
+            // ★ 2026-11-02：粘贴了分享链接时的即时纠正（见 pasteNote）。
+            if let note = pasteNote {
+                Section {
+                    Label {
+                        Text(note)
+                    } icon: {
+                        Image(systemName: "link.badge.plus")
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                }
+            }
+
             Section {
                 Toggle(L10n.WebDAV.syncAudio, isOn: $syncAudio)
             } footer: {
@@ -304,6 +320,7 @@ struct WebDAVView: View {
         if cfg == nil, let p = initialPreset {
             applyPresetDefaults(p)
         }
+        pasteNote = nil
     }
 
     /// 弹层选完类型进来的一次性预填（端口 / HTTPS / 目录）。
@@ -392,7 +409,19 @@ struct WebDAVView: View {
     ///   · `/remote.php/webdav…`（旧版端点）→ 目录原样保留；
     ///   · 其他路径（坚果云 /dav、群晖 /home 等）→ 目录原样保留；
     ///   · `/` → 没有信息，忽略。
+    /// ★ 2026-11-02（用户实测踩到）：`/f/<数字>`、`/s/<token>`、`/d/<…>` 是
+    ///   Nextcloud 的**网页分享/文件页**链接，不是 WebDAV 端点——拿它当地址
+    ///   测试只会得到 401/404。识别出来给纠正引导，目录保持原值不动。
+    private static let sharePathRegex = try? NSRegularExpression(
+        pattern: #"^/(f|s|d)/[A-Za-z0-9._-]+/?$"#)
+
     private func applyPastedPath(_ path: String) {
+        if let re = Self.sharePathRegex,
+           re.firstMatch(in: path, range: NSRange(path.startIndex..., in: path)) != nil {
+            pasteNote = "你粘贴的是网页分享链接，不是 WebDAV 地址。主机只填域名（如 doc.oazon.com），用户名填你的账号，密码用「应用密码」——目录会自动生成，不需要这条链接。"
+            return
+        }
+        pasteNote = nil
         let filesMarker = "/remote.php/dav/files/"
         if path.hasPrefix(filesMarker) {
             let user = path.dropFirst(filesMarker.count)
