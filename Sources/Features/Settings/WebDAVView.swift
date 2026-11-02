@@ -112,7 +112,7 @@ enum WebDAVPresets {
         // ★ 2026-10-30（Nextcloud 引导）：公网服务，和局域网 NAS 的填法完全
         //   不同——域名 + 应用密码 + 自动目录，不再要求用户手拼 remote.php 路径。
         Item(label: "Nextcloud", port: 443, https: true, hostPlaceholder: "cloud.example.com",
-             hint: "① 主机填域名，例如 cloud.example.com（自建且证书自签就打开「允许自签证书」）；② 密码用「应用密码」：登录网页版 → 右上角头像 → 设置 → 安全 → 设备和会话 → 创建新应用密码，登录密码不行；③ 目录不用填，会自动用 /remote.php/dav/files/你的用户名/",
+             hint: "① 主机填域名，例如 cloud.example.com（自建且证书自签就打开「允许自签证书」）；② 密码用「应用密码」：登录网页版 → 右上角头像 → 设置 → 安全 → 设备和会话 → 创建新应用密码，登录密码不行；③ 目录不用填，会自动用 /remote.php/dav/files/你的用户名/Nomily/",
              symbol: "cloud.fill", tint: .cyan, appIcon: "NASNextcloud"),
         Item(label: "坚果云", port: 443, https: true, hostPlaceholder: "dav.jianguoyun.com",
              hint: "路径填 /dav；密码要用「应用密码」（账户安全里生成），不是登录密码",
@@ -177,11 +177,13 @@ struct WebDAVView: View {
     private var isNextcloud: Bool { preset == "Nextcloud" }
 
     /// 实际生效的服务器目录：Nextcloud 自动推导，其余照旧。
+    /// ★ 2026-11-02：推导到 `<用户名>/Nomily/` 子目录——files 根直接堆
+    ///   transcripts/、audio/ 会把网盘根目录弄乱，与其他 NAS 的 /nomily 一致。
     private var effectiveBasePath: String {
         if isNextcloud {
             let user = username.trimmingCharacters(in: .whitespaces).credentialNormalized
             if !user.isEmpty, !basePath.contains("remote.php") {
-                return "/remote.php/dav/files/\(user)/"
+                return "/remote.php/dav/files/\(user)/Nomily/"
             }
         }
         return basePathText()
@@ -225,7 +227,7 @@ struct WebDAVView: View {
             } footer: {
                 // 品牌引导文案跟着预设走（原来挂在已删除的服务商 Picker 下面）。
                 if isNextcloud {
-                    Text("目录不用填——会自动使用 /remote.php/dav/files/你的用户名/。" + L10n.WebDAV.basePathFooter)
+                    Text("目录不用填——会自动使用 /remote.php/dav/files/你的用户名/Nomily/。" + L10n.WebDAV.basePathFooter)
                 } else if let hint = WebDAVPresets.item(named: preset)?.hint {
                     Text(hint + "\n\n" + L10n.WebDAV.basePathFooter)
                 } else {
