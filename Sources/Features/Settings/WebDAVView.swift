@@ -109,8 +109,10 @@ enum WebDAVPresets {
         Item(label: "极空间", port: 5005, https: false, hostPlaceholder: "192.168.1.10 或 100.x.y.z",
              hint: "系统设置 → 文件与共享服务 → WebDAV 打开。HTTP 默认 5005；用 HTTPS(5006) 需开「允许自签证书」。目录填个人空间下的路径（形如 /sata11-你的账号/nomily），填错也没关系——测试连接会自动定位",
              symbol: "externaldrive.fill", tint: .orange, appIcon: "NASZSpace"),
+        // ★ 2026-10-30（Nextcloud 引导）：公网服务，和局域网 NAS 的填法完全
+        //   不同——域名 + 应用密码 + 自动目录，不再要求用户手拼 remote.php 路径。
         Item(label: "Nextcloud", port: 443, https: true, hostPlaceholder: "cloud.example.com",
-             hint: "填 Nextcloud 域名，路径含 /remote.php/dav/files/用户名/",
+             hint: "① 主机填域名，例如 cloud.example.com（自建且证书自签就打开「允许自签证书」）；② 密码用「应用密码」：登录网页版 → 右上角头像 → 设置 → 安全 → 设备和会话 → 创建新应用密码，登录密码不行；③ 目录不用填，会自动用 /remote.php/dav/files/你的用户名/",
              symbol: "cloud.fill", tint: .cyan, appIcon: "NASNextcloud"),
         Item(label: "坚果云", port: 443, https: true, hostPlaceholder: "dav.jianguoyun.com",
              hint: "路径填 /dav；密码要用「应用密码」（账户安全里生成），不是登录密码",
@@ -163,6 +165,25 @@ struct WebDAVView: View {
         WebDAVPresets.item(named: preset)?.hostPlaceholder ?? L10n.WebDAV.host
     }
 
+    /// ★ 2026-10-30（用户："同步到 Nextcloud 这个需要优化一下，他不是本地的
+    ///   局域网，需要增加引导跟对应设置"）：Nextcloud 是公网服务，WebDAV 根
+    ///   永远带用户名（`/remote.php/dav/files/<用户名>/`）——这是新手最容易卡死
+    ///   的一步（填错就 404/401，且报错看不出原因）。所以选了 Nextcloud 就
+    ///   **不显示目录框**，路径由用户名自动推导；老配置里已手填过 remote.php
+    ///   路径的仍然尊重原值。
+    private var isNextcloud: Bool { preset == "Nextcloud" }
+
+    /// 实际生效的服务器目录：Nextcloud 自动推导，其余照旧。
+    private var effectiveBasePath: String {
+        if isNextcloud {
+            let user = username.trimmingCharacters(in: .whitespaces).credentialNormalized
+            if !user.isEmpty, !basePath.contains("remote.php") {
+                return "/remote.php/dav/files/\(user)/"
+            }
+        }
+        return basePathText()
+    }
+
     var body: some View {
         Form {
             // ★ 2026-10-30（用户："在服务器类型选择了对应的设备里面就不要设置
@@ -190,14 +211,19 @@ struct WebDAVView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 SecureField(L10n.WebDAV.password, text: $password)
-                TextField(L10n.WebDAV.basePath, text: $basePath)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                // ★ Nextcloud 不显示目录框：路径由用户名自动推导（见 effectiveBasePath）。
+                if !isNextcloud {
+                    TextField(L10n.WebDAV.basePath, text: $basePath)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
             } header: {
                 Text(L10n.WebDAV.connection)
             } footer: {
                 // 品牌引导文案跟着预设走（原来挂在已删除的服务商 Picker 下面）。
-                if let hint = WebDAVPresets.item(named: preset)?.hint {
+                if isNextcloud {
+                    Text("目录不用填——会自动使用 /remote.php/dav/files/你的用户名/。" + L10n.WebDAV.basePathFooter)
+                } else if let hint = WebDAVPresets.item(named: preset)?.hint {
                     Text(hint + "\n\n" + L10n.WebDAV.basePathFooter)
                 } else {
                     Text(L10n.WebDAV.basePathFooter)
@@ -293,7 +319,6 @@ struct WebDAVView: View {
     private func save() {
         applyPastedEndpoint()
         let trimmedHost = host.trimmingCharacters(in: .whitespaces)
-        let trimmedBase = basePath.trimmingCharacters(in: .whitespaces)
         guard trimmedHost.isEmpty == false, let port = parsedPort else {
             // 主机清空 = 移除整个目的地；只填了主机但端口非法 → 不落盘（保留旧配置），
             // 错误留给状态行，避免静默存进一条连不上的脏配置。
@@ -310,7 +335,9 @@ struct WebDAVView: View {
             port: port,
             useHTTPS: useHTTPS,
             username: username.trimmingCharacters(in: .whitespaces).credentialNormalized,
-            basePath: trimmedBase.isEmpty ? "/nomily" : trimmedBase,
+            // ★ 2026-10-30：Nextcloud 的目录由用户名推导（/remote.php/dav/files/<用户名>/），
+            //   不能把表单里那格（本来就隐藏了）的默认 /nomily 存下去。
+            basePath: effectiveBasePath,
             preset: preset.isEmpty ? nil : preset,
             // ★ 2026-10-30：进 Keychain 之前就清干净，别把不可见字符存下去。
             password: password.credentialNormalized.isEmpty ? nil : password.credentialNormalized,
@@ -340,8 +367,15 @@ struct WebDAVView: View {
                 useHTTPS = false
             }
             text = String(text[schemeRange.upperBound...])
-            // 末尾可能带着路径（…:5005/dav）——路径归 basePath 管，这里只留主机和端口。
-            if let slash = text.firstIndex(of: "/") { text = String(text[..<slash]) }
+            // ★ 2026-10-30（Nextcloud 引导）：末尾可能带着路径——
+            //   `https://cloud.example.com/remote.php/dav/files/alice/` 整串粘进来
+            //   时，主机后面的部分不能直接扔：Nextcloud 的路径里藏着用户名，
+            //   其他 NAS 的路径就是目录。交给 applyPastedPath 处理。
+            if let slash = text.firstIndex(of: "/") {
+                let pathPart = String(text[slash...])
+                text = String(text[..<slash])
+                applyPastedPath(pathPart)
+            }
         }
         if let colon = text.lastIndex(of: ":"),
            let p = Int(text[text.index(after: colon)...]),
@@ -350,6 +384,27 @@ struct WebDAVView: View {
             text = String(text[..<colon])
         }
         host = text
+    }
+
+    /// ★ 2026-10-30（Nextcloud 引导）：粘贴的 URL 里主机后面的路径怎么用。
+    ///   · `/remote.php/dav/files/<用户名>/` → 用户名直接回填（Nextcloud 客户端
+    ///     复制的 WebDAV 地址就是这个形状），目录走自动推导，不用动；
+    ///   · `/remote.php/webdav…`（旧版端点）→ 目录原样保留；
+    ///   · 其他路径（坚果云 /dav、群晖 /home 等）→ 目录原样保留；
+    ///   · `/` → 没有信息，忽略。
+    private func applyPastedPath(_ path: String) {
+        let filesMarker = "/remote.php/dav/files/"
+        if path.hasPrefix(filesMarker) {
+            let user = path.dropFirst(filesMarker.count)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            if !user.isEmpty { username = String(user) }
+            basePath = filesMarker + user + "/"
+        } else if path.hasPrefix("/remote.php/webdav") {
+            basePath = "/remote.php/webdav/"
+        } else if !path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty {
+            basePath = path.hasSuffix("/") ? path : path + "/"
+        }
+        // 根路径（"/"）没有可提取的信息，忽略。
     }
 
     // MARK: - Actions
@@ -388,11 +443,12 @@ struct WebDAVView: View {
             )
         }
 
-        var basePath = basePathText()
+        var basePath = effectiveBasePath
         // ★ 2026-10-30（用户："点击测试链接极空间提示 401"）：极空间的个人空间
         //   目录名是 `/sata<卷>-<账号>/`，猜不出来。目录还停在默认值时先扫根目录
         //   自动定位——不限服务商，反正根上没有 sata 命名就返回 nil。
-        if basePath == "/nomily",
+        //   Nextcloud 的路径已在 effectiveBasePath 推导好，跳过这个分支。
+        if !isNextcloud, basePath == "/nomily",
            let space = await make("/").discoverPersonalSpace(username: trimmedUser) {
             basePath = space + "/nomily"
             self.basePath = basePath
@@ -400,7 +456,7 @@ struct WebDAVView: View {
 
         do {
             let ms = try await make(basePath).testConnection()
-            probe = (true, annotate(basePath == basePathText()
+            probe = (true, annotate(basePath == effectiveBasePath
                 ? L10n.WebDAV.testOk(ms)
                 : L10n.WebDAV.testOkDiscovered(ms, basePath)))
             return
