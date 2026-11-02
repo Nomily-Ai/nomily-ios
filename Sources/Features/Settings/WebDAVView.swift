@@ -155,6 +155,9 @@ struct WebDAVView: View {
     /// ★ 2026-11-02（用户拿分享链接当 WebDAV 地址）：粘贴的是网页分享链接
     ///   （`/f/<id>`、`/s/<token>`）时给出纠正引导，而不是默默存一条必挂的配置。
     @State private var pasteNote: String?
+    /// ★ 2026-11-02（用户："上传指定文件夹需要有选择而不固定"）：服务器文件夹
+    ///   浏览选择器。
+    @State private var showingFolderPicker = false
 
     /// `portText` → 有效端口；非法（空/越界）返回 nil，由调用方报错。
     private var parsedPort: Int? {
@@ -216,18 +219,41 @@ struct WebDAVView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 SecureField(L10n.WebDAV.password, text: $password)
-                // ★ Nextcloud 不显示目录框：路径由用户名自动推导（见 effectiveBasePath）。
-                if !isNextcloud {
+                // ★ 2026-11-02（用户："上传指定文件夹需要有选择而不固定"）：
+                //   目录统一「可看可改可浏览」——Nextcloud 显示推导结果并提供
+                //   「恢复自动」，其余服务商保留手输框；所有类型都能点
+                //   「在服务器上选择…」进文件夹浏览弹层。
+                if isNextcloud {
+                    HStack {
+                        Text(effectiveBasePath)
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        if basePath.contains("remote.php") {
+                            Button(L10n.WebDAV.resetFolder) { basePath = "" }
+                                .font(.footnote)
+                        }
+                    }
+                } else {
                     TextField(L10n.WebDAV.basePath, text: $basePath)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
+                Button {
+                    prepareFolderPicker()
+                } label: {
+                    Label(L10n.WebDAV.browseFolders, systemImage: "folder.badge.gearshape")
+                }
+                .disabled(host.trimmingCharacters(in: .whitespaces).isEmpty
+                          || username.trimmingCharacters(in: .whitespaces).isEmpty)
             } header: {
                 Text(L10n.WebDAV.connection)
             } footer: {
                 // 品牌引导文案跟着预设走（原来挂在已删除的服务商 Picker 下面）。
                 if isNextcloud {
-                    Text("目录不用填——会自动使用 /remote.php/dav/files/你的用户名/Nomily/。" + L10n.WebDAV.basePathFooter)
+                    Text("目录默认是 /remote.php/dav/files/你的用户名/Nomily/，可以点「在服务器上选择文件夹」换成任意已有目录。" + L10n.WebDAV.basePathFooter)
                 } else if let hint = WebDAVPresets.item(named: preset)?.hint {
                     Text(hint + "\n\n" + L10n.WebDAV.basePathFooter)
                 } else {
@@ -300,8 +326,40 @@ struct WebDAVView: View {
         }
         .navigationTitle(L10n.WebDAV.title)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showingFolderPicker) {
+            WebDAVFolderPicker(
+                client: makeFormClient(),
+                initialPath: effectiveBasePath
+            ) { picked in
+                basePath = picked
+                probe = (true, "目录已设为 \(picked)")
+            }
+        }
         .onAppear(perform: load)
         .onDisappear(perform: save)
+    }
+
+    /// 用表单当前值构建浏览用的 client（端口非法时兜底 443——入口已拦过）。
+    private func makeFormClient() -> WebDAVClient {
+        WebDAVClient(
+            host: host.trimmingCharacters(in: .whitespaces),
+            port: parsedPort ?? 443,
+            useHTTPS: useHTTPS,
+            username: username,
+            password: password,
+            basePath: basePathText(),
+            allowSelfSigned: allowSelfSigned
+        )
+    }
+
+    /// 进文件夹选择器前先把粘贴的整串端点拆掉（主机框里可能是完整 URL）。
+    private func prepareFolderPicker() {
+        applyPastedEndpoint()
+        guard parsedPort != nil else {
+            probe = (false, L10n.WebDAV.badPort)
+            return
+        }
+        showingFolderPicker = true
     }
 
     // MARK: - Load / save
@@ -514,5 +572,120 @@ struct WebDAVView: View {
     private func syncNow() async {
         save() // commit the form first — sync reads config
         await sync.syncAll(config: configService.config)
+    }
+}
+
+/// ★ 2026-11-02（用户："上传指定文件夹需要有选择而不固定"）：服务器文件夹
+/// 浏览选择器。PROPFIND Depth 1 逐层下钻，「使用这个目录」提交给表单。
+/// client 由表单当前值构建——换了主机/账号先回车提交再进来
+/// （`prepareFolderPicker` 已做端点拆分），弹层里只管浏览。
+private struct WebDAVFolderPicker: View {
+    let client: WebDAVClient
+    let initialPath: String
+    var onPick: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var path = ""
+    @State private var dirs: [WebDAVClient.DirectoryEntry] = []
+    @State private var loading = false
+    @State private var errorText: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button {
+                        onPick(WebDAVClient.normalizedDirPath(path))
+                        dismiss()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(L10n.WebDAV.useThisFolder, systemImage: "checkmark.circle.fill")
+                                .font(.body.weight(.semibold))
+                            Text(path.isEmpty ? initialPath : path)
+                                .font(.footnote.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    .disabled(loading)
+                    if path != "/" {
+                        Button {
+                            Task { await go(to: parentPath) }
+                        } label: {
+                            Label(L10n.WebDAV.parentFolder, systemImage: "arrow.uturn.backward")
+                        }
+                        .disabled(loading)
+                    }
+                }
+                Section {
+                    if loading {
+                        HStack { Spacer(); ProgressView(); Spacer() }
+                    } else if let errorText {
+                        Text(errorText)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    } else if dirs.isEmpty {
+                        Text(L10n.WebDAV.noSubfolders)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(dirs) { dir in
+                            Button {
+                                Task { await go(to: dir.path) }
+                            } label: {
+                                Label(dir.name, systemImage: "folder.fill")
+                                    .foregroundStyle(.primary)
+                            }
+                            .disabled(loading)
+                        }
+                    }
+                } header: {
+                    Text(L10n.WebDAV.subfolders)
+                } footer: {
+                    Text(L10n.WebDAV.pickFolderFooter)
+                }
+            }
+            .navigationTitle(L10n.WebDAV.pickFolder)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.Common.cancel) { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .task {
+            if path.isEmpty {
+                path = WebDAVClient.normalizedDirPath(initialPath)
+                await load()
+            }
+        }
+    }
+
+    private var parentPath: String {
+        let trimmed = path.dropLast()              // 去掉结尾 /
+        if let idx = trimmed.lastIndex(of: "/") {
+            let parent = String(trimmed[...idx])
+            return parent == "/" ? "/" : parent
+        }
+        return "/"
+    }
+
+    private func go(to newPath: String) async {
+        path = WebDAVClient.normalizedDirPath(newPath)
+        await load()
+    }
+
+    private func load() async {
+        loading = true
+        errorText = nil
+        defer { loading = false }
+        do {
+            dirs = try await client.listDirectories(at: path)
+        } catch {
+            dirs = []
+            errorText = error.localizedDescription
+        }
     }
 }

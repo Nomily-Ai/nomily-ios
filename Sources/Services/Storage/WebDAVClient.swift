@@ -235,4 +235,73 @@ struct WebDAVClient {
               let nameRange = Range(match.range(at: 1), in: body) else { return nil }
         return "/\(body[nameRange])"
     }
+
+    // MARK: - 目录浏览（★ 2026-11-02：上传目录可选，不固定）
+
+    struct DirectoryEntry: Identifiable, Equatable {
+        /// 服务器上的绝对路径，保证以 `/` 结尾。
+        let path: String
+        let name: String
+        var id: String { path }
+    }
+
+    /// PROPFIND Depth 1 列出 `path` 下的**子文件夹**（文件夹选择器用）。
+    /// 判定规则够用就好：DAV 里 collection 的 href 以 `/` 结尾，文件没有。
+    /// href 可能带命名空间前缀（`<d:href>`/`<D:href>`）或干脆是完整 URL，都归一。
+    func listDirectories(at path: String) async throws -> [DirectoryEntry] {
+        guard let req = request(method: "PROPFIND", path: path, depth: "1") else {
+            throw Failure(message: "bad path")
+        }
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw Failure(message: error.localizedDescription)
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 207 else {
+            throw Failure(message: status == 401
+                ? "401 用户名或密码不对"
+                : "HTTP \(status)（列目录失败）")
+        }
+        guard let xml = String(data: data, encoding: .utf8) else {
+            throw Failure(message: "响应不是文本")
+        }
+        let current = Self.normalizedDirPath(path)
+        guard let regex = try? NSRegularExpression(
+            pattern: "<(?:[A-Za-z0-9]+:)?href\\s*>(.*?)</(?:[A-Za-z0-9]+:)?href>") else {
+            throw Failure(message: "bad pattern")
+        }
+        let range = NSRange(xml.startIndex..., in: xml)
+        var seen = Set<String>()
+        var dirs: [DirectoryEntry] = []
+        for match in regex.matches(in: xml, range: range) {
+            guard let r = Range(match.range(at: 1), in: xml) else { continue }
+            var href = String(xml[r])
+            if let decoded = href.removingPercentEncoding { href = decoded }
+            // 有的服务器给完整 URL——砍到路径部分。
+            if let schemeRange = href.range(of: "://") {
+                if let slash = href[schemeRange.upperBound...].firstIndex(of: "/") {
+                    href = String(href[slash...])
+                }
+            }
+            guard href.hasSuffix("/") else { continue }             // 只要文件夹
+            let normalized = Self.normalizedDirPath(href)
+            guard normalized != current, !seen.contains(normalized) else { continue }
+            seen.insert(normalized)
+            var name = normalized.dropLast()                        // 去掉结尾 /
+            if let idx = name.lastIndex(of: "/") { name = name[name.index(after: idx)...] }
+            guard !name.isEmpty else { continue }                   // 服务器根本身
+            dirs.append(DirectoryEntry(path: normalized, name: String(name)))
+        }
+        return dirs.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// 路径归一：保证以 `/` 开头且结尾（列目录/比较都用这个形态）。
+    static func normalizedDirPath(_ path: String) -> String {
+        var p = path
+        while p.hasPrefix("/") { p.removeFirst() }
+        while p.hasSuffix("/") { p.removeLast() }
+        return p.isEmpty ? "/" : "/" + p + "/"
+    }
 }

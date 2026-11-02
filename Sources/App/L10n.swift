@@ -2124,6 +2124,15 @@ enum L10n {
         static func reportFailures(_ uploaded: Int, _ skipped: Int, _ failures: Int, _ first: String) -> String {
             String(format: NSLocalizedString("webdav.report_failures", comment: ""), uploaded, skipped, failures, first)
         }
+        // ★ 2026-11-02：服务器文件夹浏览选择器（目录可选，不固定）。
+        static var browseFolders: String { NSLocalizedString("webdav.browse_folders", comment: "") }
+        static var resetFolder: String { NSLocalizedString("webdav.reset_folder", comment: "") }
+        static var useThisFolder: String { NSLocalizedString("webdav.use_this_folder", comment: "") }
+        static var parentFolder: String { NSLocalizedString("webdav.parent_folder", comment: "") }
+        static var subfolders: String { NSLocalizedString("webdav.subfolders", comment: "") }
+        static var noSubfolders: String { NSLocalizedString("webdav.no_subfolders", comment: "") }
+        static var pickFolder: String { NSLocalizedString("webdav.pick_folder", comment: "") }
+        static var pickFolderFooter: String { NSLocalizedString("webdav.pick_folder_footer", comment: "") }
     }
 
     enum RecordingsSettings {
