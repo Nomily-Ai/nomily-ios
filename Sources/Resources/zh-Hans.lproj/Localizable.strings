@@ -157,14 +157,14 @@
 /* 录音设置 */
 "rec_settings.delete_after_transfer" = "传输后从设备删除（仅蓝牙路径）";
 "rec_settings.delete_after_transfer_footer" = "只对蓝牙下载生效：传输和解密完成后由 App 从设备删除文件。录音豆的 Wi‑Fi 快传不受此开关控制——完整传完的录音，豆固件会自动删除（实测行为，2026-10-29）；没传完整的会一直留在豆上。";
-"rec_settings.quality_title" = "录音质量（转写后）";
-"rec_settings.quality_footer" = "转写始终使用原始音质；这里选的是旧录音可降到的档位。原样最清晰、最占空间。";
+"rec_settings.quality_title" = "手表录音质量（转写后）";
+"rec_settings.quality_footer" = "只作用于 Apple Watch 的录音；录音卡与导入的音频不在此列。转写始终使用原始音质，这里选的是旧手表录音可降到的档位。";
 "rec_settings.quality_as_is" = "原样";
 "rec_settings.quality_standard" = "标准";
 "rec_settings.quality_compact" = "省空间";
 "rec_settings.quality_minimal" = "最省";
 "rec_settings.cold_downgrade" = "旧录音自动降级";
-"rec_settings.cold_downgrade_footer" = "开着时，超过保留天数、且已有转写文本的录音会被就地重编码为所选档位，播放音质换存储空间，原始音质不可恢复。";
+"rec_settings.cold_downgrade_footer" = "开着时，超过保留天数、且已有转写文本的手表录音会被就地重编码为所选档位，播放音质换存储空间，原始音质不可恢复。";
 "rec_settings.cold_downgrade_days" = "录完 %d 天后降级";
 "rec_settings.quality_run_now" = "立即降级";
 "rec_settings.quality_running" = "处理中…";
@@ -238,6 +238,7 @@
 
 /* 片段详情 */
 "clip_detail.opus_playback_unsupported" = "当前系统版本无法播放 Opus 录音，播放需要 iOS 17 及以上（转写不受影响）。如需现在收听，可通过 隔空投送/文件 App 导出后播放。";
+"clip_detail.playback_failed_generic" = "该音频文件无法播放——录音可能已损坏或格式不受支持（转写可能仍可用）。";
 "clip_detail.transcript" = "转录文本";
 "clip_detail.transcribing" = "正在转录...";
 "clip_detail.provider_fallback" = "转录服务降级";
@@ -1808,6 +1809,7 @@
 "token.footer" = "按字符数 × 0.62 估算的 token，只看趋势，不是账单数字。统计范围：AI 整理与章节大纲。";
 "token.detail" = "约 %@ token · %d 次调用";
 "webdav.title" = "WebDAV 备份";
+"webdav.credential_guide" = "这里的账号密码是 WebDAV 服务的凭据：群晖 / 威联通 / 绿联 / 飞牛用的就是 NAS 登录账号（前提是已在设备上开启 WebDAV 服务）；坚果云和 Nextcloud 必须用网页端生成的「应用密码」，填登录密码会被拒绝。";
 "webdav.setup_footer" = "选你的服务器类型，下一步填地址和账号。目录填错也没关系——测试连接会自动定位极空间的个人空间。";
 
 "webdav.preset" = "服务商";
@@ -1858,6 +1860,7 @@
 "webdav.pick_folder_footer" = "点文件夹逐层下钻，选好点「使用这个目录」。列表来自服务器实时查询；列不出来一般是账号密码或目录权限的问题。";
 
 "rec_settings.audition_load" = "加载最近一段录音试听";
+"rec_settings.audition_empty" = "没有找到可试听的手表录音";
 "rec_settings.audition_original" = "原声";
 "rec_settings.audition_tier" = "降级后";
 "rec_settings.audition_clip" = "正在试听：%@";
@@ -1893,7 +1896,8 @@
 "timed.watch_command_sent" = "已通知手表开始录音——抬腕打开手表 App 即可看到。";
 "timed.watch_not_recording" = "手表还没开始录：抬起手腕打开手表上的 Nomily。";
 "timed.watch_stopped" = "已通知手表停止，片段会自动传回手机并转写。";
-"timed.recording" = "手表录音中…";
+"timed.recording" = "定时录音进行中，录音会自动传回手机并转写。";
+"手表录音中…";
 "timed.missed_title" = "定时录音";
 "timed.missed_body" = "录音时段已到但手表没能开始录音，抬腕打开手表上的 Nomily。";
 "timed.footer" = "只在手表上录音，手机麦克风不参与。手表 App 需已安装且麦克风权限已允许；到点后抬腕进 App 即在录。";
@@ -1987,3 +1991,162 @@
 "storage.not_configured" = "未配置";
 "storage.unavailable" = "获取失败（%@）";
 "storage.file_count" = "%d 个文件";
+
+
+/* ★ 2026-11-02: first-launch onboarding + console links */
+"settings.usage_guide" = "使用引导";
+"settings.usage_guide_detail" = "重看开屏欢迎页与使用引导";
+"onboarding.skip" = "跳过";
+"onboarding.next" = "下一步";
+"onboarding.get_started" = "开始使用";
+"onboarding.go_configure" = "去配置";
+"onboarding.title.welcome" = "欢迎使用 Nomily";
+"onboarding.body.welcome" = "随身 AI 录音助手：录音、转写、AI 摘要、云端备份，一站完成。";
+"onboarding.title.device" = "连接录音设备";
+"onboarding.body.device" = "打开 Nomily，附近的录音豆 / 录音卡片会自动连接。没有设备也可以直接用手机麦克风录音。";
+"onboarding.title.capture" = "录音与转写";
+"onboarding.body.capture" = "一键开始录音，结束后自动转写成文字，并生成带要点和待办事项的 AI 摘要。";
+"onboarding.title.configure" = "配置 AI 服务";
+"onboarding.body.configure" = "转写与摘要需要填入你自己的 API Key。每家服务商都配有获取指南，点击即可直达控制台。";
+"onboarding.title.sync" = "云端备份";
+"onboarding.body.sync" = "支持坚果云、Nextcloud 与各类 WebDAV 网盘，转写稿按录音自动归档上传备份。";
+"onboarding.title.done" = "准备好了";
+"onboarding.body.done" = "现在开始你的第一段录音吧。随时可以在「设置 → 使用引导」回看本指南。";
+"llm.console_manage" = "前往控制台管理";
+"asr.cloud.open_console" = "去控制台获取 API Key";
+
+
+/* ★ 2026-11-02: LLM 行副标题（代码内联值为中文，这里显式登记） */
+"llm.subtitle.deepseek" = "深度求索";
+"llm.subtitle.qwen" = "阿里云百炼";
+"llm.subtitle.doubao" = "火山方舟";
+"llm.subtitle.kimi" = "月之暗面";
+"llm.subtitle.zhipu" = "智谱 AI";
+"llm.subtitle.minimax" = "稀宇科技";
+"llm.subtitle.openRouter" = "聚合路由";
+"llm.subtitle.ollama" = "本地 / 局域网";
+
+
+/* ★ 2026-11-02: 流程式引导 + 日志反馈 */
+"guide.step_of" = "第 %d 步 · 共 %d 步";
+"guide.skip" = "跳过引导";
+"guide.next" = "下一步";
+"guide.later" = "知道了，下一步";
+"guide.action.connect" = "去连接";
+"guide.action.go" = "前往";
+"guide.title.connect" = "连接录音设备";
+"guide.body.connect" = "点左上角的设备圆点，扫描连接你的录音豆 / 录音卡片；没有设备也可以直接用手机麦克风录音。";
+"guide.title.live" = "实时转写";
+"guide.body.live" = "「实时」页把现场说话实时变成字幕，需要时从底部标签栏进入。";
+"guide.title.asr" = "配置转写引擎";
+"guide.body.asr" = "转写使用你自己的 API Key。选一家服务商——每个配置页里都有「去控制台获取 API Key」直链指引。";
+"guide.title.llm" = "配置 AI 摘要";
+"guide.body.llm" = "摘要由你选择的大模型生成。挑一家填入 Key，注册直链就在表单里。";
+"guide.title.backup" = "云端备份";
+"guide.body.backup" = "「录音与转写 → WebDAV 备份」：转写稿自动上传到坚果云、Nextcloud 或任意 WebDAV 网盘，每条录音一个文件夹。";
+
+"llm.error.reasoning_no_content" = "这个推理模型把输出额度全花在了思考上，没有写出正文——请重试一次，或到设置里换一个非推理模型。";
+
+
+"folder.icloud_pick" = "使用 iCloud 云盘（推荐）";
+"folder.icloud_name" = "iCloud 云盘 · Nomily";
+"folder.icloud_failed" = "iCloud 暂不可用：请确认已登录 iCloud 且开启了 iCloud 云盘，稍后重试。";
+"folder.usage" = "占用空间";
+"folder.usage.empty" = "空文件夹";
+"folder.usage.format" = "%@ · %d 个文件";
+
+"folder.icloud_hint" = "推荐选择 iCloud 云盘里的文件夹（选择器默认打开就是），写入的内容由系统自动云同步，换手机登录同一 Apple ID 即在。";
+
+// ★ 2026-11-02：数据与存储位置总枢纽
+"storage.locations.title" = "数据与存储位置";
+"storage.locations.header" = "保存路径";
+"storage.locations.iphone" = "这台 iPhone";
+"storage.locations.iphone_desc" = "录音、转写与摘要始终先保存在本机，点按查看占用明细";
+"storage.locations.icloud" = "iCloud 云盘";
+"storage.locations.icloud_desc" = "自动云备份，换机不丢数据（推荐）";
+"storage.locations.nas" = "NAS（WebDAV）";
+"storage.locations.nas_desc" = "自动备份到群晖、QNAP 等私有服务器";
+"storage.locations.folder" = "文件夹 App";
+"storage.locations.folder_desc" = "导出到「文件」App 里的任意文件夹";
+"storage.locations.footer" = "所有录音与转写先保存在这台 iPhone 上；iCloud 云盘和 NAS 是自动备份的落点，文件夹 App 用来导出副本到任意位置。";
+
+// ★ 2026-11-02：Key 快引导（不会开通？）
+"keywizard.title" = "不会开通？AI 帮你拿 Key";
+"keywizard.intro" = "把下面的提示词复制给任意 AI 助手（豆包、ChatGPT、元宝等都行），跟着它的指引操作，再把 AI 的回复粘贴回来，这里会自动认出凭据。";
+"keywizard.step1" = "第 1 步 · 复制提示词";
+"keywizard.step2" = "第 2 步 · 粘贴 AI 的回复";
+"keywizard.copy_prompt" = "复制提示词";
+"keywizard.copied" = "已复制，去粘贴给 AI 助手";
+"keywizard.apply" = "识别成功，填入";
+"keywizard.not_found" = "没有识别出凭据——请确认粘贴的是 AI 的完整回复，或手动复制 Key 到输入框。";
+"keywizard.unknown_field" = "凭据";
+"keywizard.footer" = "提示词只是问路用，不包含你的任何隐私；识别结果只保存在本机。也可以跳过引导，直接在控制台创建后手动粘贴。";
+"keywizard.open" = "不会开通？让 AI 带你拿 Key";
+"keywizard.prompt.head" = "我想在「%@」创建 API Key，但我完全不懂。请一步一步教我：";
+"keywizard.prompt.console" = "1) 打开控制台：%@\n2) 登录（没有账号就先注册）；";
+"keywizard.prompt.single" = "3) 找到创建 API Key 的入口并创建；\n4) 创建后把%@完整复制给我（只要 Key 本身，不要加多余解释）。";
+"keywizard.prompt.multi" = "3) 找到创建凭据的入口，把需要的这些字段都创建出来：%@；\n4) 创建后把每个字段对应的值分别复制给我，并标注字段名。";
+"keywizard.prompt.tail" = "请用中文回答，每一步写清楚点什么按钮、在哪个页面。如果页面改版了，就告诉我现在应该怎么走。";
+
+// ★ 2026-11-02：定时录音模式（一直录 / 时间段）
+"timed.mode_row" = "录制方式";
+"timed.mode_always" = "一直录";
+"timed.mode_window" = "指定时间段";
+"timed.recording_always_on" = "一直录进行中——关掉上面的开关才会停。";
+
+// ★ 2026-11-02：SenseVoice 本机转写模型
+"asr.sensevoice" = "SenseVoice（本机）";
+"sensevoice.title" = "SenseVoice 本机转写";
+"sensevoice.name" = "SenseVoice 本机转写";
+"sensevoice.desc" = "阿里开源的离线语音识别模型，支持中文（含粤语）、英语、日语、韩语，带标点。下载到手机后完全离线运行——不需要 API Key，不消耗流量，录音不出设备。";
+"sensevoice.footer" = "模型来自阿里 FunAudioLLM 开源项目（SenseVoice Small，int8 量化），经 sherpa-onnx 转换。下载源为 hf-mirror / HuggingFace 镜像，仅包含模型文件。";
+"sensevoice.section_header" = "本机模型";
+"sensevoice.section_footer" = "下载后可在上方「转写引擎」里选 SenseVoice 作为默认引擎，离线转写所有录音。";
+"sensevoice.manage_header" = "模型管理";
+"sensevoice.download" = "下载模型";
+"sensevoice.size_hint" = "约 230 MB，建议 Wi-Fi";
+"sensevoice.downloading" = "正在下载模型";
+"sensevoice.downloading_hint" = "下载在 App 内进行，中途退出页面下载会中断，可回来重试。";
+"sensevoice.status_row" = "模型状态";
+"sensevoice.ready" = "已下载（%@）";
+"sensevoice.ready_short" = "已下载";
+"sensevoice.delete" = "删除模型";
+"sensevoice.failed" = "下载失败";
+"sensevoice.failed_short" = "下载失败";
+"sensevoice.retry" = "重试下载";
+"sensevoice.not_downloaded" = "SenseVoice 模型还没有下载：请在「设置 → 语音识别 → 本机模型」里先下载。";
+
+/* ★ 2026-11-02 首启欢迎页（三条示例介绍，随语言切换） */
+"welcome.title" = "欢迎使用 Nomily";
+"welcome.subtitle" = "随身 AI 录音助手：录音、转写、AI 摘要、云端备份，一站完成。";
+"welcome.samples_header" = "资料库里已经放好三条示例";
+"welcome.sample_guide_title" = "如何使用 Nomily AI";
+"welcome.sample_guide_body" = "三步上手：录音 → 转写 → 整理";
+"welcome.sample_welcome_title" = "欢迎来到 Nomily AI";
+"welcome.sample_welcome_body" = "先看这一篇，了解 Nomily 能为你做什么";
+"welcome.sample_meeting_title" = "产品周会（示例）";
+"welcome.sample_meeting_body" = "一条完整的示例录音：转写、总结、待办与大纲";
+"welcome.footer" = "随时可以在「设置 → 使用引导」重看引导。";
+"welcome.start" = "开始使用";
+
+/* ★ 2026-11-02 SenseVoice 手工导入 */
+"sensevoice.import_model" = "从文件导入模型";
+"sensevoice.import_hint" = "下载一直失败？可以在电脑上下好两个文件，用隔空投送传到这台 iPhone，再点上面导入：model.int8.onnx（约 230 MB）与 tokens.txt。";
+"sensevoice.import_incomplete" = "还缺文件：需要同时导入 model.int8.onnx 和 tokens.txt。";
+
+/* ★ 2026-11-02 手表 V3 原型：首页新增「最近 / 同步」两页 + 顶栏 */
+"watch.recent" = "最近";
+"watch.recent_empty" = "还没有回顾\n在 iPhone 上生成摘要后会同步过来";
+"watch.sync_to_phone" = "同步到 iPhone";
+"watch.pending_unit" = "项待传";
+"watch.phone_label" = "iPhone";
+"watch.phone_near" = "在附近";
+"watch.phone_far" = "不在附近";
+"watch.storage_label" = "存储";
+"watch.storage_free" = "%@ 可用";
+"watch.sync_now" = "立即同步";
+"watch.syncing" = "正在上传…";
+"watch.listening" = "LISTENING";
+"watch.saved" = "已保存";
+"watch.points_count" = "%d 条要点";
+"watch.menu_header" = "菜单";

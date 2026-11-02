@@ -31,7 +31,10 @@ final class FolderExportService: ObservableObject {
 
     @Published var isRunning = false
     @Published var lastReport: String?
-    /// ★ 2026-10-30（用户："增加自动上传到 iCloud 或者指定的服务器"）：
+    /// ★ 2026-11-02（用户："展示占用内存"）：所选文件夹的占用统计行
+    /// （递归文件数 + 总字节，异步算，iCloud 目录可能有占位文件）。
+    @Published var usageText: String?
+    /// ★ 2026-11-02（用户："导出到文件夹应该是 iCloud 的默认路径方便自动云备份"）：
     /// 打开后每次转写完成自动把这条的文本（+可选录音）写进所选文件夹。
     /// 目标是 iCloud 云盘里的文件夹时，这就是"自动上传 iCloud"。
     @Published var autoEnabled: Bool {
@@ -88,7 +91,46 @@ final class FolderExportService: ObservableObject {
 
     func clear() {
         UserDefaults.standard.removeObject(forKey: Self.bookmarkKey)
+        usageText = nil
         lastReport = nil
+    }
+
+    // MARK: - Usage（★ 2026-11-02：占用统计）
+
+    /// 递归统计所选文件夹的「文件数 + 总字节」。用 enumerator + 预取 key，
+    /// 只碰元数据；iCloud 目录里的占位文件读的是本地缓存条目，不触发下载。
+    /// 后台线程算完回主线程（目录可能很大）。
+    func refreshUsage() {
+        guard let folder = resolve() else {
+            usageText = nil
+            return
+        }
+        let url = folder
+        Task.detached {
+            let fm = FileManager.default
+            guard let enumerator = fm.enumerator(
+                at: url,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .totalFileAllocatedSizeKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else {
+                await MainActor.run { self.usageText = nil }
+                return
+            }
+            var files = 0
+            var bytes: Int64 = 0
+            for case let item as URL in enumerator {
+                let values = try? item.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .totalFileAllocatedSizeKey])
+                guard values?.isRegularFile == true else { continue }
+                files += 1
+                bytes += Int64(values?.totalFileAllocatedSize ?? values?.fileSize ?? 0)
+            }
+            let formatter = ByteCountFormatter()
+            formatter.countStyle = .file
+            let text = files == 0
+                ? L10n.FolderExport.usageEmpty
+                : String(format: L10n.FolderExport.usageFormat, formatter.string(fromByteCount: bytes), files)
+            await MainActor.run { self.usageText = text }
+        }
     }
 
     /// Resolve + start access. Callers MUST call `stopAccessingSecurityScopedResource`

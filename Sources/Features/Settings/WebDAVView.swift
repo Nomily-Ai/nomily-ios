@@ -252,12 +252,22 @@ struct WebDAVView: View {
                 Text(L10n.WebDAV.connection)
             } footer: {
                 // 品牌引导文案跟着预设走（原来挂在已删除的服务商 Picker 下面）。
-                if isNextcloud {
-                    Text("目录默认是 /remote.php/dav/files/你的用户名/Nomily/，可以点「在服务器上选择文件夹」换成任意已有目录。" + L10n.WebDAV.basePathFooter)
-                } else if let hint = WebDAVPresets.item(named: preset)?.hint {
-                    Text(hint + "\n\n" + L10n.WebDAV.basePathFooter)
-                } else {
-                    Text(L10n.WebDAV.basePathFooter)
+                // ★ 2026-11-02（用户："需要增加引导如何获取对应的账号密码而不是
+                // 登录密码之类的"）：凭据引导统一放在品牌提示**前面**——用户先
+                // 看到账号密码去哪拿，再看品牌细节。
+                VStack(alignment: .leading, spacing: 6) {
+                    Label {
+                        Text(L10n.WebDAV.credentialGuide)
+                    } icon: {
+                        Image(systemName: "person.text.rectangle")
+                    }
+                    if isNextcloud {
+                        Text("目录默认是 /remote.php/dav/files/你的用户名/Nomily/，可以点「在服务器上选择文件夹」换成任意已有目录。" + L10n.WebDAV.basePathFooter)
+                    } else if let hint = WebDAVPresets.item(named: preset)?.hint {
+                        Text(hint + "\n\n" + L10n.WebDAV.basePathFooter)
+                    } else {
+                        Text(L10n.WebDAV.basePathFooter)
+                    }
                 }
             }
 

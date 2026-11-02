@@ -236,4 +236,21 @@ extension Bundle {
         overrideBundle = Bundle.main.path(forResource: resolved, ofType: "lproj")
             .flatMap(Bundle.init(path:))
     }
+
+    /// The **device** language's bundle, independent of the in-app picker.
+    ///
+    /// ★ 2026-11-02（用户："这个开屏需要跟随手机系统的语言进行设置"）：首启开屏
+    /// 出现在用户做任何选择之前，语言应当就是手机的设置语言——而 `Bundle.main`
+    /// 此刻已经被 `applyLanguage` 换成 App 内选择的那一套，所以这里直接打开
+    /// `Locale.preferredLanguages` 对应的 `.lproj`，绕开 swizzle。
+    static var systemLanguage: Bundle {
+        let tag = AppLanguage.resolve(Locale.preferredLanguages.first)
+        return Bundle.main.path(forResource: tag, ofType: "lproj")
+            .flatMap(Bundle.init(path:)) ?? Bundle.main
+    }
+
+    /// `NSLocalizedString` against `systemLanguage` — `value` is the English fallback.
+    static func systemString(_ key: String, value: String) -> String {
+        systemLanguage.localizedString(forKey: key, value: value, table: nil)
+    }
 }

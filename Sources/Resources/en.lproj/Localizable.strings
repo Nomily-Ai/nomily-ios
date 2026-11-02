@@ -157,14 +157,14 @@
 /* Recordings Settings */
 "rec_settings.delete_after_transfer" = "Delete from device after transfer (Bluetooth path only)";
 "rec_settings.delete_after_transfer_footer" = "Only applies to Bluetooth downloads: after transfer + decrypt, the app deletes the file from the device. The bean's Wi‑Fi fast transfer ignores this switch — a fully transferred recording is deleted by the bean's firmware itself (verified 2026-10-29); incomplete ones stay on the bean.";
-"rec_settings.quality_title" = "Recording quality (after transcription)";
-"rec_settings.quality_footer" = "Transcription always runs on the original audio; this picks the tier cold recordings get re-encoded to. As-is is the clearest and takes the most space.";
+"rec_settings.quality_title" = "Watch recording quality (after transcription)";
+"rec_settings.quality_footer" = "Applies to Apple Watch recordings only — recorder-card and imported audio are never touched. Transcription always runs on the original audio; this picks the tier cold watch recordings get re-encoded to.";
 "rec_settings.quality_as_is" = "As-is";
 "rec_settings.quality_standard" = "Standard";
 "rec_settings.quality_compact" = "Space-saving";
 "rec_settings.quality_minimal" = "Minimal";
 "rec_settings.cold_downgrade" = "Downgrade old recordings automatically";
-"rec_settings.cold_downgrade_footer" = "When on, recordings older than the threshold that already have a transcript are re-encoded in place to the selected tier. Playback fidelity is traded for storage; the original quality is gone.";
+"rec_settings.cold_downgrade_footer" = "When on, watch recordings older than the threshold that already have a transcript are re-encoded in place to the selected tier. Playback fidelity is traded for storage; the original quality is gone.";
 "rec_settings.cold_downgrade_days" = "Downgrade recordings %d days after they finish";
 "rec_settings.quality_run_now" = "Downgrade now";
 "rec_settings.quality_running" = "Working…";
@@ -602,6 +602,7 @@
 "device.unbinding_and_removing" = "Removing device…";
 "device.saving_name" = "Saving name…";
 "clip_detail.opus_playback_unsupported" = "This system version can't play Opus recordings — playback needs iOS 17 or later. Transcription is unaffected. To listen now, share the file out via AirDrop or the Files app.";
+"clip_detail.playback_failed_generic" = "This audio file can't be played — the recording may be damaged or in an unsupported format. Transcription may still work.";
 "devices.connection" = "Connection";
 "devices.auto_reconnect" = "Auto-Reconnect";
 "devices.auto_reconnect_footer" = "When on, the app reconnects to your most recent device by itself after an unexpected disconnect — for example after the device is powered off and on again. When off, tap the connection pill at the top to reconnect manually.";
@@ -1480,6 +1481,7 @@
 "summarize.inspiration" = "Inspiration";
 "summarize.mine_space_footer" = "Language and model are saved as your defaults.";
 "webdav.title" = "WebDAV backup";
+"webdav.credential_guide" = "The username & password here are WebDAV service credentials: on Synology/QNAP/UGREEN/fnOS they are the same as your NAS account (after WebDAV is enabled); for Nutstore and Nextcloud you MUST create an app password in their web settings — the login password gets rejected.";
 "webdav.setup_footer" = "Pick your server type, then fill in the address and account. A wrong folder is fine — Test connection auto-locates the ZSpace personal space.";
 
 "webdav.preset" = "Server";
@@ -1530,6 +1532,7 @@
 "webdav.pick_folder_footer" = "Tap a folder to descend, then \"Use this folder\" to commit. The list is queried from the server live; failures usually mean wrong credentials or permissions.";
 
 "rec_settings.audition_load" = "Load a recent recording to audition";
+"rec_settings.audition_empty" = "No watch recordings available to audition";
 "rec_settings.audition_original" = "Original";
 "rec_settings.audition_tier" = "Downgraded";
 "rec_settings.audition_clip" = "Auditioning: %@";
@@ -1601,3 +1604,246 @@
 "storage.duration_m" = "%dm recorded";
 "storage.duration_s" = "%ds recorded";
 "storage.footnote" = "Every number is measured on disk: local bytes scanned in audio_clips/, NAS bytes read back from the server with PROPFIND, iCloud bytes read through the folder bookmark. Recording time comes from the library duration cache — clips not yet played or scanned show no duration.";
+
+
+/* ★ 2026-11-02: first-launch onboarding + console links */
+"settings.usage_guide" = "Usage guide";
+"settings.usage_guide_detail" = "Replay the welcome screen and the tour";
+"onboarding.skip" = "Skip";
+"onboarding.next" = "Next";
+"onboarding.get_started" = "Start recording";
+"onboarding.go_configure" = "Configure now";
+"onboarding.title.welcome" = "Welcome to Nomily";
+"onboarding.body.welcome" = "Your pocket AI recorder — Nomily turns recordings into transcripts, summaries and a searchable library.";
+"onboarding.title.device" = "Connect a recorder";
+"onboarding.body.device" = "Have your recorder bean or card nearby and Nomily finds it automatically. No hardware? The iPhone microphone works just as well.";
+"onboarding.title.capture" = "Record & transcribe";
+"onboarding.body.capture" = "Tap once to record. When it ends, Nomily transcribes the audio and writes an AI summary with key points and action items.";
+"onboarding.title.configure" = "Configure AI services";
+"onboarding.body.configure" = "Transcription and summaries use your own API keys. Settings walks you through every provider — each one has a get-the-key guide with a direct console link.";
+"onboarding.title.sync" = "Back up to your cloud";
+"onboarding.body.sync" = "Connect Nutstore, Nextcloud or any WebDAV drive — finished transcripts upload themselves, organised into one folder per recording.";
+"onboarding.title.done" = "You're all set";
+"onboarding.body.done" = "Start your first recording below. You can replay this guide anytime in Settings → Usage guide.";
+"llm.console_manage" = "Manage keys in the console";
+"asr.cloud.open_console" = "Open the console to get a key";
+
+
+/* ★ 2026-11-02: ASR cloud vendor catalogue (English; zh falls back to inline values) */
+"asr.cloud.diarization" = "speaker separation";
+"asr.cloud.recommendation_prefix" = "Verdict: %@";
+
+"asr.cloud.aliyun.name" = "Alibaba Cloud Speech";
+"asr.cloud.aliyun.tagline" = "Paraformer · strongest for Chinese";
+"asr.cloud.aliyun.console" = "① nls-portal.console.aliyun.com → Projects for the Appkey; ② ram.console.aliyun.com to create an AccessKey (grant OSS read/write too); ③ create an OSS bucket in the matching region";
+"asr.cloud.aliyun.note" = "How transcription works: audio is staged in your own OSS bucket (private), a 2-hour presigned link is handed to Aliyun (their API requires a publicly downloadable file_link), and the result is fetched afterwards. The region entered here is the **OSS region** (a bucket in Hangzhou means cn-hangzhou) — a wrong value is auto-corrected once from OSS's response. The live-caption gateway region is unrelated and normalized automatically. Live captions use their real-time WebSocket (same Appkey): pick Alibaba Cloud under Recording & Transcription → Live recognition engine.";
+"asr.cloud.aliyun.recommendation" = "Recommended · best for Chinese";
+"asr.cloud.aliyun.price" = "≈ ¥0.3/hour";
+
+"asr.cloud.baidu.name" = "Baidu Cloud Speech";
+"asr.cloud.baidu.tagline" = "Short utterances · solid Chinese baseline";
+"asr.cloud.baidu.console" = "console.bce.baidu.com → Speech Technology → App list (AK/SK exist only after creating an app)";
+"asr.cloud.baidu.note" = "Auth is OAuth2: the AK/SK pair exchanges for an access_token, and transcription uses the same token — so a passed probe means the credentials genuinely work.";
+"asr.cloud.baidu.recommendation" = "Short audio · long audio is pricey";
+"asr.cloud.baidu.price" = "≈ ¥12/hour (short audio billed per second)";
+
+"asr.cloud.xfyun.name" = "iFlytek Open Platform";
+"asr.cloud.xfyun.tagline" = "Dictation / transcription · Chinese veteran";
+"asr.cloud.xfyun.console" = "console.xfyun.cn → Speech Dictation / Transcription → service auth info";
+"asr.cloud.xfyun.note" = "Auth is an HMAC-SHA256 signature over host+date (clock skew must stay within 5 minutes). A successful probe returns HTTP 101 — their intake is a WebSocket, so a completed handshake means the signature is valid.";
+"asr.cloud.xfyun.recommendation" = "Chinese veteran · pricey";
+"asr.cloud.xfyun.price" = "Transcription ≈ ¥0.33/min";
+
+"asr.cloud.tencent.name" = "Tencent Cloud ASR";
+"asr.cloud.tencent.tagline" = "File / real-time · one-sentence";
+"asr.cloud.tencent.console" = "console.cloud.tencent.com → Access Management → API Key Management";
+"asr.cloud.tencent.note" = "The host is fixed at asr.tencentcloudapi.com; the region travels as a request parameter (TC3-HMAC-SHA256 signature). The probe calls DescribeTaskStatus with a non-existent task ID — signature check only, no audio upload. The hot-word API (DescribeVocabList etc.) was retired under asr 2019-06-14; do not use it for probing.";
+"asr.cloud.tencent.recommendation" = "Balanced · Mandarin / English / Cantonese";
+"asr.cloud.tencent.price" = "≈ ¥1.3/hour (file recognition)";
+
+"asr.cloud.google.name" = "Google Cloud";
+"asr.cloud.google.tagline" = "Speech-to-Text v1 · 125+ languages";
+"asr.cloud.google.console" = "console.cloud.google.com → APIs & Services → Credentials";
+"asr.cloud.google.note" = "Models are v1 recognizer types: latest_long for meetings and long audio, command_and_search for short commands, phone_call for phone recordings.";
+"asr.cloud.google.recommendation" = "Multilingual · unstable from mainland China";
+"asr.cloud.google.price" = "≈ $0.024/min (≈ $1.4/hour)";
+
+"asr.cloud.aws.name" = "AWS Transcribe";
+"asr.cloud.aws.tagline" = "Batch transcription · speaker separation";
+"asr.cloud.aws.console" = "console.aws.amazon.com → IAM → Users → Security credentials";
+"asr.cloud.aws.note" = "The address is derived from the region (transcribe.<region>.amazonaws.com). Read-only permissions suffice for the probe; transcription also needs that account to reach S3 (Transcribe is an async job API).";
+"asr.cloud.aws.recommendation" = "Enterprise-grade · requires S3";
+"asr.cloud.aws.price" = "≈ $0.024/min (≈ $1.4/hour)";
+
+"asr.cloud.deepgram.name" = "Deepgram";
+"asr.cloud.deepgram.tagline" = "Nova family · cheap for live and batch";
+"asr.cloud.deepgram.console" = "console.deepgram.com → API Keys";
+"asr.cloud.deepgram.note" = "The auth header is `Authorization: Token <key>`, not Bearer — an outlier among vendors, already sent their way.";
+"asr.cloud.deepgram.recommendation" = "Strong English · cheap";
+"asr.cloud.deepgram.price" = "≈ $0.3/hour";
+
+"asr.cloud.assemblyai.name" = "AssemblyAI";
+"asr.cloud.assemblyai.tagline" = "Universal-2 · summaries and topics built in";
+"asr.cloud.assemblyai.console" = "assemblyai.com/dashboard → API keys";
+"asr.cloud.assemblyai.note" = "The model field is called speech_model in their protocol: best is the most accurate, nano the fastest, slam-1 targets real-time calls.";
+"asr.cloud.assemblyai.recommendation" = "Strong English · includes summarization";
+"asr.cloud.assemblyai.price" = "≈ $0.4/hour";
+
+"asr.cloud.gladia.name" = "Gladia";
+"asr.cloud.gladia.tagline" = "Solaria · multilingual with speakers";
+"asr.cloud.gladia.console" = "app.gladia.io → API keys";
+"asr.cloud.gladia.note" = "The auth header is `x-gladia-key`.";
+"asr.cloud.gladia.recommendation" = "Multilingual · live-ready";
+"asr.cloud.gladia.price" = "≈ $0.6/hour (Pro tier)";
+
+"asr.cloud.watson.name" = "IBM Watson";
+"asr.cloud.watson.tagline" = "Speech to Text · steady veteran";
+"asr.cloud.watson.console" = "cloud.ibm.com → Resource list → Speech to Text → credentials";
+"asr.cloud.watson.note" = "The address is derived from the region (api.<region>.speech-to-text.watson.cloud.ibm.com). Auth is Basic with the fixed username apikey. It exposes its own /v1/models, so refreshing fetches the real model list.";
+"asr.cloud.watson.recommendation" = "Steady veteran · has Chinese models";
+"asr.cloud.watson.price" = "≈ $0.02/min (≈ $1.2/hour)";
+
+/* ★ 2026-11-02: LLM provider notes (English; zh falls back to inline values) */
+"llm.custom.name" = "Custom endpoint";
+"llm.openRouter.note" = "One key covers every vendor; model names need the vendor prefix (anthropic/…, openai/…).";
+"llm.ollama.note" = "Runs on your computer or LAN — no internet, no cost. Enter the machine's address, not its name.";
+"llm.custom.note" = "Any OpenAI-compatible /v1 address (relays, self-hosted vLLM, LM Studio all count). The key can be left empty.";
+"llm.doubao.note" = "Doubao is served by Volcengine Ark. The model field takes either a model name (doubao-…) or an inference endpoint ID (ep-…, for accounts that cannot call by name).";
+"llm.kimi.note" = "By Moonshot AI. Strong on long context — the 128k tier fits a full-meeting transcript.";
+"llm.zhipu.note" = "glm-4-flash has a generous free quota, enough for everyday recordings; pick glm-4-plus for quality.";
+"llm.minimax.console" = "platform.minimaxi.com → API keys";
+"llm.minimax.note" = "MiniMax's chat endpoint is their own /text/chatcompletion_v2 — fetching the model list from the provider is unavailable; pick from the curated list instead.";
+
+"llm.subtitle.deepseek" = "DeepSeek (company)";
+"llm.subtitle.qwen" = "Alibaba Cloud Bailian";
+"llm.subtitle.doubao" = "Volcengine Ark";
+"llm.subtitle.kimi" = "Moonshot AI";
+"llm.subtitle.zhipu" = "Zhipu AI";
+"llm.subtitle.minimax" = "MiniMax (company)";
+"llm.subtitle.openRouter" = "Aggregator";
+"llm.subtitle.ollama" = "Local / LAN";
+
+
+/* ★ 2026-11-02: first-run guide + feedback */
+"guide.step_of" = "Step %d of %d";
+"guide.skip" = "Skip tour";
+"guide.next" = "Next";
+"guide.later" = "Got it — next";
+"guide.action.connect" = "Connect a device";
+"guide.action.go" = "Take me there";
+"guide.title.connect" = "Connect a recorder";
+"guide.body.connect" = "Tap the device dot in the top-left corner to scan for your recorder bean or card — or just record with the iPhone microphone.";
+"guide.title.live" = "Live transcription";
+"guide.body.live" = "The Live tab turns speech into captions in real time — open it from the bottom tab bar whenever you need it.";
+"guide.title.asr" = "Set up transcription";
+"guide.body.asr" = "Transcription uses your own API key. Pick a vendor — every sheet has a get-the-key guide with a direct console link.";
+"guide.title.llm" = "Set up AI summaries";
+"guide.body.llm" = "Summaries are written by an AI model you choose. Pick one and paste its key — the signup link is right in the form.";
+"guide.title.backup" = "Back up to your cloud";
+"guide.body.backup" = "Recording & Transcription → WebDAV backup: transcripts upload themselves to Nutstore, Nextcloud or any WebDAV drive, one folder per recording.";
+
+"llm.error.reasoning_no_content" = "This model spent its whole output budget on thinking and wrote no answer — try again, or switch to a non-reasoning model in Settings.";
+
+
+"folder.icloud_pick" = "Use iCloud Drive (recommended)";
+"folder.icloud_name" = "iCloud Drive · Nomily";
+"folder.icloud_failed" = "iCloud isn't available right now — make sure you're signed in to iCloud with iCloud Drive enabled, then try again.";
+"folder.usage" = "Space used";
+"folder.usage.empty" = "Empty";
+"folder.usage.format" = "%@ · %d files";
+
+"folder.icloud_hint" = "Recommended: pick a folder in iCloud Drive (the picker opens there by default) — everything written is cloud-synced automatically, and follows your Apple ID to a new phone.";
+
+// ★ 2026-11-02: Data & storage locations hub
+"storage.locations.title" = "Data & Storage Locations";
+"storage.locations.header" = "Save locations";
+"storage.locations.iphone" = "This iPhone";
+"storage.locations.iphone_desc" = "Recordings, transcripts and summaries always land here first. Tap for a usage breakdown.";
+"storage.locations.icloud" = "iCloud Drive";
+"storage.locations.icloud_desc" = "Automatic cloud backup so a phone swap never loses data (recommended)";
+"storage.locations.nas" = "NAS (WebDAV)";
+"storage.locations.nas_desc" = "Automatic backup to your Synology, QNAP or other private server";
+"storage.locations.folder" = "Files app";
+"storage.locations.folder_desc" = "Export to any folder in the Files app";
+"storage.locations.footer" = "All recordings and transcripts are saved on this iPhone first; iCloud Drive and a NAS are automatic-backup destinations, while the Files app exports copies anywhere you like.";
+
+// ★ 2026-11-02: Key wizard (can't get an API key?)
+"keywizard.title" = "No key? Let AI guide you";
+"keywizard.intro" = "Copy the prompt below into any AI assistant (ChatGPT, Doubao, etc.), follow its steps, then paste the AI's reply back here — the key is detected automatically.";
+"keywizard.step1" = "Step 1 · Copy the prompt";
+"keywizard.step2" = "Step 2 · Paste the AI's reply";
+"keywizard.copy_prompt" = "Copy prompt";
+"keywizard.copied" = "Copied — paste it into your AI assistant";
+"keywizard.apply" = "Detected — fill in";
+"keywizard.not_found" = "No credential detected — make sure you pasted the AI's full reply, or copy the key manually.";
+"keywizard.unknown_field" = "Credential";
+"keywizard.footer" = "The prompt asks for directions only and carries none of your data; results stay on this device. You can also skip this and create the key in the console yourself.";
+"keywizard.open" = "Can't get a key? Let AI guide you";
+"keywizard.prompt.head" = "I need to create an API key for %@ but I'm not technical. Walk me through it step by step:";
+"keywizard.prompt.console" = "1) Open the console: %@\n2) Sign in (register first if needed);";
+"keywizard.prompt.single" = "3) Find where to create an API key and create one;\n4) Paste the %@ back to me — the key itself only, no extra explanation.";
+"keywizard.prompt.multi" = "3) Find where to create the credentials and create every field I need: %@;\n4) Paste each value back to me, labeled with its field name.";
+"keywizard.prompt.tail" = "Reply in Chinese, and for each step say exactly which button to tap and on which page. If the site has changed, tell me what to do instead.";
+
+// ★ 2026-11-02: timed recording modes
+"timed.mode_row" = "Recording mode";
+"timed.mode_always" = "Record continuously";
+"timed.mode_window" = "Scheduled window";
+"timed.recording_always_on" = "Recording continuously — turn the switch off to stop.";
+
+// ★ 2026-11-02: SenseVoice on-device model
+"asr.sensevoice" = "SenseVoice (on-device)";
+"sensevoice.title" = "SenseVoice on-device model";
+"sensevoice.name" = "SenseVoice on-device transcription";
+"sensevoice.desc" = "An open-source offline speech-recognition model from Alibaba. Supports Chinese (incl. Cantonese), English, Japanese and Korean with punctuation. Runs fully offline once downloaded — no API key, no network, audio never leaves the device.";
+"sensevoice.footer" = "Model: SenseVoice Small (int8) from Alibaba FunAudioLLM, converted for sherpa-onnx. Downloaded from the hf-mirror / HuggingFace mirror; the download contains model files only.";
+"sensevoice.section_header" = "On-device models";
+"sensevoice.section_footer" = "After downloading, pick SenseVoice as the transcription engine above to transcribe every recording offline.";
+"sensevoice.manage_header" = "Model management";
+"sensevoice.download" = "Download model";
+"sensevoice.size_hint" = "About 230 MB, Wi-Fi recommended";
+"sensevoice.downloading" = "Downloading model";
+"sensevoice.downloading_hint" = "The download runs inside the app; leaving this page cancels it — come back and retry.";
+"sensevoice.status_row" = "Model status";
+"sensevoice.ready" = "Downloaded (%@)";
+"sensevoice.ready_short" = "Downloaded";
+"sensevoice.delete" = "Delete model";
+"sensevoice.failed" = "Download failed";
+"sensevoice.failed_short" = "Download failed";
+"sensevoice.retry" = "Retry download";
+"sensevoice.not_downloaded" = "The SenseVoice model isn't downloaded yet: get it in Settings → Speech recognition → On-device models first.";
+
+/* ★ 2026-11-02 首启欢迎页（三条示例介绍，随语言切换） */
+"welcome.title" = "Welcome to Nomily";
+"welcome.subtitle" = "Your pocket AI recorder — recording, transcription, AI summaries and cloud backup in one place.";
+"welcome.samples_header" = "Three samples are already in your library";
+"welcome.sample_guide_title" = "How to use Nomily AI";
+"welcome.sample_guide_body" = "Three steps: record → transcribe → organise";
+"welcome.sample_welcome_title" = "Welcome to Nomily AI";
+"welcome.sample_welcome_body" = "Read this first — what Nomily can do for you";
+"welcome.sample_meeting_title" = "Product Weekly (sample)";
+"welcome.sample_meeting_body" = "A full sample recording: transcript, summary, action items and outline";
+"welcome.footer" = "You can replay the walkthrough anytime from Settings → Usage guide.";
+"welcome.start" = "Get started";
+
+/* ★ 2026-11-02 SenseVoice 手工导入 */
+"sensevoice.import_model" = "Import model from Files";
+"sensevoice.import_hint" = "Downloads keep failing? Grab the two files on a computer, AirDrop them to this iPhone, then import above: model.int8.onnx (~230 MB) and tokens.txt.";
+"sensevoice.import_incomplete" = "Still incomplete — import both model.int8.onnx and tokens.txt.";
+
+/* ★ 2026-11-02 watch V3 prototype: new Recent / Sync pages plus the top chrome */
+"watch.recent" = "Recent";
+"watch.recent_empty" = "No recaps yet\nThey arrive once the iPhone builds a summary";
+"watch.sync_to_phone" = "Sync to iPhone";
+"watch.pending_unit" = "to send";
+"watch.phone_label" = "iPhone";
+"watch.phone_near" = "Nearby";
+"watch.phone_far" = "Out of range";
+"watch.storage_label" = "Storage";
+"watch.storage_free" = "%@ free";
+"watch.sync_now" = "Sync now";
+"watch.syncing" = "Uploading…";
+"watch.listening" = "LISTENING";
+"watch.saved" = "Saved";
+"watch.points_count" = "%d points";
+"watch.menu_header" = "Menu";

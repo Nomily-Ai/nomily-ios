@@ -32,6 +32,18 @@ struct RootView: View {
     @State private var showCancelTransferAlert = false
     @State private var isReconnecting = false
     @State private var showCloudConsent = false
+    /// ★ 2026-11-02（用户："使用引导需要到对应的 app 的功能模块去，在对应模块指向
+    /// 让用户点击"）：流程式引导取代整页 onboarding——卡片浮在真实页面上，5 步
+    /// 走完 录音页→实时→ASR→LLM→WebDAV。进度落 UserDefaults；设置 → 使用引导
+    /// 可重置重走。
+    @AppStorage("guide.done.v1") private var guideDone = false
+    @AppStorage("guide.step.v1") private var guideStepRaw = GuideStep.connectDevice.rawValue
+    /// ★ 2026-11-02（用户："首次用户使用需要弹出用户引导"）：首启欢迎页的「看过了」位。
+    /// 与 `guide.done.v1` 分开记：欢迎页只弹一次，之后重看流程引导（设置 → 使用引导）
+    /// 不该再把欢迎页顶出来。
+    @AppStorage("welcome.seen.v1") private var welcomeSeen = false
+    /// 主按钮（扫描/深链）刚导航过 → 推进时不切 tab（避免边扫描边跳页）。
+    @State private var guidePrimaryNavigated = false
     @State private var manualConnectFailure: ManualConnectFailure?
     @State private var passphraseSetup: PassphraseSetupPrompt?
     @State private var passphraseError: String?
@@ -63,6 +75,59 @@ struct RootView: View {
     /// Changes whenever we need to kick/cancel the device-info poll loop —
     /// on connect/disconnect or foreground/background. Bundled into the
     /// `.task(id:)` so SwiftUI handles teardown for us.
+    // MARK: - First-run guide（流程式引导，★ 2026-11-02）
+
+    /// 主按钮：每步的「去连接 / 前往」。深链前先弹出上一步的页面，
+    /// 保证用户永远站在引导想让他站的那个页面上。
+    private func guidePrimary(_ step: GuideStep) {
+        guidePrimaryNavigated = true
+        switch step {
+        case .connectDevice:
+            selectedTab = .recordings
+            showScanner = true
+        case .configureASR:
+            selectedTab = .settings
+            env.navigateToASRProviders = true
+        case .configureLLM:
+            selectedTab = .settings
+            env.navigateToASRProviders = false
+            env.navigateToLLMProviders = true
+        case .cloudBackup:
+            selectedTab = .settings
+            env.navigateToLLMProviders = false
+            env.navigateToRecordingsSettings = true
+        case .liveTranscribe:
+            break
+        }
+    }
+
+    /// 推进到下一步；主按钮刚导航过就不切 tab（用户已在目标页面/正在扫描）。
+    private func guideAdvance() {
+        let navigated = guidePrimaryNavigated
+        guidePrimaryNavigated = false
+        let next = guideStepRaw + 1
+        guard let nextStep = GuideStep(rawValue: next) else {
+            finishGuide()
+            return
+        }
+        withAnimation { guideStepRaw = next }
+        if !navigated {
+            switch nextStep {
+            case .liveTranscribe: selectedTab = .live
+            case .configureASR, .configureLLM, .cloudBackup: selectedTab = .settings
+            case .connectDevice: selectedTab = .recordings
+            }
+        }
+    }
+
+    /// 完成/跳过：清掉所有引导深链，落「已完成」位。
+    private func finishGuide() {
+        env.navigateToASRProviders = false
+        env.navigateToLLMProviders = false
+        env.navigateToRecordingsSettings = false
+        guideDone = true
+    }
+
     private var devicePollKey: String {
         let id = bluetooth.client?.peripheral.identifier.uuidString ?? "none"
         return "\(id)-\(String(describing: scenePhase))"
@@ -128,6 +193,18 @@ struct RootView: View {
                 .tabItem { Label(L10n.Tab.settings, systemImage: "gearshape") }
                 .tag(Tab.settings)
         }
+        .overlay(alignment: .top) {
+            // ★ 流程式引导卡片：浮在 tab 内容与被推入的页面之上。
+            if !guideDone, let step = GuideStep(rawValue: guideStepRaw) {
+                GuideCardView(
+                    step: step,
+                    primaryAction: { guidePrimary(step) },
+                    advance: { guideAdvance() },
+                    skip: { finishGuide() }
+                )
+                .padding(.top, 8)
+            }
+        }
         // ★ Theme: one place, whole app.
         //
         // `.tint()` writes `EnvironmentValues.tint`, and since iOS 16 that is the
@@ -153,6 +230,14 @@ struct RootView: View {
         }
         .sheet(isPresented: $showScanner) {
             ScannerSheet(onConnected: { showScanner = false })
+        }
+        // ★ 2026-11-02：首启欢迎页——先介绍三条示例（文案随语言切换），
+        // 「开始使用」后落位，紧接着由上面的引导卡片接手带用户走真实页面。
+        .fullScreenCover(isPresented: Binding(
+            get: { !welcomeSeen },
+            set: { if !$0 { welcomeSeen = true } }
+        )) {
+            WelcomeSheet(start: { welcomeSeen = true })
         }
         // ★ 2026-10-14: Pass `.deviceInfo`, and `openCardInfoOnAppear` no longer exists.
         //

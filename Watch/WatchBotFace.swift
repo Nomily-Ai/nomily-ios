@@ -313,6 +313,26 @@ struct WatchBotFace: View {
     @State private var dizzyAngle: Double = 0
     /// The handle for the dizzy `Task`. Shaking twice in a row must cancel the previous one first, for the same reason as `moodTask`.
     @State private var dizzyTask: Task<Void, Never>?
+
+    // MARK: 「眨眼」式形变（★ 2026-11-02，用户："手表这个录音动画可以采用眨眼方式过渡"）
+    //
+    // 原型（nomily-watch-v3-blink.html）的过场不是一个淡入淡出，而是一次**眨眼**：
+    //   开始：双眼压扁成一条线（scaleY → .02、scaleX → 1.38）→ 线从中心向两侧长出来
+    //        → 振幅起振、开始呼吸；
+    //   停止：振幅收掉 → 线从两端收回中心 → **第二次眨眼**，双眼带过冲弹回来。
+    //
+    // 所以 `figure` 里两个形态必须**同时存在**，只靠下面三个值交接。`if isRecording`
+    // 硬切做不出"压扁"这个过程——那一瞬间眼睛已经不在树里了。
+    /// 0 = 眼睛原样，1 = 压扁成一条线。
+    @State private var eyesSquash: CGFloat = 0
+    /// 眼睛透明度：压扁到后半段才归零，否则"压扁"看不见。
+    @State private var eyesFade: CGFloat = 1
+    /// 0 = 波形完全收起，1 = 全宽。遮罩宽度 = 波形宽 × 这个值（从中心向两侧长）。
+    @State private var waveReveal: CGFloat = 0
+    /// 过场的 `Task` 句柄。连点两次必须取消上一段，否则两段动画抢同一批 @State。
+    @State private var morphTask: Task<Void, Never>?
+    /// 减弱动态：原型规范要求这时压成 200ms 交叉淡化，不做"眨眼"。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Hold progress 0...1.
     ///
     /// ★ 2026-10-20 (third pass): it drives the **progress ring around the face** again
@@ -440,13 +460,19 @@ struct WatchBotFace: View {
                 // an **idle-state** element only. While recording the waveform owns the
                 // whole face at full size -- the frame around a wave read as clutter, and
                 // it was the reason the wave had to shrink and the timer lift at all.
-                if frameVisible, !isRecording {
+                if frameVisible {
                     BotFaceFrame(size: size, tint: tint)
                         .scaleEffect(figureScale)
+                        // ★ 2026-11-02：方框跟着眼睛一起退场（而不是 `!isRecording` 硬消失），
+                        //   录音结束再随眼睛一起回来——同一条形变曲线管着三样东西。
+                        .opacity(eyesFade)
+                        .allowsHitTesting(false)
                 }
                 figure
                     .scaleEffect(figureScale)
-                    .animation(.spring(response: 0.34, dampingFraction: 0.62), value: isRecording)
+                    // ⚠️ 这里**不再**挂 `.animation(..., value: isRecording)`：形变改由
+                    //   `morphToRecording()` 逐段 `withAnimation` 驱动（压扁 → 长线 → 收线 →
+                    //   弹回），再加一条隐式动画会把每段的时长都覆盖成同一条 spring。
                 // ★ 2026-10-20 (third pass): the hold indicator is a **progress ring around
                 // the face** again (the pre-revision-fourteen look). The eyes stay visible
                 // under it -- the ring no longer replaces them, so there is no hand-off.
@@ -476,7 +502,13 @@ struct WatchBotFace: View {
         .modifier(PrimaryHandGesture(enabled: handGestureEnabled))
         .accessibilityLabel(isRecording ? L10n.Watch.stop : L10n.Watch.record)
         .accessibilityValue(isRecording ? L10n.Watch.recordingBusy : L10n.Watch.holdToRecord)
-        .onAppear { startIdleMotion() }
+        .onAppear {
+            startIdleMotion()
+            // 进页面的第一帧不做过场：录音中回来的（比如切页再切回）直接落在波形形态上。
+            eyesSquash = isRecording ? 1 : 0
+            eyesFade = isRecording ? 0 : 1
+            waveReveal = isRecording ? 1 : 0
+        }
         .onChange(of: pokeTick) { _, _ in pokeOnce() }
         .onChange(of: dizzyTick) { _, _ in playDizzy() }
         .onChange(of: holding) { _, pressing in
@@ -528,6 +560,9 @@ struct WatchBotFace: View {
             // ⚠️ Before revision nine there was also a `sway` here (the two eyes drifting out of phase). The recording state
             //    is now swapped entirely for a waveform, the eyes are simply absent, and that state was deleted along with it.
             startIdleMotion()
+            // ★ 2026-11-02（用户："手表这个录音动画可以采用眨眼方式过渡"）：眼睛 ⇄ 波形 走
+            //   「压扁 → 长线 → 收线 → 弹回」的形变，不再是一帧硬切。
+            morphToRecording(isRecording)
         }
         .onChange(of: dimmed) { _, _ in
             // Dimmed: stop everything at the rest position. See the paragraph at the top of the file. Same reasoning -- leave it to the single switch.
@@ -542,6 +577,61 @@ struct WatchBotFace: View {
             moodTask?.cancel()
             // ★ Revision fourteen: the dizzy one has to be cancelled too.
             dizzyTask?.cancel()
+            // ★ 2026-11-02: 「眨眼」形变的那段也要撤——否则离开页面后它还在写 @State。
+            morphTask?.cancel()
+        }
+    }
+
+    // MARK: - 「眨眼」过场（★ 2026-11-02）
+
+    /// 眼睛 ⇄ 波形 的形变。时间轴照抄原型（`nomily-watch-v3-blink.html` 的 closing/opening 两段）：
+    ///
+    /// | 时刻 | 发生什么 |
+    /// |---|---|
+    /// | 开始 0–150ms | 眼睛纵向压到 0.02、横向撑到 1.38（`easeIn` 加速坠落——真实眼睑就是这么合的） |
+    /// | 开始 140–190ms | 压到一条 2px 线之后淡出，**50ms 的全黑帧**（内容在这一刻完成替换） |
+    /// | 开始 190–720ms | 线从中心向两侧长成整条波形（`easeOut`） |
+    /// | 停止 0–320ms | 振幅自己衰减到 0（波形读的是真实电平，停止后自然平掉），这里不用做事 |
+    /// | 停止 340–760ms | 线从两端收回中心（`easeInOut`）；340ms 正是原型打 `.stop` 触觉的时刻 |
+    /// | 停止 760–1240ms | **第二次眨眼**：眼睛从 0.02 弹回 1 并过冲到 1.06（spring，damping 0.62） |
+    ///
+    /// ⚠️ 为什么不用一条 `.animation(value:)`：压扁、淡出、伸展三段时长不同、缓动不同，
+    ///    一条隐式动画会把它们全部压成同一条曲线——那就成了"整体缩放"，不是"眨眼"。
+    /// ⚠️ 返回时眼睛的 `eyesFade` 必须**在弹开之前**归 1（760ms），
+    ///    否则弹回来的是一根看不见的线——上一版把两件事写在同一个 `withAnimation` 里，
+    ///    透明度会被 spring 的时长拖慢，看起来像"先影影绰绰再显形"。
+    /// ⚠️ 减弱动态：按原型规范压成 200ms 交叉淡化。
+    private func morphToRecording(_ recording: Bool) {
+        morphTask?.cancel()
+
+        if reduceMotion {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                eyesSquash = recording ? 1 : 0
+                eyesFade = recording ? 0 : 1
+                waveReveal = recording ? 1 : 0
+            }
+            return
+        }
+
+        morphTask = Task { @MainActor in
+            if recording {
+                withAnimation(.easeIn(duration: 0.15)) { eyesSquash = 1 }
+                try? await Task.sleep(nanoseconds: 140_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeIn(duration: 0.05)) { eyesFade = 0 }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.53)) { waveReveal = 1 }
+            } else {
+                try? await Task.sleep(nanoseconds: 340_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.42)) { waveReveal = 0 }
+                try? await Task.sleep(nanoseconds: 420_000_000)
+                guard !Task.isCancelled else { return }
+                // 先让眼睑可见（70ms，就是"睁开"那一下），再让形状弹回来。
+                withAnimation(.easeOut(duration: 0.07)) { eyesFade = 1 }
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.62)) { eyesSquash = 0 }
+            }
         }
     }
 
@@ -907,11 +997,21 @@ struct WatchBotFace: View {
     /// -- that would turn "where exactly is the wave" into something you have to compute.
     @ViewBuilder
     private var figure: some View {
-        if isRecording {
-            // ★ 2026-10-20 (third pass): the frame is **idle-only** now, so the recording
-            // figure owns the whole face again — full-size wave, no lift. (The second-pass
-            // shrink/lift existed only to keep the wave and timer inside the frame; with
-            // the frame gone during recording, that constraint disappears with it.)
+        // ★ 2026-11-02（用户："手表这个录音动画可以采用眨眼方式过渡"）：两个形态**同时在树里**，
+        //   交接全靠 `eyesSquash` / `eyesFade` / `waveReveal` 三个值——
+        //   "眼睛压扁成一条线"和"线撑开成波形"本来就是同一根线的两种形态（原型的「一条线」母题）。
+        ZStack {
+            eyes
+                // 压扁：纵向 1 → 0.02、横向同时撑到 1.38，读作"两条竖线塌成一根中线"
+                // （原型 `scaleY 1→0.02 / scaleX 1→1.38`，这组数字就是它"眨眼"的全部秘密）。
+                .scaleEffect(
+                    x: 1 + 0.38 * eyesSquash,
+                    y: 1 - 0.98 * eyesSquash,
+                    anchor: .center
+                )
+                .opacity(eyesFade)
+                .allowsHitTesting(false)
+
             VStack(spacing: 6) {
                 WatchVoiceWave(meter: meter, size: size, tint: tint)
 
@@ -923,8 +1023,14 @@ struct WatchBotFace: View {
                         .foregroundStyle(tint)
                 }
             }
-        } else {
-            eyes
+            // 从**中心向两侧**长出来：遮罩宽度 = 波形宽（`size * 1.10`）× reveal。
+            // 这就是原型里"线先立起来，再呼吸"的那一步；计时数字跟着同一条遮罩淡入。
+            .mask(alignment: .center) {
+                Rectangle()
+                    .frame(width: max(0.01, size * 1.10 * waveReveal))
+            }
+            .opacity(waveReveal > 0.01 ? 1 : 0)
+            .allowsHitTesting(false)
         }
     }
 

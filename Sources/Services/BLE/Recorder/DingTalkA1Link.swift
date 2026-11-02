@@ -1033,6 +1033,18 @@ final class DingTalkA1Link: NSObject, ObservableObject, RecorderLink {
     func containerize(_ raw: Data, for recording: RecorderRecording) throws -> RecorderClip {
         let serial = recording.sessionID ?? 0xA1D1_A1D1
         let result = try DingTalkA1Audio.convert(raw, serial: serial)
+        // ★ 2026-11-02（用户："当前系统版本无法播放 opus 录音"）：落盘即转码——
+        // 卡里的裸 Opus 帧直接解成 PCM 封 AAC/m4a，任何 iOS 版本都能播、列表
+        // 时长正确（不再依赖 iOS 17 的 Ogg 解码器）。转码失败回落 .opus（Ogg），
+        // fail-open，绝不因为转码把录音弄丢——和豆（D3200）同一条规则。
+        if let out = SoundcoreTranscoder.transcode(packets: result.packets) {
+            return RecorderClip(
+                data: out.data,
+                fileExtension: out.fileExtension,
+                duration: out.durationSeconds > 0 ? out.durationSeconds : result.duration,
+                formatNote: out.formatNote + " · A1 卡片"
+            )
+        }
         return RecorderClip(
             data: result.ogg,
             // `.opus` for the same reason TicNote uses it: the whole downstream pipeline

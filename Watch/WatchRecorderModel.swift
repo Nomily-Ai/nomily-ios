@@ -440,18 +440,17 @@ final class WatchRecorderModel: NSObject, ObservableObject {
             } catch {
                 log.error("session re-activate after interruption failed: \(error.localizedDescription, privacy: .public)")
             }
-            // `.shouldResume` is the system's own opinion that the take may go on;
-            // `record()` on a paused recorder appends to the same file.
-            let rawOpts = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
-            let opts = AVAudioSession.InterruptionOptions(rawValue: rawOpts ?? 0)
-            if opts.contains(.shouldResume), let recorder, recorder.record() {
-                log.info("recording resumed after interruption")
+            // ★ 2026-11-02（用户："我没有结束录音就自己关闭了"）：不再以
+            // `.shouldResume` 为开关——watchOS 在大量真实场景（Siri、计时器、
+            // 通知、后台打断）下**根本不下发**这个标志位，旧逻辑因此直接停录。
+            // 现在改为：立即试续录 → 失败则 0.5s/1.5s/3s 三次重试 → 全部被拒
+            // 才优雅停（已录部分照常落盘上传）。`record()` 在暂停的 recorder
+            // 上是向同一文件续写，不会开新文件。
+            if let recorder, recorder.record() {
+                log.info("recording resumed after interruption (immediate)")
             } else {
-                // Background resume is an OS-level refusal, not a bug we can fix.
-                // Save what exists: the partial file rides the normal stop path.
-                log.warning("cannot resume after interruption — stopping gracefully")
-                errorMessage = L10n.Watch.recordingInterrupted
-                stop()
+                log.warning("immediate resume refused — retrying before giving up")
+                retryResumeAfterInterruption()
             }
 
         @unknown default:
@@ -465,6 +464,28 @@ final class WatchRecorderModel: NSObject, ObservableObject {
         errorMessage = L10n.Watch.recordingInterrupted
         interrupted = false
         stop()
+    }
+
+    /// ★ 2026-11-02: sees `handleInterruption(.ended)`'s retry ladder through.
+    /// Re-entry safe on every axis: a new interruption re-sets `interrupted`
+    /// (guard exits), a manual stop flips `isRecording` (guard exits), and the
+    /// final failure goes through the same graceful `stop()` as before — the
+    /// partial file rides the normal upload path.
+    private func retryResumeAfterInterruption() {
+        Task { @MainActor in
+            for delay in [0.5, 1.5, 3.0] {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard isRecording, !interrupted else { return }
+                if let recorder, recorder.record() {
+                    log.info("recording resumed after \(delay, privacy: .public)s")
+                    return
+                }
+            }
+            guard isRecording, !interrupted else { return }
+            log.warning("all resume attempts refused — stopping gracefully")
+            errorMessage = L10n.Watch.recordingInterrupted
+            stop()
+        }
     }
 
     /// Re-states the whole recorder in one payload. Cheap enough to call from

@@ -24,19 +24,28 @@ struct SettingsView: View {
     private var busyJobCount: Int {
         jobs.unfinishedCount + env.transcription.pending.count
     }
+    /// ★ 2026-11-02：「使用引导」行——重置流程式引导进度（与 RootView 共享 UserDefaults 键）。
+    @AppStorage("guide.done.v1") private var guideDone = false
+    @AppStorage("guide.step.v1") private var guideStepRaw = GuideStep.connectDevice.rawValue
+    /// ★ 2026-11-02：「使用引导」行同时重播开屏欢迎页（见该行注释）。
+    @AppStorage("welcome.seen.v1") private var welcomeSeen = false
+    @State private var showWelcome = false
 
-    /// One settings row: a coloured glyph tile, the title, and an optional right-hand
-    /// detail (current value) or count (badge).
+    /// One settings row: a Settings-app style colored tile, the title, and an
+    /// optional right-hand detail (current value) or count (badge).
     ///
-    /// 2026-10-22 ("按照苹果的简约风格来"): the rows used to be bare
+    /// 2026-10-22 (\"按照苹果的简约风格来\"): the rows used to be bare
     /// `NavigationLink(title)`s, so ten items of six different kinds read as one
-    /// undifferentiated list. The tile gives each area a shape to recognise and
-    /// makes the groups scan vertically instead of requiring the labels to be read.
+    /// undifferentiated list — icons were added for scannability.
+    /// 2026-11-02 上午（用户：\"要更加高级简约\"）：彩色瓦片撤成单色小符号。
+    /// ★ 2026-11-02 下午（用户：\"当前图标都是灰标不好看，按照苹果的风格设置图标来\"）：
+    ///   灰标被否——恢复成 iOS 设置 App 的排法：29pt 圆角彩色磁贴 + 白色 glyph，
+    ///   每行一个语义色（.gray/.blue/…），实色不加渐变（贴系统观感）。
     @ViewBuilder
     private func settingsRow<D: View>(
         _ title: String,
-        icon: String,
-        tint: Color,
+        icon: String? = nil,
+        tint: Color = .gray,
         detail: String? = nil,
         count: Int? = nil,
         @ViewBuilder destination: () -> D
@@ -45,15 +54,17 @@ struct SettingsView: View {
             destination()
         } label: {
             HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(tint.gradient)
-                    .frame(width: 28, height: 28)
-                    .overlay {
+                Group {
+                    if let icon {
                         Image(systemName: icon)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(.white)
+                            .frame(width: 29, height: 29)
+                            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(tint))
                     }
-                    .accessibilityHidden(true)
+                }
+                .frame(width: 29)
+                .accessibilityHidden(true)
                 Text(title)
                 Spacer(minLength: 8)
                 if let detail {
@@ -74,7 +85,7 @@ struct SettingsView: View {
             // 「关于 Nomily」提到设置页第一行——图标 + 版本 + 官方账号 + GitHub +
             // 用户协议/隐私政策，参考 Plaud 的关于页。
             Section {
-                settingsRow(L10n.About.title, icon: "info.circle", tint: .accentColor) {
+                settingsRow(L10n.About.title, icon: "info.circle", tint: .gray) {
                     AboutNomilyView()
                 }
             }
@@ -85,10 +96,10 @@ struct SettingsView: View {
             // look for that thing: what records, what generates text, the files
             // themselves, and how the app behaves.
             Section {
-                settingsRow(L10n.Settings.recordings, icon: "waveform", tint: .blue) {
+                settingsRow(L10n.Settings.recordings, icon: "waveform", tint: .red) {
                     RecordingsSettingsView()
                 }
-                settingsRow(L10n.Settings.asrProviders, icon: "text.bubble", tint: .indigo) {
+                settingsRow(L10n.Settings.asrProviders, icon: "text.bubble", tint: .blue) {
                     ASRProvidersView()
                 }
             } header: {
@@ -99,11 +110,11 @@ struct SettingsView: View {
                 settingsRow(L10n.Settings.llmProviders, icon: "sparkles", tint: .purple) {
                     LLMProvidersView()
                 }
-                settingsRow(L10n.Settings.summarizeTemplates, icon: "doc.text", tint: .teal) {
+                settingsRow(L10n.Settings.summarizeTemplates, icon: "doc.text", tint: .orange) {
                     SummarizeTemplatesView()
                 }
                 // ★ 2026-10-28（饭耳逆向规格 §1.4）：常用词表——AI 整理的专名提示。
-                settingsRow(L10n.Vocabulary.title, icon: "character.book.closed", tint: .mint) {
+                settingsRow(L10n.Vocabulary.title, icon: "character.book.closed", tint: .teal) {
                     VocabularyEditorView()
                 }
                 // ★ 2026-10-29：AI 用量热力图移进了大语言模型服务页（截图 4 布局），
@@ -113,8 +124,13 @@ struct SettingsView: View {
             }
 
             Section {
-                settingsRow(L10n.Settings.devicesAndLibrary, icon: "externaldrive", tint: .orange) {
+                settingsRow(L10n.Settings.devicesAndLibrary, icon: "externaldrive", tint: .green) {
                     DevicesLibraryView()
+                }
+                // ★ 2026-11-02（用户："应该是数据与存储位置"）：存储落点总枢纽
+                // 提到设置主页——本机 / iCloud 云盘 / NAS / 文件夹 App 一页看清。
+                settingsRow(L10n.StorageLocations.title, icon: "internaldrive", tint: .mint) {
+                    StorageLocationsView()
                 }
                 // ★ 2026-10-29（用户："webdav 备份跟导出到文件夹还有相关都放到顶部的
                 // 录音跟传输里面"）：两个备份入口搬进了 录音与转写 页。
@@ -124,11 +140,11 @@ struct SettingsView: View {
                 // that card's own device-info page, because from Settings a
                 // card-shaped secret reads as account-level and people paste the
                 // wrong card's key.
-                settingsRow(L10n.Trash.settingsRow, icon: "trash", tint: .gray,
+                settingsRow(L10n.Trash.settingsRow, icon: "trash", tint: Color(red: 1.0, green: 0.27, blue: 0.23),
                             count: trash.items.isEmpty ? nil : trash.items.count) {
                     TrashView()
                 }
-                settingsRow(L10n.Jobs.openQueue, icon: "clock.arrow.circlepath", tint: .green,
+                settingsRow(L10n.Jobs.openQueue, icon: "clock.arrow.circlepath", tint: .brown,
                             count: busyJobCount > 0 ? busyJobCount : nil) {
                     TaskCenterView()
                 }
@@ -137,11 +153,40 @@ struct SettingsView: View {
             }
 
             Section {
-                settingsRow(L10n.Settings.language, icon: "globe", tint: .cyan,
+                // ★ 2026-11-02：「使用引导」行——重置流程式引导进度（卡片重新从
+                // 第 1 步开始，RootView 的 overlay 负责展示）。
+                // ★ 2026-11-02（用户："开屏的欢迎页我如何才能再次体验"）：这一行同时
+                // 重播**开屏欢迎页**——直接在本页弹一次（不依赖 RootView 的首次绑定，
+                // 用户点完当场就能看到），并把「已看过」位落掉，避免下次启动再弹一次。
+                Button {
+                    guideDone = false
+                    guideStepRaw = GuideStep.connectDevice.rawValue
+                    welcomeSeen = true
+                    showWelcome = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "book")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 29, height: 29)
+                            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.cyan))
+                            .frame(width: 29)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L10n.Settings.usageGuide)
+                                .foregroundStyle(.primary)
+                            Text(L10n.Settings.usageGuideDetail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                }
+                settingsRow(L10n.Settings.language, icon: "globe", tint: .indigo,
                             detail: currentLanguageLabel) {
                     LanguagePickerView()
                 }
-                settingsRow(L10n.Settings.theme, icon: "circle.lefthalf.filled", tint: currentTheme.accent,
+                settingsRow(L10n.Settings.theme, icon: "circle.lefthalf.filled", tint: .pink,
                             detail: currentTheme.title) {
                     ThemePickerView()
                 }
@@ -175,6 +220,12 @@ struct SettingsView: View {
         }
         .navigationDestination(isPresented: $env.navigateToRecordingsSettings) {
             RecordingsSettingsView()
+        }
+        // ★ 2026-11-02（用户："开屏的欢迎页我如何才能再次体验"）：「使用引导」行当场
+        // 重播开屏欢迎页。挂在这里而不是交给 RootView 的 `welcome.seen.v1` 绑定——
+        // 那一个只在首次为 false 时弹，重看时用户已经在二级页面里了，还得先返回。
+        .fullScreenCover(isPresented: $showWelcome) {
+            WelcomeSheet(start: { showWelcome = false })
         }
         .onDisappear { configService.saveNow() }
     }
@@ -355,6 +406,8 @@ struct ASRProvidersView: View {
     /// 2026-10-15: to read the transcription queue state (`pending` / `inFlight`).
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
+    // ★ 2026-11-02：SenseVoice 模型状态（下载完成后引擎候选列表要刷新）。
+    @ObservedObject private var senseVoiceStore = SenseVoiceModelStore.shared
     /// Active connectivity test for the local server (added 2026-10-13).
     /// `detail` / `warning` are separated: `VerifyState.success` carries no value,
     /// And after "connected", a detail line and a warning line for "a port did not respond" must be shown.
@@ -389,6 +442,9 @@ struct ASRProvidersView: View {
             // sheet is `AzureSpeechSheet`), which keeps one list of cloud vendors
             // instead of two places writing the same credentials.
             ASRCloudSection(editing: $editingCloud, showAzure: $showAzureSheet)
+            // ★ 2026-11-02：本机模型（SenseVoice 下载/管理）——离线转写，
+            // 无 Key 无流量，与上面的云转写并列。
+            senseVoiceSection
             localSection
             customSection
             remoteLiveSection
@@ -439,12 +495,50 @@ struct ASRProvidersView: View {
         azureKeyMissing || azureRegionMissing
     }
 
+    /// ★ 2026-11-02：SenseVoice 本机模型入口行（点进下载/管理页）。
+    private var senseVoiceSection: some View {
+        Section {
+            NavigationLink {
+                SenseVoiceModelView()
+            } label: {
+                HStack {
+                    Label(L10n.SenseVoice.name, systemImage: "waveform.badge.mic")
+                    Spacer()
+                    switch senseVoiceStore.phase {
+                    case .ready:
+                        Text(L10n.SenseVoice.readyShort)
+                            .font(.footnote)
+                            .foregroundStyle(.green)
+                    case .downloading(let fraction):
+                        Text("\(Int(fraction * 100))%")
+                            .font(.footnote.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    case .failed:
+                        Text(L10n.SenseVoice.failedShort)
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    case .idle:
+                        EmptyView()
+                    }
+                }
+            }
+        } header: {
+            Text(L10n.SenseVoice.sectionHeader)
+        } footer: {
+            Text(L10n.SenseVoice.sectionFooter)
+        }
+    }
+
     private var configuredASR: [(key: String, label: String)] {
         var result: [(String, String)] = []
         // On-device first: it needs no credentials, so it is the only entry that is always
         // available and the one most users will want as the active service.
         if configService.config.onDeviceASREnabled {
             result.append(("ondevice", L10n.ASR.onDevice))
+        }
+        // ★ 2026-11-02: SenseVoice 本机模型——下载过即可作为主引擎。
+        if SenseVoiceModelStore.shared.isDownloaded {
+            result.append(("sensevoice", L10n.ASR.senseVoice))
         }
         // Only list services that are fully filled **and** whose credentials have not been rejected by verification: partially filled configs and those that failed verification would produce no transcription, and showing them as candidates would mislead users into thinking they are set up.
         // ★ 2026-10-22: Aliyun is wired into file transcription (`AliyunFileASR`),
@@ -1253,7 +1347,7 @@ struct LLMProvidersView: View {
                     Text(L10n.LLM.summarizeUsing).font(.caption).foregroundStyle(.secondary)
                     Text(modelValueLabel(for: spec))
                         .font(.subheadline.weight(.semibold))
-                    Text(spec.name).font(.caption).foregroundStyle(.secondary)
+                    Text(spec.localizedName).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Menu {
@@ -1345,7 +1439,7 @@ private struct AddProviderView: View {
                         HStack(spacing: 12) {
                             ProviderMark(spec: spec, size: 36)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(spec.name).foregroundStyle(.primary)
+                                Text(spec.localizedName).foregroundStyle(.primary)
                                 Text(subtitle(for: spec))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -1388,18 +1482,19 @@ private struct AddProviderView: View {
     }
 
     private func subtitle(for spec: LLMProviderSpec) -> String {
+        // ★ 2026-11-02：公司/渠道名走本地化（en.lproj 提供英文，缺失回落中文）。
         switch spec.id {
-        case "deepseek": return "深度求索"
-        case "qwen": return "阿里云百炼"
-        case "doubao": return "火山方舟"
-        case "kimi": return "月之暗面"
-        case "zhipu": return "智谱 AI"
-        case "minimax": return "稀宇科技"
+        case "deepseek": return NSLocalizedString("llm.subtitle.deepseek", value: "DeepSeek (company)", comment: "Add-provider row subtitle")
+        case "qwen": return NSLocalizedString("llm.subtitle.qwen", value: "Alibaba Cloud Bailian", comment: "Add-provider row subtitle")
+        case "doubao": return NSLocalizedString("llm.subtitle.doubao", value: "Volcengine Ark", comment: "Add-provider row subtitle")
+        case "kimi": return NSLocalizedString("llm.subtitle.kimi", value: "Moonshot AI", comment: "Add-provider row subtitle")
+        case "zhipu": return NSLocalizedString("llm.subtitle.zhipu", value: "Zhipu AI", comment: "Add-provider row subtitle")
+        case "minimax": return NSLocalizedString("llm.subtitle.minimax", value: "MiniMax (company)", comment: "Add-provider row subtitle")
         case "openai": return "OpenAI"
         case "claude": return "Anthropic"
         case "gemini": return "Google"
-        case "openRouter": return "聚合路由"
-        case "ollama": return "本地 / 局域网"
+        case "openRouter": return NSLocalizedString("llm.subtitle.openRouter", value: "Aggregator", comment: "Add-provider row subtitle")
+        case "ollama": return NSLocalizedString("llm.subtitle.ollama", value: "Local / LAN", comment: "Add-provider row subtitle")
         default: return ""
         }
     }
@@ -1434,7 +1529,7 @@ private struct ProviderRow: View {
         HStack(spacing: 12) {
             ProviderMark(spec: spec)
             VStack(alignment: .leading, spacing: 2) {
-                Text(spec.name).foregroundStyle(.primary)
+                Text(spec.localizedName).foregroundStyle(.primary)
                 Text(detailLine)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1512,14 +1607,27 @@ private struct ProviderMark: View {
     }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(
-                LinearGradient(colors: [color, color.opacity(0.72)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-            )
-            .frame(width: size, height: size)
-            .overlay { glyph }
-            .accessibilityHidden(true)
+        // ★ 2026-11-02（用户："模型图标要按照当前 Apple Store 的 app 图标来，
+        // 不要简约的"）：有官方 App 的厂商直接渲染 App Store 彩色图标
+        // （自带底色，圆角随系统连续曲率）；没有的保留单色品牌瓦片。
+        if let asset = spec.brandAsset, spec.usesAppStoreIcon {
+            Image(asset)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+                .accessibilityHidden(true)
+        } else {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    LinearGradient(colors: [color, color.opacity(0.72)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+                .frame(width: size, height: size)
+                .overlay { glyph }
+                .accessibilityHidden(true)
+        }
     }
 
     @ViewBuilder
@@ -1640,6 +1748,8 @@ private struct ProviderConfigSheet: View {
     @State private var modelQuery = ""
     @State private var probing = false
     @State private var probe: LLMConnectivityService.Result?
+    // ★ 2026-11-02：Key 快引导弹层（复制提示词/粘贴结果）。
+    @State private var showKeyWizard = false
 
     private var key: String { configService.config.llmProviders.apiKeyValue(for: spec.storage) ?? "" }
     private var model: String { configService.config.llmProviders.modelValue(for: spec.storage) ?? "" }
@@ -1683,7 +1793,7 @@ private struct ProviderConfigSheet: View {
                     HStack(spacing: 12) {
                         ProviderMark(spec: spec)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(spec.name).font(.headline)
+                            Text(spec.localizedName).font(.headline)
                             Text(endpoint.isEmpty ? L10n.LLM.notConfigured : (URL(string: endpoint)?.host ?? endpoint))
                                 .font(.caption2.monospaced())
                                 .foregroundStyle(.secondary)
@@ -1695,17 +1805,35 @@ private struct ProviderConfigSheet: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .font(.body.monospaced())
-                        // ★ 2026-10-29（截图 1「还没有 key？去注册 ↗」）：key 为空时
-                        // 给注册页直链——不用去 note 里翻控制台地址。
-                        if keyBinding.wrappedValue.isEmpty, let url = URL(string: spec.signupURL ?? "") {
+                        // ★ 2026-10-29（截图 1「还没有 key？去注册 ↗」）：注册页直链。
+                        // ★ 2026-11-02（用户："方便用户如何获取 apikey 填写"）：改为
+                        // **常驻**——没 key 时是"去注册获取"，已有 key 时是"前往控制台
+                        // 管理"（续费/换 Key/看用量都在那个页面），不再一填完就消失。
+                        if let url = URL(string: spec.signupURL ?? "") {
                             Link(destination: url) {
                                 HStack {
-                                    Text(L10n.LLM.noKeySignup)
+                                    Text(keyBinding.wrappedValue.isEmpty
+                                         ? L10n.LLM.noKeySignup
+                                         : L10n.LLM.consoleManage)
                                         .font(.subheadline)
                                     Spacer()
                                     Image(systemName: "arrow.up.right")
                                         .font(.caption)
                                 }
+                            }
+                        }
+                        // ★ 2026-11-02（用户："不会获取 APIkey……新增一个不会开通？
+                        // 复制提示词跟粘贴结果，参考饭耳的这个快引导"）：注册直链
+                        // 下面挂快引导——复制提示词问 AI，粘贴回复自动填 Key。
+                        Button {
+                            showKeyWizard = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "questionmark.circle")
+                                    .font(.subheadline)
+                                Text(L10n.KeyWizard.openWizard)
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
                             }
                         }
                     } else {
@@ -1732,7 +1860,7 @@ private struct ProviderConfigSheet: View {
                     }
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
-                        if let console = spec.console, spec.keyRequired {
+                        if let console = spec.localizedConsole, spec.keyRequired {
                             Text("\(L10n.LLM.presetConsole): \(console)")
                         }
                         if !spec.endpointEditable {
@@ -1809,7 +1937,7 @@ private struct ProviderConfigSheet: View {
                     Text(L10n.LLM.model)
                 } footer: {
                     VStack(alignment: .leading, spacing: 6) {
-                        if let note = spec.note { Text(note) }
+                        if let note = spec.localizedNote { Text(note) }
                         Text(L10n.LLM.chatOnlyNote)
                         if let fetchHint { Text(fetchHint) }
                         if case .failed(let reason) = verify {
@@ -1865,7 +1993,7 @@ private struct ProviderConfigSheet: View {
             // spend dismissing the keyboard). This page is mostly fields, so let
             // the scroll dismiss the keyboard instead of eating taps.
             .scrollDismissesKeyboard(.immediately)
-            .navigationTitle(spec.name)
+            .navigationTitle(spec.localizedName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -1877,6 +2005,18 @@ private struct ProviderConfigSheet: View {
             }
         }
         .onAppear(perform: prime)
+        // ★ 2026-11-02：Key 快引导（复制提示词问 AI → 粘贴回复自动回填）。
+        .sheet(isPresented: $showKeyWizard) {
+            KeyWizardSheet(
+                vendorName: spec.localizedName,
+                fields: [.init(id: "apiKey", label: L10n.LLM.apiKey,
+                               aliases: ["api key", "apikey", "api 密钥", "密钥", "key"])],
+                consoleURL: spec.signupURL.flatMap(URL.init(string:))
+            ) { map in
+                if let v = map["apiKey"] { keyBinding.wrappedValue = v }
+                configService.scheduleSave()
+            }
+        }
     }
 
     // MARK: - Behaviour
@@ -2160,21 +2300,11 @@ struct RecordingsSettingsView: View {
     @EnvironmentObject private var configService: ConfigService
     @EnvironmentObject private var bluetooth: BluetoothCoordinator
     @EnvironmentObject private var env: AppEnvironment
-    // ★ 2026-10-29 (饭耳移植 · 规格 §2.2): the cold-data downgrade runs from here;
-    // its @Published progress drives the "downgrade now" button.
-    @ObservedObject private var quality = RecordingQualityService.shared
-    // ★ 2026-10-30：文件夹备份状态（行尾"自动备份已开"徽标要实时反映开关）。
-    @ObservedObject private var folderExport = FolderExportService.shared
+    // ★ 2026-11-02：录音质量分区（含试听）已整体搬进 Apple Watch 设置页
+    // （只对手表录音生效），quality/folderExport 观察者随之移除。
     @State private var showGeneratedAlert = false
     @State private var encryptionError: String?
     @State private var encryptionBusy = false
-    // ★ 2026-10-29 (饭耳移植 · 规格 §2.2 试听): A/B the latest clip against the
-    // selected tier. `auditionSide` drives which button shows "playing".
-    @State private var auditionClips: [URL] = []
-    @State private var auditionIndex = 0
-    @State private var auditionBusy = false
-    @State private var auditionSide: String?
-    @State private var auditionPlayer: AVAudioPlayer?
     @State private var passphraseSheet: PassphraseSheetMode?
     /// Snapshot of the connected device's SN taken at the moment the user
     /// taps "Set/Rotate/Clear." Pinning prevents a mid-flow device switch
@@ -2192,9 +2322,6 @@ struct RecordingsSettingsView: View {
 
     /// ★ 2026-10-29：提醒事项权限被拒时提示去系统设置。
     @State private var remindersDenied = false
-    /// ★ 2026-10-30（用户："归纳到一个 webdav，点击按照类型选择，选择在弹页面设置"）：
-    /// WebDAV 入口改为弹层——先按类型选服务器，再在弹出的页面里配置。
-    @State private var showWebDAVSetup = false
 
     /// ★ 2026-10-29（用户："待办支持同步到 iPhone 里面的待办，需要打开这个开关"）：
     /// 开关打开时请求提醒事项授权；被拒就回拨开关并给「去设置」入口。
@@ -2256,66 +2383,11 @@ struct RecordingsSettingsView: View {
                         InfoTip(text: L10n.RecordingsSettings.deleteAfterTransferFooter)
                     }
                 }
-                // ★ 2026-10-29（用户："webdav 备份跟导出到文件夹还有相关都放到顶部的
-                // 录音跟传输里面"）：两个备份/导出入口搬到这里。
-                // ★ 2026-10-30（用户："增加自动上传到 iCloud 或者指定的服务器或 nas
-                // 当前里面有但是缺少引导"）：每行右侧加当前状态，分区底部加"怎么选"
-                // 引导——用户不用点进去就知道配没配、自动备份开没开。
-                // ★ 2026-10-30（用户："不要列表式的选择服务器类型的服务商，
-                // 归纳到一个 webdav，点击按照类型选择，在弹页面设置"）：
-                // 入口只有一个「WebDAV 备份」行；点开是类型选择弹层，选完
-                // 在弹层内的二级页配置（预设自动填端口/HTTPS/目录）。
-                Button {
-                    showWebDAVSetup = true
-                } label: {
-                    HStack {
-                        Label(L10n.WebDAV.title, systemImage: "externaldrive.badge.cloud")
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        if let webdav = configService.config.webdav, webdav.isConfigured {
-                            Text(webdav.preset ?? webdav.host)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text(L10n.WebDAV.unconfigured)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Color.secondary.opacity(0.6))
-                    }
-                }
-                NavigationLink {
-                    FolderBackupView()
-                } label: {
-                    HStack {
-                        Label(L10n.FolderExport.title, systemImage: "folder.badge.gearshape")
-                        Spacer()
-                        if folderExport.autoEnabled {
-                            Text(L10n.FolderExport.autoOn)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        } else if let name = folderExport.folderName {
-                            Text(name)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                // ★ 2026-10-30（用户："录音文件在本地/nas/iCloud 占用多少需要
-                // 显示出来"）：三处占用实测一页看完。
-                NavigationLink {
-                    StorageUsageView()
-                } label: {
-                    Label(L10n.StorageUsage.title, systemImage: "chart.pie")
-                }
-            } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.Backup.guideTitle).fontWeight(.semibold)
-                    Text(L10n.Backup.guideBody)
-                }
             }
+            // ★ 2026-11-02（用户："数据储存位置跟录音与传输好像也重复了"）：
+            // 「数据与存储位置」总枢纽只在设置主页出现（另有入口行），这里
+            // 不再重复；备份选择引导页脚随枢纽一起撤掉。手表录音质量分区
+            // 也已整体搬进 Apple Watch 设置页（它只对手表生效）。
 
             // ★ 2026-10-29（用户："待办支持同步到 iPhone 里面的待办，需要打开
             // 这个开关"）：打开后录音摘要里的待办行写进系统「提醒事项」。
@@ -2340,14 +2412,10 @@ struct RecordingsSettingsView: View {
                 }
             }
 
-            // ★ 2026-10-29 (饭耳移植 · 规格 §2.2 录音质量 + 冷数据降级):
-            // four bitrate tiers + "recordings older than N days get re-encoded
-            // to the selected tier". Transcription always runs on originals —
-            // see RecordingQualityService's safety rails.
-            recordingQualitySection
-
             // ★ 2026-10-30: 定时录音入口已挪进「设置 → Apple Watch」分区（真正
             // 在手表上录），这里不再重复出现。
+            // ★ 2026-11-02: 手表录音质量（转写后）同样只对手表生效，一并搬进
+            // Apple Watch 设置页（WatchFacePickerView）。
 
             Section {
                 TextField(L10n.RecordingsSettings.ssid, text: wifiSSIDBinding)
@@ -2416,10 +2484,8 @@ struct RecordingsSettingsView: View {
                 onError: { msg in encryptionError = msg }
             )
         }
-        // ★ 2026-10-30：WebDAV 类型选择弹层（见 showWebDAVSetup）。
-        .sheet(isPresented: $showWebDAVSetup) {
-            WebDAVSetupSheet()
-        }
+        // ★ 2026-11-02：WebDAV 类型选择弹层挪进「数据与存储位置」总枢纽页，
+        // 这里不再需要。
     }
 
     /// Threshold values offered in the picker, in KB. 0 means "always
@@ -2442,176 +2508,6 @@ struct RecordingsSettingsView: View {
     /// Passphrase / Keychain key management. Lives in this section instead
     /// of `deviceEncryptionSection` because it's host-side state that
     /// applies even when the device is not connected.
-    /// ★ 2026-10-29 (饭耳移植 · 规格 §2.2): the quality tier picker + cold-data
-    /// downgrade switch + threshold stepper + "run now" (with the last pass's
-    /// report). Kept as a computed section so `body`'s Form stays readable.
-    private var recordingQualitySection: some View {
-        Section {
-            Picker(L10n.RecordingsSettings.qualityTitle, selection: Binding(
-                get: {
-                    configService.config.recordingQualityTier
-                        .flatMap(RecordingQualityTier.init(rawValue:)) ?? .asIs
-                },
-                set: {
-                    configService.config.recordingQualityTier = $0.rawValue
-                    configService.scheduleSave()
-                }
-            )) {
-                ForEach(RecordingQualityTier.allCases) { tier in
-                    Text(Self.qualityTierLabel(tier)).tag(tier)
-                }
-            }
-
-            Toggle(isOn: Binding(
-                get: { configService.config.coldDataDowngradeEnabled },
-                set: { configService.config.coldDataDowngradeEnabled = $0; configService.scheduleSave() }
-            )) {
-                HStack(spacing: 4) {
-                    Text(L10n.RecordingsSettings.coldDowngrade)
-                    InfoTip(text: L10n.RecordingsSettings.coldDowngradeFooter)
-                }
-            }
-
-            if configService.config.coldDataDowngradeEnabled {
-                Stepper(
-                    L10n.RecordingsSettings.coldDowngradeDays(configService.config.coldDataDowngradeDays),
-                    value: Binding(
-                        get: { configService.config.coldDataDowngradeDays },
-                        set: { configService.config.coldDataDowngradeDays = $0; configService.scheduleSave() }
-                    ),
-                    in: 1...90
-                )
-            }
-
-            // ★ 2026-10-29 (饭耳移植 · 规格 §2.2 试听): A/B the newest clip against
-            // the selected tier before committing to it. Hidden for 原样 —
-            // there is nothing to compare against itself.
-            if let tier = configService.config.recordingQualityTier
-                .flatMap(RecordingQualityTier.init(rawValue:)), tier != .asIs {
-                auditionRow(tier: tier)
-            }
-
-            // "Run now" — same pass the launch hook runs, forced so it works
-            // even before the toggle is on (explicit user intent wins).
-            Button {
-                guard !quality.isRunning else { return }
-                Task {
-                    let config = configService.config
-                    await quality.runDowngrade(config: config, ignoreSwitch: true)
-                }
-            } label: {
-                HStack {
-                    Text(quality.isRunning
-                         ? L10n.RecordingsSettings.qualityRunning
-                         : L10n.RecordingsSettings.qualityRunNow)
-                    if quality.isRunning { Spacer(); ProgressView() }
-                }
-            }
-            .disabled(quality.isRunning)
-
-            if let report = quality.lastReport {
-                Text(report)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            HStack(spacing: 4) {
-                Text(L10n.RecordingsSettings.qualityTitle)
-                InfoTip(text: L10n.RecordingsSettings.qualityFooter)
-            }
-        } footer: {
-            EmptyView()
-        }
-    }
-
-    /// ★ 2026-10-29 (饭耳移植 · 规格 §2.2 试听): 原声 vs 所选档位 A/B 按钮 +
-    /// 「换一段」。预览转码结果缓存在 Caches（clip+tier 各一份），二次点按秒开。
-    private func auditionRow(tier: RecordingQualityTier) -> some View {
-        Group {
-            if auditionClips.isEmpty {
-                Button {
-                    auditionClips = RecordingQualityService.recentClips()
-                    auditionIndex = 0
-                } label: {
-                    Text(L10n.RecordingsSettings.auditionLoad)
-                }
-            } else if let clip = auditionClip {
-                HStack(spacing: 16) {
-                    auditionButton(side: "orig", label: L10n.RecordingsSettings.auditionOriginal, clip: clip, tier: tier)
-                    auditionButton(side: "tier", label: L10n.RecordingsSettings.auditionTier, clip: clip, tier: tier)
-                    Spacer()
-                    Button {
-                        auditionStop()
-                        auditionIndex = (auditionIndex + 1) % max(auditionClips.count, 1)
-                    } label: {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                    }
-                    .disabled(auditionClips.count < 2)
-                }
-                .font(.subheadline)
-                Text(L10n.RecordingsSettings.auditionClipLabel(
-                    (clip.lastPathComponent as NSString).deletingPathExtension))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var auditionClip: URL? {
-        auditionClips.indices.contains(auditionIndex) ? auditionClips[auditionIndex] : nil
-    }
-
-    private func auditionButton(side: String, label: String, clip: URL, tier: RecordingQualityTier) -> some View {
-        Button {
-            Task {
-                if auditionSide == side { auditionStop(); return }
-                auditionStop()
-                auditionBusy = true
-                defer { auditionBusy = false }
-                do {
-                    let url = try await RecordingQualityService.makeAudition(source: clip, tier: tier)
-                    auditionPlayer = try AVAudioPlayer(contentsOf: url)
-                    auditionPlayer?.play()
-                    auditionSide = side
-                } catch {
-                    auditionSide = nil
-                }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                if auditionSide == side {
-                    Image(systemName: "stop.fill")
-                } else {
-                    Image(systemName: "play.fill")
-                    if auditionBusy && side == "tier" { ProgressView().scaleEffect(0.7) }
-                }
-                Text(label)
-            }
-        }
-        .disabled(auditionBusy)
-    }
-
-    private func auditionStop() {
-        auditionPlayer?.stop()
-        auditionPlayer = nil
-        auditionSide = nil
-    }
-
-    /// ★ 2026-10-29 (饭耳移植 · 规格 §3.1 定时录音): enable switch, start/end
-    /// pickers, HealthKit prefill, and the scheduler's live status line.
-    // ★ 2026-10-30: timedRecordingSection 及其时间工具已整体挪进 SettingsView
-    // 的手表分区（"定时录音归纳到 Apple Watch"），这里不再保留副本。
-
-    private static func qualityTierLabel(_ tier: RecordingQualityTier) -> String {
-        let base: String
-        switch tier {
-        case .asIs: base = L10n.RecordingsSettings.qualityTierAsIs
-        case .standard: base = L10n.RecordingsSettings.qualityTierStandard
-        case .compact: base = L10n.RecordingsSettings.qualityTierCompact
-        case .minimal: base = L10n.RecordingsSettings.qualityTierMinimal
-        }
-        return L10n.RecordingsSettings.qualityTierLabel(base, tier.sizePerHourLabel, tier.recommendationLabel)
-    }
 
     @ViewBuilder
     private var passphraseSection: some View {

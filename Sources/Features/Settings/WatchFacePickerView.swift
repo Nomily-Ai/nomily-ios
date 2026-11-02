@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UserNotifications
 
@@ -8,12 +9,27 @@ import UserNotifications
 /// 入口——用户进来先该看到"有哪些可以设"，再点进去改。现在这一页是一张菜单：
 /// 表盘表情（二级页 `WatchFaceStyleSettingsView`）、AI 怎么称呼你、定时录音、
 /// 回顾摘要与待办。
+/// ★ 2026-11-02（用户："手表录音质量这个板块需要放置到设置 APPLE Watch 里面
+/// 因为它只针对手表不针对录音卡设备"）：「手表录音质量（转写后）」分区自
+/// 录音与转写页整体搬入——档位选择 + 旧录音自动降级 + 每档试听。
 struct WatchFacePickerView: View {
     @EnvironmentObject private var configService: ConfigService
     @EnvironmentObject private var watch: WatchSyncService
+    @EnvironmentObject private var env: AppEnvironment
+    // ★ 2026-11-02：录音质量降级进度（"立即降级"按钮与最近一次报告）。
+    @ObservedObject private var quality = RecordingQualityService.shared
 
     // ★ 2026-10-30：称呼草稿（从主设置页搬来，逻辑不变）。
     @State private var userNameDraft = ""
+
+    // ★ 2026-11-02：试听状态（自录音与转写页整体搬入，逻辑不变）。
+    @State private var auditionClips: [URL] = []
+    @State private var auditionIndex = 0
+    @State private var auditionBusy = false
+    @State private var auditionSide: String?
+    @State private var auditionPlayer: AVAudioPlayer?
+    // 试听按钮点过后仍无手表录音时的空态提示开关。
+    @State private var auditionLoaded = false
 
     /// 当前表情（菜单行右侧显示，让用户不用点进去就知道现在选的是哪个）。
     private var currentStyle: BotFaceStyle {
@@ -40,6 +56,9 @@ struct WatchFacePickerView: View {
             userNameSection
 
             timedRecordingSection
+
+            // ★ 2026-11-02：手表录音质量（转写后）——只作用于手表录音。
+            recordingQualitySection
 
             recapSection
         }
@@ -135,22 +154,38 @@ struct WatchFacePickerView: View {
             }
 
             if configService.config.timedRecordingEnabled {
-                DatePicker(
-                    L10n.TimedRecording.start,
-                    selection: Binding(
-                        get: { Self.timeValue(configService.config.timedRecordingStart) },
-                        set: { configService.config.timedRecordingStart = Self.timeString($0); configService.scheduleSave() }
-                    ),
-                    displayedComponents: .hourAndMinute
-                )
-                DatePicker(
-                    L10n.TimedRecording.end,
-                    selection: Binding(
-                        get: { Self.timeValue(configService.config.timedRecordingEnd) },
-                        set: { configService.config.timedRecordingEnd = Self.timeString($0); configService.scheduleSave() }
-                    ),
-                    displayedComponents: .hourAndMinute
-                )
+                // ★ 2026-11-02（用户："需要设置什么时间段，例如一直录，跟设置
+                // 一个时间段录制"）：两种录制方式——一直录（开关打开立即录，
+                // 关掉才停）或按起止时间窗口录。
+                Picker(L10n.TimedRecording.modeRow, selection: Binding(
+                    get: { configService.config.timedRecordingAlwaysOn },
+                    set: { on in
+                        configService.config.timedRecordingAlwaysOn = on
+                        configService.scheduleSave()
+                        TimedRecordingScheduler.shared.evaluate()
+                    }
+                )) {
+                    Text(L10n.TimedRecording.modeAlways).tag(true)
+                    Text(L10n.TimedRecording.modeWindow).tag(false)
+                }
+                if !configService.config.timedRecordingAlwaysOn {
+                    DatePicker(
+                        L10n.TimedRecording.start,
+                        selection: Binding(
+                            get: { Self.timeValue(configService.config.timedRecordingStart) },
+                            set: { configService.config.timedRecordingStart = Self.timeString($0); configService.scheduleSave() }
+                        ),
+                        displayedComponents: .hourAndMinute
+                    )
+                    DatePicker(
+                        L10n.TimedRecording.end,
+                        selection: Binding(
+                            get: { Self.timeValue(configService.config.timedRecordingEnd) },
+                            set: { configService.config.timedRecordingEnd = Self.timeString($0); configService.scheduleSave() }
+                        ),
+                        displayedComponents: .hourAndMinute
+                    )
+                }
             }
 
             if let notice = TimedRecordingScheduler.shared.lastNotice {
@@ -176,6 +211,182 @@ struct WatchFacePickerView: View {
     private static func timeString(_ date: Date) -> String {
         let comps = Calendar.current.dateComponents([.hour, .minute], from: date)
         return String(format: "%02d:%02d", comps.hour ?? 23, comps.minute ?? 30)
+    }
+
+    // MARK: - 手表录音质量（★ 2026-11-02 自录音与转写页整体搬入）
+    //
+    // 只作用于 **手表** 录音：档位选择 + 旧录音自动降级开关 + 天数步进 +
+    // 每档试听（只选手表片段）+ "立即降级"。安全栏见 RecordingQualityService
+    // ——转写永远用原始音质，降级只换播放保真度。
+
+    private var recordingQualitySection: some View {
+        Section {
+            Picker(L10n.RecordingsSettings.qualityTitle, selection: Binding(
+                get: {
+                    configService.config.recordingQualityTier
+                        .flatMap(RecordingQualityTier.init(rawValue:)) ?? .asIs
+                },
+                set: {
+                    configService.config.recordingQualityTier = $0.rawValue
+                    configService.scheduleSave()
+                }
+            )) {
+                ForEach(RecordingQualityTier.allCases) { tier in
+                    Text(Self.qualityTierLabel(tier)).tag(tier)
+                }
+            }
+
+            Toggle(isOn: Binding(
+                get: { configService.config.coldDataDowngradeEnabled },
+                set: { configService.config.coldDataDowngradeEnabled = $0; configService.scheduleSave() }
+            )) {
+                HStack(spacing: 4) {
+                    Text(L10n.RecordingsSettings.coldDowngrade)
+                    InfoTip(text: L10n.RecordingsSettings.coldDowngradeFooter)
+                }
+            }
+
+            if configService.config.coldDataDowngradeEnabled {
+                Stepper(
+                    L10n.RecordingsSettings.coldDowngradeDays(configService.config.coldDataDowngradeDays),
+                    value: Binding(
+                        get: { configService.config.coldDataDowngradeDays },
+                        set: { configService.config.coldDataDowngradeDays = $0; configService.scheduleSave() }
+                    ),
+                    in: 1...90
+                )
+            }
+
+            // 每档试听：A/B 最新片段与所选档位。原样档没有可比对象，隐藏。
+            if let tier = configService.config.recordingQualityTier
+                .flatMap(RecordingQualityTier.init(rawValue:)), tier != .asIs {
+                auditionRow(tier: tier)
+            }
+
+            // "立即降级"——与启动钩子同一遍，强制执行（开着开关才有意义，
+            // 但显式点按视为用户意图）。
+            Button {
+                guard !quality.isRunning else { return }
+                Task {
+                    let config = configService.config
+                    await quality.runDowngrade(config: config, library: env.library, ignoreSwitch: true)
+                }
+            } label: {
+                HStack {
+                    Text(quality.isRunning
+                         ? L10n.RecordingsSettings.qualityRunning
+                         : L10n.RecordingsSettings.qualityRunNow)
+                    if quality.isRunning { Spacer(); ProgressView() }
+                }
+            }
+            .disabled(quality.isRunning)
+
+            if let report = quality.lastReport {
+                Text(report)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            HStack(spacing: 4) {
+                Text(L10n.RecordingsSettings.qualityTitle)
+                InfoTip(text: L10n.RecordingsSettings.qualityFooter)
+            }
+        } footer: {
+            EmptyView()
+        }
+    }
+
+    /// 原声 vs 所选档位 A/B 按钮 + 「换一段」。预览转码结果缓存在 Caches
+    /// （clip+tier 各一份），二次点按秒开。试听池只收手表录音。
+    private func auditionRow(tier: RecordingQualityTier) -> some View {
+        Group {
+            if auditionClips.isEmpty {
+                Button {
+                    let watchNames = Set(env.library.sourcesByLocalName
+                        .filter { $0.value.kind == .watch }
+                        .map(\.key))
+                    auditionClips = RecordingQualityService.recentClips(matching: watchNames)
+                    auditionIndex = 0
+                    auditionLoaded = true
+                } label: {
+                    Text(L10n.RecordingsSettings.auditionLoad)
+                }
+                if auditionLoaded {
+                    Text(L10n.RecordingsSettings.auditionEmpty)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let clip = auditionClip {
+                HStack(spacing: 16) {
+                    auditionButton(side: "orig", label: L10n.RecordingsSettings.auditionOriginal, clip: clip, tier: tier)
+                    auditionButton(side: "tier", label: L10n.RecordingsSettings.auditionTier, clip: clip, tier: tier)
+                    Spacer()
+                    Button {
+                        auditionStop()
+                        auditionIndex = (auditionIndex + 1) % max(auditionClips.count, 1)
+                    } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(auditionClips.count < 2)
+                }
+                .font(.subheadline)
+                Text(L10n.RecordingsSettings.auditionClipLabel(
+                    (clip.lastPathComponent as NSString).deletingPathExtension))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var auditionClip: URL? {
+        auditionClips.indices.contains(auditionIndex) ? auditionClips[auditionIndex] : nil
+    }
+
+    private func auditionButton(side: String, label: String, clip: URL, tier: RecordingQualityTier) -> some View {
+        Button {
+            Task {
+                if auditionSide == side { auditionStop(); return }
+                auditionStop()
+                auditionBusy = true
+                defer { auditionBusy = false }
+                do {
+                    let url = try await RecordingQualityService.makeAudition(source: clip, tier: tier)
+                    auditionPlayer = try AVAudioPlayer(contentsOf: url)
+                    auditionPlayer?.play()
+                    auditionSide = side
+                } catch {
+                    auditionSide = nil
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if auditionSide == side {
+                    Image(systemName: "stop.fill")
+                } else {
+                    Image(systemName: "play.fill")
+                    if auditionBusy && side == "tier" { ProgressView().scaleEffect(0.7) }
+                }
+                Text(label)
+            }
+        }
+        .disabled(auditionBusy)
+    }
+
+    private func auditionStop() {
+        auditionPlayer?.stop()
+        auditionPlayer = nil
+        auditionSide = nil
+    }
+
+    private static func qualityTierLabel(_ tier: RecordingQualityTier) -> String {
+        let base: String
+        switch tier {
+        case .asIs: base = L10n.RecordingsSettings.qualityTierAsIs
+        case .standard: base = L10n.RecordingsSettings.qualityTierStandard
+        case .compact: base = L10n.RecordingsSettings.qualityTierCompact
+        case .minimal: base = L10n.RecordingsSettings.qualityTierMinimal
+        }
+        return L10n.RecordingsSettings.qualityTierLabel(base, tier.sizePerHourLabel, tier.recommendationLabel)
     }
 }
 

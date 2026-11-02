@@ -17,19 +17,29 @@ private let log = Logger(subsystem: "com.nomily.app.ios", category: "diagnostics
 enum DiagnosticsExporter {
 
     /// 生成报告文件（Documents 下，用户可在文件 App 里直接看到），返回 URL。
-    static func export() -> URL? {
+    ///
+    /// ★ 2026-11-02（用户："设置页加一个日志反馈的入口，方便导出日志给我们分析，
+    /// 以及配合对应截图"）：支持可选的**用户问题描述**（写进文件头）与
+    /// `includeLogs` 开关；反馈页用 `Nomily-Feedback-…` 前缀，关于页的
+    /// 诊断导出保持默认调用不变。
+    static func export(description: String? = nil, includeLogs: Bool = true,
+                       fileNamePrefix: String = "Nomily-Diagnostics") -> URL? {
         let fm = FileManager.default
         let stamp = Self.stampFormatter.string(from: Date())
         let out = StorageLocations.documentsDir
-            .appendingPathComponent("Nomily-Diagnostics-\(stamp).txt")
+            .appendingPathComponent("\(fileNamePrefix)-\(stamp).txt")
 
-        var text = header()
-        text += "\n===== 诊断日志（ticnote-ble.log）=====\n"
-        text += readFile(StorageLocations.diagLogURL)
-        let rolled = URL(fileURLWithPath: StorageLocations.diagLogURL.path + ".1")
-        if fm.fileExists(atPath: rolled.path) {
-            text += "\n===== 上一段日志（ticnote-ble.log.1）=====\n"
-            text += readFile(rolled)
+        var text = header(description: description, includeLogs: includeLogs)
+        if includeLogs {
+            text += "\n===== 诊断日志（ticnote-ble.log）=====\n"
+            text += readFile(StorageLocations.diagLogURL)
+            let rolled = URL(fileURLWithPath: StorageLocations.diagLogURL.path + ".1")
+            if fm.fileExists(atPath: rolled.path) {
+                text += "\n===== 上一段日志（ticnote-ble.log.1）=====\n"
+                text += readFile(rolled)
+            }
+        } else {
+            text += "\n（本次未附运行日志）\n"
         }
 
         do {
@@ -44,12 +54,12 @@ enum DiagnosticsExporter {
 
     // MARK: - Pieces
 
-    private static func header() -> String {
+    private static func header(description: String? = nil, includeLogs: Bool = true) -> String {
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "?"
         let build = info?["CFBundleVersion"] as? String ?? "?"
         let device = UIDevice.current
-        return """
+        var text = """
         Nomily 诊断报告
         生成时间：\(Self.fullFormatter.string(from: Date()))
         ────────────────────────────────
@@ -62,6 +72,10 @@ enum DiagnosticsExporter {
         可以直接通过邮件发给支持邮箱 nomily@geekis.com。
 
         """
+        if let description, !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            text += "\n===== 用户描述的问题 =====\n\(description)\n"
+        }
+        return text
     }
 
     private static func readFile(_ url: URL) -> String {

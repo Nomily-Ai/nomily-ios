@@ -16,6 +16,12 @@ enum LLMCompletionError: LocalizedError {
     /// reporting only the last one would make users think the problem is on the last channel (the fallback one,
     /// usually the local Ollama, when the real cause is often the first channel having no key configured).
     case allProvidersFailed([String])
+    /// ★ 2026-11-02: the model produced thinking (`reasoning_content` / `reasoning`)
+    /// but **no answer body** — its output budget was consumed by reasoning. Never
+    /// surface the raw thinking as the result (a summary made of the model's own
+    /// meta-reasoning plus transcript fragments reads as garbage); tell the user
+    /// what actually happened instead.
+    case reasoningNoContent
 
     var errorDescription: String? {
         switch self {
@@ -33,6 +39,8 @@ enum LLMCompletionError: LocalizedError {
             return L10n.LLM.errorDecoding(msg)
         case .emptyResponse:
             return L10n.LLM.errorEmptyResponse
+        case .reasoningNoContent:
+            return L10n.LLM.errorReasoningNoContent
         case .allProvidersFailed(let failures):
             return L10n.LLM.errorAllProvidersFailed(failures.joined(separator: "\n"))
         }
@@ -68,7 +76,13 @@ struct LLMCompletionService {
 
     /// Output cap sent to every provider. `maxOutputTokens(for:)` lowers it for
     /// local models — see there.
-    static let maxOutputTokens = 4096
+    ///
+    /// ★ 2026-11-02（用户截图："转写内容怎么这样了都乱的不行"）：4096 → 8192。
+    /// 推理模型（deepseek-reasoner、qwen3 混合思考档）写正文前要先"想"，思考
+    /// 就能吃掉几千 token——4096 的上限经常被思考耗尽，正文一个字都没写。
+    /// 8192 是各家云 API 的公共安全上限（deepseek-chat 恰好 8192，再高会对
+    /// 4k/8k 档的老模型报 400）。
+    static let maxOutputTokens = 8192
 
     /// Output cap for local models (Ollama / self-hosted endpoints).
     ///
@@ -141,6 +155,25 @@ struct LLMCompletionService {
         key == "ollama" || key == "custom"
     }
 
+    /// Whether an endpoint string can actually become a request URL.
+    ///
+    /// ★ 2026-11-02: the factory placeholder `"http://<局域网IP>:11434"` (and any hand-typed
+    /// garbage) used to pass every `isEmpty` check, enter the fallback chain, and die inside
+    /// `URL(string:)` with "接口地址不是合法的 URL" in background jobs — even though the user
+    /// never configured that channel at all. Angle brackets can never appear in a legal URL,
+    /// so they are the tell-tale of an unfilled placeholder; everything else is judged by
+    /// URL(string:) + scheme + host.
+    static func isValidEndpoint(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.contains("<"), !trimmed.contains(">"),
+              let url = URL(string: trimmed),
+              let host = url.host, !host.isEmpty,
+              url.scheme == "http" || url.scheme == "https"
+        else { return false }
+        return true
+    }
+
     /// Fallback order.
     ///
     /// **Local channels come first**: they cost no quota and never leave the machine, and a fallback only ever happens
@@ -181,6 +214,7 @@ struct LLMCompletionService {
         if LLMPreset.find(key) != nil {
             guard let c = p.preset(key) else { return L10n.LLM.errorNoProvider }
             if c.endpoint.isEmpty { return L10n.LLM.errorNoEndpoint(providerLabel(key)) }
+            if !isValidEndpoint(c.endpoint) { return L10n.LLM.errorBadEndpointURL }
             if (c.apiKey ?? "").isEmpty { return L10n.LLM.errorNoAPIKey(providerLabel(key)) }
             if (c.model ?? "").isEmpty { return L10n.LLM.errorNoModel(providerLabel(key)) }
             return nil
@@ -205,10 +239,12 @@ struct LLMCompletionService {
         case "ollama":
             guard let c = p.ollama else { return L10n.LLM.errorNoProvider }
             if c.endpoint.isEmpty { return L10n.LLM.errorNoEndpoint(providerLabel(key)) }
+            if !isValidEndpoint(c.endpoint) { return L10n.LLM.errorBadEndpointURL }
             if (c.model ?? "").isEmpty { return L10n.LLM.errorNoModel(providerLabel(key)) }
         case "custom":
             guard let c = p.custom else { return L10n.LLM.errorNoProvider }
             if c.endpoint.isEmpty { return L10n.LLM.errorNoEndpoint(providerLabel(key)) }
+            if !isValidEndpoint(c.endpoint) { return L10n.LLM.errorBadEndpointURL }
             if (c.model ?? "").isEmpty { return L10n.LLM.errorNoModel(providerLabel(key)) }
         default:
             return L10n.LLM.errorNoProvider
@@ -805,6 +841,12 @@ struct LLMCompletionService {
         }
 
         var text = ""
+        /// ★ 2026-11-02: reasoning models (DeepSeek reasoner, OpenRouter qwen3
+        /// hybrids, …) stream their thinking in `delta.reasoning_content` /
+        /// `delta.reasoning`. The thinking is **never** used as the result — when
+        /// `content` stays empty it means the output budget was consumed by
+        /// thinking, and we surface a clear error instead (see `reasoningNoContent`).
+        var reasoningSeen = false
         var finishReason: String?
 
         for try await line in stream.lines {
@@ -828,12 +870,26 @@ struct LLMCompletionService {
             if let piece, !piece.isEmpty {
                 text += piece
                 onDelta?(piece)
+            } else {
+                var thought: String?
+                if let delta = first["delta"] as? [String: Any] {
+                    thought = (delta["reasoning_content"] ?? delta["reasoning"]) as? String
+                }
+                if thought == nil, let message = first["message"] as? [String: Any] {
+                    thought = (message["reasoning_content"] ?? message["reasoning"]) as? String
+                }
+                if let thought, !thought.isEmpty { reasoningSeen = true }
             }
             if let reason = first["finish_reason"] as? String { finishReason = reason }
         }
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
+            if reasoningSeen {
+                // 只有思考、没有正文：模型把输出额度花完了。宁可报错也不把
+                // 思考流水当摘要存下来（真机事故：摘要变成模型自言自语）。
+                throw LLMCompletionError.reasoningNoContent
+            }
             // SSE frames arrive but the body is empty ⇒ upstream sent an error frame (OpenRouter, for instance, puts
             // insufficient quota in `error`); that is not an "empty response", and the original message has to be surfaced.
             throw LLMCompletionError.emptyResponse
@@ -860,12 +916,24 @@ struct LLMCompletionService {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = json["choices"] as? [[String: Any]],
               let first = choices.first,
-              let message = first["message"] as? [String: Any],
-              let content = message["content"] as? String else {
+              let message = first["message"] as? [String: Any] else {
             throw LLMCompletionError.decodingError(L10n.LLM.errorMissingChoices)
         }
+        // ★ 2026-11-02: reasoning models (qwen3 on OpenRouter, DeepSeek reasoner, …) return
+        // `content: null` with only `message.reasoning` / `message.reasoning_content` filled
+        // when max_tokens runs out mid-thinking. The thinking is **never** the answer —
+        // surface a dedicated error instead of storing the model's own meta-reasoning
+        // as the summary (real-device incident: the "summary" was the model talking to
+        // itself plus raw transcript fragments).
+        let content = (message["content"] as? String) ?? ""
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw LLMCompletionError.emptyResponse }
+        if trimmed.isEmpty {
+            let reasoning = ((message["reasoning_content"] ?? message["reasoning"]) as? String) ?? ""
+            if !reasoning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw LLMCompletionError.reasoningNoContent
+            }
+            throw LLMCompletionError.decodingError(L10n.LLM.errorMissingChoices)
+        }
         return Completion(
             text: content,
             truncated: (first["finish_reason"] as? String) == "length"

@@ -78,7 +78,14 @@ final class RecordingQualityService: ObservableObject {
     /// The cold-data pass. Called at launch (when the switch is on) and from
     /// the "run now" button (`ignoreSwitch` for the button so a user can run it
     /// without leaving the toggle on).
-    func runDowngrade(config: AppConfig, ignoreSwitch: Bool = false) async {
+    ///
+    /// ★ 2026-11-02（用户："录音质量（转写后）应该只是单独控制手表的，而不是
+    /// 其他录音卡的质量"）：作用范围**只限手表录音**。手表片段落地时 manifest
+    /// 记了 `transport: "watch"`（WatchSyncService.recordDownload），据此用
+    /// `Library.source(forLocalName:).kind == .watch` 精确圈定候选；录音卡的
+    /// 片段（ble/wifi）与本机导入一律不动——卡的音频本来就是设备端压缩过的
+    /// 低码率流，再压一代只会白损音质。
+    func runDowngrade(config: AppConfig, library: Library, ignoreSwitch: Bool = false) async {
         guard let tierRaw = config.recordingQualityTier,
               let tier = RecordingQualityTier(rawValue: tierRaw),
               tier != .asIs
@@ -108,6 +115,13 @@ final class RecordingQualityService: ObservableObject {
                 // Transcript must exist first — see the class comment.
                 let base = (name as NSString).deletingPathExtension
                 return fm.fileExists(atPath: dir.appendingPathComponent("\(base).txt").path)
+            }
+            .filter { name in
+                // ★ 2026-11-02: watch-only scope — see the method comment.
+                // The manifest is the single source of truth for provenance;
+                // filename patterns alone would misfile same-timestamp clips.
+                let base = (name as NSString).deletingPathExtension
+                return library.source(forLocalName: base).kind == .watch
             }
             .sorted()
 
@@ -152,14 +166,19 @@ final class RecordingQualityService: ObservableObject {
         return dst
     }
 
-    /// The most recently modified clips (audition source pool, newest first).
-    nonisolated static func recentClips(limit: Int = 20) -> [URL] {
+    /// The most recently modified **watch** clips (audition source pool, newest
+    /// first). ★ 2026-11-02: scoped to watch recordings to match the
+    /// downgrade pass — previewing a card clip against a watch-only tier
+    /// would mislead. `watchNames` comes from the manifest (MainActor) —
+    /// callers grab it before hopping off the main actor.
+    nonisolated static func recentClips(matching watchNames: Set<String>, limit: Int = 20) -> [URL] {
         let fm = FileManager.default
         let dir = StorageLocations.decryptedDir
         let audioExtensions: Set<String> = ["m4a", "aac", "wav", "caf", "mp3", "aif", "aiff", "flac", "opus"]
         guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return [] }
         return names
             .filter { audioExtensions.contains(($0 as NSString).pathExtension.lowercased()) }
+            .filter { watchNames.contains(($0 as NSString).deletingPathExtension) }
             .compactMap { name -> (URL, Date)? in
                 let url = dir.appendingPathComponent(name)
                 let modified = (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date

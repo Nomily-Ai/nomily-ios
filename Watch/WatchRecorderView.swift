@@ -3,6 +3,22 @@ import WatchKit
 
 /// Wrist recorder page.
 ///
+/// ★★ 2026-11-02（用户："手表的整体风格朝着这个看起，往左侧是按照这个网页里面手表来，
+/// 往右侧则是现在有的菜单，然后他这个里面的内容你也可以加入进来"）：
+/// 参考 `nomily-watch-v3-blink.html`，首页改成 **4 页横向翻页**，录音页落在最左：
+///
+/// ```
+///   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+///   │ 0 录音    │ │ 1 最近    │ │ 2 同步    │ │ 3 菜单    │
+///   │  ◉◉ / 〜  │ │ 标题·时间 │ │ 1 项待传  │ │ 快捷入口  │
+///   │  00:12   │ │ 摘要要点  │ │ Wi-Fi·存储│ │ ⊕ 编辑    │
+///   └──────────┘ └──────────┘ └──────────┘ └──────────┘
+/// ```
+///
+/// 下面这段是 revision seven 起的旧结构说明（3 页：菜单 / 机器人 / 菜单），
+/// **保留**是为了解释"为什么翻页是自己写的、为什么页码条不能做成按钮"——
+/// 那两条结论至今有效，只是页数和内容变了。
+///
 /// ★ 2026-10-16 revision seven (user's words: "make it like Grok Bot, two eyes, then look at how they
 /// do the natural-blinking animations; the 4 menus should appear when you swipe left or right; remove the record button from the home screen
 /// and make it alive like the bot; start recording by holding its eyes for 2s, or with the earlier gestures
@@ -137,11 +153,26 @@ struct WatchRecorderView: View {
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
     @Environment(\.scenePhase) private var scenePhase
 
-    /// Current page of the horizontal paging: 0 = left menu page, 1 = Bot, 2 = right menu page.
+    /// Current page of the horizontal paging.
     ///
-    /// Defaults to **1** (Bot) -- the first thing you see when you raise your wrist has to be the page that "starts recording right away",
-    /// not a menu page.
-    @State private var page: Int = 1
+    /// ★ 2026-11-02（用户："往左侧是按照这个网页里面手表来，往右侧则是现在有的菜单，
+    /// 然后他这个里面的内容你也可以加入进来"）：页面改成 **4 页**，录音页移到最左：
+    ///
+    /// ```
+    ///   0 录音（原型版）│ 1 最近 │ 2 同步 │ 3 菜单
+    /// ```
+    ///
+    /// · **0 录音** —— 视觉照 `nomily-watch-v3-blink.html`：眼睛 ⇄ 波形的眨眼过场、
+    ///   顶栏时钟、LISTENING 暖点、底部细体大计时。
+    /// · **1 最近 / 2 同步** —— 原型第 2、3 页的内容（`WatchRecentsPane` / `WatchSyncPane`）。
+    /// · **3 菜单** —— 原来的左右两张菜单页合成一张（见 `menuPane` 调用处）。
+    ///
+    /// ⚠️ 默认停在第 **0** 页（以前是 1）：抬腕第一眼必须是"按一下就开始录音"的那一页。
+    @State private var page: Int = 0
+
+    /// 总页数。写成常量而不是散落的字面量：页码条、位移、边界判断三处必须同步，
+    /// 少改一处就会出现"能划到不存在的第 5 页"或者"最后一页划不动"。
+    private static let pageCount = 4
 
     /// The displacement (pt) the finger is currently dragging. Returns to 0 during the page-flip animation.
     ///
@@ -192,6 +223,17 @@ struct WatchRecorderView: View {
     /// staring at a modal while the recording they wanted keeps running.
     @State private var stopConfirmTask: Task<Void, Never>?
 
+    /// 页面底部那行读数现在是什么（★ 2026-11-02 · v3 原型）。
+    ///
+    /// 三态而不是两个 `Bool`：`saved` 只在"停止录音、眼睛还没睁开"的那 1.1 秒里存在，
+    /// 用布尔量拼出来会变成"isShowingTimer && !isShowingSaved && ..."这种一看就错的组合。
+    private enum ReadoutState { case hidden, timer, saved }
+
+    @State private var readoutState: ReadoutState = .hidden
+    /// 读数时间轴的 `Task`。连按两次（开始→停止→开始）必须取消上一段，
+    /// 否则上一段的 `sleep` 醒来会把新状态写回 `hidden`。
+    @State private var readoutTask: Task<Void, Never>?
+
     /// Usable length of one side of the watch face: the actual screen width minus a 6pt inset on each side.
     ///
     /// ⚠️ Use `WKInterfaceDevice`'s **actual** screen width, never hard-code it -- the 40mm/44mm/45mm/49mm
@@ -208,7 +250,11 @@ struct WatchRecorderView: View {
     ///
     /// ⚠️ Revision eight raised it from 0.70 to 0.76: once the plate was deleted, the 0.70 box held only the two eyes,
     ///    and at the original fraction the whole face looked small and empty. One size up exactly makes up the bulk lost with the plate.
-    private static let botFraction: CGFloat = 0.76
+    ///
+    /// ★ 2026-11-02（v3 原型）：0.76 → **0.72**。底部多了一行 26pt 的细体计时，
+    ///    40mm 屏（197pt 高）上脸 + 大数字 + 一行小字必须一起放下；0.72 与 0.76 只差 5%，
+    ///    肉眼几乎分不出来，但正好腾出那 20pt。别再往回调——回调就得砍掉计时。
+    private static let botFraction: CGFloat = 0.72
 
     var body: some View {
         // ★ Revision eight: **no more `TabView`**, we lay out a horizontal row ourselves. Reasons in the "revision eight" passage at the top of the file
@@ -218,14 +264,22 @@ struct WatchRecorderView: View {
         // makes it follow the finger while dragging.
         GeometryReader { geo in
             HStack(spacing: 0) {
-                menuPane(menuPrefs.leadingItems)
+                recordPane
                     .frame(width: geo.size.width)
-                botPane
+                WatchRecentsPane()
                     .frame(width: geo.size.width)
-                menuPane(menuPrefs.trailingItems)
+                WatchSyncPane()
+                    .frame(width: geo.size.width)
+                // ★ 2026-11-02：原来的左右两张菜单页**合成一张**。
+                //   理由：① 用户这轮说的是"往右侧则是现在有的菜单"，是**一页**；
+                //        ② 四页已经到原型给出的"最多 3~4 页"边界，五页的页码条在 40mm 上认不出来；
+                //        ③ 两张菜单页本来是因为中间的机器人页把左右两侧都吃掉了才分家的。
+                //   ⚠️ 设置页里"左/右"两个分组的**数据不动**（`WatchMenuPreferences` 照旧），
+                //      这里只是按"左组 + 右组"的顺序排进同一张滚动列表。
+                menuPane(menuPrefs.leadingItems + menuPrefs.trailingItems)
                     .frame(width: geo.size.width)
             }
-            .frame(width: geo.size.width * 3, alignment: .leading)
+            .frame(width: geo.size.width * CGFloat(Self.pageCount), alignment: .leading)
             .offset(x: -CGFloat(page) * geo.size.width + dragX)
         }
         // Three pages side by side, but only one should be visible -- without clipping, the left and right pages spill over the current one.
@@ -248,6 +302,22 @@ struct WatchRecorderView: View {
         // rather than dots — a bar can't be mistaken for a mouth, and it sits at
         // the same height as the pill so the two never fight the ring.
         .overlay(alignment: .top) { topBar }
+        // ★ 2026-11-02（照 v3 原型）：录音中**翻到别的页时**，顶部留一根 2pt 暖线。
+        //
+        // 录音是个"系统状态"，它不能因为用户划到第 3 页看菜单就从感知里消失——
+        // 而这根线用的是原型里唯一的暖色（`WatchHomeStyle.amber`），
+        // 和 LISTENING 那颗呼吸点同源，一眼就知道"还在录"。
+        //
+        // ⚠️ 只在 `page != 0` 时亮：留在录音页时它和波形争同一条视线，纯属多余。
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(WatchHomeStyle.amber)
+                .frame(height: 2)
+                .padding(.horizontal, 16)
+                .opacity(model.isRecording && page != 0 ? 0.55 : 0)
+                .animation(.easeInOut(duration: 0.35), value: page)
+                .allowsHitTesting(false)
+        }
         // What's hidden is **this page's** navigation bar; the pushed sub-pages have their own bars and back buttons.
         //
         // ⚠️ You need both: `.toolbar(.hidden, for: .navigationBar)` hides the navigation bar itself,
@@ -304,12 +374,30 @@ struct WatchRecorderView: View {
         model.setUIDormant(isLuminanceReduced || scenePhase != .active)
     }
 
-    // MARK: - The Bot home screen
+    // MARK: - 录音页（第 0 页）
 
+    /// 录音页：机器人脸 + 底部读数。
+    ///
     /// That Bot face. Hold to start, tap to stop, double tap to start/stop -- **all three live on it**
     /// (see the passage at the top of `WatchBotFace`); this is only responsible for catching its two callbacks.
-    private var botPane: some View {
-        VStack(spacing: 5) {
+    ///
+    /// ★★ 2026-11-02（用户："整体风格朝着这个看起"，参考 `nomily-watch-v3-blink.html`）：
+    /// 这一页相对上一版改了三处，全部来自原型：
+    ///
+    /// ① **计时搬到页面底部，并且变大变细**。以前它是贴在波形下面的 13pt semibold
+    ///    （revision eleven 的"计时得贴着波形"），原型把它做成页面底部的一个 38pt 细体大数字。
+    ///    这里是 26pt（原型 38pt 是按 314px 宽的模拟屏量的，162pt 屏上等比折算只有 20pt，
+    ///    太细看不清；26pt 既保住"细体大数字"的气质，又能在抬腕 20cm 的距离读出来）。
+    /// ② **待机时不显示读数**。原型 idle 状态下 `readOp = 0` —— 没在录音，底部就是空的，
+    ///    整页只有脸和一句提示。以前那行"长按开始"留着（它是唯一的可见入口），
+    ///    但不再和数字抢位置。
+    /// ③ **停止时闪一下「已保存」**。原型 opening 段 320~760ms 处闪的那个词——
+    ///    这是"文件已经落盘"唯一的视觉确认（手表上没法像手机那样弹 toast）。
+    ///
+    /// ⚠️ 脸从 0.76 缩到 0.72：40mm 总高只有 197pt，脸 + 大数字 + 一行小字要一起塞进去。
+    ///    0.72 与 0.76 差 5%，肉眼几乎看不出，但正好腾出底部读数需要的那 20pt。
+    private var recordPane: some View {
+        VStack(spacing: 0) {
             Spacer(minLength: 0)
 
             WatchBotFace(
@@ -322,10 +410,10 @@ struct WatchRecorderView: View {
                 // watch fall back to its own "Appearance" palette.
                 tint: faceStore.colorHex.map { Color(botHex: $0) } ?? styleStore.style.tint,
                 meter: model.meter,
-                // ★ Revision eleven: while recording the timer shows right by the wave (user: "with the recording time attached below").
-                elapsedText: model.isRecording
-                    ? WatchFormat.compactDuration(model.elapsed)
-                    : nil,
+                // ★ 2026-11-02（v3 原型）：计时**不再贴在波形下面**，改为页面底部的大数字
+                //   （见 `readout`）。这里传 nil 之后 `figure` 里那层 `VStack` 只剩波形，
+                //   波形因此重新居中——正是原型"一根线在脸中间"的样子。
+                elapsedText: nil,
                 pokeTick: pokeTick,
                 dizzyTick: dizzyTick,
                 handGestureEnabled: prefs.pinchToRecord,
@@ -343,13 +431,21 @@ struct WatchRecorderView: View {
             //    not color itself; don't pass the whole `style` struct in again, that would turn
             //    "does this face use the breathing light" into a question you have to re-confirm every time.
 
+            readout
+
             caption
 
-            // ★ 2026-10-23: only the top bar needs clearance now — the page
-            // indicator and the pending pill moved up out of the ring's way.
-            Spacer(minLength: 0).frame(height: 8)
+            Spacer(minLength: 0).frame(height: 7)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // ★ 2026-11-02：读数的出现/消失跟着**眨眼的时间轴**走，不跟着 `isRecording` 走——
+        //   按下那一刻眼睛刚开始压扁，这时候数字就弹出来会把"眨眼"打散。
+        //   原型里数字在 520ms 才淡入、停止时 320ms 才换成「已保存」，见 `runReadoutTimeline`。
+        .onChange(of: model.isRecording) { _, recording in
+            runReadoutTimeline(recording: recording)
+        }
+        .onAppear { readoutState = model.isRecording ? .timer : .hidden }
+        .onDisappear { readoutTask?.cancel() }
         // ★ 2026-10-20: double-tap / shake while recording land here instead of
         // stopping outright. "End" takes the destructive role; "Keep recording" is
         // the default the user most often wants after a misfire.
@@ -372,41 +468,88 @@ struct WatchRecorderView: View {
     ///
     /// ⚠️ While idle that hint **cannot be dropped**. "Hold for 2 seconds" is an **invisible** interaction --
     /// without the hint, a first-time user just pokes once, finds nothing happens, and gives up.
-    /// ★ The recording timer sits right below the wave (see `WatchBotFace.elapsedText`), so this line no longer shows time.
     /// ⚠️ The byte count is the **only** hard evidence that "the recording is really being written to disk" --
     ///   the wave is a flat line hugging the bottom when things are quiet, and from it alone you can't tell "no sound" from "broken".
+    ///
+    /// ★ 2026-11-02（v3 原型）：计时搬去 `readout` 之后，这一行只剩两件事要说，
+    /// 于是从"两行竖排"压成**一行**（字节数 · 长按结束）——40mm 上每一行都是预算。
     @ViewBuilder
     private var caption: some View {
         if model.isRecording {
-            // ★ 2026-10-22: the "tap refused, long-press to stop" hint is gone —
-            // a tap now asks "End / Keep recording" outright (see `askStopConfirm`),
-            // so there is nothing left for a second, weaker hint to explain. That
-            // line goes back to being the byte counter, which is the only hard
-            // evidence that audio is reaching the file.
-            //
-            // ★ 2026-10-23 (user: "启动跟关闭都是更暂停"): the counter alone left
-            // both presses looking the same — you hold 2 s to start and hold 2 s
-            // to stop, and nothing on screen said which one this press was. The
-            // action label now sits **directly under the counter**, small and
-            // secondary, so it explains the gesture without competing with the
-            // one number that proves the take is alive.
-            VStack(spacing: 1) {
-                Text(WatchFormat.bytes(model.currentBytes))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(styleStore.style.tint)
-                    .monospacedDigit()
-                Text(L10n.Watch.holdToStop)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
+            // 字节数是"真的在往文件里写"唯一的硬证据；后面跟一句手势说明，
+            // 因为"长按开始"和"长按停止"长得一模一样，没有说明这两次按下的意义分不开。
+            Text("\(WatchFormat.bytes(model.currentBytes)) · \(L10n.Watch.holdToStop)")
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .padding(.top, 2)
         } else {
             Text(L10n.Watch.holdToRecord)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+                .padding(.top, 4)
+        }
+    }
+
+    // MARK: - 底部读数（★ 2026-11-02 · v3 原型）
+
+    /// 页面底部那行大数字：录音时是计时，停止时闪一下「已保存」，待机时**不存在**。
+    ///
+    /// ⚠️ 用 `.font(.system(size: 26, weight: .thin))` 而不是 `.light`：原型是 38pt/重量 200，
+    ///    细体是它"不像控件、像仪表"的全部来源；换成 semibold 立刻变回一块 UI 标签。
+    /// ⚠️ `monospacedDigit()` 必须有：9 秒到 10 秒时数字会整体左右跳一格，那点抖动在细体上特别明显。
+    @ViewBuilder
+    private var readout: some View {
+        switch readoutState {
+        case .hidden:
+            EmptyView()
+        case .timer:
+            Text(WatchFormat.compactDuration(model.elapsed))
+                .font(.system(size: 26, weight: .thin))
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.94))
+                .transition(.opacity)
+        case .saved:
+            Text(L10n.Watch.saved)
+                .font(.system(size: 14, weight: .medium))
+                .tracking(2)
+                .foregroundStyle(.white.opacity(0.78))
+                .transition(.opacity)
+        }
+    }
+
+    /// 读数跟着「眨眼」的时间轴走（原型 opening/closing 两段的分段时刻）。
+    ///
+    /// | 时刻 | 读数 |
+    /// |---|---|
+    /// | 开始录音 0ms | 不动（眼睛正在压扁，这时候弹数字会把眨眼打散） |
+    /// | 开始录音 520ms | 计时淡入 |
+    /// | 停止录音 320ms | 换成「已保存」 |
+    /// | 停止录音 1450ms | 收掉（此时眼睛已经睁回来） |
+    ///
+    /// ⚠️ 数字只在 `isRecording` 翻转时**延迟**出现，之后由 `model.elapsed` 自己刷新——
+    ///    不要把它绑到 `elapsed` 上做动画，秒级刷新会把每一下都变成一次淡入。
+    private func runReadoutTimeline(recording: Bool) {
+        readoutTask?.cancel()
+        if recording {
+            readoutTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 520_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.4)) { readoutState = .timer }
+            }
+        } else {
+            readoutTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 320_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.24)) { readoutState = .saved }
+                try? await Task.sleep(nanoseconds: 1_130_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.3)) { readoutState = .hidden }
+            }
         }
     }
 
@@ -501,6 +644,14 @@ struct WatchRecorderView: View {
         //      但够不着"。现在上下各留出避让空间（顶部 12pt 让页码条，底部 8pt 兜底）。
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 7) {
+                // ★ 2026-11-02：加一个小标题，和「最近 / 同步」两页的语言对齐
+                // （三页都以一行压暗、字距拉开的小标题开头）。空列表时它也是唯一的说明。
+                Text(L10n.Watch.menuHeader)
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(1.5)
+                    .foregroundStyle(WatchHomeStyle.header)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 1)
                 if items.isEmpty {
                     VStack(spacing: 6) {
                         Image(systemName: "square.grid.2x2")
@@ -526,7 +677,8 @@ struct WatchRecorderView: View {
                 editTile
             }
             .padding(.horizontal, 5)
-            .padding(.top, 13)
+            // 13 → 26：顶栏现在多了一行时钟（15pt + 3pt 间距），小标题再贴 13 会被压住。
+            .padding(.top, 26)
             .padding(.bottom, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -634,7 +786,7 @@ struct WatchRecorderView: View {
                 // Already at the start/end and still swiping outward → damp to 1/4. It gives a bit of "you've pulled to the end" feel,
                 // otherwise the user thinks it's stuck and swipes harder.
                 let pastStart = page == 0 && raw > 0
-                let pastEnd = page == 2 && raw < 0
+                let pastEnd = page == Self.pageCount - 1 && raw < 0
                 let damped = (pastStart || pastEnd) ? raw * 0.25 : raw
 
                 withTransaction(tx) { dragX = damped }
@@ -651,7 +803,7 @@ struct WatchRecorderView: View {
 
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
                     if abs(dx) > abs(dy), abs(dx) > Self.pageFlipDistance {
-                        page = min(2, max(0, page + (dx < 0 ? 1 : -1)))
+                        page = min(Self.pageCount - 1, max(0, page + (dx < 0 ? 1 : -1)))
                     }
                     // Below threshold it settles back -- that "spring back" is itself the feedback that "you didn't swipe far enough".
                     dragX = 0
@@ -667,17 +819,31 @@ struct WatchRecorderView: View {
     /// ⚠️ One overlay, one `HStack` — two separate `.overlay(alignment: .top)`
     ///    modifiers would stack on the same spot, which is the mistake the old
     ///    bottom bar documented and then this rewrite removed along with it.
+    ///
+    /// ★ 2026-11-02（v3 原型）：右上角从"只有页码条"变成**时钟 + 页码条**竖排，
+    /// 左上角在录音时多一颗呼吸的暖点 + LISTENING。
+    /// 时钟是补上来的——这一页 `.persistentSystemOverlays(.hidden)` 把系统时钟关掉了，
+    /// 以前抬腕是看不到时间的。
     private var topBar: some View {
         HStack(alignment: .top, spacing: 0) {
-            queueBar
+            VStack(alignment: .leading, spacing: 4) {
+                if model.isRecording {
+                    WatchListeningBadge()
+                }
+                queueBar
+            }
             Spacer(minLength: 0)
-            pageBar
+            VStack(alignment: .trailing, spacing: 3) {
+                WatchClockFace()
+                pageBar
+            }
         }
-        .padding(.horizontal, 4)
-        .padding(.top, 1)
+        .padding(.horizontal, 5)
+        // 顶部留 6pt：那根 2pt 暖线贴着屏幕最上沿，压住它会看起来像标签被裁了。
+        .padding(.top, 6)
     }
 
-    /// Three little **segments** showing which page you're on.
+    /// Four little **segments** showing which page you're on.
     ///
     /// ★ Rewritten 2026-10-23 from dots to a bar, for the reason in `body`:
     /// three round dots under a face read as a mouth. Three short capsules in a
@@ -693,10 +859,10 @@ struct WatchRecorderView: View {
     ///    nothing happened". Its job is "tell you that you can swipe".
     private var pageBar: some View {
         HStack(spacing: 3) {
-            ForEach(0..<3, id: \.self) { index in
+            ForEach(0 ..< Self.pageCount, id: \.self) { index in
                 Capsule()
                     .fill(Color.white.opacity(index == page ? 0.85 : 0.22))
-                    .frame(width: index == page ? 12 : 6, height: 3)
+                    .frame(width: index == page ? 11 : 5, height: 3)
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: page)

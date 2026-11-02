@@ -137,14 +137,14 @@ private struct ASRCloudRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 // ★ 2026-10-29（饭耳规格 §1.1）：行首带选型建议角标。
                 HStack(spacing: 4) {
-                    Text(spec.name).foregroundStyle(.primary)
-                    if let rec = spec.recommendation {
+                    Text(spec.localizedName).foregroundStyle(.primary)
+                    if let rec = spec.localizedRecommendation {
                         Text(rec)
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(rec.hasPrefix("推荐") ? Color.green : Color.orange)
                     }
                 }
-                Text(model.isEmpty ? spec.tagline : model)
+                Text(model.isEmpty ? spec.localizedTagline : model)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -189,21 +189,33 @@ private struct ASRBrandTile: View {
     var size: CGFloat = 32
 
     var body: some View {
-        let t = spec.tint
-        let color = Color(red: t.r, green: t.g, blue: t.b)
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(LinearGradient(colors: [color, color.opacity(0.72)],
-                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-            .frame(width: size, height: size)
-            .overlay {
-                Image(spec.brandAsset)
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .foregroundStyle(.white)
-                    .padding(size * 0.22)
-            }
-            .accessibilityHidden(true)
+        // ★ 2026-11-02（用户："asr 的模型图标要按照 Apple Store 的 app 图标"）：
+        // 有官方 App 的厂商渲染 App Store 彩色图标；其余保留单色品牌瓦片。
+        if spec.usesAppStoreIcon {
+            Image(spec.brandAsset)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+                .accessibilityHidden(true)
+        } else {
+            let t = spec.tint
+            let color = Color(red: t.r, green: t.g, blue: t.b)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(LinearGradient(colors: [color, color.opacity(0.72)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: size, height: size)
+                .overlay {
+                    Image(spec.brandAsset)
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundStyle(.white)
+                        .padding(size * 0.22)
+                }
+                .accessibilityHidden(true)
+        }
     }
 }
 
@@ -222,6 +234,8 @@ struct ASRCloudSheet: View {
     @State private var fetched: [String] = []
     @State private var fetchHint: String?
     @State private var manualModel = false
+    // ★ 2026-11-02：Key 快引导弹层（复制提示词/粘贴结果）。
+    @State private var showKeyWizard = false
 
     private var entry: AppConfig.AsrProviders.CloudASR {
         configService.config.asrProviders.cloud?[spec.id]
@@ -250,15 +264,46 @@ struct ASRCloudSheet: View {
                         ASRBrandTile(spec: spec, size: 36)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(spec.name).font(.headline)
-                            Text(spec.tagline).font(.caption2).foregroundStyle(.secondary)
+                            Text(spec.localizedTagline).font(.caption2).foregroundStyle(.secondary)
                             // ★ 2026-10-29（饭耳规格 §1.1）：价格/能力/选型参考。
                             // 价格是刊例粗算，随时可能调——footer 里也会写明。
                             if let meta = spec.metaLine {
                                 Text(meta).font(.caption2).foregroundStyle(.secondary)
                             }
-                            if let rec = spec.recommendation {
-                                Text("选型参考：\(rec)").font(.caption2).foregroundStyle(rec.hasPrefix("推荐") ? Color.green : Color.orange)
+                            if let rec = spec.localizedRecommendation {
+                                Text(String(format: L10n.ASRCloud.recommendationPrefix, rec)).font(.caption2).foregroundStyle(rec.hasPrefix("推荐") ? Color.green : Color.orange)
                             }
+                        }
+                    }
+                    // ★ 2026-11-02（用户："该有对应配置页面点击跳转而不是要用户手动
+                    // 输入网址"）：控制台直链放在凭据输入框**上面**——先拿 Key 再填，
+                    // 顺序和操作一致。footer 里的文字路径保留作参考。
+                    if let url = spec.consoleURL {
+                        Link(destination: url) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "key.horizontal")
+                                    .font(.subheadline)
+                                Text(L10n.ASRCloud.openConsole)
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    // ★ 2026-11-02（用户："不会获取 APIkey……新增一个不会开通？
+                    // 复制提示词跟粘贴结果，参考饭耳的这个快引导"）：控制台直链
+                    // 下面挂 Key 快引导——复制提示词问 AI，粘贴回复自动填。
+                    Button {
+                        showKeyWizard = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "questionmark.circle")
+                                .font(.subheadline)
+                            Text(L10n.KeyWizard.openWizard)
+                                .font(.subheadline.weight(.medium))
+                            Spacer()
                         }
                     }
                     ForEach(spec.fields) { field in
@@ -275,8 +320,8 @@ struct ASRCloudSheet: View {
                     Text(L10n.Settings.asrProviders)
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("\(L10n.LLM.presetConsole): \(spec.console)")
-                        if let note = spec.note { Text(note) }
+                        Text("\(L10n.LLM.presetConsole): \(spec.localizedConsole)")
+                        if let note = spec.localizedNote { Text(note) }
                         // ★ 2026-10-22: Aliyun is wired now; the honest-scope note
                         // only applies to the vendors that still aren't.
                         if spec.id == "aliyun" {
@@ -362,7 +407,7 @@ struct ASRCloudSheet: View {
             // Same reason as the LLM sheet: a focused field must not eat the first
             // tap on the model row.
             .scrollDismissesKeyboard(.immediately)
-            .navigationTitle(spec.name)
+            .navigationTitle(spec.localizedName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -374,6 +419,26 @@ struct ASRCloudSheet: View {
             }
         }
         .onAppear(perform: prime)
+        // ★ 2026-11-02：Key 快引导（复制提示词问 AI → 粘贴回复自动回填）。
+        .sheet(isPresented: $showKeyWizard) {
+            KeyWizardSheet(
+                vendorName: spec.localizedName,
+                fields: spec.fields.map {
+                    .init(id: $0.id, label: L10n.ASRCloud.field($0.id, fallback: $0.label))
+                },
+                consoleURL: spec.consoleURL
+            ) { map in
+                for (id, value) in map {
+                    guard let f = spec.fields.first(where: { $0.id == id }) else { continue }
+                    if f.kind == .secret {
+                        secretBinding(id).wrappedValue = value
+                    } else {
+                        valueBinding(id).wrappedValue = value
+                    }
+                }
+                configService.scheduleSave()
+            }
+        }
     }
 
     // MARK: rows

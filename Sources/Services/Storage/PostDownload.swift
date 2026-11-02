@@ -40,11 +40,14 @@ enum PostDownload {
         let lower = name.lowercased()
         let oggMagic = Data("OggS".utf8)
         let riffMagic = Data("RIFF".utf8)
+        let encryptMagic = Data("encryt".utf8)
         let isOpus = lower.hasSuffix(".opus")
         let isWav = lower.hasSuffix(".wav")
 
-        // 1: encrypted-clip envelope → decrypt + wrap raw OPUS frames
-        if isOpus && ChaCha20.isEncryptedClip(data) {
+        // 1: encrypted-clip envelope → decrypt + wrap raw OPUS frames.
+        // ★ 2026-11-02: 按**魔数**而不是后缀判断——固件换容器命名（如 .m4a）时
+        //   旧逻辑会把密文当普通文件落到 raw，用户侧表现为「下载成功但打不开」。
+        if ChaCha20.isEncryptedClip(data) {
             guard let key = chacha20Key else {
                 return .raw(rawURL, .keyMissing)
             }
@@ -58,14 +61,26 @@ enum PostDownload {
             }
         }
 
-        // 2: already-plain container → copy verbatim
-        if (isOpus && data.prefix(4) == oggMagic) ||
-           (isWav && data.prefix(4) == riffMagic) {
+        // 2: already-plain container → copy verbatim. 魔数优先于后缀：
+        //    OggS / RIFF / MP4(`ftyp`) / ADTS-AAC(0xFF Fx) 都是自描述容器。
+        if data.prefix(4) == oggMagic || data.prefix(4) == riffMagic {
+            let url = try writeReady(data, name: name)
+            return .ready(url, .alreadyPlain)
+        }
+        // MP4/M4A: bytes 4…8 == "ftyp"
+        if data.count > 8, data.subdata(in: 4..<8) == Data("ftyp".utf8) {
+            let url = try writeReady(data, name: name)
+            return .ready(url, .alreadyPlain)
+        }
+        // ADTS AAC (.aac / 固件改用裸 AAC 流时)
+        if data.count > 2, data[data.startIndex] == 0xFF,
+           (data[data.index(after: data.startIndex)] & 0xF6) == 0xF0 {
             let url = try writeReady(data, name: name)
             return .ready(url, .alreadyPlain)
         }
 
-        // 3: anything else .opus → assume raw OPUS frames; wrap
+        // 3: bare OPUS frames → wrap. 只有 .opus 后缀才做这个假设；
+        //    其它后缀的未知内容宁可留 raw（保持旧行为），不要把垃圾包成 Ogg。
         if isOpus {
             let wrapped = OpusOgg.wrap(rawFrames: data)
             let url = try writeReady(wrapped, name: name)

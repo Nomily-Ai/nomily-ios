@@ -361,6 +361,13 @@ struct ClipDetailView: View {
             languages.fetchTargetLanguagesIfNeeded()
             transcript = TranscriptDocument.load(for: item.name)
             chapters = ClipChapterStore.load(for: item.name)
+            // ★ 2026-11-02（用户："欢迎来到 Nomily AI 点击进去来源没内容需要直接跳转到
+            //   笔记有内容的页面，如何使用 Nomily AI 也是"）：纯文档片段（示例里的欢迎信、
+            //   使用指南）没有音频也没有转写，「来源」那一页就是空白——默认落「笔记」，
+            //   那里才是这类片段的全部内容。有音频的片段维持原行为（来源里就是播放器）。
+            if !item.hasAudio, transcript == nil, detailTab == .source {
+                detailTab = .notes
+            }
             // Speaker names are a sidecar of this clip; load once per visit.
             speakerStore.load(clip: item.name)
             marks = A1MarkStore.sidecar(forClipBase: item.base)

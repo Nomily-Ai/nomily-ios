@@ -218,7 +218,7 @@ final class AppEnvironment: ObservableObject {
         if config.config.coldDataDowngradeEnabled,
            config.config.recordingQualityTier != nil {
             let cfg = config.config
-            Task { await RecordingQualityService.shared.runDowngrade(config: cfg) }
+            Task { await RecordingQualityService.shared.runDowngrade(config: cfg, library: library) }
         }
         let done = Date()
         log.notice("""

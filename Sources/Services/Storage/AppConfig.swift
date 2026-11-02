@@ -60,6 +60,10 @@ struct AppConfig: Codable, Equatable {
     var timedRecordingEnabled: Bool
     var timedRecordingStart: String
     var timedRecordingEnd: String
+    /// ★ 2026-11-02（用户："需要设置什么时间段，例如一直录，跟设置一个时间段
+    /// 录制"）：`true` = 一直录——开关打开立即命令手表开录，不分时间段，
+    /// 关掉开关才停；`false` = 按 `timedRecordingStart`/`End` 的窗口录。
+    var timedRecordingAlwaysOn: Bool
     /// ★ 2026-10-29 (饭耳移植 · 规格 §2.3): WebDAV backup destination. `nil` =
     /// not configured. The password travels through `SecretStore` (Keychain)
     /// and is stripped before `config.json` is written — see ConfigService.
@@ -193,6 +197,7 @@ struct AppConfig: Codable, Equatable {
         case timedRecordingEnabled = "timed_recording_enabled"
         case timedRecordingStart = "timed_recording_start"
         case timedRecordingEnd = "timed_recording_end"
+        case timedRecordingAlwaysOn = "timed_recording_always_on"
         case coldDataDowngradeEnabled = "cold_data_downgrade_enabled"
         case coldDataDowngradeDays = "cold_data_downgrade_days"
         case autoReconnectEnabled = "auto_reconnect_enabled"
@@ -261,6 +266,7 @@ struct AppConfig: Codable, Equatable {
         self.timedRecordingEnabled = try c.decodeIfPresent(Bool.self, forKey: .timedRecordingEnabled) ?? false
         self.timedRecordingStart = try c.decodeIfPresent(String.self, forKey: .timedRecordingStart) ?? "23:30"
         self.timedRecordingEnd = try c.decodeIfPresent(String.self, forKey: .timedRecordingEnd) ?? "07:00"
+        self.timedRecordingAlwaysOn = try c.decodeIfPresent(Bool.self, forKey: .timedRecordingAlwaysOn) ?? false
         self.coldDataDowngradeEnabled = try c.decodeIfPresent(Bool.self, forKey: .coldDataDowngradeEnabled) ?? false
         self.coldDataDowngradeDays = try c.decodeIfPresent(Int.self, forKey: .coldDataDowngradeDays) ?? 7
         self.autoReconnectEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoReconnectEnabled) ?? true
@@ -300,6 +306,7 @@ struct AppConfig: Codable, Equatable {
         timedRecordingEnabled: Bool = false,
         timedRecordingStart: String = "23:30",
         timedRecordingEnd: String = "07:00",
+        timedRecordingAlwaysOn: Bool = false,
         coldDataDowngradeEnabled: Bool = false,
         coldDataDowngradeDays: Int = 7,
         autoReconnectEnabled: Bool = true,
@@ -342,6 +349,7 @@ struct AppConfig: Codable, Equatable {
         self.timedRecordingEnabled = timedRecordingEnabled
         self.timedRecordingStart = timedRecordingStart
         self.timedRecordingEnd = timedRecordingEnd
+        self.timedRecordingAlwaysOn = timedRecordingAlwaysOn
         self.coldDataDowngradeEnabled = coldDataDowngradeEnabled
         self.coldDataDowngradeDays = coldDataDowngradeDays
         self.autoReconnectEnabled = autoReconnectEnabled
@@ -584,9 +592,14 @@ struct AppConfig: Codable, Equatable {
                 if spec.keyRequired {
                     return hasKey ? (spec.id, spec.name) : nil
                 }
-                // Ollama / Custom: a reachable address *is* the configuration.
-                let hasEndpoint = !(endpointValue(for: spec.storage) ?? "").isEmpty
-                return hasEndpoint ? (spec.id, spec.name) : nil
+                // Ollama / Custom: a *valid* endpoint is the configuration. A placeholder like
+                // "http://<局域网IP>:11434" must NOT count as configured — it used to enter the
+                // fallback chain and fail background jobs with "endpoint URL isn't valid".
+                // (★ 2026-11-02, validation shared with LLMCompletionService.configGap.)
+                guard LLMCompletionService.isValidEndpoint(endpointValue(for: spec.storage) ?? "") else {
+                    return nil
+                }
+                return (spec.id, spec.name)
             }
         }
 

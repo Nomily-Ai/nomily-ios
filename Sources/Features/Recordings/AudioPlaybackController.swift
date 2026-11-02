@@ -106,7 +106,17 @@ final class AudioPlaybackController: NSObject, ObservableObject {
                     self.item = nil
                     self.duration = 0
                     self.currentTime = 0
-                    self.loadError = L10n.ClipDetail.opusPlaybackUnsupported
+                    // ★ 2026-11-02: 之前这里无条件显示「iOS 17 才能播 Opus」——一个损坏的
+                    //   .m4a 也会看到 Opus 文案，用户被误导去升级系统。只有 Ogg/Opus 容器
+                    //   （本机解码依赖 iOS 17 的格式支持）才用那条文案；其余一律显示
+                    //   AVFoundation 给出的真实错误。
+                    let ext = url.pathExtension.lowercased()
+                    if ext == "opus" || ext == "ogg" {
+                        self.loadError = L10n.ClipDetail.opusPlaybackUnsupported
+                    } else {
+                        self.loadError = observedItem.error?.localizedDescription
+                            ?? L10n.ClipDetail.playbackFailedGeneric
+                    }
                 default:
                     break
                 }

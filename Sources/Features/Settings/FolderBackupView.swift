@@ -16,6 +16,9 @@ struct FolderBackupView: View {
     @EnvironmentObject private var configService: ConfigService
 
     @State private var showPicker = false
+    /// ★ 2026-11-02：首次使用（没选过文件夹）进页自动弹选择器——iOS 文件
+    /// 浏览器根目录默认就是 iCloud 云盘，选一次即成默认云备份路径。
+    @State private var autoOpenedPicker = false
 
     var body: some View {
         Form {
@@ -24,6 +27,8 @@ struct FolderBackupView: View {
                     showPicker = true
                 } label: {
                     HStack {
+                        Image(systemName: "folder")
+                            .foregroundStyle(Color.blue.gradient)
                         Text(L10n.FolderExport.pickFolder)
                         Spacer()
                         if let name = exporter.folderName {
@@ -34,6 +39,15 @@ struct FolderBackupView: View {
                     }
                 }
                 if exporter.hasFolder {
+                    // ★ 2026-11-02（用户："展示占用内存"）：目的地文件夹的
+                    // 文件数 + 总占用，进页/导出后自动刷新。
+                    if let usage = exporter.usageText {
+                        LabeledContent(L10n.FolderExport.usage) {
+                            Text(usage)
+                                .font(.footnote.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     Button(role: .destructive) {
                         exporter.clear()
                     } label: {
@@ -43,7 +57,12 @@ struct FolderBackupView: View {
             } header: {
                 Text(L10n.FolderExport.destination)
             } footer: {
-                Text(L10n.FolderExport.pickFooter)
+                // ★ 2026-11-02：iCloud 引导（免签名方案——文件浏览器的根目录
+                // 默认就是 iCloud 云盘，选一次即可全自动云同步）。
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.FolderExport.icloudHint)
+                    Text(L10n.FolderExport.pickFooter)
+                }
             }
 
             // ★ 2026-10-30：自动备份。放在目的地之后、手动导出之前——这是
@@ -86,6 +105,19 @@ struct FolderBackupView: View {
         }
         .navigationTitle(L10n.FolderExport.title)
         .navigationBarTitleDisplayMode(.inline)
+        // ★ 2026-11-02：进页统计占用；首次使用自动弹选择器。
+        .task {
+            exporter.refreshUsage()
+            if !exporter.hasFolder, !autoOpenedPicker {
+                autoOpenedPicker = true
+                showPicker = true
+            }
+        }
+        .refreshable { exporter.refreshUsage() }
+        .onChange(of: exporter.lastReport) { _ in
+            // 手动导出跑完顺手刷新占用。
+            exporter.refreshUsage()
+        }
         .fileImporter(
             isPresented: $showPicker,
             allowedContentTypes: [.folder],

@@ -574,7 +574,129 @@ enum L10n {
         static var theme: String {
             NSLocalizedString("settings.theme", value: "Theme", comment: "Colour theme row")
         }
+        /// ★ 2026-11-02: replays the first-launch onboarding walkthrough.
+        static var usageGuide: String {
+            NSLocalizedString("settings.usage_guide", value: "Usage guide",
+                              comment: "Settings row: replay the first-launch walkthrough")
+        }
+        /// ★ 2026-11-02（用户："开屏的欢迎页我如何才能再次体验"）：该行的副标题，
+        /// 明确它同时重播欢迎页。
+        static var usageGuideDetail: String {
+            NSLocalizedString("settings.usage_guide_detail", value: "Replay the welcome screen and the tour",
+                              comment: "Settings row subtitle: replays the welcome sheet as well")
+        }
     }
+
+    // MARK: - First-run guide (★ 2026-11-02, 流程式)
+
+    /// ★ 2026-11-02（用户："首次用户使用需要弹出用户引导…会展示三条示例介绍需要跟随
+    /// 当前语言切换进行切换"）：首启欢迎页——介绍三条示例，再交给流程式引导。
+    /// ★ 同日补充（用户："这个开屏需要跟随手机系统的语言进行设置"）：这一整套文案
+    /// **跟手机系统语言**、不跟 App 内语言选择——开屏发生在用户做任何选择之前。
+    enum Welcome {
+        // ★ 全部走 `Bundle.systemString`（系统语言），不走 `NSLocalizedString`——
+        //   开屏要跟手机系统语言，见 `Bundle.systemLanguage` 的说明。
+        static var title: String {
+            Bundle.systemString("welcome.title", value: "Welcome to Nomily")
+        }
+        static var subtitle: String {
+            Bundle.systemString("welcome.subtitle",
+                                value: "Your pocket AI recorder — recording, transcription, AI summaries and cloud backup in one place.")
+        }
+        static var samplesHeader: String {
+            Bundle.systemString("welcome.samples_header", value: "Three samples are already in your library")
+        }
+        static var sampleGuideTitle: String {
+            Bundle.systemString("welcome.sample_guide_title", value: "How to use Nomily AI")
+        }
+        static var sampleGuideBody: String {
+            Bundle.systemString("welcome.sample_guide_body", value: "Three steps: record → transcribe → organise")
+        }
+        static var sampleWelcomeTitle: String {
+            Bundle.systemString("welcome.sample_welcome_title", value: "Welcome to Nomily AI")
+        }
+        static var sampleWelcomeBody: String {
+            Bundle.systemString("welcome.sample_welcome_body", value: "Read this first — what Nomily can do for you")
+        }
+        static var sampleMeetingTitle: String {
+            Bundle.systemString("welcome.sample_meeting_title", value: "Product Weekly (sample)")
+        }
+        static var sampleMeetingBody: String {
+            Bundle.systemString("welcome.sample_meeting_body",
+                                value: "A full sample recording: transcript, summary, action items and outline")
+        }
+        static var footer: String {
+            Bundle.systemString("welcome.footer",
+                                value: "You can replay the walkthrough anytime from Settings → Usage guide.")
+        }
+        static var start: String {
+            Bundle.systemString("welcome.start", value: "Get started")
+        }
+    }
+
+    /// 流程式首用引导：卡片浮在真实页面上（见 FirstRunGuide.swift），
+    /// 整页式 onboarding 已按用户要求移除。
+    enum Guide {
+        static var stepOf: String {
+            NSLocalizedString("guide.step_of", value: "Step %d of %d", comment: "Guide card: step counter, args = current, total")
+        }
+        static var skip: String {
+            NSLocalizedString("guide.skip", value: "Skip tour", comment: "Guide card: leave the whole tour")
+        }
+        static var next: String {
+            NSLocalizedString("guide.next", value: "Next", comment: "Guide card: advance button (no primary action on this step)")
+        }
+        static var later: String {
+            NSLocalizedString("guide.later", value: "Got it — next", comment: "Guide card: advance button when the step has a primary action")
+        }
+        static var actionConnect: String {
+            NSLocalizedString("guide.action.connect", value: "Connect a device", comment: "Guide step 1 primary button: opens the scanner")
+        }
+        static var actionGo: String {
+            NSLocalizedString("guide.action.go", value: "Take me there", comment: "Guide card primary button: deep-links into the module")
+        }
+        static var titleConnect: String {
+            NSLocalizedString("guide.title.connect", value: "Connect a recorder", comment: "")
+        }
+        static var bodyConnect: String {
+            NSLocalizedString("guide.body.connect",
+                              value: "Tap the device dot in the top-left corner to scan for your recorder bean or card — or just record with the iPhone microphone.",
+                              comment: "")
+        }
+        static var titleLive: String {
+            NSLocalizedString("guide.title.live", value: "Live transcription", comment: "")
+        }
+        static var bodyLive: String {
+            NSLocalizedString("guide.body.live",
+                              value: "The Live tab turns speech into captions in real time — open it from the bottom tab bar whenever you need it.",
+                              comment: "")
+        }
+        static var titleASR: String {
+            NSLocalizedString("guide.title.asr", value: "Set up transcription", comment: "")
+        }
+        static var bodyASR: String {
+            NSLocalizedString("guide.body.asr",
+                              value: "Transcription uses your own API key. Pick a vendor — every sheet has a get-the-key guide with a direct console link.",
+                              comment: "")
+        }
+        static var titleLLM: String {
+            NSLocalizedString("guide.title.llm", value: "Set up AI summaries", comment: "")
+        }
+        static var bodyLLM: String {
+            NSLocalizedString("guide.body.llm",
+                              value: "Summaries are written by an AI model you choose. Pick one and paste its key — the signup link is right in the form.",
+                              comment: "")
+        }
+        static var titleBackup: String {
+            NSLocalizedString("guide.title.backup", value: "Back up to your cloud", comment: "")
+        }
+        static var bodyBackup: String {
+            NSLocalizedString("guide.body.backup",
+                              value: "Recording & Transcription → WebDAV backup: transcripts upload themselves to Nutstore, Nextcloud or any WebDAV drive, one folder per recording.",
+                              comment: "")
+        }
+    }
+
 
     // MARK: - Theme
 
@@ -1240,6 +1362,8 @@ enum L10n {
         // calling both "local" made the settings page unreadable. The label says the device, the
         // footer says what it costs (nothing) and what it can't do (no translation stream).
         static var onDevice: String { NSLocalizedString("asr.on_device", comment: "") }
+        // ★ 2026-11-02：SenseVoice 本机模型（下载后可作转写引擎）。
+        static var senseVoice: String { NSLocalizedString("asr.sensevoice", comment: "") }
         static var onDeviceFooter: String { NSLocalizedString("asr.on_device_footer", comment: "") }
         static var onDeviceUnauthorized: String { NSLocalizedString("asr.on_device_unauthorized", comment: "") }
         /// Build-time misconfiguration, not a user-facing preference — see
@@ -1598,6 +1722,13 @@ enum L10n {
             NSLocalizedString("llm.error.empty", value: "The model returned nothing.",
                               comment: "LLM error: 200 OK but empty text")
         }
+        /// ★ 2026-11-02: reasoning model spent the whole output budget on thinking —
+        /// no answer body was written. Never show the raw thinking as the result.
+        static var errorReasoningNoContent: String {
+            NSLocalizedString("llm.error.reasoning_no_content",
+                              value: "This model spent its whole output budget on thinking and wrote no answer — try again, or switch to a non-reasoning model in Settings.",
+                              comment: "LLM error: reasoning_content present but content empty")
+        }
         /// The entire chain failed. **List the reason for every channel** — reporting only the last one would
         /// send users digging into the fallback channel (local Ollama) when the real culprit is the missing key on the first channel.
         static func errorAllProvidersFailed(_ detail: String) -> String {
@@ -1798,6 +1929,12 @@ enum L10n {
         static var noKeySignup: String {
             NSLocalizedString("llm.no_key_signup", value: "No key yet? Sign up", comment: "Direct link to the provider's key-signup page, shown while the key field is empty")
         }
+        /// ★ 2026-11-02: the same link, relabelled once a key exists — the console is
+        /// where you renew, rotate and inspect usage, so the door shouldn't close.
+        static var consoleManage: String {
+            NSLocalizedString("llm.console_manage", value: "Manage keys in the console",
+                              comment: "Direct link to the provider's key page, shown when a key is already set")
+        }
         static var gridTitle: String {
             NSLocalizedString("llm.grid.title", value: "Providers",
                               comment: "Section header for the single provider list (no domestic/overseas split)")
@@ -1995,6 +2132,22 @@ enum L10n {
                               value: "Wired into transcription: audio is staged in your own OSS bucket (private), a 2-hour presigned link is handed to Aliyun, and the result is fetched back. Nothing is kept afterwards.",
                               comment: "Scope note on the Aliyun sheet: what transcription through this vendor actually does")
         }
+        /// ★ 2026-11-02: tappable console door on every ASR cloud sheet — the footer
+        /// text says *where* to go, this is the actual link to open.
+        static var openConsole: String {
+            NSLocalizedString("asr.cloud.open_console", value: "Open the console to get a key",
+                              comment: "Link row above the credential fields: opens the vendor's key/console page")
+        }
+        /// Capability chip in the price line ("≈ ¥0.3/hour · speaker separation").
+        static var diarization: String {
+            NSLocalizedString("asr.cloud.diarization", value: "speaker separation",
+                              comment: "Meta line chip: the vendor supports speaker diarization")
+        }
+        /// Prefix before the verdict chip ("Verdict: Recommended · best for Chinese").
+        static var recommendationPrefix: String {
+            NSLocalizedString("asr.cloud.recommendation_prefix", value: "Verdict: %@",
+                              comment: "Prefix before the vendor verdict; %@ is the verdict itself")
+        }
         static func field(_ id: String, fallback: String) -> String {
             NSLocalizedString("asr.cloud.field.\(id)", value: fallback, comment: "Credential field label")
         }
@@ -2049,9 +2202,81 @@ enum L10n {
         /// ★ 2026-10-30：stop 命令已发出。
         static var watchStopped: String { NSLocalizedString("timed.watch_stopped", comment: "") }
         static var recording: String { NSLocalizedString("timed.recording", comment: "") }
+        // ★ 2026-11-02（用户："例如一直录，跟设置一个时间段录制"）：模式选择。
+        static var modeAlways: String { NSLocalizedString("timed.mode_always", comment: "") }
+        static var modeWindow: String { NSLocalizedString("timed.mode_window", comment: "") }
+        static var modeRow: String { NSLocalizedString("timed.mode_row", comment: "") }
+        static var recordingAlwaysOn: String { NSLocalizedString("timed.recording_always_on", comment: "") }
         static var missedTitle: String { NSLocalizedString("timed.missed_title", comment: "") }
         static var missedBody: String { NSLocalizedString("timed.missed_body", comment: "") }
         static var footer: String { NSLocalizedString("timed.footer", comment: "") }
+    }
+
+    // ★ 2026-11-02（用户："应该是数据与存储位置，保存路径是这台 iPhone 或者
+    // iCloud，然后才是 NAS，然后就是文件夹 app"）：存储落点总枢纽页文案。
+    enum StorageLocations {
+        static var title: String { NSLocalizedString("storage.locations.title", comment: "") }
+        static var sectionHeader: String { NSLocalizedString("storage.locations.header", comment: "") }
+        static var iphone: String { NSLocalizedString("storage.locations.iphone", comment: "") }
+        static var iphoneDesc: String { NSLocalizedString("storage.locations.iphone_desc", comment: "") }
+        static var icloud: String { NSLocalizedString("storage.locations.icloud", comment: "") }
+        static var icloudDesc: String { NSLocalizedString("storage.locations.icloud_desc", comment: "") }
+        static var nas: String { NSLocalizedString("storage.locations.nas", comment: "") }
+        static var nasDesc: String { NSLocalizedString("storage.locations.nas_desc", comment: "") }
+        static var folder: String { NSLocalizedString("storage.locations.folder", comment: "") }
+        static var folderDesc: String { NSLocalizedString("storage.locations.folder_desc", comment: "") }
+        static var footer: String { NSLocalizedString("storage.locations.footer", comment: "") }
+    }
+
+    // ★ 2026-11-02（用户："增加一个下载使用 SenseVoice 的语音转文字的下载"）：
+    // SenseVoice 本机模型管理页文案。
+    enum SenseVoice {
+        static var title: String { NSLocalizedString("sensevoice.title", comment: "") }
+        static var name: String { NSLocalizedString("sensevoice.name", comment: "") }
+        static var desc: String { NSLocalizedString("sensevoice.desc", comment: "") }
+        static var footer: String { NSLocalizedString("sensevoice.footer", comment: "") }
+        static var sectionHeader: String { NSLocalizedString("sensevoice.section_header", comment: "") }
+        static var sectionFooter: String { NSLocalizedString("sensevoice.section_footer", comment: "") }
+        static var manageHeader: String { NSLocalizedString("sensevoice.manage_header", comment: "") }
+        /// ★ 2026-11-02：手工导入（隔空投送 / 文件 App），镜像全被挡时的兜底。
+        static var importModel: String { NSLocalizedString("sensevoice.import_model", comment: "") }
+        static var importHint: String { NSLocalizedString("sensevoice.import_hint", comment: "") }
+        static var importIncomplete: String { NSLocalizedString("sensevoice.import_incomplete", comment: "") }
+        static var download: String { NSLocalizedString("sensevoice.download", comment: "") }
+        static var sizeHint: String { NSLocalizedString("sensevoice.size_hint", comment: "") }
+        static var downloading: String { NSLocalizedString("sensevoice.downloading", comment: "") }
+        static var downloadingHint: String { NSLocalizedString("sensevoice.downloading_hint", comment: "") }
+        static var statusRow: String { NSLocalizedString("sensevoice.status_row", comment: "") }
+        static func ready(_ size: String) -> String {
+            String(format: NSLocalizedString("sensevoice.ready", comment: ""), size)
+        }
+        static var readyShort: String { NSLocalizedString("sensevoice.ready_short", comment: "") }
+        static var deleteModel: String { NSLocalizedString("sensevoice.delete", comment: "") }
+        static var failed: String { NSLocalizedString("sensevoice.failed", comment: "") }
+        static var failedShort: String { NSLocalizedString("sensevoice.failed_short", comment: "") }
+        static var retry: String { NSLocalizedString("sensevoice.retry", comment: "") }
+        static var notDownloaded: String { NSLocalizedString("sensevoice.not_downloaded", comment: "") }
+    }
+
+    // ★ 2026-11-02（用户："不会获取 APIkey……新增一个不会开通？复制提示词
+    // 跟粘贴结果，参考饭耳的这个快引导"）：Key 快引导页文案。
+    enum KeyWizard {
+        static var title: String { NSLocalizedString("keywizard.title", comment: "") }
+        static var intro: String { NSLocalizedString("keywizard.intro", comment: "") }
+        static var step1: String { NSLocalizedString("keywizard.step1", comment: "") }
+        static var step2: String { NSLocalizedString("keywizard.step2", comment: "") }
+        static var copyPrompt: String { NSLocalizedString("keywizard.copy_prompt", comment: "") }
+        static var copied: String { NSLocalizedString("keywizard.copied", comment: "") }
+        static var apply: String { NSLocalizedString("keywizard.apply", comment: "") }
+        static var notFound: String { NSLocalizedString("keywizard.not_found", comment: "") }
+        static var unknownField: String { NSLocalizedString("keywizard.unknown_field", comment: "") }
+        static var footer: String { NSLocalizedString("keywizard.footer", comment: "") }
+        static var openWizard: String { NSLocalizedString("keywizard.open", comment: "") }
+        static var promptHead: String { NSLocalizedString("keywizard.prompt.head", comment: "") }
+        static var promptConsole: String { NSLocalizedString("keywizard.prompt.console", comment: "") }
+        static var promptSingle: String { NSLocalizedString("keywizard.prompt.single", comment: "") }
+        static var promptMulti: String { NSLocalizedString("keywizard.prompt.multi", comment: "") }
+        static var promptTail: String { NSLocalizedString("keywizard.prompt.tail", comment: "") }
     }
 
     // ★ 2026-10-29 (饭耳移植 · 规格 §2.3 文件 App 导出路线)
@@ -2062,6 +2287,22 @@ enum L10n {
         static var noFolder: String { NSLocalizedString("folder.none", comment: "") }
         static var clearFolder: String { NSLocalizedString("folder.clear", comment: "") }
         static var pickFooter: String { NSLocalizedString("folder.pick_footer", comment: "") }
+        // ★ 2026-11-02：iCloud 指引（免签名方案）+ 占用统计。
+        static var icloudHint: String {
+            NSLocalizedString("folder.icloud_hint",
+                              value: "Recommended: pick a folder in iCloud Drive (the picker opens there by default) — everything written is cloud-synced automatically, and follows your Apple ID to a new phone.",
+                              comment: "Footer hint above the picker footer: why iCloud")
+        }
+        static var usage: String {
+            NSLocalizedString("folder.usage", value: "Space used", comment: "LabeledContent title: folder usage stats")
+        }
+        static var usageEmpty: String {
+            NSLocalizedString("folder.usage.empty", value: "Empty", comment: "Usage row: no files in the folder yet")
+        }
+        static var usageFormat: String {
+            NSLocalizedString("folder.usage.format", value: "%@ · %d files",
+                              comment: "Usage row: args = total size, file count")
+        }
         static var syncAudio: String { NSLocalizedString("folder.sync_audio", comment: "") }
         static var syncAudioFooter: String { NSLocalizedString("folder.sync_audio_footer", comment: "") }
         static var exportNow: String { NSLocalizedString("folder.export_now", comment: "") }
@@ -2103,6 +2344,13 @@ enum L10n {
     // ★ 2026-10-29 (饭耳移植 · 规格 §2.3 WebDAV 存储分层)
     enum WebDAV {
         static var title: String { NSLocalizedString("webdav.title", comment: "") }
+        // ★ 2026-11-02（用户："需要增加引导如何获取对应的账号密码而不是登录密码"）：
+        // 连接区页脚的凭据引导。
+        static var credentialGuide: String {
+            NSLocalizedString("webdav.credential_guide",
+                              value: "Username & password here are the WebDAV service credentials: on Synology/QNAP/UGREEN/fnOS they are the same as your NAS account (after WebDAV is enabled); for Nutstore and Nextcloud you MUST create an app password in their web settings — the login password gets rejected.",
+                              comment: "Footer guide above the preset hint: where the WebDAV username/password come from")
+        }
         static var preset: String { NSLocalizedString("webdav.preset", comment: "") }
         static var presetUnpicked: String { NSLocalizedString("webdav.preset_unpicked", comment: "") }
         static var serverType: String { NSLocalizedString("webdav.server_type", comment: "") }
@@ -2180,6 +2428,8 @@ enum L10n {
         }
         // ★ 2026-10-29 (饭耳移植 · 规格 §2.2 试听)
         static var auditionLoad: String { NSLocalizedString("rec_settings.audition_load", comment: "") }
+        /// ★ 2026-11-02：试听池只收手表录音，一段都没有时给一句提示。
+        static var auditionEmpty: String { NSLocalizedString("rec_settings.audition_empty", comment: "") }
         static var auditionOriginal: String { NSLocalizedString("rec_settings.audition_original", comment: "") }
         static var auditionTier: String { NSLocalizedString("rec_settings.audition_tier", comment: "") }
         static func auditionClipLabel(_ name: String) -> String {
@@ -2797,6 +3047,34 @@ enum L10n {
                 count
             )
         }
+        // ★ 2026-11-02（用户："手表的整体风格朝着这个看起…他这个里面的内容你也可以加入进来"）：
+        //   首页按 `nomily-watch-v3-blink.html` 重做——顶栏时钟、LISTENING 呼吸点、
+        //   大号细体计时、以及新增的「最近 / 同步」两页。
+        /// 「最近」页的标题（原型里的 `Recent`）。
+        static var recent: String { NSLocalizedString("watch.recent", comment: "") }
+        static var recentEmpty: String { NSLocalizedString("watch.recent_empty", comment: "") }
+        static var syncToPhone: String { NSLocalizedString("watch.sync_to_phone", comment: "") }
+        /// 大数字旁边那个**不带数字**的单位词（原型：「1 项待传」）——
+        /// `pendingCount` 是"整句带数字"，这里大号数字单独排版，所以要拆开。
+        static var pendingUnit: String { NSLocalizedString("watch.pending_unit", comment: "") }
+        static var phoneLabel: String { NSLocalizedString("watch.phone_label", comment: "") }
+        static var phoneNear: String { NSLocalizedString("watch.phone_near", comment: "") }
+        static var phoneFar: String { NSLocalizedString("watch.phone_far", comment: "") }
+        static var storageLabel: String { NSLocalizedString("watch.storage_label", comment: "") }
+        static func storageFree(_ value: String) -> String {
+            String(format: NSLocalizedString("watch.storage_free", comment: ""), value)
+        }
+        static var syncNow: String { NSLocalizedString("watch.sync_now", comment: "") }
+        static var syncing: String { NSLocalizedString("watch.syncing", comment: "") }
+        /// 录音中的呼吸标签。英文约定俗成全大写，中文也照原样保留——它是"状态灯"，不是句子。
+        static var listening: String { NSLocalizedString("watch.listening", comment: "") }
+        /// 停止录音、睁眼之前闪一下的那个词（原型里的大写字距标题）。
+        static var saved: String { NSLocalizedString("watch.saved", comment: "") }
+        static func pointsCount(_ count: Int) -> String {
+            String(format: NSLocalizedString("watch.points_count", comment: ""), count)
+        }
+        static var menuHeader: String { NSLocalizedString("watch.menu_header", comment: "") }
+
         /// The "shake to start recording" toggle in Settings.
         static var shakeToRecord: String {
             NSLocalizedString("watch.shake_to_record", value: "Shake to Record",
@@ -3766,6 +4044,8 @@ enum L10n {
 
     enum ClipDetail {
         static var opusPlaybackUnsupported: String { NSLocalizedString("clip_detail.opus_playback_unsupported", value: "This system version can't play Opus recordings — playback needs iOS 17 or later. Transcription is unaffected. To listen now, share the file out via AirDrop or the Files app.", comment: "Shown in the player when an Opus clip can't be played on iOS 16") }
+        /// ★ 2026-11-02: 非 Opus 容器播放失败时的真实错误兜底（此前一律误报 Opus 文案）。
+        static var playbackFailedGeneric: String { NSLocalizedString("clip_detail.playback_failed_generic", value: "This audio file can't be played — the recording may be damaged or in an unsupported format. Transcription may still work.", comment: "Shown in the player when a non-Opus clip fails to load") }
         static var transcript: String { NSLocalizedString("clip_detail.transcript", comment: "") }
 
         // MARK: Outline (★ 2026-10-23, "录音来源里面还有大纲总结")

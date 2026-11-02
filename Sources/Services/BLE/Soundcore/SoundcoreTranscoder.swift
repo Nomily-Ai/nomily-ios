@@ -69,9 +69,39 @@ enum SoundcoreTranscoder {
         }
         let frames = splitFrames(raw)
         guard !frames.isEmpty else { return nil }
+        return transcode(frames: frames, preskipAt48k: preskipAt48k)
+    }
+
+    /// ★ 2026-11-02（用户："当前系统版本无法播放 opus 录音"）：通用帧流入口——
+    /// 录音卡片（A1 等）的裸 20 ms Opus 帧也走同一条解码链，落盘即转 m4a，
+    /// 不再依赖 iOS 17 的 Ogg 解码器（iOS 16 / Ogg 解析失败的组合全都可播）。
+    /// 帧长必须是 80 B（单声道解码）或 160 B（双声道解码整包吃下）。
+    /// `preskipAt48k`：源头在 OpusHead 里声明的 pre-skip（A1 为 0，豆 3840）。
+    static func transcode(packets: [Data], preskipAt48k: Int = 0) -> Output? {
+        guard let first = packets.first, !first.isEmpty else { return nil }
+        return transcode(frames: packets, preskipAt48k: preskipAt48k)
+    }
+
+    /// 共同核心：定长 Opus 帧序列 → PCM → AAC/m4a（WAV 兜底）。
+    private static func transcode(frames: [Data], preskipAt48k: Int) -> Output? {
+        // `JXOpusDecoder` 按 **80 B × 声道数**切包（头文件原文）。帧长决定声道
+        // 口径：160 B → 声道 2 整包吃下（解完降混），80 B → 声道 1。
+        let frameBytes = frames[0].count
+        let channels: Int
+        switch frameBytes {
+        case 160: channels = 2
+        case 80:  channels = 1
+        default:
+            transcodeLog.warning("transcode skipped: unusual frame size \(frameBytes, privacy: .public)B")
+            return nil
+        }
+        guard frames.allSatisfy({ $0.count == frameBytes }) else {
+            transcodeLog.warning("transcode skipped: mixed frame sizes (\(frameBytes, privacy: .public)B first)")
+            return nil
+        }
 
         // ① 探测：一次性解码器试解几帧，拿每帧样本数 → 反推采样率。
-        guard let probed = probe(frames) else {
+        guard let probed = probe(frames, channels: channels) else {
             transcodeLog.warning("transcode aborted: JXOpusDecoder produced no PCM for probe frames")
             return nil
         }
@@ -84,7 +114,7 @@ enum SoundcoreTranscoder {
             transcodeLog.warning("transcode aborted: no writable container")
             return nil
         }
-        let decoder = JXOpusDecoder(channels: 2)
+        let decoder = JXOpusDecoder(channels: Int32(channels))
 
         var pending = Data()
         var skipBytes = preskipSamples * 2
@@ -98,7 +128,7 @@ enum SoundcoreTranscoder {
                     return
                 }
                 // 双声道解码器 + 单声道包 → 输出交织立体声，降混回单声道。
-                var chunk = downmixToMono(block)
+                var chunk = channels == 2 ? downmixToMono(block) : block
                 if skipBytes > 0 {
                     if chunk.count <= skipBytes {
                         skipBytes -= chunk.count
@@ -150,8 +180,8 @@ enum SoundcoreTranscoder {
             fileExtension: sink.fileExtension,
             durationSeconds: duration,
             formatNote: sink.fileExtension == "m4a"
-                ? "AAC mono \(rateLabel) (D3200 · Opus 转码，iOS 16 可播)"
-                : "WAV mono \(rateLabel) (D3200 · Opus 解码，AAC 封装失败时兜底)"
+                ? "AAC mono \(rateLabel) (Opus 转码，iOS 16 可播)"
+                : "WAV mono \(rateLabel) (Opus 解码，AAC 封装失败时兜底)"
         )
     }
 
@@ -181,12 +211,12 @@ enum SoundcoreTranscoder {
     /// 单声道 → 必须 `channels: 2` 才能整包喂进去；libopus 对"单声道包 +
     /// 双声道解码器"是宽容的（复制成双声道），解完降混回单声道。若其内部
     /// 采样率是 48 kHz 输出完全正确；若是 16 kHz，声音闷但时长/音高正确。
-    private static func probe(_ frames: [Data]) -> (samplesPerFrame: Int, rate: Double)? {
-        let decoder = JXOpusDecoder(channels: 2)
+    private static func probe(_ frames: [Data], channels: Int) -> (samplesPerFrame: Int, rate: Double)? {
+        let decoder = JXOpusDecoder(channels: Int32(channels))
         let limit = min(frames.count, 24)
         for i in 0..<limit {
             if let block = decoder.decode(frames[i]), block.count >= 4 {
-                let samples = block.count / 4 // 2 声道 × Int16
+                let samples = block.count / (2 * channels) // 声道数 × Int16
                 let rate = Double(samples * framesPerSecond)
                 // Opus 合法输出只有这几档，别把解坏的字节当成 7 kHz 之类。
                 let known: [Double] = [8_000, 12_000, 16_000, 24_000, 48_000]

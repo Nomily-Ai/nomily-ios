@@ -98,7 +98,26 @@ struct LLMProviderSpec: Identifiable, Equatable {
         case "qwen":       return "BrandQwen"
         case "deepseek":   return "BrandDeepSeek"
         case "doubao":     return "BrandDoubao"
+        // ★ 2026-11-02（用户："模型都要按照当前 Apple store 的 app 图标来"）：
+        // Kimi / 智谱 / MiniMax 补上官方 App 图标资产。
+        case "kimi":       return "BrandKimi"
+        case "zhipu":      return "BrandZhipu"
+        case "minimax":    return "BrandMinimax"
         default:           return nil
+        }
+    }
+
+    /// ★ 2026-11-02（用户："模型图标要按照 Apple Store 的 app 图标，不要简约的"）：
+    /// 这批厂商的 `brandAsset` 已经换成 **App Store 官方 App 图标的彩色位图**
+    /// （iTunes Search API 抓的 artwork，渲染时不能再套 template/白色）。
+    /// 没有消费级 App 的厂商（openRouter / ollama / custom）仍走单色瓦片。
+    var usesAppStoreIcon: Bool {
+        switch id {
+        case "openai", "claude", "gemini", "deepseek", "doubao",
+             "qwen", "kimi", "zhipu", "minimax":
+            return true
+        default:
+            return false
         }
     }
 
@@ -136,6 +155,18 @@ struct LLMProviderSpec: Identifiable, Equatable {
     ]
 
     static func find(_ id: String) -> LLMProviderSpec? { all.first { $0.id == id } }
+
+    // MARK: Localized display strings（★ 2026-11-02，用户："好多中文的都没翻译过来"）
+
+    /// 英文 UI 从 en.lproj 读 `llm.<id>.*` 键，缺失时回落到这里的值。
+    /// console 多为拉丁字符 URL，只有 note 需要真正翻译。
+    var localizedName: String { NSLocalizedString("llm.\(id).name", value: name, comment: "") }
+    var localizedConsole: String? {
+        console.map { NSLocalizedString("llm.\(id).console", value: $0, comment: "") }
+    }
+    var localizedNote: String? {
+        note.map { NSLocalizedString("llm.\(id).note", value: $0, comment: "") }
+    }
 
     static let chatgpt = LLMProviderSpec(
         id: "openai",

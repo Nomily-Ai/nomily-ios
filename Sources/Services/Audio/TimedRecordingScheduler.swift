@@ -75,6 +75,33 @@ final class TimedRecordingScheduler: ObservableObject {
             isTimedRecording = false
             return
         }
+
+        // ★ 2026-11-02（用户："例如一直录，跟设置一个时间段录制"）：一直录
+        // 模式不分窗口——开开关立即开录，关开关才停。兜底 endsAt 顺延到
+        // +24h：手表到点自己停后，心跳发现表端没在录且已超 24h，重发 start，
+        // 形成"只要开关开着就持续在录"的滚动续期。
+        if cfg.timedRecordingAlwaysOn {
+            if startIssuedAt == nil {
+                issueStart(endsAt: Date().addingTimeInterval(86_400))
+                return
+            }
+            if watch?.isWatchRecording == true {
+                isTimedRecording = true
+                lastNotice = L10n.TimedRecording.recordingAlwaysOn
+            } else if let issued = startIssuedAt {
+                if Date().timeIntervalSince(issued) > 86_400 + 300 {
+                    // 上一次的兜底停点过了——重开一轮。
+                    startIssuedAt = nil
+                } else if Date().timeIntervalSince(issued) > 120,
+                          missNotifiedFor != issued {
+                    missNotifiedFor = issued
+                    lastNotice = L10n.TimedRecording.watchNotRecording
+                    notifyStartMissed()
+                }
+            }
+            return
+        }
+
         guard Self.inWindow(start: cfg.timedRecordingStart, end: cfg.timedRecordingEnd, at: Date()) else {
             if startIssuedAt != nil {
                 issueStop(reason: "window ended")
