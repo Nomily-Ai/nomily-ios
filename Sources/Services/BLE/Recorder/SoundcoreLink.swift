@@ -275,6 +275,9 @@ final class SoundcoreLink: NSObject, RecorderLink {
 
     var pushedBatteryPercent: Int? { client.pushedBatteryPercent }
 
+    /// ★ 2026-11-02（对齐规格书 §5.2）：`01 03` 推送第二字节——充电盒电量。
+    var pushedCaseBatteryPercent: Int? { client.pushedCaseBatteryPercent }
+
     var pushedChargingState: Bool? { client.pushedCharging }
 
     /// ★ 2026-10-30（用户："把后台划了，重新打开录音时长就是重新开始计算了"）：

@@ -48,12 +48,19 @@ enum SoundcoreRecorderSpec: RecorderProtocolSpec {
         // iOS manufacturer data = companyId (u16 LE) ‖ payload; the Kotlin
         // matcher operates on the payload **after** the company id.
         var macFromMfg: Data = Data()
+        // ★ 2026-11-02（对齐规格书 §2.2，审计 G3）：byte 6 = 标志位——
+        // `&0x80` 绑定位（豆已在飞书 App 里绑定过）。纯展示用，**绝不**触碰
+        // 绑定命令（红线 §5.1 `0B 87`）。
+        var boundFromMfg: Bool?
         if let mfg = manufacturerData, mfg.count > 2 {
             let payload = mfg.dropFirst(2)
             let hex = payload.map { String(format: "%02x", $0) }.joined()
             if hex.contains("f5da") || hex.contains("020cf5") { familyHit = true }
             if payload.count >= 6 && macFromMfg.isEmpty {
                 macFromMfg = payload.prefix(6)
+            }
+            if payload.count >= 7 {
+                boundFromMfg = (payload[payload.index(payload.startIndex, offsetBy: 6)] & 0x80) != 0
             }
             if payload.count >= 14 {
                 // Bytes 8–13 may spell ASCII `soundc` (lot filter in the SDK).
@@ -69,6 +76,8 @@ enum SoundcoreRecorderSpec: RecorderProtocolSpec {
 
         let identity = macFromMfg.isEmpty ? Data(name.utf8) : macFromMfg
         let friendly = friendlyName(localName: name, isD3200: isD3200, mac: macFromMfg)
+        var raw: [String: AnyHashable] = ["localName": name]
+        if let bound = boundFromMfg { raw["bound"] = bound }
         return RecorderAdvertisement(
             protocolID: identifier,
             family: friendly,
@@ -78,7 +87,7 @@ enum SoundcoreRecorderSpec: RecorderProtocolSpec {
             battery: nil,
             powerState: nil,
             identity: identity,
-            raw: ["localName": name]
+            raw: raw
         )
     }
 

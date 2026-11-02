@@ -834,6 +834,7 @@
 "scanner.section_available" = "可添加";
 "scanner.section_added" = "已添加的设备";
 "scanner.added_badge" = "已添加";
+"scanner.soundcore_bound_badge" = "已绑定";
 "asr.no_provider_configured" = "尚未配置语音识别服务，请在设置中添加。";
 "asr.all_providers_unreachable" = "配置的语音识别服务都连不上。";
 "asr.azure_required_for_translation" = "实时翻译需要 Azure，请在设置中填写 Azure 密钥和区域。";
