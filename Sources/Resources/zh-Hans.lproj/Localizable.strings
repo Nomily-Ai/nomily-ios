@@ -1835,7 +1835,7 @@
 "webdav.username" = "用户名";
 "webdav.password" = "密码";
 "webdav.base_path" = "服务器目录（如 /nomily）";
-"webdav.base_path_footer" = "所有内容都传到这个目录下：transcripts/ 存转写文本，audio/ 存录音（开了「也传录音」才有）。目录会自动创建。";
+"webdav.base_path_footer" = "每条录音在这个目录下是一个「日期 主题」文件夹（如 2026-11-02 产品评审会），里面是转写文本、识别元数据和总结；录音开了「也传录音」才传。文件夹会自动创建。";
 "webdav.connection" = "连接";
 "webdav.sync_audio" = "也传录音";
 "webdav.sync_audio_footer" = "转写文本默认同步。录音文件很大，服务器空间充足再开。录音按当前（可能已降级的）音质上传。";
@@ -1959,7 +1959,7 @@
 "storage.local_footer" = "加密录音原件 + 解密副本 + 转写文本的实际磁盘占用。";
 "storage.webdav" = "WebDAV / NAS";
 "storage.server_header" = "服务器";
-"storage.webdav_footer" = "服务器上 transcripts/ + audio/ 的实际占用（向服务器实时查询）。";
+"storage.webdav_footer" = "服务器上备份内容的实际占用（向服务器实时递归查询）。";
 /* ★ 2026-10-30 存储页改成块状卡片 + 图表 */
 "storage.total_label" = "三个位置合计";
 "storage.sources_header" = "设备与资料库";

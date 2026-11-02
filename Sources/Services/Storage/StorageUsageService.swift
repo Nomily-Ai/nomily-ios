@@ -9,7 +9,8 @@ private let log = Logger(subsystem: "com.nomily.app.ios", category: "storage-usa
 /// 三处占用全部**实测**，不靠估算：
 ///   · 本地 —— 递归统计 `audio_clips/`（加密原件 + 解密副本 + 转写文本）；
 ///   · NAS —— 对 WebDAV 服务器发 PROPFIND，按服务器回报的字节数累加
-///     （`transcripts/` + `audio/`；服务器不配合时给出失败原因）；
+///     （★ 2026-11-02 起服务器布局是「日期 主题」每录音文件夹，这里改成
+///     从 basePath 递归统计；服务器不配合时给出失败原因）；
 ///   · iCloud / 文件夹 —— 用已保存的安全作用域书签进到所选文件夹，
 ///     统计 `transcripts/` + `audio/` 的实际磁盘占用。
 @MainActor
@@ -229,48 +230,99 @@ final class StorageUsageService: ObservableObject {
 
     // MARK: - WebDAV
 
-    /// PROPFIND 两个子目录（transcripts/、audio/），把服务器回报的
-    /// `getcontentlength` 累加。目录不存在（404）当作 0 —— 还没传过东西。
+    /// ★ 2026-11-02：服务器布局改成「日期 主题」每录音文件夹后，旧的
+    /// `transcripts/` + `audio/` 两个固定子目录不存在了——改为从 basePath
+    /// 递归统计（Depth 1 逐层下钻，限 3 层：basePath / 录音文件夹 / 文件）。
+    /// 用 `client.session`（自签证书放行版），目录不存在（404）当作 0。
     private static func webdavUsage(client: WebDAVClient) async -> Usage {
-        let propfind = #"<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getcontentlength/></d:prop></d:propfind>"#
+        let propfind = #"<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getcontentlength/><d:resourcetype/></d:prop></d:propfind>"#
         var total: Int64 = 0
         var count = 0
-        for sub in ["transcripts", "audio"] {
-            guard var req = client.request(publicMethod: "PROPFIND", path: "\(client.basePath)/\(sub)") else {
-                return Usage(bytes: 0, files: 0, failure: "bad_request")
+        var failure: String?
+        var walked = Set<String>()
+
+        func walk(_ path: String, depthLeft: Int) async {
+            guard depthLeft > 0, failure == nil, !walked.contains(path) else { return }
+            walked.insert(path)
+            guard var req = client.request(publicMethod: "PROPFIND", path: path) else {
+                failure = "bad_request"
+                return
             }
             req.httpBody = Data(propfind.utf8)
             req.setValue("application/xml", forHTTPHeaderField: "Content-Type")
             req.setValue("1", forHTTPHeaderField: "Depth")
-            do {
-                let (data, response) = try await URLSession.shared.data(for: req)
-                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                if status == 404 { continue } // 子目录还没创建 = 还没传过
-                guard (200..<300).contains(status) else {
-                    return Usage(bytes: 0, files: 0, failure: "http_\(status)")
-                }
-                let body = String(data: data, encoding: .utf8) ?? ""
-                let ns = body as NSString
-                let full = NSRange(location: 0, length: ns.length)
-                for match in Self.lengthRegex.matches(in: body, range: full) {
-                    let range = match.range(at: 1)
-                    guard range.location != NSNotFound, range.location + range.length <= ns.length,
-                          let n = Int64(ns.substring(with: range)) else { continue }
-                    total += n
+            let result = try? await client.session.data(for: req)
+            guard let data = result?.0,
+                  let status = (result?.1 as? HTTPURLResponse)?.statusCode else {
+                failure = failure ?? "连接失败"
+                return
+            }
+            guard status != 404 else { return } // 还没传过任何东西
+            guard (200..<300).contains(status) else {
+                failure = failure ?? "http_\(status)"
+                return
+            }
+            guard let body = String(data: data, encoding: .utf8) else { return }
+            let here = WebDAVClient.normalizedDirPath(path)
+            for block in responseBlocks(body) {
+                if let size = contentLength(block) {
+                    total += size
                     count += 1
                 }
-            } catch {
-                log.warning("PROPFIND \(sub, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
-                return Usage(bytes: 0, files: 0, failure: error.localizedDescription)
+                if isCollection(block), let href = href(block) {
+                    let sub = WebDAVClient.normalizedDirPath(href)
+                    if sub != here {
+                        await walk(sub, depthLeft: depthLeft - 1)
+                    }
+                }
             }
         }
-        return Usage(bytes: total, files: count, failure: nil)
+
+        await walk(WebDAVClient.normalizedDirPath(client.basePath), depthLeft: 3)
+        return Usage(bytes: total, files: count, failure: failure)
     }
 
-    private static let lengthRegex = try! NSRegularExpression(
-        pattern: #"getcontentlength[^>]*>\s*(\d+)"#,
-        options: [.caseInsensitive]
-    )
+    // MARK: multistatus 解析（每录音文件夹布局的递归统计用）
+
+    /// 按 `<d:response>…</d:response>`（命名空间前缀可变）切块。
+    private static func responseBlocks(_ xml: String) -> [String] {
+        guard let regex = try? NSRegularExpression(
+            pattern: "<(?:[A-Za-z0-9]+:)?response\\b.*?</(?:[A-Za-z0-9]+:)?response>",
+            options: [.dotMatchesLineSeparators]) else { return [] }
+        let ns = xml as NSString
+        return regex.matches(in: xml, range: NSRange(location: 0, length: ns.length))
+            .compactMap { Range($0.range, in: xml).map { String(xml[$0]) } }
+    }
+
+    private static func href(_ block: String) -> String? {
+        guard let regex = try? NSRegularExpression(
+            pattern: "<(?:[A-Za-z0-9]+:)?href\\s*>(.*?)</(?:[A-Za-z0-9]+:)?href>") else { return nil }
+        let ns = block as NSString
+        guard let m = regex.firstMatch(in: block, range: NSRange(location: 0, length: ns.length)),
+              m.range(at: 1).location != NSNotFound else { return nil }
+        var href = ns.substring(with: m.range(at: 1))
+        if let decoded = href.removingPercentEncoding { href = decoded }
+        if let schemeRange = href.range(of: "://"),
+           let slash = href[schemeRange.upperBound...].firstIndex(of: "/") {
+            href = String(href[slash...])
+        }
+        return href
+    }
+
+    private static func isCollection(_ block: String) -> Bool {
+        block.range(of: "<(?:[A-Za-z0-9]+:)?collection\\s*/?>",
+                    options: .regularExpression) != nil
+    }
+
+    private static func contentLength(_ block: String) -> Int64? {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"getcontentlength[^>]*>\s*(\d+)"#,
+            options: [.caseInsensitive]) else { return nil }
+        let ns = block as NSString
+        guard let m = regex.firstMatch(in: block, range: NSRange(location: 0, length: ns.length)),
+              m.range(at: 1).location != NSNotFound else { return nil }
+        return Int64(ns.substring(with: m.range(at: 1)))
+    }
 }
 
 /// 文件夹/iCloud 目的地的占用统计——挂在 FolderExportService 上是因为
