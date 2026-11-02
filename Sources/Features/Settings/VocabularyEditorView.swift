@@ -15,6 +15,12 @@ struct VocabularyEditorView: View {
     @State private var notice: String?
     @State private var search = ""
     @State private var sourcesSheet: VocabEntry?
+    /// ★ 2026-11-02（用户："常用词汇要支持选择删除多选当前的很多没有用的"）：
+    /// 多选模式——自动挖掘总会混进一堆废词，逐条滑删太痛苦。进入多选后点词
+    /// 行即勾选，支持全选/反选，批量删除带确认（一次 persist）。
+    @State private var multiSelect = false
+    @State private var selected: Set<String> = []
+    @State private var confirmDelete = false
 
     /// 搜索过滤 + 保持"手填在前、自动在后"的分组序。
     private var filtered: [VocabEntry] {
@@ -46,6 +52,17 @@ struct VocabularyEditorView: View {
                 wordsSection
             }
 
+            // ★ 2026-11-02：多选删除的操作区（有选中项才出现，避免空手误触）。
+            if multiSelect && !selected.isEmpty {
+                Section {
+                    Button(role: .destructive) {
+                        confirmDelete = true
+                    } label: {
+                        Label(L10n.Vocabulary.deleteSelected(selected.count), systemImage: "trash")
+                    }
+                }
+            }
+
             Section {
                 Button {
                     pasteImport()
@@ -73,6 +90,28 @@ struct VocabularyEditorView: View {
         }
         .navigationTitle(L10n.Vocabulary.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(multiSelect ? L10n.Common.done : L10n.Vocabulary.select) {
+                    multiSelect.toggle()
+                    if !multiSelect { selected.removeAll() }
+                }
+                .disabled(store.entries.isEmpty)
+            }
+        }
+        .confirmationDialog(
+            L10n.Vocabulary.confirmDeleteSelected(selected.count),
+            isPresented: $confirmDelete,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.Vocabulary.deleteSelected(selected.count), role: .destructive) {
+                let n = selected.count
+                store.remove(words: selected)
+                selected.removeAll()
+                notice = L10n.Vocabulary.deletedCount(n)
+            }
+            Button(L10n.Common.cancel, role: .cancel) {}
+        }
         .onAppear { store.refreshRecentAutoCount() }
         .sheet(item: $sourcesSheet) { entry in
             SourcesSheet(entry: entry)
@@ -137,48 +176,94 @@ struct VocabularyEditorView: View {
 
     private var wordsSection: some View {
         Section {
+            // ★ 2026-11-02：多选时的全选/反选（作用于当前搜索过滤结果）。
+            if multiSelect {
+                HStack {
+                    Button(L10n.Vocabulary.selectAll) {
+                        selected.formUnion(filtered.map(\.word))
+                    }
+                    Spacer()
+                    Button(L10n.Vocabulary.deselectAll) {
+                        selected.subtract(filtered.map(\.word))
+                    }
+                }
+                .font(.subheadline)
+                .buttonStyle(.borderless)
+            }
             ForEach(filtered) { entry in
-                Button {
-                    if !entry.sources.isEmpty { sourcesSheet = entry }
-                } label: {
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text(entry.word).foregroundStyle(.primary)
-                                if entry.auto {
-                                    Text(L10n.Vocabulary.autoTag)
-                                        .font(.caption2)
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 1)
-                                        .background(Color.accentColor.opacity(0.12), in: Capsule())
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            if !entry.sources.isEmpty {
-                                Text(L10n.Vocabulary.sourceLine(entry.sources.joined(separator: "、")))
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        Spacer()
-                        if entry.count > 0 {
-                            Text("×\(entry.count)")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
-                        Image(systemName: "minus.circle")
-                            .foregroundStyle(.red.opacity(0.7))
+                if multiSelect {
+                    Button {
+                        toggle(entry.word)
+                    } label: {
+                        wordRow(entry, isSelected: selected.contains(entry.word))
+                    }
+                } else {
+                    Button {
+                        if !entry.sources.isEmpty { sourcesSheet = entry }
+                    } label: {
+                        wordRow(entry, isSelected: nil)
                     }
                 }
             }
             .onDelete { indexSet in
+                guard !multiSelect else { return }
                 for index in indexSet {
                     store.remove(filtered[index].word)
                 }
             }
+        } header: {
+            if multiSelect {
+                Text(L10n.Vocabulary.selectedHeader(selected.count))
+            }
         } footer: {
             Text(L10n.Vocabulary.promptFooter)
+        }
+    }
+
+    /// 词行：多选时带勾选圈；普通模式带滑删与来源入口。
+    private func wordRow(_ entry: VocabEntry, isSelected: Bool?) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            if let isSelected {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? Color.appAccent : Color.secondary)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(entry.word).foregroundStyle(.primary)
+                    if entry.auto {
+                        Text(L10n.Vocabulary.autoTag)
+                            .font(.caption2)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.accentColor.opacity(0.12), in: Capsule())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if !entry.sources.isEmpty {
+                    Text(L10n.Vocabulary.sourceLine(entry.sources.joined(separator: "、")))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            if entry.count > 0 {
+                Text("×\(entry.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            if isSelected == nil {
+                Image(systemName: "minus.circle")
+                    .foregroundStyle(.red.opacity(0.7))
+            }
+        }
+    }
+
+    private func toggle(_ word: String) {
+        if selected.contains(word) {
+            selected.remove(word)
+        } else {
+            selected.insert(word)
         }
     }
 

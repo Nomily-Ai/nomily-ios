@@ -76,6 +76,14 @@ final class VocabularyStore: ObservableObject {
         persist()
     }
 
+    /// ★ 2026-11-02（用户："常用词汇要支持选择删除多选，当前的很多没有用的"）：
+    /// 批量删除。一次 persist——清几十上百个自动挖出来的废词只写一次盘。
+    func remove(words: Set<String>) {
+        guard !words.isEmpty else { return }
+        entries.removeAll { words.contains($0.word) }
+        persist()
+    }
+
     /// 批量导入：按换行/逗号/顿号/分号切分。返回实际新增数。
     @discardableResult
     func importText(_ text: String) -> Int {

@@ -1102,6 +1102,28 @@ enum L10n {
         static var autoTag: String {
             NSLocalizedString("vocab.auto_tag", value: "Auto", comment: "Badge on auto-mined vocabulary entries")
         }
+        // ★ 2026-11-02（用户："常用词汇要支持选择删除多选"）：多选删除。
+        static var select: String {
+            NSLocalizedString("vocab.select", value: "Select", comment: "Enter multi-select mode in the vocabulary editor")
+        }
+        static func selectedHeader(_ n: Int) -> String {
+            String(format: NSLocalizedString("vocab.selected_header", value: "%d selected", comment: "Header of the word list in multi-select mode"), n)
+        }
+        static var selectAll: String {
+            NSLocalizedString("vocab.select_all", value: "Select all", comment: "Multi-select: select every (filtered) word")
+        }
+        static var deselectAll: String {
+            NSLocalizedString("vocab.deselect_all", value: "Deselect all", comment: "Multi-select: clear the selection")
+        }
+        static func deleteSelected(_ n: Int) -> String {
+            String(format: NSLocalizedString("vocab.delete_selected", value: "Delete selected (%d)", comment: "Destructive button in multi-select mode"), n)
+        }
+        static func confirmDeleteSelected(_ n: Int) -> String {
+            String(format: NSLocalizedString("vocab.confirm_delete_selected", value: "Delete %d selected words? This cannot be undone.", comment: "Confirmation before batch-deleting vocabulary"), n)
+        }
+        static func deletedCount(_ n: Int) -> String {
+            String(format: NSLocalizedString("vocab.deleted_selected", value: "Deleted %d words", comment: "Notice after batch deletion"), n)
+        }
         static func sourceLine(_ sources: String) -> String {
             String(format: NSLocalizedString("vocab.source_line", value: "From: %@", comment: "Per-entry source clips line"), sources)
         }

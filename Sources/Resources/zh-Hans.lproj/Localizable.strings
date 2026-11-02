@@ -1917,6 +1917,15 @@
 "vocab.auto_added" = "近 7 天自动加了 %d 个";
 "vocab.see_sources" = "看来源";
 "vocab.auto_tag" = "自动";
+// ★ 2026-11-02: 多选删除（自动挖掘的废词批量清理）。
+"vocab.select" = "选择";
+"vocab.selected_header" = "已选 %d 个";
+"vocab.select_all" = "全选";
+"vocab.deselect_all" = "取消全选";
+"vocab.delete_selected" = "删除所选（%d 个词）";
+"vocab.confirm_delete_selected" = "删除选中的 %d 个常用词？删除后无法恢复。";
+"vocab.deleted_selected" = "已删除 %d 个词";
+
 "vocab.source_line" = "来源：%@";
 "vocab.source_total" = "总共出现 %d 次";
 "vocab.sources_header" = "来源录音";
