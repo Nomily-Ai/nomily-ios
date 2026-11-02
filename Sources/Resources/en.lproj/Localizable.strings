@@ -1508,7 +1508,7 @@
 "webdav.username" = "Username";
 "webdav.password" = "Password";
 "webdav.base_path" = "Server folder (e.g. /nomily)";
-"webdav.base_path_footer" = "Everything is uploaded under this folder: transcripts/ for text, audio/ for recordings (when audio sync is on). The folder is created automatically.";
+"webdav.base_path_footer" = "Each recording becomes a \"date title\" folder here (e.g. 2026-11-02 Product Review) holding the transcript, ASR metadata and summary; audio only when audio sync is on. Folders are created automatically.";
 "webdav.connection" = "Connection";
 "webdav.sync_audio" = "Also upload audio";
 "webdav.sync_audio_footer" = "Transcripts always sync. Audio files are large; turn this on only if you have the storage on your server. Audio is uploaded at its current (possibly downgraded) quality.";
@@ -1584,7 +1584,7 @@
 "storage.local_footer" = "Actual disk usage of encrypted originals + decrypted copies + transcripts.";
 "storage.webdav" = "WebDAV / NAS";
 "storage.server_header" = "Server";
-"storage.webdav_footer" = "Actual usage of transcripts/ + audio/ on the server (queried live).";
+"storage.webdav_footer" = "Actual usage of your backups on the server (queried live, recursively).";
 "storage.folder" = "iCloud / Folder";
 "storage.folder_header" = "iCloud / Folder";
 "storage.folder_footer" = "Actual usage of transcripts/ + audio/ in the chosen folder (iCloud Drive folder = iCloud usage).";
