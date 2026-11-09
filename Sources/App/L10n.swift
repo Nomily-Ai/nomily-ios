@@ -2747,6 +2747,28 @@ enum L10n {
     // iCloud，然后才是 NAS，然后就是文件夹 app"）：存储落点总枢纽页文案。
     enum StorageLocations {
         static var title: String { NSLocalizedString("storage.locations.title", comment: "") }
+        /// ★ 2026-11-09：自动上传范围（哪些录音转写完自动送到目的地）。
+        static var uploadScope: String {
+            NSLocalizedString("storage.locations.upload_scope", value: "Auto Upload",
+                              comment: "Storage locations: picker for which recordings upload automatically")
+        }
+        static var scopeAll: String {
+            NSLocalizedString("storage.locations.scope_all", value: "Every Recording",
+                              comment: "Upload scope: all recordings upload right after transcription")
+        }
+        static var scopeWithSummary: String {
+            NSLocalizedString("storage.locations.scope_with_summary", value: "Only With Summaries",
+                              comment: "Upload scope: a recording uploads once its summary is ready")
+        }
+        static var scopeManual: String {
+            NSLocalizedString("storage.locations.scope_manual", value: "Manual Only",
+                              comment: "Upload scope: nothing uploads automatically; use the sync-now button")
+        }
+        static var uploadScopeFooter: String {
+            NSLocalizedString("storage.locations.upload_scope_footer",
+                              value: "Applies to automatic uploads to NAS (WebDAV) and the Files/iCloud folder. \u{201C}Sync Now\u{201D} always sends everything, whatever this is set to.",
+                              comment: "Footer explaining the upload scope picker")
+        }
         static var sectionHeader: String { NSLocalizedString("storage.locations.header", comment: "") }
         static var iphone: String { NSLocalizedString("storage.locations.iphone", comment: "") }
         static var iphoneDesc: String { NSLocalizedString("storage.locations.iphone_desc", comment: "") }
@@ -5653,6 +5675,8 @@ enum L10n {
         static var continueButton: String { NSLocalizedString("live.continue", comment: "") }
         static var listening: String { NSLocalizedString("live.listening", comment: "") }
         static var tapMicToStart: String { NSLocalizedString("live.tap_mic_to_start", comment: "") }
+        /// ★ 2026-11-09：空态 hero 的副标题（说清这个页面给什么）。
+        static var idleHeroHint: String { NSLocalizedString("live.idle_hero_hint", value: "Tap to start live captions — sentences appear as you speak, and the take saves itself to the library when you stop.", comment: "") }
         static var searchLanguages: String { NSLocalizedString("live.search_languages", comment: "") }
         static func transcribeOnly(_ lang: String) -> String {
             String(format: NSLocalizedString("live.transcribe_only", comment: ""), lang)
@@ -6503,5 +6527,108 @@ enum L10nUploadContent {
     }
     static var bundle: String {
         NSLocalizedString("upload.bundle", value: "Resource Bundle (zip)", comment: "Artefact toggle: the all-in-one zip")
+    }
+}
+
+/// ★ 2026-11-09（用户："英文语言展示中文需要优化"）：录音豆 Wi‑Fi 快传整条
+/// 流程原来是硬编码中文——英文界面下全部漏中文。统一收进这一组词条。
+extension L10n {
+    enum WifiXfer {
+    static var statusSection: String { NSLocalizedString("wifix.status_section", value: "Status", comment: "") }
+    static var hotspotSection: String { NSLocalizedString("wifix.hotspot_section", value: "Recorder Hotspot", comment: "") }
+    static var hotspotName: String { NSLocalizedString("wifix.hotspot_name", value: "Hotspot", comment: "") }
+    static var password: String { NSLocalizedString("wifix.password", value: "Password", comment: "") }
+    static func filesPending(_ n: Int) -> String {
+        String(format: NSLocalizedString("wifix.files_pending", value: "Files to transfer (%d)", comment: ""), n)
+    }
+    static var foregroundHint: String { NSLocalizedString("wifix.foreground_hint", value: "Keep this page in the foreground during the transfer — avoid locking the screen for long.", comment: "") }
+    static var cancelTransfer: String { NSLocalizedString("wifix.cancel_transfer", value: "Cancel Transfer", comment: "") }
+    static var close: String { NSLocalizedString("wifix.close", value: "Close", comment: "") }
+    static var navTitle: String { NSLocalizedString("wifix.nav_title", value: "Wi\u{2011}Fi Quick Transfer", comment: "") }
+    static var waiting: String { NSLocalizedString("wifix.waiting", value: "Waiting", comment: "") }
+    static var savedLibrary: String { NSLocalizedString("wifix.saved_library", value: "Saved to Library", comment: "") }
+
+    static var stagePreparing: String { NSLocalizedString("wifix.stage_preparing", value: "Preparing\u{2026}", comment: "") }
+    static var stageConfigHotspot: String { NSLocalizedString("wifix.stage_config_hotspot", value: "Setting up the recorder\u{2019}s hotspot\u{2026}", comment: "") }
+    static var stageJoinHotspot: String { NSLocalizedString("wifix.stage_join_hotspot", value: "Joining the recorder\u{2019}s hotspot\u{2026}", comment: "") }
+    static var stageConnecting: String { NSLocalizedString("wifix.stage_connecting", value: "Connecting to the recorder\u{2026}", comment: "") }
+    static var stageTransferring: String { NSLocalizedString("wifix.stage_transferring", value: "Transferring", comment: "") }
+    static var stageDone: String { NSLocalizedString("wifix.stage_done", value: "Transfer Complete", comment: "") }
+    static var stageFailed: String { NSLocalizedString("wifix.stage_failed", value: "Transfer Failed", comment: "") }
+    static var stageCancelled: String { NSLocalizedString("wifix.stage_cancelled", value: "Cancelled", comment: "") }
+    static func partialSaved(_ pct: Int) -> String {
+        String(format: NSLocalizedString("wifix.partial_saved", value: "Partial saved (received %d%%)", comment: ""), pct)
+    }
+
+    static var manualJoinTitle: String { NSLocalizedString("wifix.manual_join_title", value: "Join the recorder\u{2019}s hotspot manually", comment: "") }
+    static func manualJoinMessage(_ ssid: String, _ psk: String) -> String {
+        String(format: NSLocalizedString("wifix.manual_join_message", value: "iOS couldn\u{2019}t join \u{201C}%@\u{201D} automatically.\n\nGo to Settings \u{2192} Wi\u{2011}Fi, pick \u{201C}%@\u{201D} and enter the password: %@\n\nReturn to Nomily when done \u{2014} it continues automatically (up to 3 minutes).", comment: "ssid, ssid, password"), ssid, ssid, psk)
+    }
+    static var goSettings: String { NSLocalizedString("wifix.go_settings", value: "Open Settings", comment: "") }
+    static var joinedContinue: String { NSLocalizedString("wifix.joined_continue", value: "Joined \u{2014} Continue", comment: "") }
+
+    static func clipNamed(_ name: String) -> String {
+        String(format: NSLocalizedString("wifix.clip_named", value: "Recording %@", comment: ""), name)
+    }
+    static var stop: String { NSLocalizedString("wifix.stop", value: "Stop", comment: "") }
+
+    static var pickTitle: String { NSLocalizedString("wifix.pick_title", value: "Select Recordings to Transfer", comment: "") }
+    static var pickHintEmpty: String { NSLocalizedString("wifix.pick_hint_empty", value: "Pick the takes you want, then use Wi\u{2011}Fi quick transfer.", comment: "") }
+    static func pickHint(_ n: Int) -> String {
+        String(format: NSLocalizedString("wifix.pick_hint", value: "Pick which of the %d takes to send \u{2014} Wi\u{2011}Fi quick transfer beats Bluetooth by far", comment: ""), n)
+    }
+    static var exportAllA11y: String { NSLocalizedString("wifix.export_all_a11y", value: "Export all recordings via Wi\u{2011}Fi quick transfer", comment: "") }
+    static func selectedCount(_ n: Int) -> String {
+        String(format: NSLocalizedString("wifix.selected_count", value: "%d selected", comment: ""), n)
+    }
+    static var selectAll: String { NSLocalizedString("wifix.select_all", value: "Select All", comment: "") }
+    static var deselectAll: String { NSLocalizedString("wifix.deselect_all", value: "Deselect All", comment: "") }
+    static var cancel: String { NSLocalizedString("wifix.cancel", value: "Cancel", comment: "") }
+    static func transferSelected(_ n: Int) -> String {
+        String(format: NSLocalizedString("wifix.transfer_selected", value: "Transfer selected (%d)", comment: ""), n)
+    }
+
+    static var errNotConnected: String { NSLocalizedString("wifix.err_not_connected", value: "Recorder not connected \u{2014} connect first and retry.", comment: "") }
+    static var errEmpty: String { NSLocalizedString("wifix.err_empty", value: "No recordings on the recorder", comment: "") }
+    static var errPickedGone: String { NSLocalizedString("wifix.err_picked_gone", value: "The selected recordings are no longer on the recorder (they may have been transferred by Feishu or auto-delete).", comment: "") }
+    static var errNothingExportable: String { NSLocalizedString("wifix.err_nothing_exportable", value: "No recordings to export", comment: "") }
+    static func reconnectAttempt(_ n: Int) -> String {
+        String(format: NSLocalizedString("wifix.reconnect_attempt", value: "Reconnecting to the recorder via Bluetooth (attempt %d/3)\u{2026}", comment: ""), n)
+    }
+    static func reconnectDetail(_ n: Int) -> String {
+        String(format: NSLocalizedString("wifix.reconnect_detail", value: "Bluetooth dropped \u{2014} reconnecting to the recorder (attempt %d/3)\u{2026}", comment: ""), n)
+    }
+    static func waitHotspot(_ ssid: String) -> String {
+        String(format: NSLocalizedString("wifix.wait_hotspot", value: "Waiting for you to join the hotspot \u{201C}%@\u{201D} manually\u{2026}", comment: ""), ssid)
+    }
+    static func partialSkipped(_ pct: Int) -> String {
+        String(format: NSLocalizedString("wifix.partial_skipped", value: "Only %d%% received \u{2014} skipped", comment: ""), pct)
+    }
+    static func partialNote(_ pct: Int) -> String {
+        String(format: NSLocalizedString("wifix.partial_note", value: " \u{00b7} partial transfer (%d%%)", comment: ""), pct)
+    }
+    static var noteWifi: String { NSLocalizedString("wifix.note_wifi", value: " \u{00b7} Wi\u{2011}Fi quick transfer", comment: "") }
+    static var noteWifiD3200: String { NSLocalizedString("wifix.note_wifi_d3200", value: "Opus 48 kHz mono (D3200 \u{00b7} Wi\u{2011}Fi quick transfer)", comment: "") }
+    static var reconnecting: String { NSLocalizedString("wifix.reconnecting", value: "Reconnecting to the recorder\u{2026}", comment: "") }
+    static func exportedReport(_ saved: Int, _ total: Int) -> String {
+        String(format: NSLocalizedString("wifix.exported_report", value: "Exported %d/%d recordings to the library", comment: ""), saved, total)
+    }
+    static func deletedNote(_ n: Int) -> String {
+        String(format: NSLocalizedString("wifix.deleted_note", value: ", deleted %d from the recorder", comment: ""), n)
+    }
+    static func deleteFailedNote(_ n: Int) -> String {
+        String(format: NSLocalizedString("wifix.delete_failed_note", value: ", %d couldn\u{2019}t be deleted from the recorder (an in-progress recording can\u{2019}t be deleted)", comment: ""), n)
+    }
+    static var deleteBtNote: String { NSLocalizedString("wifix.delete_bt_note", value: "; Bluetooth didn\u{2019}t come back \u{2014} recordings remain on the recorder", comment: "") }
+    static var autoDeletedNote: String { NSLocalizedString("wifix.auto_deleted_note", value: "; that take is already gone \u{2014} the firmware auto-deletes fully transferred recordings regardless of the delete switch (it is in the library)", comment: "") }
+    static func partialResumableNote(_ n: Int) -> String {
+        String(format: NSLocalizedString("wifix.partial_resumable_note", value: " (%d partially received and checkpointed \u{2014} tapping Wi\u{2011}Fi quick transfer again resumes instead of re-uploading)", comment: ""), n)
+    }
+    static func partialSkippedNote(_ n: Int) -> String {
+        String(format: NSLocalizedString("wifix.partial_skipped_note", value: " (%d received almost nothing and were skipped \u{2014} retry available)", comment: ""), n)
+    }
+    static var interrupted: String { NSLocalizedString("wifix.interrupted", value: "Transfer interrupted", comment: "") }
+    static var interruptedAdvice: String { NSLocalizedString("wifix.interrupted_advice", value: ". Keep the recorder nearby with enough battery and not occupied by the Feishu app. If joining the hotspot keeps failing, join the recorder\u{2019}s hotspot manually in Settings \u{2192} Wi\u{2011}Fi and retry.", comment: "") }
+    static var batteryCase: String { NSLocalizedString("wifix.battery_case", value: "Charging case", comment: "") }
     }
 }

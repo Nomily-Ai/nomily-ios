@@ -171,6 +171,13 @@ struct AppConfig: Codable, Equatable {
     /// 进 `webdav`，所有旧读取方（同步/占用/后台上传）零改动。
     /// `nil` = 尚未迁移（旧配置）；迁移在 `init(from:)` 里做一次。
     var webdavAccounts: [WebDAVConfig]?
+    /// ★ 2026-11-09（用户："是否是每条录音都传输吗…可能需要一个选择筛选"）：
+    /// 转写完成后**自动**往存储目的地（WebDAV / 文件夹）送哪些录音。
+    ///   · nil / "all"        —— 每条（现状，默认）；
+    ///   · "with_summary"    —— 等摘要生成后再送（摘要是最有价值的产物）；
+    ///   · "manual"          —— 从不自动，只走「立即同步」。
+    /// 手动「立即同步」永远全量，不受此档位影响。
+    var autoUploadScope: String?
     /// 「当前使用」的账户 id（自动备份/手动同步走它）。nil = 取第一条。
     var webdavActiveID: String?
 
@@ -239,6 +246,7 @@ struct AppConfig: Codable, Equatable {
         case llmEffort = "llm_effort"
         case webdavAccounts = "webdav_accounts"
         case webdavActiveID = "webdav_active_id"
+        case autoUploadScope = "auto_upload_scope"
     }
 
     /// Decode with `decodeIfPresent` for new / optional keys so a
@@ -314,6 +322,7 @@ struct AppConfig: Codable, Equatable {
         }
         self.webdavActiveID = try c.decodeIfPresent(String.self, forKey: .webdavActiveID)
             ?? webdavAccounts?.first?.id
+        self.autoUploadScope = try c.decodeIfPresent(String.self, forKey: .autoUploadScope)
     }
 
     init(
@@ -361,7 +370,8 @@ struct AppConfig: Codable, Equatable {
         watchRecapEnabled: Bool = true,
         llmEffort: String? = nil,
         webdavAccounts: [WebDAVConfig]? = nil,
-        webdavActiveID: String? = nil
+        webdavActiveID: String? = nil,
+        autoUploadScope: String? = nil
     ) {
         self.asrProviders = asrProviders
         self.llmProviders = llmProviders
@@ -408,6 +418,7 @@ struct AppConfig: Codable, Equatable {
         self.llmEffort = llmEffort
         self.webdavAccounts = webdavAccounts
         self.webdavActiveID = webdavActiveID
+        self.autoUploadScope = autoUploadScope
     }
 
     // MARK: - WebDAV 多账户（★ 2026-11-09）

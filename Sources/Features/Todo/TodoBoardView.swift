@@ -289,8 +289,9 @@ struct TodoBoardView: View {
     }
 
     private func shortDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MM-dd HH:mm"
+        let formatter = AppLocale.formatter("todo.stamp") {
+            $0.dateFormat = "MM-dd HH:mm"
+        }
         return formatter.string(from: date)
     }
 
@@ -421,8 +422,11 @@ struct TodoBoardView: View {
     // MARK: 日历计算
 
     private var weekdaySymbols: [String] {
+        // ★ 2026-11-09（用户截图：英文界面下表头是"日 一 二 …"）：跟随 App 内
+        // 语言覆盖（AppLocale.current），不能跟系统 locale——设备是中文时
+        // 英文界面会漏出中文表头。
         var calendar = Calendar.current
-        calendar.locale = .current
+        calendar.locale = AppLocale.current
         let symbols = calendar.veryShortStandaloneWeekdaySymbols
         // 按当前地区的"一周第一天"旋转（中国是周一，美国是周日）。
         let first = calendar.firstWeekday - 1
@@ -460,15 +464,17 @@ struct TodoBoardView: View {
     }
 
     private func monthTitle(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("yMMMM")
-        return formatter.string(from: date)
+        // ★ 2026-11-09：locale 先设再套模板（见 AppLocale.formatter 的注释），
+        // 否则英文界面漏出"2026 年 11 月"。
+        AppLocale.formatter("todo.monthTitle") {
+            $0.setLocalizedDateFormatFromTemplate("yMMMM")
+        }.string(from: date)
     }
 
     private func dayTitle(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("MMMdEEEE")
-        return formatter.string(from: date)
+        AppLocale.formatter("todo.dayTitle") {
+            $0.setLocalizedDateFormatFromTemplate("MMMdEEEE")
+        }.string(from: date)
     }
 }
 

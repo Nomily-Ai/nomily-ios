@@ -167,12 +167,17 @@ struct PhoneRecordScreen: View {
                             .id(seg.id)
                         }
                         if !captions.partial.isEmpty {
-                            Text(captions.partial)
-                                .font(.body)
-                                .italic()
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .id("phonePartial")
+                            // ★ 2026-11-09：与 Live 页同一套"正在说"强调（大一号、
+                            // 加重、左侧强调条），不再用斜体。
+                            HStack(alignment: .top, spacing: 8) {
+                                Capsule()
+                                    .fill(Color.accentColor)
+                                    .frame(width: 3)
+                                Text(captions.partial)
+                                    .font(.system(size: 19, weight: .medium))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .id("phonePartial")
                         }
                     }
                     .padding()

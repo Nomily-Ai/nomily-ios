@@ -649,23 +649,44 @@ private struct LiveContent: View {
                     Spacer()
                 }
             } else {
-                VStack {
+                // ★ 2026-11-09（用户：实时字幕页参考 Plaud / Vobot 优化）：
+                // 空态从"图标 + 右下角小按钮 + 弯箭头"改成 **hero 大按键**——
+                // 主操作就该长在拇指落点上，一眼可知这个页面是干嘛的。
+                VStack(spacing: 22) {
                     Spacer()
-                    Image(systemName: "waveform.badge.mic")
-                        .font(.system(size: 40))
-                        .foregroundStyle(.quaternary)
-                    Text(L10n.Live.tapMicToStart)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        CurvedArrowHint()
-                            .padding(.trailing, 36)
-                            .padding(.bottom, 4)
+                    Button {
+                        Task {
+                            await model.start(source: source, config: config, library: library)
+                            env.isStreaming = model.isRunning
+                        }
+                    } label: {
+                        ZStack {
+                            Circle()
+                                .fill(Color.accentColor.opacity(0.12))
+                                .frame(width: 116, height: 116)
+                            Circle()
+                                .fill(Color.accentColor)
+                                .frame(width: 88, height: 88)
+                            Image(systemName: "mic.fill")
+                                .font(.system(size: 34, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.Phone.record)
+
+                    VStack(spacing: 6) {
+                        Text(L10n.Live.tapMicToStart)
+                            .font(.headline)
+                        Text(L10n.Live.idleHeroHint)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                    }
+                    Spacer()
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else {
             ScrollViewReader { proxy in
@@ -1136,16 +1157,31 @@ private struct BilingualRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(source)
-                .font(.body)
-                .italic(isPartial)
-                .foregroundStyle(isPartial ? .secondary : .primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // ★ 2026-11-09（Plaud / Vobot 的实时字幕样式）：正在说的一句
+            // **大一号、加重、带左侧强调条**，定稿的句子回落正文——一眼分清
+            // "刚说完的"和"正在说的"。斜体改掉：中文斜体没有字形，原来只是
+            // 把字压歪。
+            if isPartial {
+                HStack(alignment: .top, spacing: 8) {
+                    Capsule()
+                        .fill(Color.accentColor)
+                        .frame(width: 3)
+                    Text(source)
+                        .font(.system(size: 19, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.vertical, 2)
+            } else {
+                Text(source)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             if !translation.isEmpty {
                 Text(translation)
-                    .font(.body)
-                    .italic(isPartial)
+                    .font(isPartial ? .system(size: 17) : .body)
                     .foregroundColor(.accentColor)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -1200,14 +1236,6 @@ private struct LevelBars: View {
 
 // MARK: - Curved arrow hint
 
-private struct CurvedArrowHint: View {
-    var body: some View {
-        CurvedArrow()
-            .stroke(style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
-            .foregroundStyle(.secondary)
-            .frame(width: 60, height: 80)
-    }
-}
 
 private struct CurvedArrow: Shape {
     func path(in rect: CGRect) -> Path {

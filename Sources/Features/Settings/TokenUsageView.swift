@@ -156,6 +156,8 @@ struct TokenUsageContent: View {
 
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
+        // ★ 2026-11-09：跟随 App 内语言覆盖（原来是系统 locale）。
+        f.locale = AppLocale.current
         f.dateStyle = .medium
         return f
     }()

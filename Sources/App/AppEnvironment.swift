@@ -156,15 +156,22 @@ final class AppEnvironment: ObservableObject {
                 // sync to the user's server right away. No-op unless WebDAV is
                 // configured (the service checks `webdav.isConfigured` itself);
                 // reads the config when it runs, so edits made meanwhile are picked up.
-                if let config = AppEnvironment.shared?.config {
-                    let cfg = config.config
-                    Task { await WebDAVSyncService.shared.sync(clipName: clip, config: cfg) }
+                //
+                // ★ 2026-11-09（用户："是否是每条录音都传输吗…需要一个选择筛选"）：
+                // 自动上传范围听 `auto_upload_scope` 的——"manual" 这里不送；
+                // "with_summary" 也不在这里送，改挂在摘要完成钩子上（JobRunners）。
+                let scope = AppEnvironment.shared?.config.config.autoUploadScope ?? "all"
+                if scope != "manual", scope != "with_summary" {
+                    if let config = AppEnvironment.shared?.config {
+                        let cfg = config.config
+                        Task { await WebDAVSyncService.shared.sync(clipName: clip, config: cfg) }
+                    }
+                    // ★ 2026-10-30（用户："增加自动上传到 iCloud 或者指定的服务器"）：
+                    // 文件夹目的地走同一条钩子——所选文件夹在 iCloud 云盘里时，
+                    // 这就是"自动上传 iCloud"。服务自检 autoEnabled + 书签，
+                    // 没开/没选就是 no-op。
+                    Task { await FolderExportService.shared.export(clipName: clip) }
                 }
-                // ★ 2026-10-30（用户："增加自动上传到 iCloud 或者指定的服务器"）：
-                // 文件夹目的地走同一条钩子——所选文件夹在 iCloud 云盘里时，
-                // 这就是"自动上传 iCloud"。服务自检 autoEnabled + 书签，
-                // 没开/没选就是 no-op。
-                Task { await FolderExportService.shared.export(clipName: clip) }
             }
         }
         self.localization = LocalizationService(selected: config.config.appLanguage)

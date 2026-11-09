@@ -2006,7 +2006,7 @@
 "watch.ambient_rec" = "REC";
 
 /* ★ 2026-11-05 十五轮：录音质量档位的体积/建议标（英文界面不再漏中文） */
-"rec_settings.quality_size_as_is" = "≈ 29MB/hour";
+"rec_settings.quality_size_asIs" = "≈ 29MB/hour";
 "rec_settings.quality_size_standard" = "≈ 15MB/hour";
 "rec_settings.quality_size_compact" = "≈ 11MB/hour";
 "rec_settings.quality_size_minimal" = "≈ 8MB/hour";
@@ -2181,3 +2181,72 @@
 "upload.mind_map" = "Mind Map";
 "upload.chapters" = "Chapters";
 "upload.bundle" = "Resource Bundle (zip)";
+
+/* Wi-Fi quick transfer (was hardcoded Chinese) */
+"wifix.status_section" = "Status";
+"wifix.hotspot_section" = "Recorder Hotspot";
+"wifix.hotspot_name" = "Hotspot";
+"wifix.password" = "Password";
+"wifix.files_pending" = "Files to transfer (%d)";
+"wifix.foreground_hint" = "Keep this page in the foreground during the transfer — avoid locking the screen for long.";
+"wifix.cancel_transfer" = "Cancel Transfer";
+"wifix.close" = "Close";
+"wifix.nav_title" = "Wi‑Fi Quick Transfer";
+"wifix.waiting" = "Waiting";
+"wifix.saved_library" = "Saved to Library";
+"wifix.stage_preparing" = "Preparing…";
+"wifix.stage_config_hotspot" = "Setting up the recorder’s hotspot…";
+"wifix.stage_join_hotspot" = "Joining the recorder’s hotspot…";
+"wifix.stage_connecting" = "Connecting to the recorder…";
+"wifix.stage_transferring" = "Transferring";
+"wifix.stage_done" = "Transfer Complete";
+"wifix.stage_failed" = "Transfer Failed";
+"wifix.stage_cancelled" = "Cancelled";
+"wifix.partial_saved" = "Partial saved (received %d%%)";
+"wifix.manual_join_title" = "Join the recorder’s hotspot manually";
+"wifix.manual_join_message" = "iOS couldn’t join “%@” automatically.\n\nGo to Settings → Wi‑Fi, pick “%@” and enter the password: %@\n\nReturn to Nomily when done — it continues automatically (up to 3 minutes).";
+"wifix.go_settings" = "Open Settings";
+"wifix.joined_continue" = "Joined — Continue";
+"wifix.clip_named" = "Recording %@";
+"wifix.stop" = "Stop";
+"wifix.pick_title" = "Select Recordings to Transfer";
+"wifix.pick_hint_empty" = "Pick the takes you want, then use Wi‑Fi quick transfer.";
+"wifix.pick_hint" = "Pick which of the %d takes to send — Wi‑Fi quick transfer beats Bluetooth by far";
+"wifix.export_all_a11y" = "Export all recordings via Wi‑Fi quick transfer";
+"wifix.selected_count" = "%d selected";
+"wifix.select_all" = "Select All";
+"wifix.deselect_all" = "Deselect All";
+"wifix.cancel" = "Cancel";
+"wifix.transfer_selected" = "Transfer selected (%d)";
+"wifix.err_not_connected" = "Recorder not connected — connect first and retry.";
+"wifix.err_empty" = "No recordings on the recorder";
+"wifix.err_picked_gone" = "The selected recordings are no longer on the recorder (they may have been transferred by Feishu or auto-delete).";
+"wifix.err_nothing_exportable" = "No recordings to export";
+"wifix.reconnect_attempt" = "Reconnecting to the recorder via Bluetooth (attempt %d/3)…";
+"wifix.reconnect_detail" = "Bluetooth dropped — reconnecting to the recorder (attempt %d/3)…";
+"wifix.wait_hotspot" = "Waiting for you to join the hotspot “%@” manually…";
+"wifix.partial_skipped" = "Only %d%% received — skipped";
+"wifix.partial_note" = " · partial transfer (%d%%)";
+"wifix.note_wifi" = " · Wi‑Fi quick transfer";
+"wifix.note_wifi_d3200" = "Opus 48 kHz mono (D3200 · Wi‑Fi quick transfer)";
+"wifix.reconnecting" = "Reconnecting to the recorder…";
+"wifix.exported_report" = "Exported %d/%d recordings to the library";
+"wifix.deleted_note" = ", deleted %d from the recorder";
+"wifix.delete_failed_note" = ", %d couldn’t be deleted from the recorder (an in-progress recording can’t be deleted)";
+"wifix.delete_bt_note" = "; Bluetooth didn’t come back — recordings remain on the recorder";
+"wifix.auto_deleted_note" = "; that take is already gone — the firmware auto-deletes fully transferred recordings regardless of the delete switch (it is in the library)";
+"wifix.partial_resumable_note" = " (%d partially received and checkpointed — tapping Wi‑Fi quick transfer again resumes instead of re-uploading)";
+"wifix.partial_skipped_note" = " (%d received almost nothing and were skipped — retry available)";
+"wifix.interrupted" = "Transfer interrupted";
+"wifix.interrupted_advice" = ". Keep the recorder nearby with enough battery and not occupied by the Feishu app. If joining the hotspot keeps failing, join the recorder’s hotspot manually in Settings → Wi‑Fi and retry.";
+"wifix.battery_case" = "Charging case";
+
+/* Live idle hero */
+"live.idle_hero_hint" = "Tap to start live captions — sentences appear as you speak, and the take saves itself to the library when you stop.";
+
+/* auto-upload scope */
+"storage.locations.upload_scope" = "Auto Upload";
+"storage.locations.scope_all" = "Every Recording";
+"storage.locations.scope_with_summary" = "Only With Summaries";
+"storage.locations.scope_manual" = "Manual Only";
+"storage.locations.upload_scope_footer" = "Applies to automatic uploads to NAS (WebDAV) and the Files/iCloud folder. “Sync Now” always sends everything, whatever this is set to.";

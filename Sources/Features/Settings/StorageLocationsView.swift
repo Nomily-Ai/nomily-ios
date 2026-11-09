@@ -20,6 +20,26 @@ struct StorageLocationsView: View {
 
     var body: some View {
         Form {
+            // ★ 2026-11-09（用户："是否是每条录音都传输吗…需要一个选择筛选"）：
+            // 自动上传范围——转写完成后哪些录音自动送到下面的目的地。
+            Section {
+                Picker(L10n.StorageLocations.uploadScope, selection: Binding(
+                    get: { configService.config.autoUploadScope ?? "all" },
+                    set: { newValue in
+                        configService.config.autoUploadScope = newValue == "all" ? nil : newValue
+                        configService.saveNow()
+                    }
+                )) {
+                    Text(L10n.StorageLocations.scopeAll).tag("all")
+                    Text(L10n.StorageLocations.scopeWithSummary).tag("with_summary")
+                    Text(L10n.StorageLocations.scopeManual).tag("manual")
+                }
+            } header: {
+                Text(L10n.StorageLocations.uploadScope)
+            } footer: {
+                Text(L10n.StorageLocations.uploadScopeFooter)
+            }
+
             Section {
                 // 1. 这台 iPhone —— 主存储。转写后的音频/文本都在 decryptedDir，
                 //    点进去看占用明细。

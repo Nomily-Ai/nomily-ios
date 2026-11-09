@@ -267,6 +267,9 @@ final class NomilyChatModel: ObservableObject {
     /// 今天日期注入 prompt：用户问"上周定了什么"这类相对时间时模型才有锚点。
     private static var todayLine: String {
         let fmt = DateFormatter()
+        // ★ 2026-11-09：跟随 App 内语言（原来跟系统 locale，中文设备的英文
+        // 界面会把"2026年11月9日"塞进提示词/页面）。
+        fmt.locale = AppLocale.current
         fmt.dateStyle = .long
         return "Today is \(fmt.string(from: Date()))."
     }

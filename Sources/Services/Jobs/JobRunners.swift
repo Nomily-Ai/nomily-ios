@@ -329,6 +329,20 @@ enum JobRunners {
                     recordingTitle: RecordingName.displayTitle(for: job.clipName)
                 )
             }
+
+            // ★ 2026-11-09（自动上传范围 = "仅带摘要的"）：摘要刚落地，这条录音
+            // 第一次"配齐"了最有价值的产物——这时候才往存储目的地送。转写钩子
+            // 里的上传在这一档位下被跳过（见 AppEnvironment）。
+            let scope = AppEnvironment.shared?.config.config.autoUploadScope ?? "all"
+            if scope == "with_summary" {
+                await MainActor.run {
+                    if let config = AppEnvironment.shared?.config {
+                        let cfg = config.config
+                        Task { await WebDAVSyncService.shared.sync(clipName: job.clipName, config: cfg) }
+                    }
+                    Task { await FolderExportService.shared.export(clipName: job.clipName) }
+                }
+            }
         }
 
         // The note goes last: it's part of the **result**, and any earlier step throwing shouldn't leave behind

@@ -2394,7 +2394,7 @@
 "watch.ambient_rec" = "REC";
 
 /* ★ 2026-11-05 十五轮：录音质量档位的体积/建议标 */
-"rec_settings.quality_size_as_is" = "约 29MB/小时";
+"rec_settings.quality_size_asIs" = "约 29MB/小时";
 "rec_settings.quality_size_standard" = "约 15MB/小时";
 "rec_settings.quality_size_compact" = "约 11MB/小时";
 "rec_settings.quality_size_minimal" = "约 8MB/小时";
@@ -2547,3 +2547,72 @@
 "upload.mind_map" = "思维导图";
 "upload.chapters" = "章节";
 "upload.bundle" = "资料包（zip）";
+
+/* ★ 2026-11-09 录音豆 Wi‑Fi 快传（原硬编码中文，收进词条） */
+"wifix.status_section" = "状态";
+"wifix.hotspot_section" = "录音豆热点";
+"wifix.hotspot_name" = "热点名";
+"wifix.password" = "密码";
+"wifix.files_pending" = "待传文件（%d 个）";
+"wifix.foreground_hint" = "传输期间请保持本页在前台，不要锁屏太久。";
+"wifix.cancel_transfer" = "取消传输";
+"wifix.close" = "关闭";
+"wifix.nav_title" = "Wi‑Fi 快传";
+"wifix.waiting" = "等待传输";
+"wifix.saved_library" = "已保存到资料库";
+"wifix.stage_preparing" = "准备中…";
+"wifix.stage_config_hotspot" = "正在配置录音豆热点…";
+"wifix.stage_join_hotspot" = "正在接入录音豆热点…";
+"wifix.stage_connecting" = "正在连接录音豆…";
+"wifix.stage_transferring" = "传输中";
+"wifix.stage_done" = "传输完成";
+"wifix.stage_failed" = "传输失败";
+"wifix.stage_cancelled" = "已取消";
+"wifix.partial_saved" = "已保存到断点（收到 %d%%）";
+"wifix.manual_join_title" = "请手动加入录音豆热点";
+"wifix.manual_join_message" = "iOS 没能自动加入「%@」。\n\n请到 设置 → 无线局域网，选择「%@」，密码：%@\n\n连好后回到 Nomily 会自动继续（最多等 3 分钟）。";
+"wifix.go_settings" = "去设置";
+"wifix.joined_continue" = "已加入，继续";
+"wifix.clip_named" = "录音 %@";
+"wifix.stop" = "停止";
+"wifix.pick_title" = "选择录音传输";
+"wifix.pick_hint_empty" = "先选要传的那几条，再走 Wi‑Fi 快传。";
+"wifix.pick_hint" = "从 %d 条里挑要传的，Wi‑Fi 快传，远快于蓝牙";
+"wifix.export_all_a11y" = "Wi‑Fi 快传导出全部录音";
+"wifix.selected_count" = "已选择 %d 条";
+"wifix.select_all" = "全选";
+"wifix.deselect_all" = "取消全选";
+"wifix.cancel" = "取消";
+"wifix.transfer_selected" = "传输所选（%d 条）";
+"wifix.err_not_connected" = "录音豆未连接——请先连接后重试。";
+"wifix.err_empty" = "豆上没有录音";
+"wifix.err_picked_gone" = "所选录音已经不在豆上了（可能已被飞书或自动删除传走）。";
+"wifix.err_nothing_exportable" = "没有可导出的录音";
+"wifix.reconnect_attempt" = "正在重新连接录音豆（蓝牙，第 %d/3 次）…";
+"wifix.reconnect_detail" = "蓝牙断了，正在重连录音豆（第 %d/3 次）…";
+"wifix.wait_hotspot" = "等待手动加入热点「%@」…";
+"wifix.partial_skipped" = "只收到 %d%%，已跳过";
+"wifix.partial_note" = " · 传输不完整(%d%%)";
+"wifix.note_wifi" = " · Wi‑Fi 快传";
+"wifix.note_wifi_d3200" = "Opus 48 kHz mono (D3200 · Wi‑Fi 快传)";
+"wifix.reconnecting" = "正在重新连接录音豆…";
+"wifix.exported_report" = "已导出 %d/%d 个录音到资料库";
+"wifix.deleted_note" = "，并从豆上删除了 %d 个";
+"wifix.delete_failed_note" = "，%d 个未能从豆上删除（录音中的那条删不掉）";
+"wifix.delete_bt_note" = "；蓝牙没连回来，豆上录音未删除";
+"wifix.auto_deleted_note" = "；豆上那条已不在了——完整传完的录音豆固件会自动删除，与删除开关无关（录音已在资料库里）";
+"wifix.partial_resumable_note" = "（%d 个只收到一部分，已存断点——再次点 Wi‑Fi 快传会从断点继续，不会重传）";
+"wifix.partial_skipped_note" = "（%d 个几乎没收到数据，已跳过——可重试）";
+"wifix.interrupted" = "传输中断";
+"wifix.interrupted_advice" = "。请保持录音豆在附近、电量充足，且未被飞书 App 占用；若一直提示接入热点失败，可在 设置 → 无线局域网 手动加入录音豆热点后重试。";
+"wifix.battery_case" = "充电盒";
+
+/* ★ 2026-11-09 Live 空态 hero */
+"live.idle_hero_hint" = "点击开始实时转写：说话时逐句上屏，结束后自动存入资料库。";
+
+/* ★ 2026-11-09 自动上传范围 */
+"storage.locations.upload_scope" = "自动上传";
+"storage.locations.scope_all" = "每条录音";
+"storage.locations.scope_with_summary" = "仅带摘要的";
+"storage.locations.scope_manual" = "仅手动";
+"storage.locations.upload_scope_footer" = "作用于 NAS（WebDAV）与文件夹/iCloud 的自动上传。无论选哪档，「立即同步」都会全量上传。";

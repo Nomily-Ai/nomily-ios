@@ -352,13 +352,13 @@ struct RecorderDeviceView: View {
             // 会继续导出流程——"去设置"后回来，导出器仍在轮询确认网络。
             .alert(item: $soundcoreManualJoin) { prompt in
                 Alert(
-                    title: Text("请手动加入录音豆热点"),
-                    message: Text("iOS 没能自动加入「\(prompt.ssid)」。\n\n请到 设置 → 无线局域网，选择「\(prompt.ssid)」，密码：\(prompt.psk)\n\n连好后回到 Nomily 会自动继续（最多等 3 分钟）。"),
-                    primaryButton: .default(Text("去设置")) {
+                    title: Text(L10n.WifiXfer.manualJoinTitle),
+                    message: Text(L10n.WifiXfer.manualJoinMessage(prompt.ssid, prompt.psk)),
+                    primaryButton: .default(Text(L10n.WifiXfer.goSettings)) {
                         Self.openWiFiSettings()
                         prompt.resume()
                     },
-                    secondaryButton: .cancel(Text("已加入，继续")) {
+                    secondaryButton: .cancel(Text(L10n.WifiXfer.joinedContinue)) {
                         prompt.resume()
                     }
                 )
@@ -871,9 +871,9 @@ struct RecorderDeviceView: View {
         if id > 1_000_000_000 {
             let fmt = DateFormatter()
             fmt.dateFormat = "MM-dd HH:mm"
-            return "录音 " + fmt.string(from: Date(timeIntervalSince1970: TimeInterval(id)))
+            return L10n.WifiXfer.clipNamed(fmt.string(from: Date(timeIntervalSince1970: TimeInterval(id))))
         }
-        return "录音 \(id)"
+        return L10n.WifiXfer.clipNamed("\(id)")
     }
 
     @ViewBuilder
@@ -887,7 +887,7 @@ struct RecorderDeviceView: View {
                 if let fraction = soundcoreWifiFraction {
                     ProgressView(value: fraction)
                 }
-                Button("停止") { soundcoreWifiExporter?.cancel() }
+                Button(L10n.WifiXfer.stop) { soundcoreWifiExporter?.cancel() }
                     .font(.callout)
             }
             .padding(.horizontal)
@@ -907,10 +907,10 @@ struct RecorderDeviceView: View {
                 } label: {
                     Label {
                         VStack(alignment: .leading) {
-                            Text("选择录音传输").font(.body.bold())
+                            Text(L10n.WifiXfer.pickTitle).font(.body.bold())
                             Text(recordings.isEmpty
-                                 ? "先选要传的那几条，再走 Wi‑Fi 快传"
-                                 : "从 \(recordings.count) 条里挑要传的，Wi‑Fi 快传，远快于蓝牙")
+                                 ? L10n.WifiXfer.pickHintEmpty
+                                 : L10n.WifiXfer.pickHint(recordings.count))
                                 .font(.caption2)
                                 .foregroundStyle(.white.opacity(0.85))
                         }
@@ -933,7 +933,7 @@ struct RecorderDeviceView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(isRecording || soundcoreWifiRunning || soundcoreLink?.isConnected != true)
-                .accessibilityLabel("Wi‑Fi 快传导出全部录音")
+                .accessibilityLabel(L10n.WifiXfer.exportAllA11y)
             }
             .padding(.horizontal)
             .padding(.bottom, 8)
@@ -951,10 +951,10 @@ struct RecorderDeviceView: View {
         let allSelected = !selectable.isEmpty && selectedIDs.count >= selectable.count
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text("已选择 \(selectedIDs.count) 条")
+                Text(L10n.WifiXfer.selectedCount(selectedIDs.count))
                     .font(.subheadline.weight(.medium))
                 Spacer(minLength: 8)
-                Button(allSelected ? "取消全选" : "全选") {
+                Button(allSelected ? L10n.WifiXfer.deselectAll : L10n.WifiXfer.selectAll) {
                     if allSelected {
                         selectedIDs.removeAll()
                     } else {
@@ -965,7 +965,7 @@ struct RecorderDeviceView: View {
                 .disabled(selectable.isEmpty)
             }
             HStack(spacing: 8) {
-                Button("取消") {
+                Button(L10n.WifiXfer.cancel) {
                     isSelecting = false
                     selectedIDs.removeAll()
                 }
@@ -985,7 +985,7 @@ struct RecorderDeviceView: View {
                         } else {
                             Image(systemName: "wifi")
                         }
-                        Text("传输所选（\(selectedIDs.count) 条）")
+                        Text(L10n.WifiXfer.transferSelected(selectedIDs.count))
                         Spacer(minLength: 0)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1010,7 +1010,7 @@ struct RecorderDeviceView: View {
     ///   一次会话里传几条由 `files` 决定；不能先全传再丢，那等于白传。
     private func runSoundcoreWifiExport(only: Set<String>? = nil) async {
         guard let link = soundcoreLink, link.isConnected else {
-            soundcoreWifiError = "录音豆未连接——请先连接后重试"
+            soundcoreWifiError = L10n.WifiXfer.errNotConnected
             return
         }
         guard !soundcoreWifiRunning else { return }
@@ -1032,7 +1032,7 @@ struct RecorderDeviceView: View {
         do {
             let list = try await link.client.listFilesCompat()
             guard !list.files.isEmpty else {
-                banner = "豆上没有录音"
+                banner = L10n.WifiXfer.errEmpty
                 return
             }
             // ★ 2026-11-03：选择式传输——按 fileId 过滤出这次要传的那几条。
@@ -1041,7 +1041,7 @@ struct RecorderDeviceView: View {
             if let only {
                 files = list.files.filter { only.contains(String($0.fileId)) }
                 guard !files.isEmpty else {
-                    banner = "所选录音已经不在豆上了（可能已被飞书或自动删除传走）"
+                    banner = L10n.WifiXfer.errPickedGone
                     soundcoreWifiError = nil
                     return
                 }
@@ -1051,7 +1051,7 @@ struct RecorderDeviceView: View {
                 files = list.files
             }
             guard !files.isEmpty else {
-                banner = "豆上没有录音"
+                banner = L10n.WifiXfer.errEmpty
                 return
             }
             // ★ 2026-10-29：先建页面 model 并弹出，用户立刻看到"这次要传什么"。
@@ -1079,8 +1079,8 @@ struct RecorderDeviceView: View {
             exporter.onNeedBleReconnect = {
                 if let current = soundcoreLink, current.isConnected { return current.client }
                 for attempt in 1...3 {
-                    soundcoreWifiStatus = "正在重新连接录音豆（蓝牙，第 \(attempt)/3 次）…"
-                    ui.stageDetail = "蓝牙断了，正在重连录音豆（第 \(attempt)/3 次）…"
+                    soundcoreWifiStatus = L10n.WifiXfer.reconnectAttempt(attempt)
+                    ui.stageDetail = L10n.WifiXfer.reconnectDetail(attempt)
                     _ = try? await bluetooth.ensureRecorderLink(recordID: recorder.id.uuidString, timeout: 25)
                     if let fresh = soundcoreLink, fresh.isConnected { return fresh.client }
                     if attempt < 3 { try? await Task.sleep(nanoseconds: 5_000_000_000) }
@@ -1091,7 +1091,7 @@ struct RecorderDeviceView: View {
             // 失败时在同一次会话里请用户手动加入——此时豆的热点还开着。
             exporter.onNeedManualJoin = { ssid, psk in
                 await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                    soundcoreWifiStatus = "等待手动加入热点「\(ssid)」…"
+                    soundcoreWifiStatus = L10n.WifiXfer.waitHotspot(ssid)
                     soundcoreManualJoin = SoundcoreManualJoinPrompt(ssid: ssid, psk: psk) {
                         cont.resume()
                     }
@@ -1109,8 +1109,8 @@ struct RecorderDeviceView: View {
                 }
             }
             guard !exported.isEmpty else {
-                soundcoreWifiUI?.finish(error: "没有可导出的录音")
-                banner = "没有可导出的录音"
+                soundcoreWifiUI?.finish(error: L10n.WifiXfer.errNothingExportable)
+                banner = L10n.WifiXfer.errNothingExportable
                 return
             }
 
@@ -1126,12 +1126,12 @@ struct RecorderDeviceView: View {
                 // "传输不完整"标注，Opus 流截断仍然能播到断点），<50% 才跳过。
                 if f.partial && f.coverage < 0.5 {
                     partialCount += 1
-                    ui.markFailed(fileId: f.fileId, message: "只收到 \(Int((f.coverage * 100).rounded()))%，已跳过")
+                    ui.markFailed(fileId: f.fileId, message: L10n.WifiXfer.partialSkipped(Int((f.coverage * 100).rounded())))
                     log.warning("partial Wi‑Fi export \(f.fileId, privacy: .public) coverage=\(f.coverage, privacy: .public) skipped for library ingestion")
                     continue
                 }
                 let partialNote = f.partial
-                    ? " · 传输不完整(\(Int((f.coverage * 100).rounded()))%)"
+                    ? L10n.WifiXfer.partialNote(Int((f.coverage * 100).rounded()))
                     : ""
                 let startedAt = f.fileId > 1_000_000_000
                     ? Date(timeIntervalSince1970: TimeInterval(f.fileId))
@@ -1142,14 +1142,14 @@ struct RecorderDeviceView: View {
                         data: out.data,
                         fileExtension: out.fileExtension,
                         duration: out.durationSeconds > 0 ? out.durationSeconds : nil,
-                        formatNote: out.formatNote + " · Wi‑Fi 快传" + partialNote
+                        formatNote: out.formatNote + L10n.WifiXfer.noteWifi + partialNote
                     )
                 } else {
                     clip = RecorderClip(
                         data: f.ogg,
                         fileExtension: "opus",
                         duration: Double(SoundcoreOgg.rawDurationMs(f.raw.count)) / 1000.0,
-                        formatNote: "Opus 48 kHz mono (D3200 · Wi‑Fi 快传)" + partialNote
+                        formatNote: L10n.WifiXfer.noteWifiD3200 + partialNote
                     )
                 }
                 let name = RecorderClipStore.suggestedName(
@@ -1182,7 +1182,7 @@ struct RecorderDeviceView: View {
             // 后面"删除豆上录音"和列表刷新都要靠这条 BLE。
             var activeLink = link
             if activeLink.isConnected == false {
-                soundcoreWifiStatus = "正在重新连接录音豆…"
+                soundcoreWifiStatus = L10n.WifiXfer.reconnecting
                 _ = try? await bluetooth.ensureRecorderLink(recordID: recorder.id.uuidString, timeout: 20)
                 if let fresh = soundcoreLink { activeLink = fresh }
             }
@@ -1196,7 +1196,7 @@ struct RecorderDeviceView: View {
                     for f in exported where !f.partial {
                         let rec = RecorderRecording(
                             id: String(f.fileId),
-                            displayTitle: "录音 \(f.fileId)",
+                            displayTitle: L10n.WifiXfer.clipNamed("\(f.fileId)"),
                             sizeBytes: f.ogg.count,
                             startedAt: nil,
                             sessionID: f.fileId,
@@ -1217,19 +1217,19 @@ struct RecorderDeviceView: View {
             }
             if activeLink.isConnected { await connectAndList(showsLoading: false) }
 
-            var message = "已导出 \(saved)/\(exported.count) 个录音到资料库"
-            if deleted > 0 { message += "，并从豆上删除了 \(deleted) 个" }
-            if deleteFailed > 0 { message += "，\(deleteFailed) 个未能从豆上删除（录音中的那条删不掉）" }
-            if deleteSkipped { message += "；蓝牙没连回来，豆上录音未删除" }
+            var message = L10n.WifiXfer.exportedReport(saved, exported.count)
+            if deleted > 0 { message += L10n.WifiXfer.deletedNote(deleted) }
+            if deleteFailed > 0 { message += L10n.WifiXfer.deleteFailedNote(deleteFailed) }
+            if deleteSkipped { message += L10n.WifiXfer.deleteBtNote }
             // ★ 2026-10-29（用户："自动删除开关是关着的，为啥也删了？"）：
             // 实锤是**豆固件的"传完即删"**——录音被完整传走后豆自己删（日志里
             // App 没发过任何删除指令；没传完整的从不被删；飞书传完的也是豆删的）。
             // 开关只管蓝牙路径。这里如实告知，免得用户以为开关失效。
             if saved > 0, partialCount == 0, deleted == 0 {
-                message += "；豆上那条已不在了——完整传完的录音豆固件会自动删除，与删除开关无关（录音已在资料库里）"
+                message += L10n.WifiXfer.autoDeletedNote
             }
-            if partialSaved > 0 { message += "（\(partialSaved) 个只收到一部分，已存断点——再次点 Wi‑Fi 快传会从断点继续，不会重传）" }
-            if partialCount > 0 { message += "（\(partialCount) 个几乎没收到数据，已跳过——可重试）" }
+            if partialSaved > 0 { message += L10n.WifiXfer.partialResumableNote(partialSaved) }
+            if partialCount > 0 { message += L10n.WifiXfer.partialSkippedNote(partialCount) }
             banner = message
             soundcoreWifiUI?.finish(error: nil)
         } catch is CancellationError {
@@ -1241,11 +1241,10 @@ struct RecorderDeviceView: View {
                 _ = try? await bluetooth.ensureRecorderLink(recordID: recorder.id.uuidString, timeout: 20)
                 if soundcoreLink?.isConnected == true { await connectAndList(showsLoading: false) }
             }
-            soundcoreWifiUI?.failUnfinished(message: "传输中断")
+            soundcoreWifiUI?.failUnfinished(message: L10n.WifiXfer.interrupted)
             soundcoreWifiUI?.finish(error: error.localizedDescription)
             soundcoreWifiError = error.localizedDescription +
-                "。请保持录音豆在附近、电量充足，且未被飞书 App 占用；" +
-                "若一直提示接入热点失败，可在 设置 → 无线局域网 手动加入录音豆热点后重试。"
+                L10n.WifiXfer.interruptedAdvice
         }
     }
 
@@ -1803,7 +1802,7 @@ struct RecorderDeviceView: View {
             // 盒电量只在 `getDeviceInfo` 快照里有，keep-alive 推的 0x09 帧只有豆本体。
             if let secondary = deviceInfo?.secondaryBatteryPercent {
                 HStack {
-                    Label(deviceInfo?.secondaryBatteryLabel ?? "充电盒", systemImage: batterySymbol)
+                    Label(deviceInfo?.secondaryBatteryLabel ?? L10n.WifiXfer.batteryCase, systemImage: batterySymbol)
                     Spacer()
                     Text("\(secondary)%")
                         .foregroundStyle(.secondary)
