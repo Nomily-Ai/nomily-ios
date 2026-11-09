@@ -37,6 +37,19 @@ struct ASRCloudSpec: Identifiable, Equatable {
         let placeholder: String
         /// Keys that must be present before the probe can run.
         var required: Bool = true
+
+        /// ★ 2026-11-05：凭据字段的标签/占位符翻译。上一版只有标签走了
+        /// `L10n.ASRCloud.field`，而且键是**全局** `asr.cloud.field.<id>`——
+        /// 但 `apiKey` 这类 id 六家共用，一家翻译会串味，所以干脆没建 en 键，
+        /// 中文标签（"项目 Appkey"）就原样漏进了英文界面。改成按厂商命名空间：
+        /// `asr.cloud.<vendor>.fields.<id>.label|.placeholder`，en 只需要给
+        /// 原值是中文的那几条建键，其余回落（回落值本来就是英文）。
+        func localizedLabel(vendor: String) -> String {
+            NSLocalizedString("asr.cloud.\(vendor).fields.\(id).label", value: label, comment: "Credential field label")
+        }
+        func localizedPlaceholder(vendor: String) -> String {
+            NSLocalizedString("asr.cloud.\(vendor).fields.\(id).placeholder", value: placeholder, comment: "Credential field placeholder")
+        }
     }
 
     let id: String
@@ -55,6 +68,10 @@ struct ASRCloudSpec: Identifiable, Equatable {
     let models: [String]
     /// Where the credential comes from.
     let console: String
+    /// ★ 2026-11-02（用户："该有对应配置页面点击跳转而不是要用户手动输入网址"）：
+    /// 控制台/创建 Key 页面的**可点链接**——`console` 里的文字路径告诉用户去哪，
+    /// 这个字段是真正的那扇门。nil = 没有稳定入口页。
+    let consoleURL: URL?
     /// Vendor-specific caveat.
     let note: String?
 
@@ -67,15 +84,78 @@ struct ASRCloudSpec: Identifiable, Equatable {
     /// 选型建议短句："推荐 · 中文首选" / "偏贵" 等。nil = 中立。
     let recommendation: String?
 
+    /// ★ 2026-11-06（饭耳 1.0 移植 P0-2）：**准确率口径**——厂商公布的中文
+    /// CER / 英文 WER，形如「中文 CER 2.25% · 英文 WER 4.72%」。
+    ///
+    /// 为什么单独一个字段而不是塞进 `pricePerHour`：价格和精度是两个不同的问题
+    /// （"便不便宜"与"准不准"），混在一行里用户没法比较。有数据的厂商才显示，
+    /// 没有把握的一律 nil——**不编数字**，这条比"卡片看起来整齐"重要。
+    var cerHint: String? = nil
+
     /// 价格 + 能力一行小字（"约 0.3 元/小时 · 分说话人"）。空 = 没有可靠数据。
+    /// ★ 2026-11-05：价格走 `localizedPrice`——上一版直接用原始中文（"约 $0.3/小时"
+    /// 里的"约"就是这么漏进英文界面的），`localizedPrice` 键缺失时回落原值，行为不变。
     var metaLine: String? {
         var parts: [String] = []
-        if let pricePerHour { parts.append(pricePerHour) }
-        if supportsDiarization { parts.append("分说话人") }
+        if let localizedPrice { parts.append(localizedPrice) }
+        if supportsDiarization { parts.append(L10n.ASRCloud.diarization) }
+        // ★ 2026-11-06（P0-2）：精度跟在价格后面——"约 0.1 元/小时 · 分说话人 ·
+        // 中文 CER 2.25%"正是饭耳卡片那一行的排法。
+        if let localizedCerHint { parts.append(localizedCerHint) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    // MARK: - Localized display strings（★ 2026-11-02，用户："设置英语为系统语言但是好多中文的都没翻译过来"）
+
+    /// spec 数据以中文撰写（主要受众），英文 UI 从 en.lproj 读 `asr.cloud.<id>.*`
+    /// 键，键缺失时回落到这里的中文值——zh-Hans 不需要建键。
+    var localizedName: String { NSLocalizedString("asr.cloud.\(id).name", value: name, comment: "") }
+    var localizedTagline: String { NSLocalizedString("asr.cloud.\(id).tagline", value: tagline, comment: "") }
+    var localizedConsole: String { NSLocalizedString("asr.cloud.\(id).console", value: console, comment: "") }
+    var localizedNote: String? {
+        note.map { NSLocalizedString("asr.cloud.\(id).note", value: $0, comment: "") }
+    }
+    var localizedRecommendation: String? {
+        recommendation.map { NSLocalizedString("asr.cloud.\(id).recommendation", value: $0, comment: "") }
+    }
+    var localizedPrice: String? {
+        pricePerHour.map { NSLocalizedString("asr.cloud.\(id).price", value: $0, comment: "") }
+    }
+    var localizedCerHint: String? {
+        cerHint.map { NSLocalizedString("asr.cloud.\(id).cer", value: $0, comment: "") }
+    }
+
+    /// ★ 2026-11-05（用户截图：英文界面下模型选择页全是中文）：
+    /// `models` 里存的是**要发给 API 的真名**（"录音文件识别（Paraformer）"），
+    /// 存进 config 的必须是原值——这里只翻译**显示层**。英文 UI 从 en 表读
+    /// `asr.cloud.<id>.models.<序号>`，键缺失回落原值（zh-Hans 不用建键）。
+    func localizedModel(_ raw: String) -> String {
+        guard let index = models.firstIndex(of: raw) else { return raw }
+        return NSLocalizedString("asr.cloud.\(id).models.\(index)", value: raw, comment: "")
+    }
+
+    /// ★ 2026-11-05：选型建议是不是"正面的"（绿色）。上一版用
+    /// `recommendation.hasPrefix("推荐")` 判断——英文翻译不以"推荐"开头，
+    /// 于是英文界面所有厂商都掉进橙色分支，"Recommended" 也显示成橙色。
+    /// 数据侧只认中文原值的这个前缀（en 翻译爱怎么写怎么写）。
+    var recommendationIsPositive: Bool {
+        recommendation?.hasPrefix("推荐") ?? false
+    }
+
     /// Tile colour, same shape as `LLMProviderSpec.tint`.
+    /// ★ 2026-11-02（用户："asr 的这些模型图标要按照 Apple Store 的 app 图标来"）：
+    /// 这批厂商的 `brandAsset` 已换成 App Store 官方 App 图标的**彩色位图**
+    /// （渲染时不能套 template/白色着色）。腾讯云没有官方移动 App，微信生态
+    /// 之外的 Deepgram / AssemblyAI / Gladia / Watson 也无消费级 App——保留单色瓦片。
+    var usesAppStoreIcon: Bool {
+        switch id {
+        case "aliyun", "baidu", "xfyun", "google", "aws":
+            return true
+        default:
+            return false
+        }
+    }
+
     var tint: (r: Double, g: Double, b: Double) {
         switch id {
         case "aliyun":     return (0.98, 0.43, 0.02)   // Aliyun orange
@@ -128,10 +208,13 @@ struct ASRCloudSpec: Identifiable, Equatable {
         endpointEditable: false,
         models: ["录音文件识别（Paraformer）", "一句话识别", "实时语音识别"],
         console: "① nls-portal.console.aliyun.com → 项目列表 拿 Appkey；② ram.console.aliyun.com 创建 AccessKey（需同时授权 OSS 读写）；③ 与区域一致建一个 OSS Bucket",
+        consoleURL: URL(string: "https://nls-portal.console.aliyun.com/"),
         note: "转写流程：音频先上传到你的 OSS Bucket（私有），生成 2 小时有效的预签名链接交给阿里云识别（file_link 必须公网可下载，这是它的接口要求），识别完取回结果。这里填的是 **OSS 区域**（Bucket 建在杭州就填 cn-hangzhou）——填错会自动按 OSS 返回的 endpoint 纠正一次；实时字幕的网关区域与它无关，会自动归一化。实时字幕走它家的实时语音识别 WebSocket（同一个 Appkey），在「录音与转写 → 实时识别引擎」里选阿里云即可。",
-        pricePerHour: "约 0.3 元/小时",
+        pricePerHour: "约 0.1 元/小时（百炼 qwen-audio）",
         supportsDiarization: true,
-        recommendation: "推荐 · 中文首选"
+        recommendation: "推荐 · 中文首选",
+        // ★ 2026-11-06（P0-2）：饭耳 1.0 卡片原文口径（FLEURS 测试集）。
+        cerHint: "中文 CER 2.25% · 英文 WER 4.72%"
     )
 
     static let baidu = ASRCloudSpec(
@@ -149,6 +232,7 @@ struct ASRCloudSpec: Identifiable, Equatable {
         endpointEditable: false,
         models: ["短语音识别-标准版", "短语音识别-极速版", "远场语音识别"],
         console: "console.bce.baidu.com → 语音技术 → 应用列表（创建应用后才有 AK/SK）",
+        consoleURL: URL(string: "https://console.bce.baidu.com/ai-engine/old/#/ai/speech/app/list"),
         note: "鉴权走 OAuth2：AK/SK 换 access_token，转写也用同一个 token，所以探测通过即代表凭据可用。",
         pricePerHour: "约 12 元/小时（短语音按秒计）",
         supportsDiarization: false,
@@ -172,6 +256,7 @@ struct ASRCloudSpec: Identifiable, Equatable {
         endpointEditable: false,
         models: ["听写 iat（短语音/实时）", "语音转写 asr（长音频）"],
         console: "console.xfyun.cn → 语音听写/语音转写 → 服务接口认证信息",
+        consoleURL: URL(string: "https://console.xfyun.cn/"),
         note: "鉴权是 host+date 的 HMAC-SHA256 签名（date 与服务器时差要在 5 分钟内）。探测成功返回 HTTP 101——它家的识别入口是 WebSocket，握手通过即签名有效。",
         pricePerHour: "转写约 0.33 元/分钟",
         supportsDiarization: true,
@@ -195,8 +280,9 @@ struct ASRCloudSpec: Identifiable, Equatable {
         endpointEditable: false,
         models: ["16k_zh 普通话", "16k_en 英语", "16k_yue 粤语", "16k_zh_medical 医疗"],
         console: "console.cloud.tencent.com → 访问管理 → API 密钥管理",
+        consoleURL: URL(string: "https://console.cloud.tencent.com/cam/capi"),
         note: "地址固定 asr.tencentcloudapi.com，区域是请求参数（TC3-HMAC-SHA256 签名）。探测调 DescribeTaskStatus（不存在的任务 ID）——只验证签名，不上传音频；热词表接口（DescribeVocabList 等）已在 asr 2019-06-14 下线，不要用它做探测。",
-        pricePerHour: "约 1.3 元/小时（录音文件识别）",
+        pricePerHour: "约 0.8 元/小时（录音识别大模型 2.0）",
         supportsDiarization: true,
         recommendation: "国内均衡 · 中英粤均可"
     )
@@ -213,6 +299,7 @@ struct ASRCloudSpec: Identifiable, Equatable {
         models: ["latest_long", "latest_short", "phone_call", "video",
                  "command_and_search", "default"],
         console: "console.cloud.google.com → APIs & Services → Credentials",
+        consoleURL: URL(string: "https://console.cloud.google.com/apis/credentials"),
         note: "模型是 v1 的识别器类型：会议/长音频用 latest_long，短指令用 command_and_search，电话录音用 phone_call。",
         pricePerHour: "约 $0.024/分钟（约 $1.4/小时）",
         supportsDiarization: true,
@@ -236,6 +323,7 @@ struct ASRCloudSpec: Identifiable, Equatable {
         endpointEditable: false,
         models: ["standard", "medical"],
         console: "console.aws.amazon.com → IAM → 用户 → 安全凭证",
+        consoleURL: URL(string: "https://console.aws.amazon.com/iam/home#/security_credentials"),
         note: "地址由区域拼出（transcribe.<region>.amazonaws.com）。只读权限即够探测；转写还需要该账号能访问 S3（Transcribe 是异步任务型接口）。",
         pricePerHour: "约 $0.024/分钟（约 $1.4/小时）",
         supportsDiarization: true,
@@ -254,6 +342,7 @@ struct ASRCloudSpec: Identifiable, Equatable {
         models: ["nova-3", "nova-2", "nova-2-phonecall", "nova-2-medical",
                  "nova-2-meeting", "enhanced", "base", "whisper-large"],
         console: "console.deepgram.com → API Keys",
+        consoleURL: URL(string: "https://console.deepgram.com/"),
         note: "鉴权头是 `Authorization: Token <key>`，不是 Bearer——这家是特例，已按它的协议发。",
         pricePerHour: "约 $0.3/小时",
         supportsDiarization: true,
@@ -271,6 +360,7 @@ struct ASRCloudSpec: Identifiable, Equatable {
         endpointEditable: false,
         models: ["best", "nano", "slam-1"],
         console: "assemblyai.com/dashboard → API keys",
+        consoleURL: URL(string: "https://www.assemblyai.com/app/dashboard/api-keys"),
         note: "模型字段在它的协议里叫 speech_model：best 最准，nano 最快，slam-1 面向实时通话。",
         pricePerHour: "约 $0.4/小时",
         supportsDiarization: true,
@@ -288,6 +378,7 @@ struct ASRCloudSpec: Identifiable, Equatable {
         endpointEditable: false,
         models: ["solaria-1", "solaria-mini", "whisper-large-v3"],
         console: "app.gladia.io → API keys",
+        consoleURL: URL(string: "https://app.gladia.io/"),
         note: "鉴权头是 `x-gladia-key`。",
         pricePerHour: "约 $0.6/小时（Pro 档）",
         supportsDiarization: true,
@@ -310,6 +401,7 @@ struct ASRCloudSpec: Identifiable, Equatable {
         models: ["en-US_BroadbandModel", "en-US_Telephony", "en-US_Multimedia",
                  "zh-CN_BroadbandModel", "zh-CN_Telephony"],
         console: "cloud.ibm.com → 资源列表 → Speech to Text → 凭证",
+        consoleURL: URL(string: "https://cloud.ibm.com/resources"),
         note: "地址按区域拼出（api.<region>.speech-to-text.watson.cloud.ibm.com）。鉴权是 Basic，用户名固定写 apikey。它有自己的 /v1/models，刷新会拿到真实模型清单。",
         pricePerHour: "约 $0.02/分钟（约 $1.2/小时）",
         supportsDiarization: true,

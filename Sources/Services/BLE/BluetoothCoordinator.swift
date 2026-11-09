@@ -794,6 +794,10 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
         client = nil
         connectedDeviceSID = nil
         pendingPairing = nil
+        // ★ 2026-11-04：断开就把钥匙校验的结论清掉。
+        //   留着上一个设备的"与设备一致"，界面会对着一个已经不存在的连接
+        //   报平安——这比不显示更糟。
+        KeyHealthService.shared.reset()
     }
 
     // MARK: Recorder auto-reconnect
@@ -1018,6 +1022,14 @@ final class BluetoothCoordinator: NSObject, ObservableObject {
         // is non-fatal; downloads fall back to the "decrypt if key set"
         // heuristic when `deviceEncryptionOn` stays nil.
         _ = try? await client.getEncryptionState()
+
+        // ★ 2026-11-04（用户："在 Nomily 链接的时候增加检查密钥当前是否符合，否则
+        //   导致录音能够传输但是无法解密"）：连接完成就把"钥匙对不对"判出来。
+        //
+        //   放在这里而不是下载时：这是唯一一个**所有**连接路径都会经过的点
+        //   （首次连接、重连、自动重连），而且恰好就在 0xA3 读完的下一秒。
+        //   判定本身是纯本地的（Keychain + 已存的 KCV），不会拖慢连接。
+        await KeyHealthService.shared.evaluate(client: client)
     }
 
     private func attemptConnect(peripheral: CBPeripheral, timeout: TimeInterval) async throws -> DnoteClient {

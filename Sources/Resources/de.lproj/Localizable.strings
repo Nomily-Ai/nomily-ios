@@ -427,7 +427,7 @@
 "encryption.action.rotate" = "Rotieren";
 "encryption.action.cancel" = "Abbrechen";
 "encryption.progress.working" = "Arbeite …";
-"encryption.footer.rotate" = "Rotieren schreibt einen brandneuen Schlüssel auf das Gerät. Alle bereits verschlüsselten Aufnahmen auf dem Gerät werden dauerhaft unentschlüsselbar. Nur verwenden, wenn du ein gebrauchtes Gerät übernimmst oder die alte Passphrase vergessen hast.";
+"encryption.footer.rotate" = "„Rotieren“ schreibt einen völlig neuen Schlüssel auf das Gerät. Aufnahmen, die noch darauf liegen, bleiben an den alten Schlüssel gebunden und lassen sich auf diesem iPhone nicht mehr öffnen — lade sie vorher herunter. Das Gerät gibt seinen aktuellen Schlüssel nur an den heraus, der ihn besitzt; Rotieren gelingt also nur, wenn dieses iPhone (oder die eingegebene Passphrase) ihn besitzt. Ein von der Hersteller-App gesetzter Schlüssel muss dort zuerst deaktiviert werden.";
 "encryption.footer.set_encrypted" = "Dieses Gerät ist verschlüsselt. Wir nehmen einen kurzen Test-Clip auf, laden ihn herunter und versuchen, ihn mit der eingegebenen Passphrase zu entschlüsseln. Der Test-Clip wird anschließend automatisch gelöscht.";
 "encryption.footer.set_unencrypted" = "Speichert den lokal abgeleiteten Schlüssel im iOS-Schlüsselbund. Das Gerät bleibt unverändert – wähle eine starke Passphrase und aktiviere die Verschlüsselung später im Geräte-Bildschirm.";
 "encryption.progress.deriving" = "Schlüssel wird abgeleitet …";
@@ -440,7 +440,7 @@
 "encryption.progress.checking_device" = "Aufnahmen auf dem Gerät werden geprüft…";
 "encryption.rotate_confirm.title" = "Geräteschlüssel wirklich erneuern?";
 "encryption.rotate_confirm.message_empty" = "Auf dem Gerät sind keine Aufnahmen mehr, es geht nichts verloren. Notiere die neue Passphrase — nur damit lassen sich künftige Aufnahmen öffnen, eine Wiederherstellung gibt es nicht.";
-"encryption.rotate_confirm.message" = "Auf dem Gerät liegen noch %d Aufnahme(n). Sie wurden mit dem alten Schlüssel erstellt und werden dauerhaft unlesbar — übertrage sie vorher, wenn du sie behalten willst. Notiere die neue Passphrase; eine Wiederherstellung gibt es nicht.";
+"encryption.rotate_confirm.message" = "%d Aufnahme(n) liegen noch auf dem Gerät und sind an den aktuellen Schlüssel gebunden — nach dem Rotieren lassen sie sich auf diesem iPhone nicht mehr öffnen, lade sie also vorher herunter. Notiere die neue Passphrase: Nur mit ihr lassen sich künftige Aufnahmen öffnen, es gibt keine Wiederherstellung.";
 "encryption.progress.probe_subtitle" = "Ein kurzer Test-Clip wird aufgenommen, um die Passphrase zu prüfen. Er wird automatisch gelöscht.";
 "encryption.mismatch.title" = "Passphrase stimmt nicht";
 "encryption.mismatch.message" = "Der Test-Clip ließ sich mit dieser Passphrase nicht entschlüsseln. Bitte erneut prüfen und nochmal eingeben. Wenn du sie wirklich vergessen hast, überschreibe den Geräteschlüssel mit »Rotieren« – damit werden allerdings alle bereits verschlüsselten Aufnahmen auf dem Gerät dauerhaft zerstört.";
@@ -450,7 +450,9 @@
 "encryption.error.probe_not_found" = "Konnte den Test-Clip auf dem Gerät nicht finden.";
 "encryption.error.device_busy" = "Gerät konnte nicht aufnehmen: %@";
 "encryption.banner.title" = "Gerät ist verschlüsselt";
-"encryption.banner.message" = "Gib die Passphrase ein, mit der dieses Gerät eingerichtet wurde, um seine Aufnahmen auf diesem iPhone zu entsperren. Wenn du sie vergessen hast, rotiere den Schlüssel (löscht alle bereits verschlüsselten Aufnahmen auf dem Gerät).";
+"encryption.switch_to_unlock_hint" = "Wenn du die Passphrase kennst, mit der dieser Schlüssel erstellt wurde, prüfe sie hier: Die Aufnahmen werden lesbar und auf dem Gerät wird nichts überschrieben. Überschreiben funktioniert erst, wenn dieses iPhone den aktuellen Schlüssel besitzt.";
+"encryption.switch_to_unlock" = "Stattdessen aktuelle Passphrase prüfen";
+"encryption.banner.message" = "Gib die Passphrase ein, mit der dieses Gerät eingerichtet wurde, um seine Aufnahmen auf diesem iPhone zu entsperren. Ein von einer anderen App gesetzter Schlüssel muss dort zuerst deaktiviert werden — dieses iPhone kann einen Schlüssel, den es nicht besitzt, nicht überschreiben.";
 "encryption.banner.cta" = "Passphrase bestätigen …";
 "encryption.download.key_missing" = "%@: Diese Aufnahme ist verschlüsselt, aber auf diesem iPhone ist keine Passphrase festgelegt. Öffne Einstellungen → Verschlüsselungspassphrase → Geräte-Passphrase bestätigen …, um sie zu entsperren.";
 "encryption.download.wrong_key" = "%1$@: Entschlüsselung fehlgeschlagen – die Passphrase passt nicht zu dieser Aufnahme. Öffne Einstellungen → Verschlüsselungspassphrase, lösche die aktuelle und lege die richtige fest. (Details: %2$@)";

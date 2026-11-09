@@ -47,19 +47,20 @@ enum LLMConnectivityService {
     // MARK: - Entry point
 
     static func test(
-        spec: LLMProviderSpec, endpoint: String, apiKey: String, model: String
+        spec: LLMProviderSpec, endpoint: String, apiKey: String, model: String,
+        protocol wire: LLMWireProtocol = .openai
     ) async -> Result {
         guard !model.isEmpty else { return .failure(L10n.LLM.testNeedModel) }
         if spec.keyRequired, apiKey.isEmpty { return .failure(L10n.LLM.testNeedKey) }
 
-        let base = endpoint.hasSuffix("/") ? String(endpoint.dropLast()) : endpoint
+        let base = LLMEndpoint.base(endpoint)
         guard !base.isEmpty, URL(string: base) != nil else {
             return .failure(L10n.LLM.testBadEndpoint)
         }
 
         let request: URLRequest
         do {
-            request = try build(spec: spec, base: base, apiKey: apiKey, model: model)
+            request = try build(spec: spec, base: base, apiKey: apiKey, model: model, wire: wire)
         } catch {
             return .failure(L10n.LLM.testBadEndpoint)
         }
@@ -69,6 +70,7 @@ enum LLMConnectivityService {
             let (data, resp) = try await URLSession.shared.data(for: request)
             let millis = Int(Date().timeIntervalSince(started) * 1000)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            LLMRequestLog.record(request, code: code, millis: millis, note: "probe \(spec.id)")
 
             guard (200..<300).contains(code) else {
                 let reason = message(in: data) ?? L10n.LLM.testHTTP(code)
@@ -78,7 +80,7 @@ enum LLMConnectivityService {
             // 200 but a body we can't read means it answered with something other
             // than a completion — worth flagging, since the summary would break
             // the same way later, only much less visibly.
-            guard answered(data, provider: spec.id) else {
+            guard answered(data, provider: spec.id, wire: wire) else {
                 return Result(ok: false, millis: millis, detail: "HTTP \(code)",
                               error: L10n.LLM.testUnexpectedBody)
             }
@@ -102,7 +104,8 @@ enum LLMConnectivityService {
     // MARK: - Per-provider wire formats
 
     private static func build(
-        spec: LLMProviderSpec, base: String, apiKey: String, model: String
+        spec: LLMProviderSpec, base: String, apiKey: String, model: String,
+        wire: LLMWireProtocol = .openai
     ) throws -> URLRequest {
         switch spec.id {
         case "openai":
@@ -140,21 +143,39 @@ enum LLMConnectivityService {
                 timeout: cloudTimeout
             )
         case "openRouter":
-            return try openAI(url: "\(base)/chat/completions", apiKey: apiKey,
+            return try openAI(url: LLMEndpoint.chatURL(base), apiKey: apiKey,
                               model: model, timeout: cloudTimeout)
         case "ollama":
             // Same endpoint the completion path uses (`/v1/chat/completions`, not
             // `/api/chat`): testing a path the app never takes would clear a
             // provider that still fails at summary time.
-            return try openAI(url: "\(base)/v1/chat/completions", apiKey: apiKey,
+            return try openAI(url: LLMEndpoint.chatURL(base), apiKey: apiKey,
                               model: model, timeout: localTimeout)
         case "custom":
-            return try openAI(url: "\(base)/chat/completions", apiKey: apiKey,
-                              model: model, timeout: localTimeout)
+            // ★ 2026-11-04: probe must match what `LLMCompletionService` actually sends,
+            // including the protocol choice and the remote/local split — otherwise a
+            // provider that says "N ms" here still fails at summarise time.
+            let timeout = LLMEndpoint.isPrivate(base) ? localTimeout : cloudTimeout
+            if wire == .anthropic {
+                var req = try json(
+                    url: LLMEndpoint.messagesURL(base),
+                    body: [
+                        "model": model,
+                        "max_tokens": 1,
+                        "messages": [["role": "user", "content": probePrompt]],
+                    ],
+                    timeout: timeout
+                )
+                req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+                req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+                return req
+            }
+            return try openAI(url: LLMEndpoint.chatURL(base), apiKey: apiKey,
+                              model: model, timeout: timeout)
         default:
             // Presets (Qwen / DeepSeek / Doubao): OpenAI-compatible base that
-            // already ends in `/v1` or `/api/v3`.
-            return try openAI(url: "\(base)/chat/completions", apiKey: apiKey,
+            // already ends in `/v1`, `/compatible-mode/v1` or `/api/v3`.
+            return try openAI(url: LLMEndpoint.chatURL(base), apiKey: apiKey,
                               model: model, timeout: cloudTimeout)
         }
     }
@@ -200,7 +221,7 @@ enum LLMConnectivityService {
     /// Did this 2xx body actually contain an answer? Each family nests it
     /// differently, and a proxy that returns `{"ok":true}` with status 200 would
     /// otherwise be reported as a working provider.
-    private static func answered(_ data: Data, provider: String) -> Bool {
+    private static func answered(_ data: Data, provider: String, wire: LLMWireProtocol = .openai) -> Bool {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return false
         }
@@ -209,6 +230,9 @@ enum LLMConnectivityService {
             return json["content"] is [[String: Any]] || json["type"] as? String == "message"
         case "gemini":
             return json["candidates"] is [[String: Any]]
+        case "custom" where wire == .anthropic:
+            // A custom Anthropic endpoint answers in the Messages shape, not `choices`.
+            return json["content"] is [[String: Any]] || json["type"] as? String == "message"
         default:
             return json["choices"] is [[String: Any]]
         }

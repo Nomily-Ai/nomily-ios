@@ -108,7 +108,18 @@ enum JobRunners {
         _ job: Job, config: AppConfig, reporter: JobQueue.Reporter
     ) async throws {
         guard let prompt = job.prompt else { throw JobSourceMissing(what: L10n.Jobs.sourcePrompt) }
-        let source = try transcriptText(for: job.clipName)
+        let transcript = try transcriptText(for: job.clipName)
+        // ★ 2026-11-03 十轮（用户："全天候录音别把所有话都转进摘要，只挑重要的部分"）：
+        // 长转写先过一遍 `SalienceFilter`——决策/承诺/数字/风险留下，寒暄与语气词丢掉。
+        // 短转写原样进去（十来分钟的语音备忘，剪一刀只会丢信息，见那个文件顶部的说明）。
+        //
+        // ⚠️ 只作用于**摘要**，不碰转写、不碰翻译：那两样必须逐字完整，
+        //    少一句话就是数据损坏，而摘要本来就是有损压缩。
+        let salient = SalienceFilter.reduce(transcript)
+        let source = salient.text
+        if salient.didReduce {
+            TicNoteDiagLog.log("LLM", "salience kept=\(salient.keptLines)/\(salient.totalLines) dropped=\(Int(salient.droppedRatio * 100))%")
+        }
         // ★ 2026-10-22 ("转写只有简短一句话的话使用模板，模板文字比一句话还多"):
         // a meeting-minutes skeleton on a one-sentence voice note produces more
         // headings than content — the same failure Plaud and Vobot both avoid by
@@ -120,10 +131,64 @@ enum JobRunners {
         // 注入——词表是提示不是词典（「只是提示，不会把别的词强行换成它」），
         // 称呼让模型知道录音的主人是谁。附加块放在模板尾部，模板自身的
         // 结构指令（标题/分节）不受影响。
-        let effectivePrompt = Self.withUserContext(templateText: adapted.text, config: config)
+        let effectivePrompt = Self.withUserContext(templateText: adapted.text, config: config, clipName: job.clipName)
 
         BackgroundKeeper.shared.acquire(.summary)
         defer { BackgroundKeeper.shared.release(.summary) }
+
+        // ★ 2026-11-04 两段式（用户："摘要还是要优化"）：先出事实清单，再按模板成文。
+        //
+        // 为什么值得多花一次调用：旧路径是一步从转写写到模板骨架，模型为了让
+        // 「0. 基本信息 / 1. 核心结论 … 」这些槽位有内容，只能注水或编造——事后
+        // 靠 `SummaryPolicy` 删占位符是治标。事实层把"写什么"和"怎么组织"拆开：
+        // 第一遍只允许写定下来的事实，第二遍拿到的是已经压干净的事实表，
+        // 模板里没有对应的槽位就只能删节（规则 4 明确禁止丢事实）。
+        //
+        // 两个例外不走两段：
+        //   · 极短转写（`adapted.replacedTemplate`）——一句话的备忘没有事实可压；
+        //   · 事实层失败时——回落到一步成文，并记进日志，绝不让用户因为"多了一步"而拿不到摘要。
+        let marks = SummaryFacts.marksBlock(clipName: job.clipName)
+        let useFacts = !adapted.replacedTemplate && SummaryFacts.shouldBuild(source: source)
+        var facts: String?
+        if useFacts {
+            let stageInput = marks.map { $0 + "\n\n———\n\n" + source } ?? source
+            do {
+                let stage = try await LLMCompletionService.completeResilient(
+                    systemPrompt: SummaryFacts.instruction(marks: marks),
+                    userContent: stageInput,
+                    config: config,
+                    allowSectionReuse: job.attempts > 0,
+                    onChunk: { done, total in reporter.progress(done, total) }
+                )
+                let text = stage.completion.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                // 太短的事实表等于没抽出来（模型回了一句 "OK" 之类）——宁可走一步成文。
+                if text.count > 80 { facts = text }
+                TokenUsageStore.shared.record(
+                    inputChars: SummaryFacts.instruction(marks: marks).count + stageInput.count,
+                    outputChars: text.count
+                )
+                TicNoteDiagLog.log(
+                    "LLM",
+                    "facts ok clip=\(job.clipName) chars=\(text.count) marks=\(marks == nil ? 0 : 1) provider=\(stage.providerKey)"
+                )
+            } catch {
+                TicNoteDiagLog.log("LLM", "facts FAILED → one-pass clip=\(job.clipName) error=\(error.localizedDescription)")
+            }
+        }
+
+        let finalPrompt: String
+        let finalInput: String
+        if let facts {
+            finalPrompt = effectivePrompt + "\n\n" + SummaryFacts.finalizePolicy(hasMarks: marks != nil)
+            finalInput = facts
+        } else if let marks {
+            // 一步成文也要吃到标记：前缀进正文，再补一条简短规则。
+            finalPrompt = effectivePrompt + "\n\n" + SummaryFacts.marksOnlyRule
+            finalInput = marks + "\n\n———\n\n" + source
+        } else {
+            finalPrompt = effectivePrompt
+            finalInput = source
+        }
 
         // ★ 2026-10-22 ("有转写但摘要生不出来"): the LLM error used to exist only
         // as the job's `lastError`, which nobody sees unless the task center is
@@ -132,12 +197,12 @@ enum JobRunners {
         let gap = config.llmProviders.primary.map {
             LLMCompletionService.configGap($0, config) ?? "none"
         } ?? "no-primary"
-        TicNoteDiagLog.log("LLM", "summarize start clip=\(job.clipName) primary=\(config.llmProviders.primary ?? "-") gap=\(gap) chars=\(source.count)")
+        TicNoteDiagLog.log("LLM", "summarize start clip=\(job.clipName) primary=\(config.llmProviders.primary ?? "-") gap=\(gap) chars=\(source.count) facts=\(facts == nil ? "no" : "yes")")
         let outcome: LLMCompletionService.Outcome
         do {
             outcome = try await LLMCompletionService.completeResilient(
-                systemPrompt: effectivePrompt,
-                userContent: source,
+                systemPrompt: finalPrompt,
+                userContent: finalInput,
                 config: config,
                 // ★ Reuse finished chunk sections **only on a retry**. On a first
                 // run there is nothing cached anyway, and on a deliberate
@@ -235,6 +300,9 @@ enum JobRunners {
                 let todos = TodoExtract.fromSummary(text)
                     .map { RemindersSyncService.stripMarkdown($0.text) }
                     .filter { !$0.isEmpty }
+                // ★ 2026-11-03（V4 原型）：时长随回顾一起推。手表上没有这条录音的
+                // 音频文件，自己算不出来；探不到就是 nil，腕上会整段省略。
+                let duration = await WatchSyncService.clipDuration(job.clipName)
                 AppEnvironment.shared?.watch.pushRecap(
                     clipName: job.clipName,
                     title: digest.title,
@@ -243,8 +311,37 @@ enum JobRunners {
                     // Recorded time parsed from the `yyyyMMddHHmmss` name, so
                     // the watch can say "this morning's meeting"; a name that
                     // doesn't parse falls back to now.
-                    recordedAt: RecordingName.date(from: job.clipName) ?? Date()
+                    recordedAt: RecordingName.date(from: job.clipName) ?? Date(),
+                    duration: duration
                 )
+            }
+        }
+
+        // ★ 2026-11-06（饭耳 1.0 移植 P0-1 · 待办闭环）：摘要里的行动项同时进
+        //   待办看板。与手表回顾共用同一个提取器（TodoExtract），但看板是**跨录音
+        //   的账本**：这里只采集，状态机（要不要做/做完/稍后）归用户。
+        //   幂等由 `TodoCard.makeID` 保证——重新生成摘要只刷新字段，不重置状态。
+        if pageID == NotePage.primaryID {
+            await MainActor.run {
+                _ = TodoBoard.shared.ingest(
+                    summary: text,
+                    recordingName: job.clipName,
+                    recordingTitle: RecordingName.displayTitle(for: job.clipName)
+                )
+            }
+
+            // ★ 2026-11-09（自动上传范围 = "仅带摘要的"）：摘要刚落地，这条录音
+            // 第一次"配齐"了最有价值的产物——这时候才往存储目的地送。转写钩子
+            // 里的上传在这一档位下被跳过（见 AppEnvironment）。
+            let scope = AppEnvironment.shared?.config.config.autoUploadScope ?? "all"
+            if scope == "with_summary" {
+                await MainActor.run {
+                    if let config = AppEnvironment.shared?.config {
+                        let cfg = config.config
+                        Task { await WebDAVSyncService.shared.sync(clipName: job.clipName, config: cfg) }
+                    }
+                    Task { await FolderExportService.shared.export(clipName: job.clipName) }
+                }
             }
         }
 
@@ -253,6 +350,11 @@ enum JobRunners {
         var notes = notices(for: outcome, config: config)
         if adapted.replacedTemplate {
             notes.append(L10n.Summarize.shortSourceNote)
+        }
+        // ★ 2026-11-03 十轮：过滤掉闲聊这件事必须让用户知道——否则"摘要怎么没提我刚才说的那句"
+        //   会被当成丢数据。这条备注同时也是"只摘要重要片段"功能存在的可见证据。
+        if salient.didReduce {
+            notes.append(L10n.Summarize.salienceNote(dropped: Int((salient.droppedRatio * 100).rounded())))
         }
         reporter.notes(notes, completion.truncated)
         log.info("summary done for \(job.clipName, privacy: .public) via \(outcome.providerKey, privacy: .public)")
@@ -276,7 +378,9 @@ enum JobRunners {
     ///   placeholder-looking lines (`SummaryPolish` already removed most).
     static func recapDigest(from text: String, fallbackTitle: String) -> (title: String, points: [String]) {
         func strip(_ line: String) -> String {
-            line
+            // ★ 2026-11-04：摘要要点现在带 `[mm:ss]` 来源时间。手表一行放不下元信息，
+            //   摘掉再推——腕上要的是那句话本身，不是它出自第几分钟。
+            StampRef.stripping(line)
                 .trimmingCharacters(in: .whitespaces)
                 .replacingOccurrences(of: "**", with: "")
                 .trimmingCharacters(in: CharacterSet(charactersIn: "#*-• "))
@@ -578,10 +682,19 @@ enum JobRunners {
     /// ⇒ Always forward to `summarizableText`, **letter-for-letter the same source** as the detail page.
     /// ★ 2026-10-28（饭耳逆向规格）：模板尾部附加「用户上下文」——称呼 + 常用词。
     /// 两者都没配置时返回原文（不产生空行差异）。
-    static func withUserContext(templateText: String, config: AppConfig) -> String {
+    ///
+    /// ★ 2026-11-04（用户："那个 Angel 只限于手表的转录称呼，其他的都不是"）：
+    /// 称呼**只在录音确实来自手表时**注入。之前是无条件告诉模型"录音的主人是 X"，
+    /// 于是同事递来的录音、会议室的录音、导入的音频，模型都会把某个说话人当成
+    /// "我"，甚至把别人的观点写成用户本人的判断。名字是事实，不能靠猜。
+    /// 现在：手表录音才提名字；其他录音一律不提，如果声纹认出了本人，说话人
+    /// 标签里已经写着名字，模型自然看得到。
+    static func withUserContext(templateText: String, config: AppConfig, clipName: String) -> String {
         var lines: [String] = []
-        if let name = config.userName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-            lines.append("录音的主人（用户本人）叫「\(name)」；转写里 TA 本人说的话可以标注为「\(name)（我）」。")
+        if ClipOrigin.isWatch(clipName),
+           let name = config.userName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty {
+            lines.append("这段录音是用 Apple Watch 录的，戴表的人（设备主人）叫「\(name)」。转写里能确认是他本人说的话，可以标成「\(name)（我）」；确认不了就按说话人原样写，不要猜。")
         }
         if let hint = VocabularyStore.shared.promptHint() {
             lines.append("常用词表（只是提示，帮助识别专有名词，不会把别的词强行换成它）：\(hint)")

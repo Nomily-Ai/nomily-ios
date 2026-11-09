@@ -136,6 +136,13 @@ enum SecretStore {
         }
     }
 
+    /// ★ 2026-11-09（多账户 WebDAV）：删除账户时把它的独立密码槽一起清掉
+    /// （`webdav.password.<accountID>`）。字符串版 delete 与 load(key:)/save(_:toKey:)
+    /// 同族——目录型 key 的生命周期不该依赖 Slot 枚举。
+    static func delete(key: String) -> Bool {
+        SecItemDelete(baseQuery(account: key) as CFDictionary) == errSecSuccess
+    }
+
     private static func baseQuery(_ slot: Slot) -> [String: Any] {
         baseQuery(account: slot.rawValue)
     }

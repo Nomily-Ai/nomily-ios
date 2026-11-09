@@ -327,6 +327,16 @@ final class SoundcoreWifiExporter: NSObject {
                         // 会话了，别再白烧（一次机会试完就停）。
                         if prevCatchAccWire == accWire { break }
                         prevCatchAccWire = accWire
+                        // ★ 2026-11-03：重开一轮要 ~1 分钟（BLE 重连 + 换热点 + WS），
+                        //   必须让用户看见"为什么在等"，否则百分比冻住就是"卡死/要传好几遍"。
+                        onProgress(Progress(
+                            phase: .transferring,
+                            message: "传输中断了，正在重开会话续传（第 \(sessions + 1) 段，约需 1 分钟）…",
+                            currentFile: index + 1,
+                            totalFiles: files.count,
+                            fileBytes: accWire,
+                            fileTotal: max(fileExpected, f.estimatedSizeBytes)
+                        ))
                         if sessions < 8, !cancelled, await restartWifiSession() { continue }
                         break
                     }
@@ -339,6 +349,15 @@ final class SoundcoreWifiExporter: NSObject {
                     // 把剩下那段拼回来。
                     TicNoteDiagLog.log("D3200 WIFI",
                         "file \(f.fileId): session \(sessions) ended at \(accWire)B/\(fileExpected)B — reopening 1A05 for session \(sessions + 1)")
+                    // ★ 2026-11-03：同上——每段之间让用户知道"分段续传"是正常流程。
+                    onProgress(Progress(
+                        phase: .transferring,
+                        message: "豆的单连接容量到顶了，正在换新会话续传（第 \(sessions + 1) 段，约需 1 分钟）…",
+                        currentFile: index + 1,
+                        totalFiles: files.count,
+                        fileBytes: accWire,
+                        fileTotal: max(fileExpected, f.estimatedSizeBytes)
+                    ))
                     if !(await restartWifiSession()) { break }
                 }
                 let raw = acc
@@ -821,21 +840,26 @@ final class SoundcoreWifiExporter: NSObject {
         // ★ 2026-10-30：探测间隔 5s×5 → **2s×3 + 5s×2**。日志（10:33）显示服务真死
         // 时探测是"立刻拒连"，5 s 间隔纯属白等；而服务"还在启动"时需要总窗口 ~30 s，
         // 所以只收紧前 3 次——真死更快判死进重开，慢启动不被误杀。
-        probeLoop: for probeAttempt in 1...5 {
+        // ★★ 2026-11-03（真机日志 19:15–19:21，用户："WiFi 快传传输多次才能传输完毕"）：
+        //   实测一次 15MB 的导出花 7 分钟，其中 3 次会话重开占 ~4.5 分钟；单是
+        //   "5 次探测全烧完才升级"就吃掉 53s。而且重开后的新会话里服务都是秒就绪的——
+        //   "前 3 次不通"之后剩下的 2 次慢探测**从没救回过任何一次连接**。
+        //   所以砍掉 5s×2 尾巴：3 次（窗口 ~24s）不通就升级重开会话，单轮省 ~30s。
+        probeLoop: for probeAttempt in 1...3 {
             if cancelled { throw WifiExportError(message: "已取消") }
             if await probeTcp(ip: endpoint.ip, port: UInt16(endpoint.port)) {
                 probesOK = true
                 break probeLoop
             }
-            if probeAttempt < 5 {
-                try? await Task.sleep(nanoseconds: probeAttempt <= 3 ? 2_000_000_000 : 5_000_000_000)
+            if probeAttempt < 3 {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
         if !probesOK {
-            TicNoteDiagLog.log("D3200 WIFI", "tcp pre-probe \(endpoint.ip):\(endpoint.port) failed ×5 — service dead, escalating")
+            TicNoteDiagLog.log("D3200 WIFI", "tcp pre-probe \(endpoint.ip):\(endpoint.port) failed ×3 — escalating to session restart")
             throw WifiExportError(
                 message:
-                    "连不上录音豆的 Wi‑Fi 服务 \(endpoint.ip):\(endpoint.port)（TCP 探测五次都不通）——" +
+                    "连不上录音豆的 Wi‑Fi 服务 \(endpoint.ip):\(endpoint.port)（TCP 探测三次都不通）——" +
                     "豆的热点已加入，但传输服务没有响应。请：① 给录音豆充充电——电量低时豆会频繁掐断传输；" +
                     "② 还不行就把豆重启再试。",
                 isTCPDead: true
@@ -1130,7 +1154,9 @@ final class SoundcoreWifiExporter: NSObject {
         // ★ 2026-10-29：8→4。每次"续传"现在都是重开一次 1A05 会话（1–2 分钟），
         // 60 MB 文件正常只需要 1 次；4 次已兜住"豆状态差"的最坏情况。
         let maxResumes = 4
-        let stallWindow: TimeInterval = 20
+        /// ★ 2026-11-03 五轮：20s → **15s**。真机日志里断流都是"设备彻底不吐了"，
+        ///   20 秒的判定窗口纯属多等；而正常传输最长的抖动间隔 < 3s。
+        let stallWindow: TimeInterval = 15
 
         while true {
             if doneSignalled { break }
@@ -1213,6 +1239,15 @@ final class SoundcoreWifiExporter: NSObject {
                     // 收尾——FINISH 让它自己关掉 Wi‑Fi 模式，BLE 广播才会回来。
                     // 反正马上要重开 1A05 会话，旧会话结束没有副作用。
                     try? await sendText("FINISH", timeoutSeconds: 2)
+                    // ★★ 2026-11-03 五轮（用户："WiFi 快传要传很多次才能传完"）：
+                    //   **立刻**把手机从豆的热点上摘下来，而不是等 restartWifiSession
+                    //   里 BLE 重连失败（12s 空等）才做。豆只要还有客户端连着就不退出
+                    //   Wi‑Fi 模式、不恢复蓝牙广播——先摘配置 = 豆马上看到 AP 空了，
+                    //   BLE 常在第一次重连（5–10s）就回来，整轮重开省 10–20s。
+                    //   FINISH 已经发给豆做干净收尾，摘配置不会再伤会话。
+                    if let current = ssid {
+                        NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: current)
+                    }
                     resumeStartBytes = fileBytes
                     // ★ 2026-10-29：不再原地 restartWs。同一条 AP 会话里换 WS，
                     // 设备实测永远不吐包（09:35 wss 超时 / 19:27 重连成功但 20 秒

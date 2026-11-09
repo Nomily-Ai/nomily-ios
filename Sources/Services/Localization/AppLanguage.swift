@@ -236,4 +236,30 @@ extension Bundle {
         overrideBundle = Bundle.main.path(forResource: resolved, ofType: "lproj")
             .flatMap(Bundle.init(path:))
     }
+
+    /// The **device** language's bundle, independent of the in-app picker.
+    ///
+    /// ★ 2026-11-02（用户："这个开屏需要跟随手机系统的语言进行设置"）：首启开屏
+    /// 出现在用户做任何选择之前，语言应当就是手机的设置语言——而 `Bundle.main`
+    /// 此刻已经被 `applyLanguage` 换成 App 内选择的那一套，所以这里直接打开
+    /// `Locale.preferredLanguages` 对应的 `.lproj`，绕开 swizzle。
+    static var systemLanguage: Bundle {
+        let tag = AppLanguage.resolve(Locale.preferredLanguages.first)
+        return Bundle.main.path(forResource: tag, ofType: "lproj")
+            .flatMap(Bundle.init(path:)) ?? Bundle.main
+    }
+
+    /// `NSLocalizedString` against `systemLanguage` — `value` is the English fallback.
+    ///
+    /// ★ 2026-11-05（用户："设置了英文，开屏引导还是中文"）：原版只读**系统语言**，
+    /// 用户在 App 内切了英文但手机系统是中文时，欢迎页/协议页仍是中文。现在改为：
+    /// 用户在 App 内明确选过语言（`overrideBundle` 已就位）就跟随 App 内语言；
+    /// 没选过（真正的首启、尚未做任何选择）才跟随系统语言——首启那一刻
+    /// "跟随手机语言"的原需求仍然成立。
+    static func systemString(_ key: String, value: String) -> String {
+        if let override = overrideBundle {
+            return override.localizedString(forKey: key, value: value, table: nil)
+        }
+        return systemLanguage.localizedString(forKey: key, value: value, table: nil)
+    }
 }

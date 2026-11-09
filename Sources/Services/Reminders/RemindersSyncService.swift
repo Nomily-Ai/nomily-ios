@@ -176,11 +176,16 @@ final class RemindersSyncService {
 
     /// 待办行里可能有 `**加粗**` / `` `代码` `` 之类的行内标记——提醒事项标题
     /// 是纯文本，把这几个记号剥掉。
+    ///
+    /// ★ 2026-11-04（摘要优化 D）：待办行现在带 ` · @张伟 · 11-08 · [12:24]` 三段元信息。
+    /// 提醒事项只有"标题"一个字段，把来源时间塞进去读起来像噪音，所以这里剥掉它，
+    /// 但**保留 @负责人与截止**——那两段恰好就是提醒事项真正要记的东西。
     static func stripMarkdown(_ text: String) -> String {
-        text.replacingOccurrences(
-            of: #"\*\*|__|[*_`]"#,
-            with: "",
-            options: .regularExpression)
+        StampRef.stripping(text)
+            .replacingOccurrences(
+                of: #"\*\*|__|[*_`]"#,
+                with: "",
+                options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

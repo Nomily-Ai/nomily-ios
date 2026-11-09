@@ -427,7 +427,7 @@
 "encryption.action.rotate" = "Trocar";
 "encryption.action.cancel" = "Cancelar";
 "encryption.progress.working" = "Processando…";
-"encryption.footer.rotate" = "Trocar grava uma chave totalmente nova no dispositivo. Toda gravação criptografada já existente no dispositivo torna-se permanentemente indecifrável. Use somente ao assumir um dispositivo de segunda mão ou se esqueceu a frase antiga.";
+"encryption.footer.rotate" = "\"Rotacionar\" grava uma chave totalmente nova no dispositivo. As gravações que ainda estiverem nele ficam presas à chave antiga e deixam de abrir neste iPhone — baixe-as antes. O dispositivo só entrega a chave atual a quem a possui, então a rotação só funciona quando este iPhone (ou a frase digitada) a possui; uma chave definida pelo app do fabricante precisa ser desativada lá primeiro.";
 "encryption.footer.set_encrypted" = "Este dispositivo está criptografado. Vamos gravar um clipe curto de teste, baixá-lo e tentar descriptografar com a frase que você digitou. O clipe de teste é apagado automaticamente em seguida.";
 "encryption.footer.set_unencrypted" = "Salva a chave derivada localmente no Chaveiro do iOS. O dispositivo não é afetado — escolha uma frase forte e ative a criptografia na tela do dispositivo quando quiser.";
 "encryption.progress.deriving" = "Derivando chave…";
@@ -440,7 +440,7 @@
 "encryption.progress.checking_device" = "Verificando as gravações no dispositivo…";
 "encryption.rotate_confirm.title" = "Girar a chave do dispositivo?";
 "encryption.rotate_confirm.message_empty" = "O dispositivo não tem mais gravações, nada será perdido. Anote a nova senha: é o único jeito de abrir as gravações futuras e não há recuperação.";
-"encryption.rotate_confirm.message" = "Ainda há %d gravação(ões) no dispositivo. Foram feitas com a chave antiga e ficarão ilegíveis para sempre — baixe antes se quiser mantê-las. Anote a nova senha: não há recuperação.";
+"encryption.rotate_confirm.message" = "Ainda há %d gravação(ões) no dispositivo, presas à chave atual — após a rotação elas não abrem neste iPhone, então baixe-as antes se quiser mantê-las. Anote a nova frase: é a única forma de abrir as gravações futuras e não há recuperação.";
 "encryption.progress.probe_subtitle" = "Gravando um clipe curto para verificar a frase. Ele será apagado automaticamente.";
 "encryption.mismatch.title" = "A frase não confere";
 "encryption.mismatch.message" = "O clipe de teste não foi descriptografado com essa frase. Confira com cuidado e tente novamente. Se realmente esqueceu, use \"Trocar\" para sobrescrever a chave do dispositivo — mas isso destrói permanentemente todas as gravações criptografadas existentes.";
@@ -450,7 +450,9 @@
 "encryption.error.probe_not_found" = "Não foi possível encontrar o clipe de teste no dispositivo.";
 "encryption.error.device_busy" = "O dispositivo não gravou: %@";
 "encryption.banner.title" = "Dispositivo criptografado";
-"encryption.banner.message" = "Digite a frase com que este dispositivo foi configurado para desbloquear as gravações neste iPhone. Se esqueceu, troque a chave (isso apaga as gravações criptografadas existentes no dispositivo).";
+"encryption.switch_to_unlock_hint" = "Se você sabe a frase que criou esta chave, verifique-a aqui: as gravações ficam legíveis e nada é sobrescrito no dispositivo. Sobrescrever só funciona quando este iPhone tem a chave atual.";
+"encryption.switch_to_unlock" = "Verificar a frase atual em vez disso";
+"encryption.banner.message" = "Digite a frase com que este dispositivo foi configurado para desbloquear as gravações neste iPhone. Uma chave criada por outro app precisa ser desativada lá primeiro — este iPhone não pode sobrescrever uma chave que não possui.";
 "encryption.banner.cta" = "Verificar a frase…";
 "encryption.download.key_missing" = "%@: esta gravação está criptografada, mas não há frase definida neste iPhone. Abra Ajustes → Frase de criptografia → Verificar a frase do dispositivo… para desbloqueá-la.";
 "encryption.download.wrong_key" = "%1$@: não foi possível descriptografar — a frase não confere com esta gravação. Abra Ajustes → Frase de criptografia, apague a atual e defina a correta. (Detalhes: %2$@)";

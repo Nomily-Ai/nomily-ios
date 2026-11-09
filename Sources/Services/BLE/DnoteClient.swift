@@ -32,6 +32,10 @@ final class DnoteClient: NSObject, ObservableObject {
     /// Resolved during `completeHandshake` so SwiftUI can show it in the
     /// Device sheet hero card.
     @Published private(set) var negotiatedMTU: Int = 0
+    /// ★ 2026-11-09：OTA 进行中标记。开着的时候把每一条收到的通知原文落到
+    /// `Documents/ota-trace.log`——首跑在真机上失败，而 iOS 的设备日志要 root
+    /// 才能拉，只能让 App 自己把报文写下来（用 devicectl copy 取走）。
+    private(set) var otaActive = false
     @Published private(set) var lastDeviceInfo: DeviceInfo?
     @Published private(set) var lastSwitchInfo: SwitchInfo?
     @Published private(set) var disconnectError: Error?
@@ -145,12 +149,15 @@ final class DnoteClient: NSObject, ObservableObject {
 
     /// Drains stale responses, then writes the request frame to RX_CHAR
     /// with response.
-    private func send(cmd: UInt8, payload: Data = Data()) async throws {
+    private func send(cmd: UInt8, payload: Data = Data(), drainQueue: Bool = true) async throws {
         guard isConnected, let rx = rxChar else {
             log.warning("send cmd=\(String(format: "0x%02X", cmd), privacy: .public) but not connected")
             throw DnoteError.notConnected
         }
-        respQueue.drain()
+        // OTA 流式传输不能排空：设备对 seq==0 包的确认可能在窗口中途到达，
+        // drain 会把它吞掉，然后 App 就会去等一个永远不会来的回包（设备只在
+        // seq==0 或出错时回包）。普通请求-响应命令保持旧行为。
+        if drainQueue { respQueue.drain() }
         let pkt = PacketCodec.encode(cmd: cmd, payload: payload)
         log.debug("→ cmd=\(String(format: "0x%02X", cmd), privacy: .public) len=\(payload.count, privacy: .public)")
         peripheral.writeValue(pkt, for: rx, type: .withResponse)
@@ -973,6 +980,7 @@ final class DnoteClient: NSObject, ObservableObject {
     }
 
     private func dispatchNotification(_ data: Data) {
+        if otaActive { OtaTrace.add("RX raw \(data.hexString)") }
         guard data.count >= 3, data[data.startIndex] == DnoteProtocol.pid else {
             log.warning("dispatch: bad frame len=\(data.count, privacy: .public)")
             return
@@ -1090,6 +1098,436 @@ extension DnoteClient: CBPeripheralDelegate {
         if let cont = handshakeContinuation {
             handshakeContinuation = nil
             cont.resume()
+        }
+    }
+}
+
+
+// MARK: - 固件 OTA（0xB0 / 0xB1）
+//
+// ★ 2026-11-09：按厂商《录音卡片协议》20260417 版实现。此前 App 只认到 0xA3，
+//   固件升级只能靠厂商工具——用户拿到 1.55 的 Firmware.lz 后问"有没有 OTA 方式"，
+//   协议 PDF 里其实一直有：0xB0 启动升级模式，0xB1 传数据，包体就是 .lz 原样推送。
+//
+// 协议要点（照 PDF §0xb0/0xb1）：
+//   · 0xB0 DATA=[0x02]（lz 压缩包）→ 设备回 ACK（0x01 成功 / 0x00 拒绝）。
+//   · 0xB1 DATA = FLAG(1) + OFFSET(4) + 数据：
+//       FLAG bit[0..3] 包序 0–F 循环；bit[4]=0 主控固件；bit[5..7] 状态：
+//       000 开始 / 001 进行中 / 010 传输完成 / 100 出错退出 / 101 启动设备自升级。
+//   · 设备只对 **seq==0 的包**或出错回包：FLAG(want_seq|status) + want_offset(4)。
+//       status：0000 正常 / 0001 需按 want_seq+want_offset 重传 / 0010 接收完成 /
+//       0011 停止 / 0100 开始升级 / 0101 升级进度(KB) / 0110 失败 / 0111 成功。
+//   · 传输完成后**不会自动**自升级，必须再发一帧 state=101。
+//   · OFFSET 字节序 PDF 没写死；发送端沿用 0x70 下载方向已验证的大端，
+//     解析回包时两种字节序都试（按"chunk 整数倍"判别，见 plausibleOffset）。
+//
+// ★ 首跑（2026-11-09）在真机上失败过一轮后重写的要点：不能假设"设备只对 seq==0
+//   回包"——如果它每包都回，旧确认帧会堆在队列里，把 seq==0 的确认"污染"掉。
+//   所以等确认一律用 pop-until-match：连续吞帧直到 want_seq/want_offset 对上
+//   当前游标，或队列空闲后取最后一帧。触发刷写同理，先排空再等 0100/0101。
+extension DnoteClient {
+
+    enum OtaPhase: Equatable {
+        /// App → 设备传 .lz 包。
+        case transferring(sent: Int, total: Int)
+        /// 设备在自刷写（KB 单位进度，nil = 设备还没报出具体数字）。
+        case flashing(kb: Int?)
+        case done
+    }
+
+    enum OtaError: LocalizedError {
+        case refused                          // 0xB0 回 0x00：设备拒绝进入升级模式
+        case cannotResync                     // 设备要求重传，但 want_offset 无法解析
+        case stoppedByDevice                  // 0011：设备主动退出升级模式
+        case deviceFailed                     // 0110：设备侧刷写失败
+        case interrupted(stage: String, detail: String)  // 其他错误，带阶段
+
+        // ⚠️ 这里必须是 String?：写成非可选 String 不会成为 LocalizedError 的
+        //    协议见证（编译照过、运行时 errorDescription 恒为 nil），弹窗就只剩
+        //    "未能完成操作。(OtaError 错误 0)" 兜底文案——2026-11-09 真机踩到。
+        var errorDescription: String? {
+            switch self {
+            case .refused:          return L10n.DeviceOta.errorRefused
+            case .cannotResync:     return L10n.DeviceOta.errorCannotResync
+            case .stoppedByDevice:  return L10n.DeviceOta.errorStopped
+            case .deviceFailed:     return L10n.DeviceOta.errorDeviceFailed
+            case .interrupted(let stage, let detail):
+                return String(format: L10n.DeviceOta.errorAtStage, stage, detail)
+            }
+        }
+    }
+
+    /// 每帧固件字节数：整帧 = [PID][CMD][LEN] + FLAG(1) + OFFSET(4) + 数据，
+    /// 压在协商 MTU 内，同时不超过协议 PDF 的 255 字节上限。
+    private var otaChunkSize: Int {
+        let mtu = negotiatedMTU > 0 ? negotiatedMTU : 185
+        return max(20, min(240, mtu - 8))
+    }
+
+    /// 完整 OTA：传 .lz → 触发自升级 → 盯进度直到成功/失败/重启。
+    /// 全程持有命令锁，调用方（UI）只管收进度。
+    func runFirmwareUpgrade(
+        _ firmware: Data,
+        progress: @escaping (OtaPhase) -> Void
+    ) async throws {
+        try await runExclusive {
+            OtaTrace.reset()
+            otaActive = true
+            defer {
+                otaActive = false
+                OtaTrace.add("== end")
+            }
+            OtaTrace.add("== start file=\(firmware.count)B mtu=\(negotiatedMTU) chunk=\(otaChunkSize)")
+
+            // 升级模式下不能有录音在跑（0xB0 会被拒或录到一半被切）。
+            let info = try await readDeviceInfoLocked()
+            guard !info.isRecording else {
+                throw DnoteError.operationUnavailableWhileRecording
+            }
+
+            // 1) 进入升级模式
+            do {
+                OtaTrace.add("TX 0xB0 02")
+                try await send(cmd: DnoteProtocol.Cmd.otaStart, payload: Data([0x02]))
+                let ack = try await recv(expect: DnoteProtocol.Cmd.otaStart, timeout: 10)
+                OtaTrace.add("RX 0xB0 ack=\(ack.payload.hexString)")
+                guard ack.isAck else { throw OtaError.refused }
+            } catch let e as OtaError {
+                OtaTrace.add("ERR enter: \(e.localizedDescription)")
+                throw e
+            } catch {
+                OtaTrace.add("ERR enter: \(error.localizedDescription)")
+                throw OtaError.interrupted(
+                    stage: L10n.DeviceOta.stageEnter, detail: error.localizedDescription)
+            }
+            log.info("OTA: device entered upgrade mode")
+
+            // 2) 传输固件
+            do {
+                try await transferFirmwareLocked(firmware, progress: progress)
+            } catch let e as OtaError {
+                OtaTrace.add("ERR transfer: \(e.localizedDescription)")
+                throw e
+            } catch {
+                OtaTrace.add("ERR transfer: \(error.localizedDescription)")
+                throw OtaError.interrupted(
+                    stage: L10n.DeviceOta.stageTransfer, detail: error.localizedDescription)
+            }
+
+            // 3) 触发自升级 + 盯刷写进度
+            do {
+                try await triggerSelfUpgradeLocked(progress: progress)
+            } catch let e as OtaError {
+                OtaTrace.add("ERR flash: \(e.localizedDescription)")
+                throw e
+            } catch {
+                OtaTrace.add("ERR flash: \(error.localizedDescription)")
+                throw OtaError.interrupted(
+                    stage: L10n.DeviceOta.stageFlash, detail: error.localizedDescription)
+            }
+        }
+    }
+
+    // MARK: 数据传输阶段
+
+    private func transferFirmwareLocked(
+        _ firmware: Data,
+        progress: @escaping (OtaPhase) -> Void
+    ) async throws {
+        let chunk = otaChunkSize
+        let total = firmware.count
+        var seq: UInt8 = 0
+        var offset = 0
+
+        func offsetBE(_ v: Int) -> Data {
+            Data([UInt8((v >> 24) & 0xFF), UInt8((v >> 16) & 0xFF),
+                  UInt8((v >> 8) & 0xFF), UInt8(v & 0xFF)])
+        }
+
+        func sendPacket(state: UInt8, seqOverride: UInt8?, bytes: Data) async throws {
+            var payload = Data([(state << 5) | (seqOverride ?? seq)])
+            payload.append(offsetBE(offset))
+            payload.append(bytes)
+            try await send(cmd: DnoteProtocol.Cmd.otaData, payload: payload, drainQueue: false)
+            if seqOverride == nil { seq = (seq + 1) & 0x0F }
+        }
+
+        /// 回包里的 want_offset 两种字节序都解一遍：协议没写死，
+        /// 取"是 chunk 整数倍且落在文件范围内"的那个解释；都合规时返回 nil
+        /// （调用方继续用本地计数，不强行猜）。
+        func plausibleOffset(_ raw: Data) -> Int? {
+            guard raw.count >= 4 else { return nil }
+            let b = [UInt8](raw.prefix(4))
+            let be = (Int(b[0]) << 24) | (Int(b[1]) << 16) | (Int(b[2]) << 8) | Int(b[3])
+            let le = (Int(b[3]) << 24) | (Int(b[2]) << 16) | (Int(b[1]) << 8) | Int(b[0])
+            func sane(_ v: Int) -> Bool { v >= 0 && v <= total && v % chunk == 0 }
+            switch (sane(be), sane(le)) {
+            case (true, false):  return be
+            case (false, true):  return le
+            default:             return nil
+            }
+        }
+
+        struct OtaReply {
+            let status: UInt8
+            let wantSeq: UInt8
+            let wantOffset: Int?
+        }
+
+        func parseReply(_ frame: PacketCodec.Frame) -> OtaReply? {
+            let p = frame.payload
+            guard !p.isEmpty else { return nil }
+            let f = p[p.startIndex]
+            let wantOffset = p.count >= 5
+                ? plausibleOffset(Data(p[(p.startIndex + 1) ..< (p.startIndex + 5)]))
+                : nil
+            return OtaReply(status: (f >> 4) & 0x0F, wantSeq: f & 0x0F, wantOffset: wantOffset)
+        }
+
+        /// 等确认（pop-until-match）。连续吞帧，直到某帧的 want_seq/want_offset
+        /// 与当前游标对上——旧确认帧（设备如果每包都回）在这里被自然过滤掉；
+        /// 队列空闲后把最后看到的帧带回去（resync 自己判断）。
+        func awaitDataAck(
+            timeout: TimeInterval,
+            expectSeq: UInt8?,
+            expectOffset: Int?
+        ) async throws -> OtaReply? {
+            let deadline = Date().addingTimeInterval(timeout)
+            var last: OtaReply?
+            while true {
+                let remaining = deadline.timeIntervalSinceNow
+                guard remaining > 0 else { break }
+                let frame: PacketCodec.Frame
+                do {
+                    frame = try await recv(expect: DnoteProtocol.Cmd.otaData,
+                                           timeout: min(remaining, 1.5))
+                } catch let e as DnoteError {
+                    if case .timeout = e { break }
+                    throw e
+                }
+                guard let reply = parseReply(frame) else { continue }
+                last = reply
+                // 明确的失败/停止帧，不等、直接交给调用方处理。
+                if reply.status == 0x1 || reply.status == 0x3 { return reply }
+                let seqOK = expectSeq == nil || reply.wantSeq == expectSeq!
+                let offOK = expectOffset == nil || reply.wantOffset == nil
+                    || reply.wantOffset == expectOffset
+                if seqOK && offOK { return reply }
+            }
+            return last
+        }
+
+        /// 按设备回包校正本地游标：0001 = 要重传，0000 = 顺手对齐一下。
+        func resync(_ reply: OtaReply) throws {
+            switch reply.status {
+            case 0x1:   // 0001 重传
+                guard let wo = reply.wantOffset else { throw OtaError.cannotResync }
+                offset = wo
+                seq = reply.wantSeq
+                log.warning("OTA: device asked resend at \(wo)")
+            case 0x3:   // 0011 设备退出
+                throw OtaError.stoppedByDevice
+            default:
+                if let wo = reply.wantOffset, wo != offset {
+                    log.info("OTA: syncing offset local=\(offset) device=\(wo)")
+                    offset = wo
+                    seq = reply.wantSeq
+                }
+            }
+        }
+
+        progress(.transferring(sent: 0, total: total))
+
+        // 1) 首包：state=000、seq=0、offset=0，设备必回一帧确认。
+        OtaTrace.add("TX first FLAG=00 OFF=0 len=\(min(chunk, total))")
+        try await sendPacket(state: 0, seqOverride: nil, bytes: firmware.prefix(chunk))
+        offset = min(chunk, total)
+        if let reply = try await awaitDataAck(timeout: 15, expectSeq: seq, expectOffset: offset) {
+            OtaTrace.add("ACK first status=\(reply.status) wantSeq=\(reply.wantSeq) wantOff=\(reply.wantOffset.map(String.init) ?? "nil")")
+            try resync(reply)
+        } else {
+            OtaTrace.add("ACK first: none (timeout)")
+            throw DnoteError.timeout
+        }
+        progress(.transferring(sent: offset, total: total))
+
+        // 2) 主体：窗口式推送，每 16 包（seq 回到 0）等一次确认。
+        while offset < total {
+            let end = min(offset + chunk, total)
+            let windowAck = (seq == 0)
+            try await sendPacket(state: 1, seqOverride: nil,
+                                 bytes: firmware[(firmware.startIndex + offset) ..< (firmware.startIndex + end)])
+            offset = end
+            progress(.transferring(sent: offset, total: total))
+            if windowAck {
+                OtaTrace.add("WIN off=\(offset) seq=\(seq)")
+                if let reply = try await awaitDataAck(timeout: 15, expectSeq: seq, expectOffset: offset) {
+                    OtaTrace.add("ACK status=\(reply.status) wantSeq=\(reply.wantSeq) wantOff=\(reply.wantOffset.map(String.init) ?? "nil")")
+                    try resync(reply)
+                } else {
+                    OtaTrace.add("ACK: none (timeout) off=\(offset)")
+                    throw DnoteError.timeout
+                }
+            }
+        }
+
+        // 3) 收尾帧（state=010）。设备只对 seq==0 回包：先按自然序号发一次，
+        //    超时再用 seq=0 重试；确认拿不到不算致命（数据已发完，关键在触发帧）。
+        var complete = false
+        for forced in [UInt8?.none, 0] {
+            OtaTrace.add("TX complete seq=\(forced.map(String.init) ?? "natural")")
+            try await sendPacket(state: 2, seqOverride: forced, bytes: Data())
+            if let reply = try await awaitDataAck(timeout: 10, expectSeq: nil, expectOffset: total) {
+                if reply.status == 0x2 || reply.status == 0x0 { complete = true; break }
+                if reply.status == 0x1 {
+                    if let wo = reply.wantOffset { offset = wo; seq = reply.wantSeq }
+                    continue
+                }
+            }
+        }
+        if !complete {
+            log.warning("OTA: no completion ack, proceeding to self-upgrade trigger")
+        }
+        log.info("OTA: transfer complete, \(total) bytes")
+    }
+
+    // MARK: 自升级阶段
+
+    private func triggerSelfUpgradeLocked(progress: @escaping (OtaPhase) -> Void) async throws {
+        let deadline = Date().addingTimeInterval(15 * 60)   // 官方口径 5–10 分钟
+        var sawFlashing = false
+        var lastKB = -1
+
+        func sendTrigger(seqOverride: UInt8?) async throws {
+            var payload = Data([0xA0 | (seqOverride ?? 0)])     // state=101, seq=0
+            payload.append(Data(repeating: 0, count: 4))        // OFFSET 无意义，占位
+            try await send(cmd: DnoteProtocol.Cmd.otaData, payload: payload, drainQueue: false)
+        }
+
+        // 触发帧先排空积压（收尾帧的迟到确认），再按自然 seq → seq=0 各试一次。
+        var started = false
+        outer: for forced in [UInt8?.none, 0] {
+            respQueue.drain()
+            OtaTrace.add("TX trigger seq=\(forced.map(String.init) ?? "natural")")
+            try await sendTrigger(seqOverride: forced)
+            let windowDeadline = Date().addingTimeInterval(12)
+            while Date() < windowDeadline {
+                let frame: PacketCodec.Frame
+                do {
+                    frame = try await recv(expect: DnoteProtocol.Cmd.otaData, timeout: 2)
+                } catch let e as DnoteError {
+                    if case .timeout = e { break }
+                    throw e
+                }
+                guard !frame.payload.isEmpty else { continue }
+                let status = (frame.payload[frame.payload.startIndex] >> 4) & 0x0F
+                switch status {
+                case 0x4, 0x5:            // 0100 开始升级 / 0101 已在报进度
+                    started = true
+                    sawFlashing = true
+                    break outer
+                case 0x3: throw OtaError.stoppedByDevice
+                case 0x6: throw OtaError.deviceFailed
+                case 0x7:                 // 直接收尾
+                    progress(.done)
+                    return
+                default: continue         // 迟到的 0000/0010：吞掉继续等
+                }
+            }
+        }
+        guard started else {
+            OtaTrace.add("trigger: no 0100/0101 within window")
+            throw DnoteError.timeout
+        }
+        OtaTrace.add("trigger accepted")
+        progress(.flashing(kb: nil))
+
+        // 盯进度：0101 的 want_offset 是已刷写 KB；0111 = 成功（随后设备重启、连接断开）。
+        while Date() < deadline {
+            let frame: PacketCodec.Frame
+            do {
+                frame = try await recv(expect: DnoteProtocol.Cmd.otaData, timeout: 60)
+            } catch let e as DnoteError {
+                if case .timeout = e {
+                    if sawFlashing {
+                        // 刷写中连接断开 = 设备已重启（0111 之后本来就会断）。
+                        progress(.done)
+                        return
+                    }
+                    throw DnoteError.timeout
+                }
+                // notConnected：刷写期断链同理视为重启，否则如实抛出。
+                if sawFlashing {
+                    progress(.done)
+                    return
+                }
+                throw e
+            }
+            guard !frame.payload.isEmpty else { continue }
+            let status = (frame.payload[frame.payload.startIndex] >> 4) & 0x0F
+            switch status {
+            case 0x4:   // 0100 开始升级
+                sawFlashing = true
+                progress(.flashing(kb: nil))
+            case 0x5:   // 0101 进度（KB）
+                sawFlashing = true
+                let kb = plausibleKB(frame.payload.suffix(from: frame.payload.startIndex + 1),
+                                     cap: 512 * 1024)
+                if let kb, kb >= lastKB { lastKB = kb; progress(.flashing(kb: kb)) }
+            case 0x6:   // 0110 失败
+                throw OtaError.deviceFailed
+            case 0x7:   // 0111 成功
+                progress(.done)
+                return
+            case 0x3:   // 0011 停止
+                throw OtaError.stoppedByDevice
+            default:
+                continue
+            }
+        }
+        throw DnoteError.timeout
+    }
+
+    /// 自升级进度按 KB 报在 want_offset 字段里；字节序未知，两种解释取
+    /// "单调递增且不超过上限"的那个。
+    private func plausibleKB(_ raw: Data, cap: Int) -> Int? {
+        guard raw.count >= 4 else { return nil }
+        let b = [UInt8](raw.prefix(4))
+        let be = (Int(b[0]) << 24) | (Int(b[1]) << 16) | (Int(b[2]) << 8) | Int(b[3])
+        let le = (Int(b[3]) << 24) | (Int(b[2]) << 16) | (Int(b[1]) << 8) | Int(b[0])
+        let cands = [be, le].filter { $0 >= 0 && $0 <= cap }
+        return cands.min()
+    }
+}
+
+/// ★ 2026-11-09：OTA 报文抓取，落到 App 沙盒的 `Documents/ota-trace.log`。
+/// iOS 的设备日志要 root 才能拉（`log collect` 会直接拒绝），所以让 App 自己
+/// 把升级期间收到/发出的每一帧写下来，再用 devicectl 取走：
+///   xcrun devicectl device copy from --device <UDID> \
+///     --domain-type appDataContainer --domain-identifier com.nomily.app \
+///     --source Documents/ota-trace.log --destination /tmp/ota-trace.log
+enum OtaTrace {
+    private static let queue = DispatchQueue(label: "com.nomily.ota.trace")
+    private static var url: URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return dir.appendingPathComponent("ota-trace.log")
+    }
+
+    static func reset() {
+        queue.async { try? "".write(to: url, atomically: true, encoding: .utf8) }
+    }
+
+    static func add(_ line: String) {
+        let stamp = Int(Date().timeIntervalSince1970)
+        queue.async {
+            guard let data = "\(stamp) \(line)\n".data(using: .utf8) else { return }
+            if let handle = try? FileHandle(forWritingTo: url) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                try? handle.close()
+            } else {
+                try? data.write(to: url)
+            }
         }
     }
 }

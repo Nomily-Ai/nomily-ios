@@ -88,27 +88,44 @@ struct WatchStatusRow: View {
         } else if let notice = watch.watchTransferNotice {
             // The watchdog gave up (or the wrist went quiet): say so once, with
             // the same dismiss affordance, instead of dropping the row silently.
-            HStack(spacing: 8) {
+            //
+            // ★ 2026-11-09（用户："手表离线在首页这个提示需要优化展示的地方"）：
+            // 这条是**非操作型信息**——录音还在手表上、重连后自动送达，用户没有
+            // 任何要做的动作。原来是全宽横幅常驻在搜索框和筛选 chips 之间，
+            // 挤占版面。改成轻量胶囊 + 8 秒自动消失（重连开始续传时传输条
+            // 会自然回来），用户也可手动关。
+            HStack(spacing: 6) {
                 Image(systemName: "applewatch.slash")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
                 Text(notice)
-                    .font(.footnote)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                Spacer()
+                    .lineLimit(2)
+                Spacer(minLength: 4)
                 Button {
                     watch.dismissTransferNotice()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.footnote)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.borderless)
                 .accessibilityLabel(L10n.Watch.hideTransferStatus)
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule().fill(Color(uiColor: .secondarySystemBackground))
+            )
             .padding(.horizontal)
-            .padding(.vertical, 7)
-            .background(Color(uiColor: .secondarySystemBackground))
+            .padding(.vertical, 2)
+            .onReceive(tick) { now = $0 }
+            .task {
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                guard !Task.isCancelled else { return }
+                watch.dismissTransferNotice()
+            }
         }
     }
 

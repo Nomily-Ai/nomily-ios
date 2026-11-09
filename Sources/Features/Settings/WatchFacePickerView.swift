@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UserNotifications
 
@@ -8,12 +9,30 @@ import UserNotifications
 /// 入口——用户进来先该看到"有哪些可以设"，再点进去改。现在这一页是一张菜单：
 /// 表盘表情（二级页 `WatchFaceStyleSettingsView`）、AI 怎么称呼你、定时录音、
 /// 回顾摘要与待办。
+/// ★ 2026-11-02（用户："手表录音质量这个板块需要放置到设置 APPLE Watch 里面
+/// 因为它只针对手表不针对录音卡设备"）：「手表录音质量（转写后）」分区自
+/// 录音与转写页整体搬入——档位选择 + 旧录音自动降级 + 每档试听。
 struct WatchFacePickerView: View {
     @EnvironmentObject private var configService: ConfigService
     @EnvironmentObject private var watch: WatchSyncService
+    @EnvironmentObject private var env: AppEnvironment
+    // ★ 2026-11-02：录音质量降级进度（"立即降级"按钮与最近一次报告）。
+    @ObservedObject private var quality = RecordingQualityService.shared
+    /// ★ 2026-11-04：声纹状态（有无、在哪台设备录的）。手表录的样本传上来后
+    /// 由 `VoiceprintService` 在本机注册，这一行是用户唯一能看到"到底注册成功没有"的地方。
+    @ObservedObject private var voiceprint = VoiceprintService.shared
 
     // ★ 2026-10-30：称呼草稿（从主设置页搬来，逻辑不变）。
     @State private var userNameDraft = ""
+
+    // ★ 2026-11-02：试听状态（自录音与转写页整体搬入，逻辑不变）。
+    @State private var auditionClips: [URL] = []
+    @State private var auditionIndex = 0
+    @State private var auditionBusy = false
+    @State private var auditionSide: String?
+    @State private var auditionPlayer: AVAudioPlayer?
+    // 试听按钮点过后仍无手表录音时的空态提示开关。
+    @State private var auditionLoaded = false
 
     /// 当前表情（菜单行右侧显示，让用户不用点进去就知道现在选的是哪个）。
     private var currentStyle: BotFaceStyle {
@@ -39,7 +58,22 @@ struct WatchFacePickerView: View {
 
             userNameSection
 
+            voiceprintSection
+
             timedRecordingSection
+
+            // ★ 2026-11-05：全天候录音开关（用户："nomily AI APP 设置也要有一个开关"）。
+            allDayRecordingSection
+
+            // ★ 2026-11-06：表情常亮开关（用户："增加一个表情常亮让手表持续显示在首页
+            // 的设置在 app 里面"）。
+            alwaysOnFaceSection
+
+            // ★ 2026-11-06 二轮（"让脸活起来"）：眼睛形状 / 打瞌睡 / 瞳孔跟随。
+            faceLifeSection
+
+            // ★ 2026-11-02：手表录音质量（转写后）——只作用于手表录音。
+            recordingQualitySection
 
             recapSection
         }
@@ -103,6 +137,44 @@ struct WatchFacePickerView: View {
         }
     }
 
+    // MARK: - 声纹（★ 2026-11-04）
+
+    /// 手表上录的那段声音，最终注册成了什么。
+    ///
+    /// 这里只做三件事：显示有没有、说明它怎么用、给一个删除入口。
+    /// **不做"在手机上重录"**——声纹要和录音用同一个麦克风，手机上录的样本拿去
+    /// 认手表录音只会更不准（见 `VoiceprintEngine` 顶部关于"音频通道"的说明）。
+    @ViewBuilder
+    private var voiceprintSection: some View {
+        Section {
+            if let profile = voiceprint.profile {
+                LabeledContent {
+                    Text(L10n.Voiceprint.sampleInfo(
+                        Int(profile.seconds.rounded()),
+                        source: profile.source == ClipOrigin.watch
+                            ? L10n.Voiceprint.deviceWatch
+                            : L10n.Voiceprint.devicePhone
+                    ))
+                    .foregroundStyle(.secondary)
+                } label: {
+                    Label(L10n.Voiceprint.statusEnrolled, systemImage: "checkmark.seal")
+                }
+                Button(role: .destructive) {
+                    voiceprint.forget()
+                } label: {
+                    Label(L10n.Voiceprint.remove, systemImage: "trash")
+                }
+            } else {
+                Label(L10n.Voiceprint.statusMissing, systemImage: "person.wave.2")
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(L10n.Voiceprint.title)
+        } footer: {
+            Text(L10n.Voiceprint.explain + "\n" + L10n.Voiceprint.identityFooter)
+        }
+    }
+
     private func commitUserName() {
         configService.config.userName = userNameDraft.isEmpty ? nil : userNameDraft
         configService.saveNow()
@@ -135,22 +207,38 @@ struct WatchFacePickerView: View {
             }
 
             if configService.config.timedRecordingEnabled {
-                DatePicker(
-                    L10n.TimedRecording.start,
-                    selection: Binding(
-                        get: { Self.timeValue(configService.config.timedRecordingStart) },
-                        set: { configService.config.timedRecordingStart = Self.timeString($0); configService.scheduleSave() }
-                    ),
-                    displayedComponents: .hourAndMinute
-                )
-                DatePicker(
-                    L10n.TimedRecording.end,
-                    selection: Binding(
-                        get: { Self.timeValue(configService.config.timedRecordingEnd) },
-                        set: { configService.config.timedRecordingEnd = Self.timeString($0); configService.scheduleSave() }
-                    ),
-                    displayedComponents: .hourAndMinute
-                )
+                // ★ 2026-11-02（用户："需要设置什么时间段，例如一直录，跟设置
+                // 一个时间段录制"）：两种录制方式——一直录（开关打开立即录，
+                // 关掉才停）或按起止时间窗口录。
+                Picker(L10n.TimedRecording.modeRow, selection: Binding(
+                    get: { configService.config.timedRecordingAlwaysOn },
+                    set: { on in
+                        configService.config.timedRecordingAlwaysOn = on
+                        configService.scheduleSave()
+                        TimedRecordingScheduler.shared.evaluate()
+                    }
+                )) {
+                    Text(L10n.TimedRecording.modeAlways).tag(true)
+                    Text(L10n.TimedRecording.modeWindow).tag(false)
+                }
+                if !configService.config.timedRecordingAlwaysOn {
+                    DatePicker(
+                        L10n.TimedRecording.start,
+                        selection: Binding(
+                            get: { Self.timeValue(configService.config.timedRecordingStart) },
+                            set: { configService.config.timedRecordingStart = Self.timeString($0); configService.scheduleSave() }
+                        ),
+                        displayedComponents: .hourAndMinute
+                    )
+                    DatePicker(
+                        L10n.TimedRecording.end,
+                        selection: Binding(
+                            get: { Self.timeValue(configService.config.timedRecordingEnd) },
+                            set: { configService.config.timedRecordingEnd = Self.timeString($0); configService.scheduleSave() }
+                        ),
+                        displayedComponents: .hourAndMinute
+                    )
+                }
             }
 
             if let notice = TimedRecordingScheduler.shared.lastNotice {
@@ -176,6 +264,294 @@ struct WatchFacePickerView: View {
     private static func timeString(_ date: Date) -> String {
         let comps = Calendar.current.dateComponents([.hour, .minute], from: date)
         return String(format: "%02d:%02d", comps.hour ?? 23, comps.minute ?? 30)
+    }
+
+    // MARK: - 全天候录音开关（★ 2026-11-05，双端同步）
+
+    /// 手机上的全天候录音开关（手表「设置」页里也有一颗）。翻动即刻推给手表；
+    /// 手机从未动过这个开关时，显示跟手表回报的值走。
+    private var allDayRecordingSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { watch.phoneAllDay ?? watch.watchAllDayState ?? false },
+                set: { watch.setAllDayRecording($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.Watch.allDayTitle)
+                    Text(L10n.Watch.allDayHint)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } footer: {
+            Text(L10n.Watch.allDayPhoneFooter)
+        }
+    }
+
+    // MARK: ★ 2026-11-06 表情常亮
+    //
+    // 用户："手表这边可以增加一个表情常亮让手表持续显示在首页的设置在 app 里面"。
+    // 语义边界（诚实）：watchOS 7 起没有任何公开 API 能让 App 改"返回表盘时间"，
+    // 那由手表上的 设置 → 通用 → 唤醒屏幕 → 返回表盘时间 决定（可按 App 单独设置，
+    // 最长 1 小时）。这个开关管的是**暗显的那段时间**：画表情（默认，暗态停帧）
+    // 还是黑屏省电。录音中例外——workout 会话期间本来就一直常驻常显。
+    private var alwaysOnFaceSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { watch.phoneAlwaysOnFace ?? watch.watchAlwaysOnFace ?? true },
+                set: { watch.setAlwaysOnFace($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.Watch.alwaysOnTitle)
+                    Text(L10n.Watch.alwaysOnHint)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } footer: {
+            Text(L10n.Watch.alwaysOnFooter)
+        }
+    }
+
+    // MARK: - ★ 2026-11-06 二轮："让脸活起来"（借鉴 agent-avatars）
+
+    /// 眼睛形状 / 打瞌睡 / 瞳孔跟随，三个设置一组。借鉴的是 agent-avatars
+    /// 的**能力**（4 种 eye styles、drowsy→asleep 阶梯、followPointer），
+    /// 触发逻辑换成了 Nomily 自己的：打瞌睡看"多久没触摸"，跟随看"手指按住拖动"。
+    private var faceLifeSection: some View {
+        Section {
+            Picker(L10n.Watch.eyeShapeTitle, selection: Binding(
+                get: {
+                    watch.phoneEyeShape
+                        .flatMap(BotEyeShape.init(rawValue:))
+                        ?? BotEyeShape.tall
+                },
+                set: { watch.setEyeShape($0.rawValue) }
+            )) {
+                ForEach(BotEyeShape.allCases) { shape in
+                    Text(shape.title).tag(shape)
+                }
+            }
+
+            Toggle(isOn: Binding(
+                get: { watch.phoneDrowsyEnabled ?? true },
+                set: { on in
+                    watch.setDrowsy(enabled: on, after: watch.phoneDrowsyAfter ?? 45)
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.Watch.drowsyTitle)
+                    Text(L10n.Watch.drowsyHint)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if watch.phoneDrowsyEnabled ?? true {
+                Picker(L10n.Watch.drowsyAfterTitle, selection: Binding(
+                    get: { watch.phoneDrowsyAfter ?? 45 },
+                    set: { seconds in
+                        watch.setDrowsy(enabled: true, after: seconds)
+                    }
+                )) {
+                    ForEach([15, 30, 60, 120], id: \.self) { seconds in
+                        Text(L10n.Watch.drowsyDelay(seconds)).tag(seconds)
+                    }
+                }
+            }
+
+            Toggle(isOn: Binding(
+                get: { watch.phonePupilFollow ?? true },
+                set: { watch.setPupilFollow($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.Watch.pupilFollowTitle)
+                    Text(L10n.Watch.pupilFollowHint)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text(L10n.Watch.faceLifeHeader)
+        } footer: {
+            Text(L10n.Watch.faceLifeFooter)
+        }
+    }
+
+    // MARK: - 手表录音质量（★ 2026-11-02 自录音与转写页整体搬入）
+    //
+    // 只作用于 **手表** 录音：档位选择 + 旧录音自动降级开关 + 天数步进 +
+    // 每档试听（只选手表片段）+ "立即降级"。安全栏见 RecordingQualityService
+    // ——转写永远用原始音质，降级只换播放保真度。
+
+    private var recordingQualitySection: some View {
+        Section {
+            Picker(L10n.RecordingsSettings.qualityTitle, selection: Binding(
+                get: {
+                    configService.config.recordingQualityTier
+                        .flatMap(RecordingQualityTier.init(rawValue:)) ?? .asIs
+                },
+                set: {
+                    configService.config.recordingQualityTier = $0.rawValue
+                    configService.scheduleSave()
+                }
+            )) {
+                ForEach(RecordingQualityTier.allCases) { tier in
+                    Text(Self.qualityTierLabel(tier)).tag(tier)
+                }
+            }
+
+            Toggle(isOn: Binding(
+                get: { configService.config.coldDataDowngradeEnabled },
+                set: { configService.config.coldDataDowngradeEnabled = $0; configService.scheduleSave() }
+            )) {
+                HStack(spacing: 4) {
+                    Text(L10n.RecordingsSettings.coldDowngrade)
+                    InfoTip(text: L10n.RecordingsSettings.coldDowngradeFooter)
+                }
+            }
+
+            if configService.config.coldDataDowngradeEnabled {
+                Stepper(
+                    L10n.RecordingsSettings.coldDowngradeDays(configService.config.coldDataDowngradeDays),
+                    value: Binding(
+                        get: { configService.config.coldDataDowngradeDays },
+                        set: { configService.config.coldDataDowngradeDays = $0; configService.scheduleSave() }
+                    ),
+                    in: 1...90
+                )
+            }
+
+            // 每档试听：A/B 最新片段与所选档位。原样档没有可比对象，隐藏。
+            if let tier = configService.config.recordingQualityTier
+                .flatMap(RecordingQualityTier.init(rawValue:)), tier != .asIs {
+                auditionRow(tier: tier)
+            }
+
+            // "立即降级"——与启动钩子同一遍，强制执行（开着开关才有意义，
+            // 但显式点按视为用户意图）。
+            Button {
+                guard !quality.isRunning else { return }
+                Task {
+                    let config = configService.config
+                    await quality.runDowngrade(config: config, library: env.library, ignoreSwitch: true)
+                }
+            } label: {
+                HStack {
+                    Text(quality.isRunning
+                         ? L10n.RecordingsSettings.qualityRunning
+                         : L10n.RecordingsSettings.qualityRunNow)
+                    if quality.isRunning { Spacer(); ProgressView() }
+                }
+            }
+            .disabled(quality.isRunning)
+
+            if let report = quality.lastReport {
+                Text(report)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            HStack(spacing: 4) {
+                Text(L10n.RecordingsSettings.qualityTitle)
+                InfoTip(text: L10n.RecordingsSettings.qualityFooter)
+            }
+        } footer: {
+            EmptyView()
+        }
+    }
+
+    /// 原声 vs 所选档位 A/B 按钮 + 「换一段」。预览转码结果缓存在 Caches
+    /// （clip+tier 各一份），二次点按秒开。试听池只收手表录音。
+    private func auditionRow(tier: RecordingQualityTier) -> some View {
+        Group {
+            if auditionClips.isEmpty {
+                Button {
+                    let watchNames = Set(env.library.sourcesByLocalName
+                        .filter { $0.value.kind == .watch }
+                        .map(\.key))
+                    auditionClips = RecordingQualityService.recentClips(matching: watchNames)
+                    auditionIndex = 0
+                    auditionLoaded = true
+                } label: {
+                    Text(L10n.RecordingsSettings.auditionLoad)
+                }
+                if auditionLoaded {
+                    Text(L10n.RecordingsSettings.auditionEmpty)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let clip = auditionClip {
+                HStack(spacing: 16) {
+                    auditionButton(side: "orig", label: L10n.RecordingsSettings.auditionOriginal, clip: clip, tier: tier)
+                    auditionButton(side: "tier", label: L10n.RecordingsSettings.auditionTier, clip: clip, tier: tier)
+                    Spacer()
+                    Button {
+                        auditionStop()
+                        auditionIndex = (auditionIndex + 1) % max(auditionClips.count, 1)
+                    } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(auditionClips.count < 2)
+                }
+                .font(.subheadline)
+                Text(L10n.RecordingsSettings.auditionClipLabel(
+                    (clip.lastPathComponent as NSString).deletingPathExtension))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var auditionClip: URL? {
+        auditionClips.indices.contains(auditionIndex) ? auditionClips[auditionIndex] : nil
+    }
+
+    private func auditionButton(side: String, label: String, clip: URL, tier: RecordingQualityTier) -> some View {
+        Button {
+            Task {
+                if auditionSide == side { auditionStop(); return }
+                auditionStop()
+                auditionBusy = true
+                defer { auditionBusy = false }
+                do {
+                    let url = try await RecordingQualityService.makeAudition(source: clip, tier: tier)
+                    auditionPlayer = try AVAudioPlayer(contentsOf: url)
+                    auditionPlayer?.play()
+                    auditionSide = side
+                } catch {
+                    auditionSide = nil
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if auditionSide == side {
+                    Image(systemName: "stop.fill")
+                } else {
+                    Image(systemName: "play.fill")
+                    if auditionBusy && side == "tier" { ProgressView().scaleEffect(0.7) }
+                }
+                Text(label)
+            }
+        }
+        .disabled(auditionBusy)
+    }
+
+    private func auditionStop() {
+        auditionPlayer?.stop()
+        auditionPlayer = nil
+        auditionSide = nil
+    }
+
+    private static func qualityTierLabel(_ tier: RecordingQualityTier) -> String {
+        let base: String
+        switch tier {
+        case .asIs: base = L10n.RecordingsSettings.qualityTierAsIs
+        case .standard: base = L10n.RecordingsSettings.qualityTierStandard
+        case .compact: base = L10n.RecordingsSettings.qualityTierCompact
+        case .minimal: base = L10n.RecordingsSettings.qualityTierMinimal
+        }
+        return L10n.RecordingsSettings.qualityTierLabel(base, tier.sizePerHourLabel, tier.recommendationLabel)
     }
 }
 
@@ -324,7 +700,10 @@ struct WatchFaceStyleSettingsView: View {
             if frameOn {
                 BotFaceFrame(size: Self.previewSize, tint: tint)
             }
-            BotFacePair(style: style, size: Self.previewSize, tint: tint)
+            // ★ 2026-11-06 二轮：预览也带上眼睛形状轴——选了"圆眼"这里就画圆眼，
+            //   手机预览与表上同源（BotFaceEye 是唯一的画法实现）。
+            BotFacePair(style: style, size: Self.previewSize, tint: tint,
+                        shape: watch.phoneEyeShape.flatMap(BotEyeShape.init(rawValue:)) ?? .tall)
         }
         if chosenColorHex != nil {
             face

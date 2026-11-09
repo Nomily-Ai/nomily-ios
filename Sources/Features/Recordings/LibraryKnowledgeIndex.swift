@@ -67,6 +67,19 @@ actor LibraryKnowledgeIndex {
         return hits
     }
 
+    /// 批量取正文（★ 2026-11-03 十轮，「Nomi 问答」检索用）。
+    ///
+    /// 与 `search` 走同一份缓存：索引里已有的直接给，没有的现读一次并落缓存。
+    /// 返回 `base -> 全文`（摘要优先拼接的顺序与搜索一致）。
+    func documents(for bases: [String]) async -> [String: String] {
+        var out: [String: String] = [:]
+        for base in bases {
+            if Task.isCancelled { return out }
+            if let text = text(for: base), !text.isEmpty { out[base] = text }
+        }
+        return out
+    }
+
     /// Get one clip's body text (reads the disk the first time, then goes through the cache). Returns nil when there really is no body text.
     private func text(for base: String) -> String? {
         // An empty string is also a **meaningful cached value**: it means "this one is confirmed to have no body text",

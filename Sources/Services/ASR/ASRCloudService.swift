@@ -39,7 +39,8 @@ enum ASRCloudService {
         for field in spec.fields where field.required {
             let value = field.kind == .secret ? (secrets[field.id] ?? "") : (values[field.id] ?? "")
             if value.trimmingCharacters(in: .whitespaces).isEmpty {
-                return .failure(L10n.ASRCloud.missingField(field.label))
+                // ★ 2026-11-05：报错文案里的字段名也走翻译（"项目 Appkey is empty"）。
+                return .failure(L10n.ASRCloud.missingField(field.localizedLabel(vendor: spec.id)))
             }
         }
         let base = endpoint.isEmpty ? spec.endpoint(values: values) : endpoint
@@ -328,9 +329,14 @@ enum ASRCloudService {
         // ★ 2026-10-23: the format was **never set** — `string(from:)` came back
         // as an empty string, so the Credential scope began with "/asr/…" and
         // Tencent rejected it with "`Date` in Credential not valid format".
-        // The scope date must be `yyyyMMdd` (no dashes).
+        //
+        // ★ 2026-11-06（用户拿到真 SecretKey 后仍报同一个错）：修法错了方向——
+        // 腾讯云 TC3 和 AWS SigV4 **不一样**：scope 里的 Date 是**带横杠**的
+        // `YYYY-MM-DD`（官方文档示例 `2019-02-25/cvm/tc3_request`），签名密钥
+        // 第一轮 HMAC 用的也是同一个带横杠的日期。之前去掉横杠拼成 `yyyyMMdd`，
+        // 格式校验照样拦，报的还是同一句话。保持 `yyyy-MM-dd`，**不要**去横杠。
         f.dateFormat = "yyyy-MM-dd"
-        let fullDate = String(f.string(from: Date()).replacingOccurrences(of: "-", with: "").prefix(8))
+        let fullDate = f.string(from: Date())
         let timestamp = String(Int(Date().timeIntervalSince1970))
 
         let canonicalRequest = """

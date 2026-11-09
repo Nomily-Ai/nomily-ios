@@ -17,7 +17,7 @@ struct SoundcoreWifiTransferSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("状态") {
+                Section(L10n.WifiXfer.statusSection) {
                     HStack(spacing: 8) {
                         Image(systemName: model.phase.icon)
                             .foregroundStyle(model.phase.tint)
@@ -34,14 +34,14 @@ struct SoundcoreWifiTransferSheet: View {
                 }
 
                 if let ssid = model.ssid {
-                    Section("录音豆热点") {
-                        LabeledContent("热点名", value: ssid)
-                        LabeledContent("密码", value: model.psk ?? "")
+                    Section(L10n.WifiXfer.hotspotSection) {
+                        LabeledContent(L10n.WifiXfer.hotspotName, value: ssid)
+                        LabeledContent(L10n.WifiXfer.password, value: model.psk ?? "")
                     }
                 }
 
                 if !model.rows.isEmpty {
-                    Section("待传文件（\(model.rows.count) 个）") {
+                    Section(L10n.WifiXfer.filesPending(model.rows.count)) {
                         ForEach(model.rows) { row in
                             SoundcoreWifiFileRow(row: row)
                         }
@@ -50,7 +50,7 @@ struct SoundcoreWifiTransferSheet: View {
 
                 if model.phase == .working {
                     Section {
-                        Label("传输期间请保持本页在前台，不要锁屏太久", systemImage: "info.circle")
+                        Label(L10n.WifiXfer.foregroundHint, systemImage: "info.circle")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -64,13 +64,13 @@ struct SoundcoreWifiTransferSheet: View {
                             dismiss()
                         }
                     } label: {
-                        Text(model.phase == .working ? "取消传输" : "关闭")
+                        Text(model.phase == .working ? L10n.WifiXfer.cancelTransfer : L10n.WifiXfer.close)
                             .frame(maxWidth: .infinity)
                     }
                     .tint(model.phase == .working ? .red : .accentColor)
                 }
             }
-            .navigationTitle("Wi‑Fi 快传")
+            .navigationTitle(L10n.WifiXfer.navTitle)
             .navigationBarTitleDisplayMode(.inline)
             // 传输中别让下滑手势把页面关掉——否则用户以为传输没了。
             .interactiveDismissDisabled(model.phase == .working)
@@ -96,14 +96,14 @@ private struct SoundcoreWifiFileRow: View {
             }
             switch row.status {
             case .pending:
-                Text("等待传输").font(.caption2).foregroundStyle(.secondary)
+                Text(L10n.WifiXfer.waiting).font(.caption2).foregroundStyle(.secondary)
             case .downloading(let got):
                 let frac = row.size > 0 ? min(1, Double(got) / Double(row.size)) : 0
                 ProgressView(value: frac)
                 Text("\(Self.sizeLabel(got)) / \(Self.sizeLabel(row.size))")
                     .font(.caption2).foregroundStyle(.secondary)
             case .saved:
-                Label("已保存到资料库", systemImage: "checkmark.circle.fill")
+                Label(L10n.WifiXfer.savedLibrary, systemImage: "checkmark.circle.fill")
                     .font(.caption2).foregroundStyle(.green)
             case .savedPartial(let note):
                 Label(note, systemImage: "exclamationmark.triangle.fill")
@@ -165,7 +165,7 @@ final class SoundcoreWifiTransferModel: ObservableObject, Identifiable {
     }
 
     @Published var rows: [Row] = []
-    @Published var stageTitle = "准备中…"
+    @Published var stageTitle = L10n.WifiXfer.stagePreparing
     @Published var stageDetail: String?
     @Published var error: String?
     @Published var phase: Phase = .working
@@ -184,21 +184,21 @@ final class SoundcoreWifiTransferModel: ObservableObject, Identifiable {
         stageDetail = p.message
         switch p.phase {
         case .openAp:
-            stageTitle = "正在配置录音豆热点…"
+            stageTitle = L10n.WifiXfer.stageConfigHotspot
         case .waitJoin:
-            stageTitle = "正在接入录音豆热点…"
+            stageTitle = L10n.WifiXfer.stageJoinHotspot
         case .connectWs:
-            stageTitle = "正在连接录音豆…"
+            stageTitle = L10n.WifiXfer.stageConnecting
         case .transferring:
-            stageTitle = "传输中"
+            stageTitle = L10n.WifiXfer.stageTransferring
             if p.currentFile > 0, p.currentFile <= rows.count {
                 rows[p.currentFile - 1].status = .downloading(got: p.fileBytes)
             }
         case .done:
-            stageTitle = "传输完成"
+            stageTitle = L10n.WifiXfer.stageDone
             phase = .done
         case .error:
-            stageTitle = "传输失败"
+            stageTitle = L10n.WifiXfer.stageFailed
             error = p.message
             phase = .failed
         }
@@ -207,7 +207,7 @@ final class SoundcoreWifiTransferModel: ObservableObject, Identifiable {
     func markSaved(fileId: UInt32, partial: Bool, coverage: Double) {
         guard let idx = indexById[fileId], idx < rows.count else { return }
         rows[idx].status = partial
-            ? .savedPartial("已保存到断点（收到 \(Int((coverage * 100).rounded()))%）")
+            ? .savedPartial(L10n.WifiXfer.partialSaved(Int((coverage * 100).rounded())))
             : .saved
     }
 
@@ -222,14 +222,14 @@ final class SoundcoreWifiTransferModel: ObservableObject, Identifiable {
             if phase == .working { phase = .failed }
         } else if phase == .working {
             phase = .done
-            stageTitle = "传输完成"
+            stageTitle = L10n.WifiXfer.stageDone
         }
     }
 
     /// 用户点了"取消传输"。
     func markCancelled() {
         phase = .cancelled
-        stageTitle = "已取消"
+        stageTitle = L10n.WifiXfer.stageCancelled
     }
 
     /// 导出中途抛错：把还在"传输中"的行标成失败（没轮到的保持"等待传输"）。

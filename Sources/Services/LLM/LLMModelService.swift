@@ -129,9 +129,13 @@ struct LLMModelService {
     /// This also attaches connectivity detail (model count + latency). **Does not probe the version**: the OpenAI-compatible layer
     /// has no unified version endpoint, and forcing a probe only creates a request guaranteed to fail for third-party implementations.
     static func fetchOpenAICompatible(endpoint: String, apiKey: String?) async -> FetchResult {
-        let base = endpoint.hasSuffix("/") ? String(endpoint.dropLast()) : endpoint
-        guard let url = URL(string: "\(base)/v1/models") else {
-            return FetchResult(ok: false, models: [], error: "Bad URL")
+        // ★ 2026-11-04: was `\(base)/v1/models`, which turns a perfectly good
+        // `…/compatible-mode/v1` (百炼 / 中转的常见形状) into `…/compatible-mode/v1/v1/models`
+        // and 404s. `LLMEndpoint` decides whether the version segment is already there.
+        guard let url = URL(string: LLMEndpoint.modelsURL(endpoint)) else {
+            // ★ 2026-11-04: show what could not be turned into a URL — "Bad URL" alone
+            // gives the user nothing to correct.
+            return FetchResult(ok: false, models: [], error: "Bad URL · \(endpoint)")
         }
         var req = URLRequest(url: url)
         // The key is **optional**: local services basically don't validate it, so leave the header off when it's empty
@@ -163,7 +167,7 @@ struct LLMModelService {
     static func fetchPresetModels(base: String, apiKey: String) async -> FetchResult {
         let trimmed = base.hasSuffix("/") ? String(base.dropLast()) : base
         guard let url = URL(string: "\(trimmed)/models") else {
-            return FetchResult(ok: false, models: [], error: "Bad URL")
+            return FetchResult(ok: false, models: [], error: "Bad URL · \(trimmed)")
         }
         var req = URLRequest(url: url)
         if !apiKey.isEmpty {
@@ -322,19 +326,35 @@ struct LLMModelService {
         _ req: URLRequest,
         parse: @escaping ([String: Any]) -> [String]
     ) async -> FetchResult {
+        let started = Date()
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            LLMRequestLog.record(req, code: code, millis: Int(Date().timeIntervalSince(started) * 1000),
+                                 note: "models")
             guard (200..<300).contains(code) else {
-                return FetchResult(ok: false, models: [], error: "HTTP \(code)")
+                // ★ 2026-11-04（用户："手机获取模型获取不到"）：只报 "HTTP 404" 时，
+                // 用户和我们都没法知道它到底请求了哪条地址——而 404 的成因九成是
+                // 地址拼错（多一层 /v1、少了 /compatible-mode、粘成了 Anthropic 那条）。
+                // 把 method + host + path 一起带出来，一眼就能看出问题。
+                return FetchResult(ok: false, models: [], error: "HTTP \(code) · \(shortURL(req))")
             }
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 return FetchResult(ok: true, models: [])
             }
             return FetchResult(ok: true, models: parse(json))
         } catch {
-            return FetchResult(ok: false, models: [], error: error.localizedDescription)
+            LLMRequestLog.record(req, code: -1, millis: Int(Date().timeIntervalSince(started) * 1000),
+                                 note: error.localizedDescription)
+            return FetchResult(ok: false, models: [], error: "\(error.localizedDescription) · \(shortURL(req))")
         }
+    }
+
+    /// `host/path` without the scheme — long enough to diagnose, short enough to fit a row.
+    static func shortURL(_ req: URLRequest) -> String {
+        guard let url = req.url else { return "(no url)" }
+        let host = url.host() ?? "?"
+        return host + url.path
     }
 
     // MARK: - parsers

@@ -19,7 +19,11 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>61</string>
+	<string>228</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Nomily AI uses a workout session to keep background recording alive on your wrist. No health data is read.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Nomily AI uses a workout session to keep background recording alive on your wrist. No health data is written.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.</string>
 	<key>UIBackgroundModes</key>
@@ -28,6 +32,10 @@
 	</array>
 	<key>WKApplication</key>
 	<true/>
+	<key>WKBackgroundModes</key>
+	<array>
+		<string>workout-processing</string>
+	</array>
 	<key>WKCompanionAppBundleIdentifier</key>
 	<string>com.nomily.app</string>
 </dict>

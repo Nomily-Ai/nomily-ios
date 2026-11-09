@@ -88,6 +88,26 @@ enum BotFaceStyle: String, CaseIterable, Codable, Identifiable {
     case sly
     /// Curious. A raised brow: tall, slightly narrower, tilted.
     case curious
+    // ★ 2026-11-06：借鉴 agent-avatars（jamesalmeida/agent-avatars）表情库的两档。
+    // ⚠️ 只加"静态形状档"：那个项目里 thinking / listening / drowsy 之类是**行为**
+    //   （视线上抬、垂眼、打瞌睡），在 Nomily 里由 `WatchBotFace.runGazeLoop`
+    //   的姿态抽签实现，不占表情库的位——静态档要能被手机选成"常驻表情"，
+    //   行为档不该被钉死。
+    /// Wink. One eye closed — borrowed from agent-avatars' one-shot `wink` gesture.
+    case wink
+    /// Love. Heart-shaped pupils — borrowed from agent-avatars' `love` mood.
+    case love
+    // ★ 2026-11-06 二轮（用户："表情库很丰富他们里面我们没有就加入进来"）：
+    // 把 agent-avatars 库里还缺的静态档补齐。thinking / listening / searching /
+    // reading / writing 是**行为**（视线姿态 / 扫视），由 `runGazeLoop` 的姿态
+    // 抽签承担，不进静态库（理由见上面 wink 处的段落）；working 的转圈眼睛
+    // 在手表上是持续动画，常驻太闹，同样不进。
+    /// Sorry（借鉴 `sorry` mood）：眼皮下垂、眉心内收——任务失败时那张脸。
+    case sorry
+    /// Confused（借鉴 `confused` mood）：两眼一高一矮、同向倾斜——"歪头"。
+    /// 原项目里两眼还会持续交换大小；静态档先取它的"歪斜不对称"姿态，
+    /// 动态交换交给自动轮换（轮到下一档时脸整个换掉，效果等价）。
+    case confused
 
     var id: String { rawValue }
 
@@ -109,6 +129,10 @@ enum BotFaceStyle: String, CaseIterable, Codable, Identifiable {
         case .focus:    return L10n.Face.focus
         case .sly:      return L10n.Face.sly
         case .curious:  return L10n.Face.curious
+        case .wink:     return L10n.Face.wink
+        case .love:     return L10n.Face.love
+        case .sorry:    return L10n.Face.sorry
+        case .confused: return L10n.Face.confused
         }
     }
 
@@ -137,6 +161,13 @@ enum BotFaceStyle: String, CaseIterable, Codable, Identifiable {
         case .focus:     return BotFaceGeometry(scaleX: 0.80, scaleY: 0.66)
         case .sly:       return BotFaceGeometry(scaleY: 0.55, tilt: 17)
         case .curious:   return BotFaceGeometry(scaleX: 0.90, scaleY: 1.28, tilt: 9)
+        // ★ 2026-11-06（借鉴 agent-avatars）：wink = 右眼闭（`oneEyeClosed` 的
+        //   压扁在 `BotFaceEye` 里做，镜像的那只）；love = 爱心瞳（第三种画法）。
+        case .wink:      return BotFaceGeometry(oneEyeClosed: true)
+        case .love:      return BotFaceGeometry(heart: true)
+        // ★ 2026-11-06 二轮：补齐 agent-avatars 缺的两档静态形状。
+        case .sorry:     return BotFaceGeometry(scaleX: 0.94, scaleY: 0.52, tilt: -6)
+        case .confused:  return BotFaceGeometry(scaleY: 1.0, tilt: 10, sameTilt: true, asym: true)
         }
     }
 
@@ -181,6 +212,66 @@ struct BotFaceGeometry {
     var tilt: Double = 0
     /// `nil` = straight (rounded vertical bar); a value = switch to a stroked arc.
     var arc: BotFaceArc?
+    /// ★ 2026-11-06（借鉴 agent-avatars 的 `wink`）：`true` = **右**眼闭合——
+    /// `BotFaceEye` 里对 `mirrored == true` 的那只把高度压到一条线。
+    /// 两只对称的几何体系里唯一的"不对称"档位，所以单独一个开关。
+    var oneEyeClosed: Bool = false
+    /// ★ 2026-11-06（借鉴 agent-avatars 的 `love`）：`true` = 切换到**爱心**画法
+    /// （第三种眼睛形态，见 `BotFaceEye`）。沿用 `tint`，随眨眼一起开合。
+    var heart: Bool = false
+    /// ★ 2026-11-06 二轮（借鉴 agent-avatars 的 `confused`）：`true` = 两眼**同向**
+    /// 倾斜（`mirrored` 不再取负，读作"歪头"而不是"对眉"）。
+    var sameTilt: Bool = false
+    /// ★ 2026-11-06 二轮（借鉴 agent-avatars 的 `confused`）：`true` = 两眼**一高一矮**
+    /// （左眼 ×1.25、右眼 ×0.78），配合同向倾斜就是那张"没听懂"的脸。
+    var asym: Bool = false
+}
+
+// MARK: - ★ 2026-11-06 二轮：眼睛形状（借鉴 agent-avatars 的 4 种 eye styles）
+
+/// 眼睛的**形状轴**——与表情轴（`BotFaceStyle`）正交：形状管"眼睛的高宽比"，
+/// 表情管"这只眼在做什么"。agent-avatars 一侧是 `"round" | "tall" | "calm" | "curious"`。
+enum BotEyeShape: String, CaseIterable, Codable, Identifiable {
+    /// 竖长条（现状默认，Grok bot 风格）。
+    case tall
+    /// 圆眼——睁得又圆又大。
+    case round
+    /// 平静——宽而矮的一条，柔和。
+    case calm
+    /// 好奇——更窄更高，always 在"瞪大了看"。
+    case curious
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .tall:    return L10n.Face.shapeTall
+        case .round:   return L10n.Face.shapeRound
+        case .calm:    return L10n.Face.shapeCalm
+        case .curious: return L10n.Face.shapeCurious
+        }
+    }
+
+    /// 相对基准（`BotFaceMetrics` 的 0.30 × 0.62）的宽度倍率。
+    var widthMul: CGFloat {
+        switch self {
+        case .tall:    return 1.00
+        case .round:   return 1.16
+        case .calm:    return 1.26
+        case .curious: return 0.86
+        }
+    }
+
+    /// 相对基准的高度倍率。⚠️ 弧形档（`arc != nil`）不乘高度——弧高由
+    /// `BotFaceMetrics.arcHeight` 单独管（见那里的说明）。
+    var heightMul: CGFloat {
+        switch self {
+        case .tall:    return 1.00
+        case .round:   return 0.55
+        case .calm:    return 0.74
+        case .curious: return 1.16
+        }
+    }
 }
 
 /// Which way the arc bows.
@@ -203,11 +294,29 @@ enum BotFaceArc {
 ///   what the user picks and what they see on the device would be out of proportion.
 enum BotFaceMetrics {
     /// Width of the idle eye.
-    static func eyeWidth(_ size: CGFloat) -> CGFloat { size * 0.235 }
+    ///
+    /// ★ 2026-11-03（用户："首页的眼睛部分变得很小"）：对齐 V4 原型
+    /// `54px / 226px = 0.239`。旧值 0.235 本来就贴着原型，问题不在宽。
+    /// ★★ 2026-11-03 七轮（用户："眼睛这个优化有问题，没有按照之前那种大一点的比例"）：
+    ///   0.26 → **0.30**，眼高 0.55 → **0.62**。原型（0.239/0.496）在这个尺寸的表上
+    ///   偏保守，用户明显要"更大一号"，这里按 1.25 倍放大原型比例。
+    static func eyeWidth(_ size: CGFloat) -> CGFloat { size * 0.30 }
     /// Height of the idle eye.
-    static func eyeHeight(_ size: CGFloat) -> CGFloat { size * 0.375 }
+    ///
+    /// ★ 2026-11-03（用户："首页的眼睛部分变得很小"）：**这里是主要病灶**——
+    /// 旧值 0.375 只有原型（`112px / 226px = 0.496`）的四分之三，眼睛是一对"矮墩"。
+    /// 对齐到 0.50：眼从扁圆变回原型那对竖长的白条（Grok bot 的比例）。
+    /// ★★ 2026-11-03 五轮：0.50 → **0.55**（用户仍嫌小）；七轮再 → **0.62**。
+    /// ⚠️ 表情库的弧形（`arcHeight/arcWidth`）都从眼高派生，会一起等比长高——
+    ///   手机预览与手表共用本文件，两端同步变化，不会漂。
+    static func eyeHeight(_ size: CGFloat) -> CGFloat { size * 0.62 }
     /// The gap **between** the two eyes (not the centre-to-centre distance).
-    static func eyeGap(_ size: CGFloat) -> CGFloat { size * 0.235 }
+    ///
+    /// ★ 2026-11-03 八轮（用户："眼睛太近了，不够生动"）：0.11 → **0.17**。
+    ///   两眼总宽 2×0.30 + 0.17 = 0.77 × size，仍留在 1.14 的框内。
+    ///   ⚠️ 间距是"生不生动"的一半：Grok bot 那对眼睛之间明显留白，
+    ///   挨太近会读成一张"眯着的脸"。
+    static func eyeGap(_ size: CGFloat) -> CGFloat { size * 0.17 }
     /// How much the pair of eyes is raised above the geometric centre. Dead centre makes it look like "head down" —
     /// a human face's eyes sit above the midpoint anyway.
     static func eyeRise(_ size: CGFloat) -> CGFloat { -size * 0.03 }
@@ -245,32 +354,55 @@ struct BotFaceEye: View {
     let mirrored: Bool
     /// Openness. 1 = fully open, 0.05 = closed, and it may briefly exceed 1 (blink overshoot).
     var openness: CGFloat = 1
+    /// ★ 2026-11-06 二轮：眼睛形状轴（`BotEyeShape`）。默认 tall = 现状不变。
+    var shape: BotEyeShape = .tall
 
     private var geo: BotFaceGeometry { style.geometry }
-    private var w: CGFloat { BotFaceMetrics.eyeWidth(size) }
-    private var h: CGFloat { BotFaceMetrics.eyeHeight(size) }
+    private var w: CGFloat { BotFaceMetrics.eyeWidth(size) * shape.widthMul }
+    private var h: CGFloat { BotFaceMetrics.eyeHeight(size) * shape.heightMul }
 
     var body: some View {
         ZStack {
             Capsule()
                 .fill(tint)
                 .frame(width: w * geo.scaleX, height: h * geo.scaleY)
-                .opacity(geo.arc == nil ? 1 : 0)
+                .opacity(geo.arc == nil && !geo.heart ? 1 : 0)
 
             BotFaceEyeCurve(up: geo.arc == .up)
                 .stroke(tint, style: StrokeStyle(lineWidth: BotFaceMetrics.arcWidth(size), lineCap: .round))
                 .frame(width: w * geo.scaleX, height: BotFaceMetrics.arcHeight(size))
                 .opacity(geo.arc == nil ? 0 : 1)
+
+            // ★ 2026-11-06（借鉴 agent-avatars 的 `love`）：爱心瞳。SF Symbol 自带
+            //   两瓣一尖的形状，比手写贝塞尔稳；大小从眼宽派生，与档位的 scaleX 联动。
+            //   ⚠️ 也常驻在 ZStack 里靠 opacity 淡入淡出——三种画法互相过渡都是
+            //   渐变而不是硬切（见下方"为什么交叉淡化"的段落）。
+            Image(systemName: "heart.fill")
+                .font(.system(size: w * 0.72 * geo.scaleX))
+                .foregroundStyle(tint)
+                .opacity(geo.heart ? 1 : 0)
         }
         // ⚠️ The outer `frame` is **fixed** (`eyeWidth × eyeHeight`) and does not follow the expression.
         //    Being fixed: the `HStack` spacing doesn't change with the expression (a sudden widening of the eye gap is more noticeable than the expression
         //    itself), and the two drawing modes share one alignment baseline.
         //    Anything outside the box is not clipped — `frame` doesn't clip, only `.clipped()` does.
+        //    ★ 2026-11-06 二轮：外框随形状轴等比缩放（round 眼矮、curious 眼高），
+        //    两只眼仍共用同一基线。
         .frame(width: w, height: h)
-        .rotationEffect(.degrees(mirrored ? -geo.tilt : geo.tilt))
+        // ★ 2026-11-06 二轮（借鉴 agent-avatars 的 `confused`）：`sameTilt` 时右眼
+        //   **不**取负——两只眼倒向同一边，读作"歪头"。
+        .rotationEffect(.degrees(mirrored && !geo.sameTilt ? -geo.tilt : geo.tilt))
         // Open/close squashes from the centre with `scaleEffect(y:)` rather than changing `frame(height:)` —
         // changing the height would make the eye "grow from the bottom up", whereas a real eyelid comes down **from top and bottom at once**.
-        .scaleEffect(y: openness, anchor: .center)
+        // ★ 2026-11-06（借鉴 agent-avatars 的 `wink`）：右眼常闭——压到 0.08 的一条线，
+        //   仍随眨眼一起开合（眨眼叠在 wink 上读作"又眨了一下"，不冲突）。
+        // ★ 2026-11-06 二轮（`confused`）：两眼一高一矮——左眼 ×1.25、右眼 ×0.78。
+        .scaleEffect(
+            y: openness
+                * (geo.oneEyeClosed && mirrored ? 0.08 : 1)
+                * (geo.asym ? (mirrored ? 0.78 : 1.25) : 1),
+            anchor: .center
+        )
     }
 }
 
@@ -280,11 +412,13 @@ struct BotFacePair: View {
     let size: CGFloat
     let tint: Color
     var openness: CGFloat = 1
+    /// ★ 2026-11-06 二轮：眼睛形状轴，从手机设置一路推下来。
+    var shape: BotEyeShape = .tall
 
     var body: some View {
         HStack(spacing: BotFaceMetrics.eyeGap(size)) {
-            BotFaceEye(style: style, size: size, tint: tint, mirrored: false, openness: openness)
-            BotFaceEye(style: style, size: size, tint: tint, mirrored: true, openness: openness)
+            BotFaceEye(style: style, size: size, tint: tint, mirrored: false, openness: openness, shape: shape)
+            BotFaceEye(style: style, size: size, tint: tint, mirrored: true, openness: openness, shape: shape)
         }
     }
 }

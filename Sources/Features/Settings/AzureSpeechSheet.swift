@@ -21,6 +21,9 @@ struct AzureSpeechSheet: View {
 
     @State private var verify: VerifyState = .idle
     @State private var showHelp = false
+    // ★ 2026-11-03（用户："为啥 Azure 没有『让 ai 带你拿 key』这个"）：Azure 是
+    // 唯一漏掉 Key 快引导的转写服务商——其它云厂商的配置页都有，这里补齐。
+    @State private var showKeyWizard = false
     /// Round trip of the last verify, so the test row can say "可用 · 1234 ms"
     /// even before the value is read back from `ASRLatencyMemory`.
     @State private var lastMillis: Int?
@@ -91,6 +94,19 @@ struct AzureSpeechSheet: View {
                 }
 
                 Section {
+                    // ★ 2026-11-03：Key 快引导——复制提示词问 AI，粘贴回复自动回填
+                    // Key / Region。与 `ASRCloudSection` 的入口位置、文案保持一致。
+                    Button {
+                        showKeyWizard = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "questionmark.circle")
+                                .font(.subheadline)
+                            Text(L10n.KeyWizard.openWizard)
+                                .font(.subheadline.weight(.medium))
+                            Spacer()
+                        }
+                    }
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             SecureField(L10n.ASR.subscriptionKey, text: keyBinding)
@@ -182,6 +198,27 @@ struct AzureSpeechSheet: View {
             .sheet(isPresented: $showHelp) {
                 AzureSpeechSetupGuide()
                     .environmentObject(configService)
+            }
+            .sheet(isPresented: $showKeyWizard) {
+                KeyWizardSheet(
+                    vendorName: L10n.ASR.azureSpeech,
+                    fields: [
+                        .init(id: "key", label: L10n.ASR.subscriptionKey,
+                              aliases: ["key", "订阅密钥", "密钥", "subscription key"]),
+                        .init(id: "region", label: L10n.ASR.region,
+                              aliases: ["region", "区域", "位置", "location"]),
+                    ],
+                    consoleURL: URL(string: "https://portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices")
+                ) { map in
+                    for (id, value) in map {
+                        switch id {
+                        case "key": keyBinding.wrappedValue = value
+                        case "region": regionBinding.wrappedValue = value
+                        default: break
+                        }
+                    }
+                    configService.scheduleSave()
+                }
             }
         }
     }

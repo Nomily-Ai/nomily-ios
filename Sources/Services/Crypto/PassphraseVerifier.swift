@@ -142,6 +142,10 @@ enum PassphraseVerifier {
         }
         do {
             _ = try ChaCha20.decryptClip(data, key: key)
+            // ★ 2026-11-04：这条探针是"钥匙确实能开这台设备的录音"的实证。
+            // 把它的信封头留成 KCV——以后用户再输口令，或每次连接时自检，
+            // 都是纯本地的几毫秒，不用再录一次探针、下载一次。
+            KeyHealthService.rememberSuccess(envelope: data, key: key)
             return (.matches, key)
         } catch ChaCha20.DecryptError.verifyMismatch {
             return (.mismatch, key)

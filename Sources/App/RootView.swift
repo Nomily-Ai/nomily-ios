@@ -1,7 +1,15 @@
+import AVFoundation
 import SwiftUI
+import UserNotifications
 
 extension Notification.Name {
     static let navigateToSettings = Notification.Name("navigateToSettings")
+}
+
+/// ★ 2026-11-06：一条待提醒的权限问题。`id` 兼做 UserDefaults「已提醒」标记的后缀。
+struct PermissionIssue: Identifiable {
+    let id: String
+    let message: String
 }
 
 /// App chrome: 3-tab layout with a persistent connection pill anchored to the
@@ -32,6 +40,28 @@ struct RootView: View {
     @State private var showCancelTransferAlert = false
     @State private var isReconnecting = false
     @State private var showCloudConsent = false
+    /// ★ 2026-11-06（后台保活·被杀善后）：冷启动读到 `keeper.jobsActiveAtBackground.v1`
+    /// 还是 true = 上次在后台时进程是被杀掉的（正常回前台会先清掉），弹一条一次性提示。
+    @State private var interruptedLastRun = false
+    /// ★ 2026-11-06（用户："有些权限被关闭，需要弹窗提醒，例如蓝牙没开"）：
+    /// 当前正在弹的权限问题（一次只弹一条，按 麦克风 > 蓝牙权限 > 蓝牙开关 > 通知 排序）。
+    @State private var permissionIssue: PermissionIssue?
+    /// ★ 2026-11-02（用户："使用引导需要到对应的 app 的功能模块去，在对应模块指向
+    /// 让用户点击"）：流程式引导取代整页 onboarding——卡片浮在真实页面上，5 步
+    /// 走完 录音页→实时→ASR→LLM→WebDAV。进度落 UserDefaults；设置 → 使用引导
+    /// 可重置重走。
+    @AppStorage("guide.done.v1") private var guideDone = false
+    @AppStorage("guide.step.v1") private var guideStepRaw = GuideStep.connectDevice.rawValue
+    /// ★ 2026-11-02（用户："首次用户使用需要弹出用户引导"）：首启欢迎页的「看过了」位。
+    /// 与 `guide.done.v1` 分开记：欢迎页只弹一次，之后重看流程引导（设置 → 使用引导）
+    /// 不该再把欢迎页顶出来。
+    @AppStorage("welcome.seen.v1") private var welcomeSeen = false
+    /// ★ 2026-11-03（用户："是否需要在增加一个免责条款，让用户同意点击之类的"）：
+    /// 首启的免责声明是否已同意。**和欢迎页共用一个 cover**（见下面的 `fullScreenCover`），
+    /// 两个 cover 串着弹会撞上 SwiftUI 的 presenting-while-presenting 警告。
+    @AppStorage(NomilyConsent.storageKey) private var consentAccepted = false
+    /// 主按钮（扫描/深链）刚导航过 → 推进时不切 tab（避免边扫描边跳页）。
+    @State private var guidePrimaryNavigated = false
     @State private var manualConnectFailure: ManualConnectFailure?
     @State private var passphraseSetup: PassphraseSetupPrompt?
     @State private var passphraseError: String?
@@ -57,12 +87,65 @@ struct RootView: View {
     }
 
     enum Tab: Hashable {
-        case recordings, live, settings
+        case recordings, live, nomily, settings
     }
 
     /// Changes whenever we need to kick/cancel the device-info poll loop —
     /// on connect/disconnect or foreground/background. Bundled into the
     /// `.task(id:)` so SwiftUI handles teardown for us.
+    // MARK: - First-run guide（流程式引导，★ 2026-11-02）
+
+    /// 主按钮：每步的「去连接 / 前往」。深链前先弹出上一步的页面，
+    /// 保证用户永远站在引导想让他站的那个页面上。
+    private func guidePrimary(_ step: GuideStep) {
+        guidePrimaryNavigated = true
+        switch step {
+        case .connectDevice:
+            selectedTab = .recordings
+            showScanner = true
+        case .configureASR:
+            selectedTab = .settings
+            env.navigateToASRProviders = true
+        case .configureLLM:
+            selectedTab = .settings
+            env.navigateToASRProviders = false
+            env.navigateToLLMProviders = true
+        case .cloudBackup:
+            selectedTab = .settings
+            env.navigateToLLMProviders = false
+            env.navigateToRecordingsSettings = true
+        case .liveTranscribe:
+            break
+        }
+    }
+
+    /// 推进到下一步；主按钮刚导航过就不切 tab（用户已在目标页面/正在扫描）。
+    private func guideAdvance() {
+        let navigated = guidePrimaryNavigated
+        guidePrimaryNavigated = false
+        let next = guideStepRaw + 1
+        guard let nextStep = GuideStep(rawValue: next) else {
+            finishGuide()
+            return
+        }
+        withAnimation { guideStepRaw = next }
+        if !navigated {
+            switch nextStep {
+            case .liveTranscribe: selectedTab = .live
+            case .configureASR, .configureLLM, .cloudBackup: selectedTab = .settings
+            case .connectDevice: selectedTab = .recordings
+            }
+        }
+    }
+
+    /// 完成/跳过：清掉所有引导深链，落「已完成」位。
+    private func finishGuide() {
+        env.navigateToASRProviders = false
+        env.navigateToLLMProviders = false
+        env.navigateToRecordingsSettings = false
+        guideDone = true
+    }
+
     private var devicePollKey: String {
         let id = bluetooth.client?.peripheral.identifier.uuidString ?? "none"
         return "\(id)-\(String(describing: scenePhase))"
@@ -124,9 +207,29 @@ struct RootView: View {
                 .tabItem { Label(L10n.Tab.live, systemImage: "waveform.badge.mic") }
                 .tag(Tab.live)
 
+            // ★ 2026-11-03 十轮：第四个标签「Nomily」——问自己的录音。
+            //   图标是 **App 图标的白色剪影**（`NomilyLogo`，从 nomi-logo.png 抠出
+            //   glyph、背景转透明），随选中态染色；上一版自绘的圆环+双眼被用户
+            //   认不出来是哪个 App（"为啥菜单栏不是 app 图标 logo"）。
+            tabContent(L10n.Tab.nomily, NomilyView())
+                .tabItem { Label(L10n.Tab.nomily, image: "NomilyLogo") }
+                .tag(Tab.nomily)
+
             tabContent(L10n.Tab.settings, SettingsView())
                 .tabItem { Label(L10n.Tab.settings, systemImage: "gearshape") }
                 .tag(Tab.settings)
+        }
+        .overlay(alignment: .top) {
+            // ★ 流程式引导卡片：浮在 tab 内容与被推入的页面之上。
+            if !guideDone, let step = GuideStep(rawValue: guideStepRaw) {
+                GuideCardView(
+                    step: step,
+                    primaryAction: { guidePrimary(step) },
+                    advance: { guideAdvance() },
+                    skip: { finishGuide() }
+                )
+                .padding(.top, 8)
+            }
         }
         // ★ Theme: one place, whole app.
         //
@@ -153,6 +256,22 @@ struct RootView: View {
         }
         .sheet(isPresented: $showScanner) {
             ScannerSheet(onConnected: { showScanner = false })
+        }
+        // ★ 2026-11-02：首启欢迎页——先介绍三条示例（文案随语言切换），
+        // 「开始使用」后落位，紧接着由上面的引导卡片接手带用户走真实页面。
+        // ★ 2026-11-03：先同意、再欢迎，同一个 cover 里换内容。
+        //
+        // 顺序不能反：欢迎页会介绍示例、引导用户去点录音——**同意必须发生在
+        // 任何一次真实录音之前**，所以它排在欢迎页前面，而且不提供"跳过"。
+        .fullScreenCover(isPresented: Binding(
+            get: { !consentAccepted || !welcomeSeen },
+            set: { if !$0 { welcomeSeen = true } }
+        )) {
+            if !consentAccepted {
+                ConsentSheet(accept: { consentAccepted = true })
+            } else {
+                WelcomeSheet(start: { welcomeSeen = true })
+            }
         }
         // ★ 2026-10-14: Pass `.deviceInfo`, and `openCardInfoOnAppear` no longer exists.
         //
@@ -229,6 +348,27 @@ struct RootView: View {
         .task {
             if cloudConsentPending { showCloudConsent = true }
         }
+        // ★ 2026-11-02 调试钩子：以 `-webdav-sync-on-launch` 参数启动时，冷启动后
+        // 立刻跑一次 WebDAV 全量同步，并把逐文件结果打到控制台（NSLog），用于
+        // 真机验证上传布局——不必再靠手点「立即同步」。Release 构建里整段不存在。
+        #if DEBUG
+        .task {
+            guard ProcessInfo.processInfo.arguments.contains("-webdav-sync-on-launch") else { return }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            await WebDAVSyncService.shared.syncAll(config: configService.config)
+            NSLog("[WEBDAV-TEST] report: %@",
+                  WebDAVSyncService.shared.lastReport ?? "nil")
+            // 环境变量 NOMILY_SAMPLE_PDF_BASE=<录音base>：把这条录音的摘要 PDF
+            // 写进 Documents（devicectl copy from 拉回 Mac 检查排版）。
+            if let base = ProcessInfo.processInfo.environment["NOMILY_SAMPLE_PDF_BASE"],
+               let pdf = WebDAVSyncService.shared.notePDFData(base: base) {
+                let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("摘要-预览.pdf")
+                try? pdf.write(to: url, options: .atomic)
+                NSLog("[WEBDAV-TEST] sample pdf: Documents/摘要-预览.pdf (\(pdf.count / 1024) KB)")
+            }
+        }
+        #endif
         .alert(item: $manualConnectFailure) { failure in
             Alert(
                 title: Text(L10n.Scanner.connectionFailed),
@@ -250,6 +390,33 @@ struct RootView: View {
             }
         } message: {
             Text(L10n.Privacy.cloudMessage)
+        }
+        // ★ 2026-11-06（后台保活·被杀善后）：哨兵通知负责"被杀当时"，这条弹窗负责
+        // "用户没看到通知、下次打开 App 时"。读到标记即为被杀过（一次性消费）。
+        .alert(L10n.ASR.killedAlertTitle, isPresented: $interruptedLastRun) {
+            Button(L10n.Common.ok, role: .cancel) {}
+        } message: {
+            Text(L10n.ASR.killedAlertBody)
+        }
+        // ★ 2026-11-06（用户："有些权限被关闭，需要弹窗提醒，例如蓝牙没开"）：
+        // 每次回到前台 + 蓝牙状态每次变化都查一遍；**每个问题只在关闭状态下提醒一次**
+        //（用户点掉后不再弹，直到权限恢复过再关才重新提醒），避免每次冷启动都骚扰。
+        .alert(item: $permissionIssue) { issue in
+            Alert(
+                title: Text(L10n.ASR.permAlertTitle),
+                message: Text(issue.message),
+                primaryButton: .default(Text(L10n.ASR.permGoSettings)) {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                },
+                secondaryButton: .cancel(Text(L10n.ASR.permAck))
+            )
+        }
+        .onAppear {
+            // 必须在 scenePhase 的 onChange 拆标记**之前**读——冷启动的首个
+            // scenePhase 就是 .active，onChange 不会重放初值，所以这里的顺序安全。
+            interruptedLastRun = BackgroundKeeper.consumeKilledFlag()
         }
         .onChange(of: env.isStreaming) { streaming in
             streamingTab = streaming ? selectedTab : nil
@@ -343,6 +510,11 @@ struct RootView: View {
         .onChange(of: scenePhase) { phase in
             handleScenePhase(phase)
         }
+        // ★ 2026-11-06：蓝牙在 App 活着的时候被用户关掉/拒绝（控制中心一拉就关），
+        // 状态机立刻变化——不等下次回前台，当场提醒。
+        .onChange(of: bluetooth.adapter) { _ in
+            checkPermissionIssues()
+        }
         // ★ 2026-10-26 ("实时字幕按照 Plaud 的那个方式，卡片弹出那种页面"):
         // the recording stage rises as a card over whatever tab is showing,
         // raised by `PlaudDirectService.bleRecordStart`. Dismissing it only
@@ -356,12 +528,93 @@ struct RootView: View {
         }
     }
 
+    /// ★ 2026-11-06：权限体检。按"最影响核心功能"排序，一次只弹一条最严重的。
+    ///
+    /// ## 为什么每个问题只提醒一次
+    /// 弹窗骚扰比权限问题更赶人。所以用 UserDefaults 记"这个问题提醒过了"：
+    /// 用户点掉后不再弹；**权限恢复的瞬间把标记清掉**——之后再被关才重新提醒。
+    private func checkPermissionIssues() {
+        var issue: PermissionIssue?
+
+        // ① 麦克风：录音 App 的命根子，被拒 = 完全没法录。
+        let mic = AVAudioSession.sharedInstance().recordPermission
+        if mic == .denied {
+            if remindOnce("perm.reminded.mic") {
+                issue = PermissionIssue(
+                    id: "mic",
+                    message: L10n.ASR.permMicDenied)
+            }
+        } else {
+            UserDefaults.standard.set(false, forKey: "perm.reminded.mic")
+        }
+
+        // ② 蓝牙权限（用户在系统设置里拒绝了蓝牙）：录音设备一个都连不上。
+        if issue == nil, bluetooth.adapter == .unauthorized {
+            if remindOnce("perm.reminded.bt_auth") {
+                issue = PermissionIssue(
+                    id: "bt_auth",
+                    message: L10n.ASR.permBtDenied)
+            }
+        } else if bluetooth.adapter != .unauthorized {
+            UserDefaults.standard.set(false, forKey: "perm.reminded.bt_auth")
+        }
+
+        // ③ 蓝牙开关本身关了（控制中心一拉就能关）：设备也连不上，但用户自己能开回来。
+        if issue == nil, bluetooth.adapter == .poweredOff {
+            if remindOnce("perm.reminded.bt_off") {
+                issue = PermissionIssue(
+                    id: "bt_off",
+                    message: L10n.ASR.permBtOff)
+            }
+        } else if bluetooth.adapter != .poweredOff {
+            UserDefaults.standard.set(false, forKey: "perm.reminded.bt_off")
+        }
+
+        // ④ 通知：不阻塞录音，但被杀哨兵提醒依赖它。异步查。
+        if issue == nil {
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                let denied = settings.authorizationStatus == .denied
+                Task { @MainActor in
+                    if denied {
+                        if remindOnce("perm.reminded.notif"), permissionIssue == nil {
+                            permissionIssue = PermissionIssue(
+                                id: "notif",
+                                message: L10n.ASR.permNotifDenied)
+                        }
+                    } else {
+                        UserDefaults.standard.set(false, forKey: "perm.reminded.notif")
+                    }
+                }
+            }
+        }
+
+        if permissionIssue == nil {
+            permissionIssue = issue
+        }
+    }
+
+    /// 该问题是否需要提醒（提醒过一次就不再弹，直到标记被"恢复授权"清掉）。
+    private func remindOnce(_ key: String) -> Bool {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: key) else { return false }
+        defaults.set(true, forKey: key)
+        return true
+    }
+
     /// Foreground/background side effects, kept out of `body` — inlining them
     /// pushed the view builder past the type-checker's time budget.
-    private func handleScenePhase(_ phase: ScenePhase) {
-        if phase == .active {
+    private func handleScenePhase(_ phase: ScenePhase) {        if phase == .active {
+            // ★ 2026-11-06：回前台第一件事拆掉"被杀预警"哨兵（撤循环 + 撤待发通知 +
+            // 清在途标记）。此后冷启动再读到标记 = 上次是被杀的，见 `interruptedLastRun`。
+            BackgroundKeeper.shared.disarmKillGuard()
             env.transcription.resumePending()
             env.jobs.resume()
+            // ★ 2026-11-06：权限体检延后 2 秒——蓝牙状态在冷启动后是异步上来的
+            // （CBCentralManager 初始化），立刻查只会查到 .unknown。
+            Task {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                checkPermissionIssues()
+            }
             // ★ 2026-10-29 (饭耳移植 · 规格 §3.1): catch a timed-recording window
             // that began while the app sat in the task switcher.
             TimedRecordingScheduler.shared.evaluate()
@@ -380,6 +633,11 @@ struct RootView: View {
             // we leave the foreground — the freshest submit wins, and each one
             // carries the newest config (switch state) implicitly via execution.
             NightlyTranscribeScheduler.shared.schedule()
+            // ★ 2026-11-06（用户："加入后台常驻防止被杀后台…不行则增加用户引导跟
+            // 通知栏检测"）：静音音频保活已是 iOS 的上限（没有常驻 API），所以按
+            // "不行"的那条走——手里还有任务时架起**被杀预警哨兵**：进程活着通知
+            // 永远不响，被杀后 60 秒内用户必收到一条"任务被中断"。
+            BackgroundKeeper.shared.armKillGuard()
         }
     }
 

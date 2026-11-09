@@ -180,7 +180,14 @@ final class ConfigService: ObservableObject {
         ("kimi", .llmKimi), ("zhipu", .llmZhipu), ("minimax", .llmMiniMax),
     ]
     /// ★ 2026-10-29 (饭耳移植): WebDAV password Keychain key (string-keyed slot).
+    /// ★ 2026-11-09 多账户：每个账户一条独立槽（`webdav.password.<id>`）；
+    /// 旧的单槽键保留——迁移过来的第一条账户在 restore 时从这里捞回密码。
     static let webdavPasswordKey = "webdav.password"
+
+    /// 每账户密码槽：同一家 NAS 配两台、两家 NAS 各存各的，互不覆盖。
+    static func webdavPasswordKey(accountID: String) -> String {
+        "webdav.password.\(accountID)"
+    }
 
     private static func extractSecrets(_ config: AppConfig) -> AppConfig {
         var stripped = config
@@ -205,6 +212,13 @@ final class ConfigService: ObservableObject {
         }
         SecretStore.save(config.wifiAP?.psk, to: .wifiAPPassword)
         // ★ 2026-10-29 (饭耳移植): WebDAV password never touches config.json.
+        // ★ 2026-11-09 多账户：每条已保存账户各存各的槽；旧的单槽键继续写
+        //   「当前使用」那条（老版本 App 读回来还能用）。
+        if let accounts = config.webdavAccounts {
+            for account in accounts {
+                SecretStore.save(account.password, toKey: Self.webdavPasswordKey(accountID: account.id))
+            }
+        }
         SecretStore.save(config.webdav?.password, toKey: Self.webdavPasswordKey)
 
         stripped.asrProviders.azure?.key = ""
@@ -223,6 +237,11 @@ final class ConfigService: ObservableObject {
         }
         stripped.wifiAP?.psk = ""
         stripped.webdav?.password = nil
+        if stripped.webdavAccounts != nil {
+            for index in stripped.webdavAccounts!.indices {
+                stripped.webdavAccounts?[index].password = nil
+            }
+        }
         return stripped
     }
 
@@ -268,8 +287,29 @@ final class ConfigService: ObservableObject {
             config.wifiAP?.psk = SecretStore.load(.wifiAPPassword) ?? ""
         }
         // ★ 2026-10-29 (饭耳移植): WebDAV password round trip (Keychain).
+        // ★ 2026-11-09 多账户：每条账户从自己的槽里捞回；迁移过来的第一条
+        //   没有独立槽时回落旧单槽键（老版本写入的位置），捞到后立刻固化
+        //   到自己的槽，下次就不再依赖旧键。
+        if var accounts = config.webdavAccounts {
+            let legacyPassword = SecretStore.load(key: Self.webdavPasswordKey)
+            for index in accounts.indices {
+                var password = SecretStore.load(key: Self.webdavPasswordKey(accountID: accounts[index].id))
+                if password == nil, let legacy = legacyPassword,
+                   accounts[index].id == config.webdavActiveID {
+                    password = legacy
+                    SecretStore.save(password, toKey: Self.webdavPasswordKey(accountID: accounts[index].id))
+                }
+                accounts[index].password = password
+            }
+            config.webdavAccounts = accounts
+        }
         if config.webdav != nil {
-            config.webdav?.password = SecretStore.load(key: Self.webdavPasswordKey)
+            // ★ 2026-11-09：先算 RHS 再赋值——activeWebDAVAccount 内部也读
+            // config.webdav，链式 `config.webdav?.password = config.active…`
+            // 会撞 overlapping access。
+            let activePassword = config.activeWebDAVAccount?.password
+                ?? SecretStore.load(key: Self.webdavPasswordKey)
+            config.webdav?.password = activePassword
         }
     }
 

@@ -59,6 +59,7 @@ struct CustomASR {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = Self.uploadTimeout(for: duration)
+        form.finalize()
         req.setValue("multipart/form-data; boundary=\(form.boundary)", forHTTPHeaderField: "Content-Type")
         if !apiKey.isEmpty {
             req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -293,6 +294,16 @@ struct CustomASR {
             body.append(Data("Content-Type: \(mimeType)\r\n\r\n".utf8))
             body.append(data)
             body.append(Data("\r\n".utf8))
+        }
+
+        /// ★ 2026-11-02: 补上闭合边界。缺了它，严格实现（python-multipart，
+        ///   即 FastAPI 的解析层）会把整个 body 当作未终结的 part 丢弃——真机
+        ///   诊断日志里 custom provider 的 422
+        ///   `{"loc":["body","file"],"msg":"Field required"}` 就是这个。
+        ///   LocalASR 复用此类型，一并修复。
+        mutating func finalize() {
+            guard !body.isEmpty else { return }
+            body.append(Data("--\(boundary)--\r\n".utf8))
         }
     }
 

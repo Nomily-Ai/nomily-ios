@@ -22,6 +22,13 @@ packages:
   Argon2Swift:
     url: https://github.com/tmthecoder/Argon2Swift.git
     branch: main
+  # ★ 2026-11-02（用户："增加一个下载使用 SenseVoice 的语音转文字"）：
+  # sherpa-onnx 运行时（静态链接，内含 onnxruntime）。**本地 vendored 包**
+  # （VendorPackages/sherpa-onnx-local）——远程 SPM 解析要从 GitHub release
+  # 拉 4 个 xcframework，直连国内超时全部失败，故把 iOS 静态二进制 +
+  # Swift wrapper 落进仓库。详见该包 Package.swift 头注释。
+  SherpaOnnx:
+    path: VendorPackages/sherpa-onnx-local
 
 schemes:
   # Shared, so `xcodebuild -scheme nomily_ios` works from a clean checkout and
@@ -32,6 +39,24 @@ schemes:
     build:
       targets:
         nomily_ios: all
+      # ★ 2026-11-02：把「构建号 +1」从**目标级 preBuild** 挪到**方案级 preAction**。
+      #
+      # 原因（真机踩到的）：preBuild 脚本属于 iOS App 目标，而 `nomily_watch` 是它的
+      # **依赖**，通常在脚本跑之前就已经编完了——于是同一个 build 里出现
+      # 「App = 62、内嵌手表 App = 61」。watchOS 对配对 App 的版本号是**要求一致**的，
+      # 差 1 就可能装不上手表端（表现是手机上一切正常、表上还是旧界面）。
+      #
+      # 方案级 preAction 在任何目标开始编译**之前**执行，三个 plist 一起 +1，
+      # 各目标取到的就是同一个数。
+      preActions:
+        - name: Bump build number
+          settingsTarget: nomily_ios
+          script: |
+            for P in "$SRCROOT/Sources/App/Info.plist" "$SRCROOT/Watch/Info.plist" "$SRCROOT/WatchControls/Info.plist"; do
+              N=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$P" 2>/dev/null || echo 0)
+              /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $((N+1))" "$P"
+            done
+            echo "CFBundleVersion -> $((N+1))"
     run:
       config: Debug
     archive:
@@ -48,6 +73,9 @@ targets:
       - path: Sources/Resources
     dependencies:
       - package: Argon2Swift
+      # ★ 2026-11-02: SenseVoice 本机转写运行时（静态链接）。
+      - package: SherpaOnnx
+        product: sherpa-onnx
       # Embeds the watch app inside the iPhone app bundle, which is how a
       # watchOS companion ships — it can't be installed on its own.
       - target: nomily_watch
@@ -63,19 +91,11 @@ targets:
         embed: true
       - framework: Frameworks/PlaudWiFiSDK.framework
         embed: true
-    preBuildScripts:
-      # ★ 2026-10-29（用户："关于里的版本每次修改都没增加"）：每次构建把
-      # CFBundleVersion +1。三份 plist（App/Watch/WatchControls）**同步 +1**，
-      # 否则 watchOS 会因 App 与手表 App 版本不一致拒绝安装。
-      # 注意：`xcodegen generate` 会把构建号重置回 project.yml 里的值——重跑
-      # generate 后构建号从 47 重新爬，ShortVersion 变更仍需手改这里。
-      - name: Bump build number
-        script: |
-          for P in "$SRCROOT/Sources/App/Info.plist" "$SRCROOT/Watch/Info.plist" "$SRCROOT/WatchControls/Info.plist"; do
-            N=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$P" 2>/dev/null || echo 0)
-            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $((N+1))" "$P"
-          done
-          echo "CFBundleVersion -> $((N+1))"
+    # ★ 2026-10-29（用户："关于里的版本每次修改都没增加"）：每次构建把
+    # CFBundleVersion +1。
+    # ★ 2026-11-02：**已挪到方案级 `preActions`**（见文件上方 `schemes.nomily_ios.build.preActions`）——
+    # 放在这里时它跑在 `nomily_watch` 依赖**编译之后**，产出的 App 与内嵌手表 App
+    # 版本号会差 1，watchOS 会因此拒绝安装手表端。
     info:
       path: Sources/App/Info.plist
       properties:
@@ -84,7 +104,7 @@ targets:
         # Must track `nomily_watch`'s build number — watchOS refuses to install
         # a companion whose version doesn't match its host, and an embedded
         # watch app one build ahead is enough to trip it. Bump both or neither.
-        CFBundleVersion: "47"
+        CFBundleVersion: "210"
         # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
         # appropriate when the app's crypto use is exempt from US export
         # documentation requirements:
@@ -136,6 +156,15 @@ targets:
         # ★ 2026-10-29 (用户："待办支持同步到 iPhone 里面的待办，需要打开这个开关"):
         # EventKit Reminders — recording to-dos are written into the iOS Reminders app
         # when the user flips the sync toggle. No entitlement needed, just usage strings.
+        # ★ 2026-11-02：这三条原本是**手写进 Info.plist** 的，`xcodegen generate` 一跑就被
+        # 抹掉了（plist 是由本文件生成的，只在 plist 里加 key 等于下次生成时自删）。
+        # 缺 key 的后果不是"降级"而是**进程被系统直接杀掉**（TCC namespace crash），
+        # 所以它们必须住在这里。
+        NSLocationAlwaysAndWhenInUseUsageDescription: Nomily AI records a rough location when your recorder card disconnects, so it can tell you where you last had it. It asks for the position once, only at that moment, and never tracks you.
+        # ★ 2026-11-02 (用户："图片能不能再打开备注…"): 笔记里插入图片/视频要先把它存进临时目录
+        # 再读，iOS 会因为"访问了相册"弹权限。只在你主动选一张图时发生。
+        NSPhotoLibraryUsageDescription: Nomily AI only opens your photo library when you choose a photo or video to attach. It never reads your library on its own.
+        NSPhotoLibraryAddUsageDescription: Nomily AI saves an image or video to your photo library only when you ask it to.
         NSRemindersUsageDescription: Nomily AI can add the to-dos from your recording summaries to the Reminders app, so you never lose an action item. Nothing is read back unless you also tick them in Nomily.
         NSRemindersFullAccessUsageDescription: Nomily AI can add the to-dos from your recording summaries to the Reminders app, so you never lose an action item. Nothing is read back unless you also tick them in Nomily.
         # `nomily-a1://import/<base64url>` — the deep link behind that QR code, and behind any
@@ -257,7 +286,7 @@ targets:
         CFBundleShortVersionString: "1.1.0"
         # Must track the iPhone app's build number — watchOS refuses to install
         # a companion whose version doesn't match its host.
-        CFBundleVersion: "47"
+        CFBundleVersion: "210"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.nomily.app
         NSMicrophoneUsageDescription: Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.
@@ -269,6 +298,18 @@ targets:
         # there risks installd rejecting the bundle outright.
         UIBackgroundModes:
           - audio
+        # ★ 2026-11-03（用户："开会的时候录音自己关闭了"，全天候录音前置）：
+        #   纯 `UIBackgroundModes: audio` 挡不住 watchOS 的挂起策略——会话被
+        #   打断后（会议里通知/计时器/来电极常见），后台续录被系统拒绝，
+        #   App 随即挂起，任何重试梯子都没机会跑（manifest 里今天的录音全是
+        #   2~4 分钟的短片段，就是这个死法）。`HKWorkoutSession` 是 Apple 给
+        #   长时间后台录音的正规通道： workout 存续期间 App 不会被挂起，
+        #   麦克风保持在手。声明 workout-processing 后台模式 + HealthKit
+        #   权限（见 nomily_watch.entitlements）是它的两个前置条件。
+        WKBackgroundModes:
+          - workout-processing
+        NSHealthShareUsageDescription: Nomily AI uses a workout session to keep background recording alive on your wrist. No health data is read.
+        NSHealthUpdateUsageDescription: Nomily AI uses a workout session to keep background recording alive on your wrist. No health data is written.
     entitlements:
       path: Watch/nomily_watch.entitlements
     settings:
@@ -332,7 +373,7 @@ targets:
         CFBundleShortVersionString: "1.1.0"
         # Must match the parent App — when an embedded binary's version numbers differ from the host's, watchOS
         # refuses to install the whole App.
-        CFBundleVersion: "47"
+        CFBundleVersion: "210"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

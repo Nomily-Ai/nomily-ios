@@ -44,6 +44,16 @@ enum StorageLocations {
         )
     }
 
+    /// ★ 2026-11-03 八轮（手表端"标记重点"打点）：`<base>.marks.json`，与转写文件同样
+    /// 紧贴音频存放——这样"这条录音的重点在哪几秒"永远只有一处答案。
+    ///
+    /// 内容形如 `{"seconds": [12.4, 305.1]}`。消费方（摘要/高亮）读不到文件就当没有打点，
+    /// 不让一个可选的附属物卡住整段音频。
+    static func marksURL(for audioName: String) -> URL {
+        let base = (audioName as NSString).deletingPathExtension
+        return decryptedDir.appendingPathComponent("\(base).marks.json")
+    }
+
     /// Renamed speakers for one clip (`<base>.speakers.json`).
     ///
     /// ★ 2026-10-22 ("还要支持修改说话人的名称"): the diarization ids ("1", "2", …)
@@ -117,6 +127,15 @@ enum StorageLocations {
     /// 放 `root`（工作数据，不是某条录音的产物）。
     static var vocabularyURL: URL {
         root.appendingPathComponent("vocabulary.json", isDirectory: false)
+    }
+
+    /// ★ 2026-11-06（饭耳 1.0 移植 P0-1）：待办看板的卡片库。
+    ///
+    /// 放 `root` 而不是某条录音的目录里：待办是**跨录音**的账本（"我欠了什么"），
+    /// 它的生命周期比任何一条录音都长——删掉来源录音不该把"这件事我还没做"也删了。
+    /// 卡片自己保存 `recordingName`，跳播放时找不到音频就降级成纯文本。
+    static var todoBoardURL: URL {
+        root.appendingPathComponent("todo-board.json", isDirectory: false)
     }
 
     /// The pending-transcription queue (survives across launches).

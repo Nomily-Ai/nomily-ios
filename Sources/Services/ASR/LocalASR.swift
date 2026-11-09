@@ -135,6 +135,7 @@ struct LocalASR {
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.timeoutInterval = Self.uploadTimeout(for: expectedDuration)
+        form.finalize()
         req.setValue("multipart/form-data; boundary=\(form.boundary)",
                      forHTTPHeaderField: "Content-Type")
         let (respData, response): (Data, URLResponse)

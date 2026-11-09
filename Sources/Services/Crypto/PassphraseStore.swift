@@ -70,15 +70,26 @@ enum PassphraseStore {
 
     /// Returns the cached 32-byte key for this SN, or nil if not yet set.
     static func load(sn: String) -> Data? {
+        loadDetailed(sn: sn).key
+    }
+
+    /// 带原因的读取。
+    ///
+    /// ★ 2026-11-04：原来只有 `load` 一个出口，`OSStatus` 被 `guard status ==
+    /// errSecSuccess` 吞掉——于是"锁屏时读不到钥匙"（`errSecInteractionNotAllowed`）
+    /// 与"从来没设过"（`errSecItemNotFound`）在上层长得一模一样，界面上都变成
+    /// "请设置密码"。用户明明设过，却被要求重设，重设又因为设备上有外来钥匙而
+    /// 失败——一条完整的死循环。分开之后，前者可以说"解锁后自动重试"。
+    static func loadDetailed(sn: String) -> (key: Data?, status: OSStatus) {
         var query: [String: Any] = baseQuery(sn: sn)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var out: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &out)
-        guard status == errSecSuccess, let data = out as? Data else { return nil }
-        guard data.count == keyLength else { return nil }
-        return data
+        guard status == errSecSuccess, let data = out as? Data else { return (nil, status) }
+        guard data.count == keyLength else { return (nil, errSecDecode) }
+        return (data, status)
     }
 
     /// Inserts or updates the 32-byte key for this SN, locked to the

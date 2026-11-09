@@ -595,6 +595,10 @@ struct MindMapScreen: View {
 
     private let tree: OutlineNode?
 
+    /// ★ 2026-11-03 九轮：这张图用的结构模板。识别一次、整个屏复用——
+    /// 摘要不会在页面开着的时候变，重算只会让折叠状态和 id 打架。
+    private let template: MindMapTemplate
+
     /// The opening level, kept as the "Branches" menu's selection. Picking a
     /// level re-folds the whole map to it; folding a branch by hand does not
     /// move the menu, because the two are different questions — "where
@@ -618,13 +622,19 @@ struct MindMapScreen: View {
         // The summary never changes while the screen is open, so parse and
         // lay out exactly once, here — from the same fold set the screen
         // starts with.
+        //
+        // ★ 2026-11-03 九轮：解析之后先认模板、按模板重组树（会议重排 / 组织图按人 /
+        //   时间轴加序号 / 行动清单置顶待办），再算折叠与布局。
         let parsed = MarkdownOutline.parse(markdown)
-        let level = min(3, max(1, parsed?.maxDepth ?? 1))
-        let folded = parsed.map { MindMapLayout.foldPoints(in: $0, showingLevels: level) } ?? []
-        self.tree = parsed
+        let template = parsed.map { MindMapTemplate.detect($0) } ?? .topic
+        let tree = parsed.map { template.apply(to: $0) }
+        let level = min(3, max(1, tree?.maxDepth ?? 1))
+        let folded = tree.map { MindMapLayout.foldPoints(in: $0, showingLevels: level) } ?? []
+        self.template = template
+        self.tree = tree
         _expandLevel = State(initialValue: level)
         _collapsed = State(initialValue: folded)
-        _layout = State(initialValue: parsed.map {
+        _layout = State(initialValue: tree.map {
             MindMapLayout.build(tree: $0, collapsed: folded, rootLabel: fallbackTitle)
         })
     }
@@ -720,6 +730,15 @@ struct MindMapScreen: View {
     @ViewBuilder
     private func legend(layout: MindMapLayout, viewport: CGSize) -> some View {
         HStack(spacing: 10) {
+            // ★ 2026-11-03 九轮：结构模板标签放在浮层最左边——用户不用退出页面
+            //   就能看出"这张图是按会议/组织/时间轴排的"。
+            Label(template.label, systemImage: template.symbol)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.appAccent)
+                .labelStyle(.titleAndIcon)
+
+            Divider().frame(height: 18)
+
             Button {
                 withAnimation(.easeOut(duration: 0.18)) { zoom(by: -0.25) }
             } label: {
@@ -1024,15 +1043,23 @@ struct MindMapPreviewCard: View {
     var onTap: () -> Void
 
     private let layout: MindMapLayout?
+    /// ★ 2026-11-03 九轮：这张图是按哪种结构排的（话题树/会议/组织/时间轴/行动）。
+    private let template: MindMapTemplate
     private static let previewHeight: CGFloat = 190
 
     init(markdown: String, title: String, onTap: @escaping () -> Void) {
         self.title = title
         self.onTap = onTap
-        guard let tree = MarkdownOutline.parse(markdown) else {
+        guard let parsed = MarkdownOutline.parse(markdown) else {
             self.layout = nil
+            self.template = .topic
             return
         }
+        // ★ 2026-11-03 九轮：先按内容认模板、让模板**重组大纲树**，再折叠布局。
+        //   顺序不能反：重组会改变分支数量，折叠层级要按重组后的树来算。
+        let template = MindMapTemplate.detect(parsed)
+        let tree = template.apply(to: parsed)
+        self.template = template
         // ★ 2026-10-23 ("思维导图展示有问题"): a busy map folded to two levels
         // scales down to unreadable dots inside a 190 pt card. The preview
         // adapts: few sections keep their sub-points, many sections collapse
@@ -1046,9 +1073,21 @@ struct MindMapPreviewCard: View {
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 10) {
-                Text(L10n.ClipDetail.mindMap)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 5) {
+                    Text(L10n.ClipDetail.mindMap)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Text(template.label)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.appAccent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.appAccent.opacity(0.12)))
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
 
                 GeometryReader { geo in
                     if let layout {

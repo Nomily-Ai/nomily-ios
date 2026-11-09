@@ -234,6 +234,9 @@ struct WatchTransferHistoryView: View {
 struct WatchSettingsView: View {
     @ObservedObject private var store = WatchRingStyleStore.shared
     @ObservedObject private var prefs = WatchRecordingPrefs.shared
+    /// ★ 2026-11-02（全天候录音）：开关一翻就把新状态推进录音模型
+    /// （采样频率、回传时机都由它接管）；关掉时模型自动补发攒下的待传。
+    @EnvironmentObject private var model: WatchRecorderModel
 
     var body: some View {
         List {
@@ -243,6 +246,86 @@ struct WatchSettingsView: View {
                 Text(WatchAboutView.appVersion)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+            }
+
+            // ★ 2026-11-02（用户："手表需要为全天候录音设置，这个功耗跟传输需要优化"）：
+            // 全天候录音 = 省电模式。放在最上面——它是给"一戴一整天"准备的，
+            // 比手势开关更高频地被想起。
+            Toggle(isOn: $prefs.allDayRecording) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(L10n.Watch.allDayTitle)
+                    Text(L10n.Watch.allDayHint)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .onChange(of: prefs.allDayRecording) { _, on in
+                model.setPowerSaver(on)
+                // ★ 2026-11-05 第四轮（用户："点击了全天候录音的开关则需要自动就开启了录音，
+                // 不要手动去点击"）：在表上翻开开关 = 当场开录，不用再回录音页按。
+                // 手机端推过来的那条路在 `NomilyWatchApp.onAllDaySetting`，同一个收口。
+                // ★ 2026-11-06（全天候语义，用户："那个暂停应该是关闭全天候录音这个
+                // 开关了就是"）：表上关开关 = 停止录音。此刻偏好已是 false，stop
+                // 末尾的自动续录不会触发；没在录则幂等空操作。
+                if on {
+                    model.autoStartForAllDayIfNeeded()
+                } else if model.isRecording {
+                    model.stop()
+                }
+            }
+
+            // ★ 2026-11-05（用户："震动大小分 5 个等级供用户选择"）：录音起止触感的
+            // 力度档位。换档立刻放一段试听——手表上没有"应用"按钮，反馈必须当场给。
+            Picker(selection: $prefs.hapticLevel) {
+                ForEach(1...5, id: \.self) { level in
+                    Text(L10n.Watch.hapticLevelName(level)).tag(level)
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(L10n.Watch.hapticLevelTitle)
+                    Text(L10n.Watch.hapticLevelHint)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .onChange(of: prefs.hapticLevel) { _, _ in
+                model.previewHaptic()
+            }
+
+            // ★ 2026-11-05 第三轮（用户："震动样式里面分启动震动跟结束震动…启动震动一下
+            // 结束震动 2 下，然后给不同的震动样式选择"）：启动与结束**各一行、各选各的**。
+            // 默认一下开、两下收；换档当场试听完整一遍——只听一段听不出节奏差别。
+            Picker(selection: $prefs.startHapticPattern) {
+                ForEach(WatchHapticPattern.allCases) { pattern in
+                    Text(pattern.label).tag(pattern.rawValue)
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(L10n.Watch.hapticStartTitle)
+                    Text(L10n.Watch.hapticPatternHint)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .onChange(of: prefs.startHapticPattern) { _, _ in
+                model.previewStartHaptic()
+            }
+
+            Picker(selection: $prefs.stopHapticPattern) {
+                ForEach(WatchHapticPattern.allCases) { pattern in
+                    Text(pattern.label).tag(pattern.rawValue)
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(L10n.Watch.hapticStopTitle)
+                    Text(L10n.Watch.hapticPatternHint)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .onChange(of: prefs.stopHapticPattern) { _, _ in
+                model.previewStopHaptic()
             }
 
             // ★ Shake. Flipping the toggle notifies the home screen via `WatchRecordingPrefs`

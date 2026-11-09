@@ -57,6 +57,11 @@ enum DnoteProtocol {
         // off requires the key currently stored on the device.
         static let encryptSet:     UInt8 = 0xA2
         static let encryptQuery:   UInt8 = 0xA3
+        // ★ 2026-11-09：固件 OTA（协议 PDF《录音卡片协议》20260417 版新增）。
+        //   0xB0 启动升级模式（DATA=0x02 表示发送 .lz 压缩包），0xB1 传输固件数据。
+        //   包体就是厂商给的 `Firmware.lz`（zlib），原样推送即可。
+        static let otaStart:       UInt8 = 0xB0
+        static let otaData:        UInt8 = 0xB1
     }
 
     /// Longest Bluetooth name the firmware accepts, in UTF-8 bytes. Anything

@@ -1,5 +1,7 @@
 import AVFoundation
 import SwiftUI
+import UIKit
+import UserNotifications
 
 struct SettingsView: View {
     @EnvironmentObject private var configService: ConfigService
@@ -15,6 +17,8 @@ struct SettingsView: View {
     /// The number of items sitting in the trash is shown on the right of that row, so it has to be observed — delete
     /// one on the detail page and come back to the settings page, and the number has to follow.
     @ObservedObject private var trash = ClipTrash.shared
+    /// ★ 2026-11-06（饭耳 1.0 移植 P0-1）：待办看板入口的角标要跟着待处理条数变。
+    @ObservedObject private var todoBoard = TodoBoard.shared
     // ★ 2026-10-30：版本彩蛋/开发者模式/诊断导出的状态已随「关于」区
     // 整体搬进 AboutNomilyView。
     /// Jobs not finished yet: summary / translation / format conversion (`jobs`) + transcription (`transcription`).
@@ -24,19 +28,274 @@ struct SettingsView: View {
     private var busyJobCount: Int {
         jobs.unfinishedCount + env.transcription.pending.count
     }
+    /// ★ 2026-11-02：「使用引导」行——重置流程式引导进度（与 RootView 共享 UserDefaults 键）。
+    @AppStorage("guide.done.v1") private var guideDone = false
+    @AppStorage("guide.step.v1") private var guideStepRaw = GuideStep.connectDevice.rawValue
+    /// ★ 2026-11-02：「使用引导」行同时重播开屏欢迎页（见该行注释）。
+    @AppStorage("welcome.seen.v1") private var welcomeSeen = false
+    @State private var showWelcome = false
 
-    /// One settings row: a coloured glyph tile, the title, and an optional right-hand
-    /// detail (current value) or count (badge).
+    // MARK: - ★ 2026-11-06 设置搜索（用户两次反馈"找不到入口"）
+    //
+    // 「后台保护指南」先埋在 ASR 深处、被点名找不到后搬到顶层；权限体检同样
+    // 是"知道有、但翻不到"。这不是某一行放错位置，而是设置页已有 100+ 项、
+    // 七八个入口分组的必然结果——靠肉眼扫整页不可行。
+    //
+    // 搜索只索引**入口**（能跳转的页面），不索引开关值：开关值都在二级页里，
+    // 从一级页搜出来还得跳过去才能改，不如让入口本身好找。关键词中英都写，
+    // 因为用户可能在中文界面里按 "webdav" / "plaud" / "asr" 去找。
+    @State private var searchQuery = ""
+
+    /// 可被搜索到的入口。新增设置页时**必须**在这里补一条——这是唯一的人工账本，
+    /// 漏了不会崩，只是搜不到（测试用例见 `SettingsView.searchIndexCoversAllRows` 注释）。
+    private enum SettingsEntry: String, CaseIterable, Identifiable {
+        case about, recordings, asrProviders, backgroundProtection
+        case llmProviders, templates, vocabulary
+        case devices, storage, trash, taskCenter, todos
+        case language, theme, usageGuide, watch
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .about: return L10n.About.title
+            case .recordings: return L10n.Settings.recordings
+            case .asrProviders: return L10n.Settings.asrProviders
+            case .backgroundProtection: return L10n.ASR.bgpRow
+            case .llmProviders: return L10n.Settings.llmProviders
+            case .templates: return L10n.Settings.summarizeTemplates
+            case .vocabulary: return L10n.Vocabulary.title
+            case .devices: return L10n.Settings.devicesAndLibrary
+            case .storage: return L10n.StorageLocations.title
+            case .trash: return L10n.Trash.settingsRow
+            case .taskCenter: return L10n.Jobs.openQueue
+            case .todos: return L10n.Todo.settingsRow
+            case .language: return L10n.Settings.language
+            case .theme: return L10n.Settings.theme
+            case .usageGuide: return L10n.Settings.usageGuide
+            case .watch: return L10n.Watch.settingsTitle
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .about: return "info.circle"
+            case .recordings: return "waveform"
+            case .asrProviders: return "text.bubble"
+            case .backgroundProtection: return "shield.lefthalf.filled"
+            case .llmProviders: return "sparkles"
+            case .templates: return "doc.text"
+            case .vocabulary: return "character.book.closed"
+            case .devices: return "externaldrive"
+            case .storage: return "internaldrive"
+            case .trash: return "trash"
+            case .taskCenter: return "clock.arrow.circlepath"
+            case .todos: return "checklist"
+            case .language: return "globe"
+            case .theme: return "circle.lefthalf.filled"
+            case .usageGuide: return "book"
+            case .watch: return "applewatch"
+            }
+        }
+
+        /// 与列表里那一行**完全同色**（iOS 设置式的彩色磁贴）。搜索结果是同一批
+        /// 入口的另一条视图，颜色对不上会让人以为搜到了别的页面。
+        var tint: Color {
+            switch self {
+            case .about: return .gray
+            case .recordings: return .red
+            case .asrProviders: return .blue
+            case .backgroundProtection: return .green
+            case .llmProviders: return .purple
+            case .templates: return .orange
+            case .vocabulary: return .teal
+            case .devices: return .green
+            case .storage: return .mint
+            case .trash: return Color(red: 1.0, green: 0.27, blue: 0.23)
+            case .taskCenter: return .brown
+            case .todos: return .orange
+            case .language: return .indigo
+            case .theme: return .pink
+            case .usageGuide: return .cyan
+            case .watch: return .gray
+            }
+        }
+
+        /// 别名池：中英 + 产品名 + 用户可能用的口语。**不放进标题**，只参与匹配。
+        var keywords: String {
+            switch self {
+            case .about:
+                return "关于 about version 版本 协议 隐私 privacy github"
+            case .recordings:
+                return "录音 转写 recordings transcription 录音质量 自动转写 静音 vad 后台保活"
+            case .asrProviders:
+                return "asr 语音识别 转写服务 whisper azure 阿里云 腾讯 本地 自定义 custom openai 密钥 key 模型 model"
+            case .backgroundProtection:
+                return "后台 保活 被杀 background keep alive 电池 通知 权限 白名单 后台刷新"
+            case .llmProviders:
+                return "大模型 llm ai 摘要 gpt claude 密钥 key 用量 usage"
+            case .templates:
+                return "模板 template 摘要 summary 提示词 prompt"
+            case .vocabulary:
+                return "常用词 词表 vocabulary 专名 识别 纠错"
+            case .devices:
+                return "设备 devices 资料库 library 录音卡 plaud ticnote a1 soundcore 手表 watch"
+            case .storage:
+                return "存储 位置 storage icloud 云盘 nas webdav 文件夹 folder 备份 backup"
+            case .trash:
+                return "回收站 trash 删除 delete 恢复 restore"
+            case .taskCenter:
+                return "任务 队列 job queue 后台任务 进度"
+            case .todos:
+                return "待办 todo 清单 行动项 提醒 reminders 日程 schedule 卡片 清算"
+            case .language:
+                return "语言 language 中文 english 界面"
+            case .theme:
+                return "主题 theme 颜色 外观 深色 dark"
+            case .usageGuide:
+                return "引导 guide 教程 欢迎 welcome 新手 onboarding"
+            case .watch:
+                return "手表 watch apple watch 表情 表盘 常亮 定时录音 称呼"
+            }
+        }
+    }
+
+    private var searchMatches: [SettingsEntry] {
+        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return [] }
+        return SettingsEntry.allCases.filter {
+            $0.title.localizedCaseInsensitiveContains(q)
+                || $0.keywords.localizedCaseInsensitiveContains(q)
+        }
+    }
+
+    /// 搜索命中的入口 → 真正的页面。与列表里的各行**共用**同一批视图类型，
+    /// 不存在"搜到的是一个简化版"这种情况。
+    @ViewBuilder
+    private func destination(for entry: SettingsEntry) -> some View {
+        switch entry {
+        case .about: AboutNomilyView()
+        case .recordings: RecordingsSettingsView()
+        case .asrProviders: ASRProvidersView()
+        case .backgroundProtection: BackgroundProtectionGuideView()
+        case .llmProviders: LLMProvidersView()
+        case .templates: SummarizeTemplatesView()
+        case .vocabulary: VocabularyEditorView()
+        case .devices: DevicesLibraryView()
+        case .storage: StorageLocationsView()
+        case .trash: TrashView()
+        case .taskCenter: TaskCenterView()
+        case .todos: TodoBoardView()
+        case .language: LanguagePickerView()
+        case .theme: ThemePickerView()
+        case .usageGuide: EmptyView()   // 这一项是按钮，见 `usageGuideRow`
+        case .watch: WatchFacePickerView()
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField(L10n.Settings.searchPlaceholder, text: $searchQuery)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if !searchQuery.isEmpty {
+                Button {
+                    searchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.Common.ok)
+            }
+        }
+    }
+
+    /// 「使用引导」行（列表与搜索结果共用的同一段视图）。
+    private var usageGuideRow: some View {
+        Button {
+            guideDone = false
+            guideStepRaw = GuideStep.connectDevice.rawValue
+            welcomeSeen = true
+            showWelcome = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "book")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 29, height: 29)
+                    .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.cyan))
+                    .frame(width: 29)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.Settings.usageGuide)
+                        .foregroundStyle(.primary)
+                    Text(L10n.Settings.usageGuideDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 搜索态下的结果列表。空结果给一句话而不是一片空白——"没搜到"和"页面坏了"
+    /// 在用户眼里长得一样。
+    @ViewBuilder
+    private var searchResults: some View {
+        Section {
+            if searchMatches.isEmpty {
+                Text(L10n.Settings.searchEmpty)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(searchMatches) { entry in
+                    switch entry {
+                    case .usageGuide:
+                        usageGuideRow
+                    case .watch where !(watch.isActivated && watch.isPaired && watch.isWatchAppInstalled):
+                        // 没装/没配对时那一行本来就是"跳到 Watch App 去装"，搜索里保持一致。
+                        Button(action: openWatchApp) {
+                            Label(entry.title, systemImage: entry.icon)
+                        }
+                    default:
+                        settingsRow(entry.title, icon: entry.icon, tint: entry.tint) {
+                            destination(for: entry)
+                        }
+                    }
+                }
+            }
+        } footer: {
+            Text(L10n.Settings.searchHint)
+        }
+    }
+
+    /// ★ 2026-11-03（用户："设置的最上角增加一个横条，点击跳转亚马逊的购买页面，
+    /// 就是引导用户去购买 Vobot V05E"）：Amazon 商品页（含渠道追踪参数，原样保留）。
+    /// ⚠️ 用 `openURL` 交给**系统浏览器**，不进应用内 WebView——购买页有登录/购物车，
+    ///    内嵌视图既做不了也过不了 App Store 审核对"引导外部购买"的观感要求。
+    private static let amazonStoreURL = URL(string:
+        "https://www.amazon.com/dp/B0HHGWYS6J?maas=maas_adg_7561A19815A1FBF370F5F7E1AAD78D3E_afap_abs&ref_=aa_maas&tag=maas"
+    )
+
+    /// One settings row: a Settings-app style colored tile, the title, and an
+    /// optional right-hand detail (current value) or count (badge).
     ///
-    /// 2026-10-22 ("按照苹果的简约风格来"): the rows used to be bare
+    /// 2026-10-22 (\"按照苹果的简约风格来\"): the rows used to be bare
     /// `NavigationLink(title)`s, so ten items of six different kinds read as one
-    /// undifferentiated list. The tile gives each area a shape to recognise and
-    /// makes the groups scan vertically instead of requiring the labels to be read.
+    /// undifferentiated list — icons were added for scannability.
+    /// 2026-11-02 上午（用户：\"要更加高级简约\"）：彩色瓦片撤成单色小符号。
+    /// ★ 2026-11-02 下午（用户：\"当前图标都是灰标不好看，按照苹果的风格设置图标来\"）：
+    ///   灰标被否——恢复成 iOS 设置 App 的排法：29pt 圆角彩色磁贴 + 白色 glyph，
+    ///   每行一个语义色（.gray/.blue/…），实色不加渐变（贴系统观感）。
     @ViewBuilder
     private func settingsRow<D: View>(
         _ title: String,
-        icon: String,
-        tint: Color,
+        icon: String? = nil,
+        tint: Color = .gray,
         detail: String? = nil,
         count: Int? = nil,
         @ViewBuilder destination: () -> D
@@ -45,15 +304,17 @@ struct SettingsView: View {
             destination()
         } label: {
             HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(tint.gradient)
-                    .frame(width: 28, height: 28)
-                    .overlay {
+                Group {
+                    if let icon {
                         Image(systemName: icon)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(.white)
+                            .frame(width: 29, height: 29)
+                            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(tint))
                     }
-                    .accessibilityHidden(true)
+                }
+                .frame(width: 29)
+                .accessibilityHidden(true)
                 Text(title)
                 Spacer(minLength: 8)
                 if let detail {
@@ -70,14 +331,72 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            // ★ 2026-11-06：搜索框置顶——它是"找东西"的入口，不属于任何一组。
+            // 输入即筛（本页数据全在内存里，不需要防抖），清空即回正常分组。
+            Section {
+                searchField
+            }
+
+            // ★ 2026-11-03（用户："设置的最上角增加一个横条，点击跳转亚马逊的购买页面，
+            // 就是引导用户去购买 Vobot V05E"）：设置页**最顶部**的购买横幅。
+            //
+            // 视觉：暖色底的一整条（区别于下面按行配色的磁贴——它是"店铺招牌"，
+            // 不是第 N 个设置项），跳转箭头用 ↗（外部链接的通用形状，不用 ›，
+            // 避免被读成"还有一层设置页"）。
+            Section {
+                Button {
+                    if let url = Self.amazonStoreURL {
+                        openURL(url)
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "cart.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 29, height: 29)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(Color.orange)
+                            )
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L10n.Settings.buyBannerTitle)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                            Text(L10n.Settings.buyBannerSubtitle)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .listRowBackground(Color.orange.opacity(0.10))
+                .accessibilityHint(L10n.Settings.buyBannerSubtitle)
+            }
+
             // ★ 2026-10-30（用户："设置下面最顶部加入一个，关于 Nomily"）：
             // 「关于 Nomily」提到设置页第一行——图标 + 版本 + 官方账号 + GitHub +
             // 用户协议/隐私政策，参考 Plaud 的关于页。
             Section {
-                settingsRow(L10n.About.title, icon: "info.circle", tint: .accentColor) {
+                settingsRow(L10n.About.title, icon: "info.circle", tint: .gray) {
                     AboutNomilyView()
                 }
             }
+
+            // ★ 2026-11-06：有搜索词时只显示命中入口，正常分组整体让位。
+            // 用 `if/else` 而不是"过滤每一行"：设置页的行一半是自定义视图
+            // （手表行、引导行），逐行过滤得给每行加一套匹配逻辑，改一次漏一次；
+            // 让位 + 入口索引是一处维护。
+            if searchQuery.isEmpty {
 
             // ★ 2026-10-22 ("按照苹果的简约风格来"): one flat Section held ten
             // rows in no particular order, so "where do I change the ASR vendor"
@@ -85,11 +404,17 @@ struct SettingsView: View {
             // look for that thing: what records, what generates text, the files
             // themselves, and how the app behaves.
             Section {
-                settingsRow(L10n.Settings.recordings, icon: "waveform", tint: .blue) {
+                settingsRow(L10n.Settings.recordings, icon: "waveform", tint: .red) {
                     RecordingsSettingsView()
                 }
-                settingsRow(L10n.Settings.asrProviders, icon: "text.bubble", tint: .indigo) {
+                settingsRow(L10n.Settings.asrProviders, icon: "text.bubble", tint: .blue) {
                     ASRProvidersView()
+                }
+                // ★ 2026-11-06（用户："我在哪里能看到这个设置：后台保护指南，就是我没找到"）：
+                // 原来埋在 ASR 设置页深处的保活开关下面，等于没有入口。提到设置顶层——
+                // 它是"整台 App 能不能后台干活"的事，跟转写服务商不是一个层级。
+                settingsRow(L10n.ASR.bgpRow, icon: "shield.lefthalf.filled", tint: .green) {
+                    BackgroundProtectionGuideView()
                 }
             } header: {
                 Text(L10n.Settings.groupCapture)
@@ -99,11 +424,11 @@ struct SettingsView: View {
                 settingsRow(L10n.Settings.llmProviders, icon: "sparkles", tint: .purple) {
                     LLMProvidersView()
                 }
-                settingsRow(L10n.Settings.summarizeTemplates, icon: "doc.text", tint: .teal) {
+                settingsRow(L10n.Settings.summarizeTemplates, icon: "doc.text", tint: .orange) {
                     SummarizeTemplatesView()
                 }
                 // ★ 2026-10-28（饭耳逆向规格 §1.4）：常用词表——AI 整理的专名提示。
-                settingsRow(L10n.Vocabulary.title, icon: "character.book.closed", tint: .mint) {
+                settingsRow(L10n.Vocabulary.title, icon: "character.book.closed", tint: .teal) {
                     VocabularyEditorView()
                 }
                 // ★ 2026-10-29：AI 用量热力图移进了大语言模型服务页（截图 4 布局），
@@ -113,8 +438,13 @@ struct SettingsView: View {
             }
 
             Section {
-                settingsRow(L10n.Settings.devicesAndLibrary, icon: "externaldrive", tint: .orange) {
+                settingsRow(L10n.Settings.devicesAndLibrary, icon: "externaldrive", tint: .green) {
                     DevicesLibraryView()
+                }
+                // ★ 2026-11-02（用户："应该是数据与存储位置"）：存储落点总枢纽
+                // 提到设置主页——本机 / iCloud 云盘 / NAS / 文件夹 App 一页看清。
+                settingsRow(L10n.StorageLocations.title, icon: "internaldrive", tint: .mint) {
+                    StorageLocationsView()
                 }
                 // ★ 2026-10-29（用户："webdav 备份跟导出到文件夹还有相关都放到顶部的
                 // 录音跟传输里面"）：两个备份入口搬进了 录音与转写 页。
@@ -124,11 +454,17 @@ struct SettingsView: View {
                 // that card's own device-info page, because from Settings a
                 // card-shaped secret reads as account-level and people paste the
                 // wrong card's key.
-                settingsRow(L10n.Trash.settingsRow, icon: "trash", tint: .gray,
+                // ★ 2026-11-06（饭耳 1.0 移植 P0-1）：待办看板。角标显示"等你决定"
+                // 的条数——这是用户唯一需要**动作**的数字，已结束的不算。
+                settingsRow(L10n.Todo.settingsRow, icon: "checklist", tint: .orange,
+                            count: todoBoard.inboxCount > 0 ? todoBoard.inboxCount : nil) {
+                    TodoBoardView()
+                }
+                settingsRow(L10n.Trash.settingsRow, icon: "trash", tint: Color(red: 1.0, green: 0.27, blue: 0.23),
                             count: trash.items.isEmpty ? nil : trash.items.count) {
                     TrashView()
                 }
-                settingsRow(L10n.Jobs.openQueue, icon: "clock.arrow.circlepath", tint: .green,
+                settingsRow(L10n.Jobs.openQueue, icon: "clock.arrow.circlepath", tint: .brown,
                             count: busyJobCount > 0 ? busyJobCount : nil) {
                     TaskCenterView()
                 }
@@ -137,11 +473,19 @@ struct SettingsView: View {
             }
 
             Section {
-                settingsRow(L10n.Settings.language, icon: "globe", tint: .cyan,
+                // ★ 2026-11-02：「使用引导」行——重置流程式引导进度（卡片重新从
+                // 第 1 步开始，RootView 的 overlay 负责展示）。
+                // ★ 2026-11-02（用户："开屏的欢迎页我如何才能再次体验"）：这一行同时
+                // 重播**开屏欢迎页**——直接在本页弹一次（不依赖 RootView 的首次绑定，
+                // 用户点完当场就能看到），并把「已看过」位落掉，避免下次启动再弹一次。
+                // ★ 2026-11-06：抽成 `usageGuideRow`——搜索命中「引导」时同一行要
+                // 能出现在结果里，两处必须是同一段视图，不能各写一份。
+                usageGuideRow
+                settingsRow(L10n.Settings.language, icon: "globe", tint: .indigo,
                             detail: currentLanguageLabel) {
                     LanguagePickerView()
                 }
-                settingsRow(L10n.Settings.theme, icon: "circle.lefthalf.filled", tint: currentTheme.accent,
+                settingsRow(L10n.Settings.theme, icon: "circle.lefthalf.filled", tint: .pink,
                             detail: currentTheme.title) {
                     ThemePickerView()
                 }
@@ -159,6 +503,10 @@ struct SettingsView: View {
             // ★ 2026-10-30（用户："顶部一个关于，下面一个关于是否是重复了"）：
             // 底部旧「关于」区（版本/诊断/社交图标）已整体搬进顶部 AboutNomilyView，
             // 设置页不再出现第二个"关于"。
+
+            } else {
+                searchResults
+            }
         }
         // ★ 2026-10-22 ("设置里面顶部的录音与转写被顶部遮挡住了"): this Form carried
         // `.padding(.top, -20)` — a leftover from when the page had no navigation
@@ -175,6 +523,12 @@ struct SettingsView: View {
         }
         .navigationDestination(isPresented: $env.navigateToRecordingsSettings) {
             RecordingsSettingsView()
+        }
+        // ★ 2026-11-02（用户："开屏的欢迎页我如何才能再次体验"）：「使用引导」行当场
+        // 重播开屏欢迎页。挂在这里而不是交给 RootView 的 `welcome.seen.v1` 绑定——
+        // 那一个只在首次为 false 时弹，重看时用户已经在二级页面里了，还得先返回。
+        .fullScreenCover(isPresented: $showWelcome) {
+            WelcomeSheet(start: { showWelcome = false })
         }
         .onDisappear { configService.saveNow() }
     }
@@ -355,6 +709,8 @@ struct ASRProvidersView: View {
     /// 2026-10-15: to read the transcription queue state (`pending` / `inFlight`).
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
+    // ★ 2026-11-02：SenseVoice 模型状态（下载完成后引擎候选列表要刷新）。
+    @ObservedObject private var senseVoiceStore = SenseVoiceModelStore.shared
     /// Active connectivity test for the local server (added 2026-10-13).
     /// `detail` / `warning` are separated: `VerifyState.success` carries no value,
     /// And after "connected", a detail line and a warning line for "a port did not respond" must be shown.
@@ -389,6 +745,9 @@ struct ASRProvidersView: View {
             // sheet is `AzureSpeechSheet`), which keeps one list of cloud vendors
             // instead of two places writing the same credentials.
             ASRCloudSection(editing: $editingCloud, showAzure: $showAzureSheet)
+            // ★ 2026-11-02：本机模型（SenseVoice 下载/管理）——离线转写，
+            // 无 Key 无流量，与上面的云转写并列。
+            senseVoiceSection
             localSection
             customSection
             remoteLiveSection
@@ -439,12 +798,50 @@ struct ASRProvidersView: View {
         azureKeyMissing || azureRegionMissing
     }
 
+    /// ★ 2026-11-02：SenseVoice 本机模型入口行（点进下载/管理页）。
+    private var senseVoiceSection: some View {
+        Section {
+            NavigationLink {
+                SenseVoiceModelView()
+            } label: {
+                HStack {
+                    Label(L10n.SenseVoice.name, systemImage: "waveform.badge.mic")
+                    Spacer()
+                    switch senseVoiceStore.phase {
+                    case .ready:
+                        Text(L10n.SenseVoice.readyShort)
+                            .font(.footnote)
+                            .foregroundStyle(.green)
+                    case .downloading(let fraction):
+                        Text("\(Int(fraction * 100))%")
+                            .font(.footnote.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    case .failed:
+                        Text(L10n.SenseVoice.failedShort)
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    case .idle:
+                        EmptyView()
+                    }
+                }
+            }
+        } header: {
+            Text(L10n.SenseVoice.sectionHeader)
+        } footer: {
+            Text(L10n.SenseVoice.sectionFooter)
+        }
+    }
+
     private var configuredASR: [(key: String, label: String)] {
         var result: [(String, String)] = []
         // On-device first: it needs no credentials, so it is the only entry that is always
         // available and the one most users will want as the active service.
         if configService.config.onDeviceASREnabled {
             result.append(("ondevice", L10n.ASR.onDevice))
+        }
+        // ★ 2026-11-02: SenseVoice 本机模型——下载过即可作为主引擎。
+        if SenseVoiceModelStore.shared.isDownloaded {
+            result.append(("sensevoice", L10n.ASR.senseVoice))
         }
         // Only list services that are fully filled **and** whose credentials have not been rejected by verification: partially filled configs and those that failed verification would produce no transcription, and showing them as candidates would mislead users into thinking they are set up.
         // ★ 2026-10-22: Aliyun is wired into file transcription (`AliyunFileASR`),
@@ -485,7 +882,10 @@ struct ASRProvidersView: View {
     private var liveCapableASR: [(key: String, label: String)] {
         // ★ 2026-10-23: Aliyun joined the live-capable set (its 实时语音识别 WS
         // endpoint); Baidu / Tencent / Google / AWS / … are still batch-only.
-        let liveKeys: Set<String> = ["ondevice", "azure", "aliyun", "local", "remote"]
+        // ★ 2026-11-04: `custom` 也能实时了 —— 它不是流式协议，客户端会把
+        // 音频按 5 s 切片反复调用同一端点（`BailianLiveASR`）。之前把它排除
+        // 在外，用户选了自定义服务器，实时字幕却跑在 Azure 上。
+        let liveKeys: Set<String> = ["ondevice", "azure", "aliyun", "local", "remote", "custom"]
         return configuredASR.filter { liveKeys.contains($0.key) }
     }
 
@@ -598,6 +998,20 @@ struct ASRProvidersView: View {
                     InfoTip(text: L10n.ASR.backgroundKeepAliveFooter)
                 }
             }
+            // ★ 2026-11-06（用户："加入后台常驻防止被杀…不行则增加用户引导"）：
+            // iOS 没有真正的"常驻"API，静音音频保活已经到顶；剩下的被杀风险
+            // 主要来自**低电量模式**（系统会掐后台音频）和用户上滑杀 App。
+            // 这里做引导：低电量开着就当场亮黄牌，别等任务断了才追悔。
+            if ProcessInfo.processInfo.isLowPowerModeEnabled {
+                Label {
+                    Text(L10n.ASR.lowPowerWarning)
+                        .font(.footnote)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .foregroundStyle(.orange)
+            }
+            // ★ 入口已提到设置顶层（见 SettingsView 顶部分组）；这里不再重复放导航行。
 
             // ★ 2026-10-29 (饭耳移植): night-shift backlog transcription. Complements
             // keep-alive: that one holds the process *right now*; this one asks iOS
@@ -848,7 +1262,8 @@ struct ASRProvidersView: View {
                     endpoint: configService.config.asrProviders.custom?.endpoint ?? "",
                     apiKey: configService.config.asrProviders.custom?.apiKey,
                     model: $0.isEmpty ? nil : $0,
-                    language: configService.config.asrProviders.custom?.language))
+                    language: configService.config.asrProviders.custom?.language,
+                    wireProtocol: configService.config.asrProviders.custom?.wireProtocol))
             })
     }
 
@@ -900,8 +1315,11 @@ struct ASRProvidersView: View {
         customModelLoading = true
         customModelNotice = nil
         defer { customModelLoading = false }
-        if let result = await CustomASR.listModels(endpoint: custom.endpoint,
-                                                   apiKey: custom.apiKey ?? "") {
+        let isBailian = (custom.wireProtocol ?? "").lowercased() == "bailian"
+        let fetched = isBailian
+            ? await BailianASR.listModels(endpoint: custom.endpoint, apiKey: custom.apiKey ?? "")
+            : await CustomASR.listModels(endpoint: custom.endpoint, apiKey: custom.apiKey ?? "")
+        if let result = fetched {
             customModelChoices = result.models
             customModelTotal = result.total
             customModelManual = false
@@ -915,6 +1333,27 @@ struct ASRProvidersView: View {
 
     private var customSection: some View {
         Section {
+            // ★ 2026-11-04（用户："要的就是这个百炼的兼容"）：同一个"自定义服务"下
+            // 有两种接口形态，选错了只会看到 HTTP 404——因为百炼根本没有
+            // /audio/transcriptions，它把识别放在 chat/completions 里。
+            Picker(L10n.ASR.customShape, selection: Binding(
+                get: { configService.config.asrProviders.custom?.wireProtocol ?? "whisper" },
+                set: { newValue in
+                    writeCustom(AppConfig.AsrProviders.Custom(
+                        endpoint: configService.config.asrProviders.custom?.endpoint ?? "",
+                        apiKey: configService.config.asrProviders.custom?.apiKey,
+                        model: configService.config.asrProviders.custom?.model,
+                        language: configService.config.asrProviders.custom?.language,
+                        wireProtocol: newValue))
+                    customProbe = .idle
+                    customModelChoices = []
+                    customModelNotice = nil
+                    customModelManual = false
+                }
+            )) {
+                Text(L10n.ASR.customShapeWhisper).tag("whisper")
+                Text(L10n.ASR.customShapeBailian).tag("bailian")
+            }
             TextField(L10n.ASR.customEndpoint, text: Binding(
                 get: { configService.config.asrProviders.custom?.endpoint ?? "" },
                 set: {
@@ -922,7 +1361,8 @@ struct ASRProvidersView: View {
                         endpoint: $0,
                         apiKey: configService.config.asrProviders.custom?.apiKey,
                         model: configService.config.asrProviders.custom?.model,
-                        language: configService.config.asrProviders.custom?.language))
+                        language: configService.config.asrProviders.custom?.language,
+                        wireProtocol: configService.config.asrProviders.custom?.wireProtocol))
                     customProbe = .idle
                     // A model list fetched from the previous endpoint is now stale.
                     customModelChoices = []
@@ -939,7 +1379,8 @@ struct ASRProvidersView: View {
                         endpoint: configService.config.asrProviders.custom?.endpoint ?? "",
                         apiKey: $0.isEmpty ? nil : $0,
                         model: configService.config.asrProviders.custom?.model,
-                        language: configService.config.asrProviders.custom?.language))
+                        language: configService.config.asrProviders.custom?.language,
+                        wireProtocol: configService.config.asrProviders.custom?.wireProtocol))
                 }))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -955,7 +1396,8 @@ struct ASRProvidersView: View {
                         endpoint: configService.config.asrProviders.custom?.endpoint ?? "",
                         apiKey: configService.config.asrProviders.custom?.apiKey,
                         model: configService.config.asrProviders.custom?.model,
-                        language: $0.isEmpty ? nil : $0))
+                        language: $0.isEmpty ? nil : $0,
+                        wireProtocol: configService.config.asrProviders.custom?.wireProtocol))
                 }
             )) {
                 Text(L10n.ASR.customLanguageAuto).tag("")
@@ -1008,8 +1450,14 @@ struct ASRProvidersView: View {
         }
         customProbe = .verifying
         customProbeDetail = nil
-        let result = await CustomASR.probe(endpoint: custom.endpoint,
-                                           apiKey: custom.apiKey ?? "")
+        let isBailian = (custom.wireProtocol ?? "").lowercased() == "bailian"
+        let probed = isBailian
+            ? await BailianASR.probe(endpoint: custom.endpoint, apiKey: custom.apiKey ?? "")
+            : await CustomASR.probe(endpoint: custom.endpoint, apiKey: custom.apiKey ?? "")
+        guard let result = probed else {
+            customProbe = .failed(L10n.ASR.localProbeNoHost)
+            return
+        }
         if result.ok {
             customProbeDetail = result.detail
             customProbe = .success
@@ -1202,6 +1650,28 @@ struct LLMProvidersView: View {
                 currentModelCard
             }
 
+            // ★ 2026-11-06（饭耳 1.0 移植 P1-4）：推理力度档。
+            //
+            // 饭耳把力度芯片放在问答输入条上（按次切）；这里做成**全局默认**，
+            // 因为 Nomily 的摘要/大纲/问答是同一条 LLM 链路，用户对"快还是深"
+            // 的偏好稳定，按页面各设一份只会让人忘记上次在哪改的。
+            // 之所以是独立一屏而不是藏在某个供应商 sheet 里：它决定的是**所有**
+            // 供应商的请求，挂在某一家下面等于说谎。
+            Section {
+                Picker(L10n.LLM.effortTitle, selection: effortBinding) {
+                    ForEach(LLMEffort.allCases) { effort in
+                        Text(effort.title).tag(effort.rawValue)
+                    }
+                }
+                Text(currentEffort.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text(L10n.LLM.effortTitle)
+            } footer: {
+                Text(L10n.LLM.effortFooter)
+            }
+
             // 供应商（截图 4 底部）：已配置的在前，「添加供应商」进选择页。
             Section {
                 if !configured.isEmpty {
@@ -1238,10 +1708,26 @@ struct LLMProvidersView: View {
         .onDisappear { configService.saveNow() }
     }
 
+    // MARK: 推理力度（★ 2026-11-06 · 饭耳 1.0 移植 P1-4）
+
+    /// 当前档位（未知/空 → auto，与请求侧回落规则一致）。
+    private var currentEffort: LLMEffort {
+        LLMEffort(rawValue: configService.config.llmEffort ?? "") ?? .auto
+    }
+
+    private var effortBinding: Binding<String> {
+        Binding(
+            get: { currentEffort.rawValue },
+            set: { raw in
+                // `.auto` 存成 nil：配置里少一个键，和"没设过"是同一件事。
+                configService.config.llmEffort = raw == LLMEffort.auto.rawValue ? nil : raw
+            }
+        )
+    }
+
     /// 「整理对话正在用 X [换模型]」卡片。primary 没配置时退回原有的
     /// Picker + primaryGap 提示（那条橙字是真实事故换来的）。
-    @ViewBuilder
-    private var currentModelCard: some View {
+    @ViewBuilder    private var currentModelCard: some View {
         if configured.isEmpty && primaryGap == nil {
             EmptyView()
         } else if let primary = configService.config.llmProviders.primary,
@@ -1253,7 +1739,7 @@ struct LLMProvidersView: View {
                     Text(L10n.LLM.summarizeUsing).font(.caption).foregroundStyle(.secondary)
                     Text(modelValueLabel(for: spec))
                         .font(.subheadline.weight(.semibold))
-                    Text(spec.name).font(.caption).foregroundStyle(.secondary)
+                    Text(spec.localizedName).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Menu {
@@ -1345,7 +1831,7 @@ private struct AddProviderView: View {
                         HStack(spacing: 12) {
                             ProviderMark(spec: spec, size: 36)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(spec.name).foregroundStyle(.primary)
+                                Text(spec.localizedName).foregroundStyle(.primary)
                                 Text(subtitle(for: spec))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -1388,18 +1874,19 @@ private struct AddProviderView: View {
     }
 
     private func subtitle(for spec: LLMProviderSpec) -> String {
+        // ★ 2026-11-02：公司/渠道名走本地化（en.lproj 提供英文，缺失回落中文）。
         switch spec.id {
-        case "deepseek": return "深度求索"
-        case "qwen": return "阿里云百炼"
-        case "doubao": return "火山方舟"
-        case "kimi": return "月之暗面"
-        case "zhipu": return "智谱 AI"
-        case "minimax": return "稀宇科技"
+        case "deepseek": return NSLocalizedString("llm.subtitle.deepseek", value: "DeepSeek (company)", comment: "Add-provider row subtitle")
+        case "qwen": return NSLocalizedString("llm.subtitle.qwen", value: "Alibaba Cloud Bailian", comment: "Add-provider row subtitle")
+        case "doubao": return NSLocalizedString("llm.subtitle.doubao", value: "Volcengine Ark", comment: "Add-provider row subtitle")
+        case "kimi": return NSLocalizedString("llm.subtitle.kimi", value: "Moonshot AI", comment: "Add-provider row subtitle")
+        case "zhipu": return NSLocalizedString("llm.subtitle.zhipu", value: "Zhipu AI", comment: "Add-provider row subtitle")
+        case "minimax": return NSLocalizedString("llm.subtitle.minimax", value: "MiniMax (company)", comment: "Add-provider row subtitle")
         case "openai": return "OpenAI"
         case "claude": return "Anthropic"
         case "gemini": return "Google"
-        case "openRouter": return "聚合路由"
-        case "ollama": return "本地 / 局域网"
+        case "openRouter": return NSLocalizedString("llm.subtitle.openRouter", value: "Aggregator", comment: "Add-provider row subtitle")
+        case "ollama": return NSLocalizedString("llm.subtitle.ollama", value: "Local / LAN", comment: "Add-provider row subtitle")
         default: return ""
         }
     }
@@ -1434,7 +1921,7 @@ private struct ProviderRow: View {
         HStack(spacing: 12) {
             ProviderMark(spec: spec)
             VStack(alignment: .leading, spacing: 2) {
-                Text(spec.name).foregroundStyle(.primary)
+                Text(spec.localizedName).foregroundStyle(.primary)
                 Text(detailLine)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1512,14 +1999,27 @@ private struct ProviderMark: View {
     }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(
-                LinearGradient(colors: [color, color.opacity(0.72)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-            )
-            .frame(width: size, height: size)
-            .overlay { glyph }
-            .accessibilityHidden(true)
+        // ★ 2026-11-02（用户："模型图标要按照当前 Apple Store 的 app 图标来，
+        // 不要简约的"）：有官方 App 的厂商直接渲染 App Store 彩色图标
+        // （自带底色，圆角随系统连续曲率）；没有的保留单色品牌瓦片。
+        if let asset = spec.brandAsset, spec.usesAppStoreIcon {
+            Image(asset)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+                .accessibilityHidden(true)
+        } else {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    LinearGradient(colors: [color, color.opacity(0.72)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+                .frame(width: size, height: size)
+                .overlay { glyph }
+                .accessibilityHidden(true)
+        }
     }
 
     @ViewBuilder
@@ -1640,6 +2140,8 @@ private struct ProviderConfigSheet: View {
     @State private var modelQuery = ""
     @State private var probing = false
     @State private var probe: LLMConnectivityService.Result?
+    // ★ 2026-11-02：Key 快引导弹层（复制提示词/粘贴结果）。
+    @State private var showKeyWizard = false
 
     private var key: String { configService.config.llmProviders.apiKeyValue(for: spec.storage) ?? "" }
     private var model: String { configService.config.llmProviders.modelValue(for: spec.storage) ?? "" }
@@ -1683,7 +2185,7 @@ private struct ProviderConfigSheet: View {
                     HStack(spacing: 12) {
                         ProviderMark(spec: spec)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(spec.name).font(.headline)
+                            Text(spec.localizedName).font(.headline)
                             Text(endpoint.isEmpty ? L10n.LLM.notConfigured : (URL(string: endpoint)?.host ?? endpoint))
                                 .font(.caption2.monospaced())
                                 .foregroundStyle(.secondary)
@@ -1695,17 +2197,35 @@ private struct ProviderConfigSheet: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .font(.body.monospaced())
-                        // ★ 2026-10-29（截图 1「还没有 key？去注册 ↗」）：key 为空时
-                        // 给注册页直链——不用去 note 里翻控制台地址。
-                        if keyBinding.wrappedValue.isEmpty, let url = URL(string: spec.signupURL ?? "") {
+                        // ★ 2026-10-29（截图 1「还没有 key？去注册 ↗」）：注册页直链。
+                        // ★ 2026-11-02（用户："方便用户如何获取 apikey 填写"）：改为
+                        // **常驻**——没 key 时是"去注册获取"，已有 key 时是"前往控制台
+                        // 管理"（续费/换 Key/看用量都在那个页面），不再一填完就消失。
+                        if let url = URL(string: spec.signupURL ?? "") {
                             Link(destination: url) {
                                 HStack {
-                                    Text(L10n.LLM.noKeySignup)
+                                    Text(keyBinding.wrappedValue.isEmpty
+                                         ? L10n.LLM.noKeySignup
+                                         : L10n.LLM.consoleManage)
                                         .font(.subheadline)
                                     Spacer()
                                     Image(systemName: "arrow.up.right")
                                         .font(.caption)
                                 }
+                            }
+                        }
+                        // ★ 2026-11-02（用户："不会获取 APIkey……新增一个不会开通？
+                        // 复制提示词跟粘贴结果，参考饭耳的这个快引导"）：注册直链
+                        // 下面挂快引导——复制提示词问 AI，粘贴回复自动填 Key。
+                        Button {
+                            showKeyWizard = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "questionmark.circle")
+                                    .font(.subheadline)
+                                Text(L10n.KeyWizard.openWizard)
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
                             }
                         }
                     } else {
@@ -1730,13 +2250,28 @@ private struct ProviderConfigSheet: View {
                                 .truncationMode(.middle)
                         }
                     }
+
+                    // ★ 2026-11-04（用户："当前自定义的需要支持这种不只是 openai 的"）：
+                    // 自定义渠道原来只有一个隐含假设——对端说 OpenAI 的
+                    // `/chat/completions`。但百炼这类"业务空间专属端点"同时给出
+                    // OpenAI 兼容与 Anthropic 兼容两个 Base URL，用户贴哪个就得能用哪个。
+                    if spec.id == "custom" {
+                        Picker(L10n.LLM.protocolTitle, selection: protocolBinding) {
+                            ForEach(LLMWireProtocol.allCases) { proto in
+                                Text(proto.label).tag(proto)
+                            }
+                        }
+                    }
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
-                        if let console = spec.console, spec.keyRequired {
+                        if let console = spec.localizedConsole, spec.keyRequired {
                             Text("\(L10n.LLM.presetConsole): \(console)")
                         }
                         if !spec.endpointEditable {
                             Text(L10n.LLM.endpointFixedByAPI)
+                        }
+                        if spec.id == "custom" {
+                            Text(protocolBinding.wrappedValue.hint)
                         }
                     }
                     .font(.footnote)
@@ -1796,7 +2331,11 @@ private struct ProviderConfigSheet: View {
                             }
                         }
                     }
-                    .disabled(verify == .verifying || (spec.keyRequired && key.isEmpty))
+                    // ★ 2026-11-04（用户："获取不了模型"）：这里原本是
+                    // `.disabled(key.isEmpty)`——按钮直接变灰，点下去既没有反应也没有
+                    // 任何文案，读起来就是"坏了"。改成永远可点，缺前置条件时把原因
+                    // 写在原来的报错位上，用户至少知道自己该补什么。
+                    .disabled(verify == .verifying)
 
                     if !options.isEmpty, !manualModel {
                         Button(L10n.LLM.presetManualModel) { manualModel = true }
@@ -1809,7 +2348,15 @@ private struct ProviderConfigSheet: View {
                     Text(L10n.LLM.model)
                 } footer: {
                     VStack(alignment: .leading, spacing: 6) {
-                        if let note = spec.note { Text(note) }
+                        if let note = spec.localizedNote { Text(note) }
+                        // ★ 2026-11-05（用户："介绍里设置一个花费情况"）：这家厂商
+                        // 摘要一小时录音的大概花费（¥/$ 跟随界面语言）。
+                        if let cost = spec.localizedCost {
+                            HStack(alignment: .top, spacing: 4) {
+                                Image(systemName: "yensign.circle")
+                                Text(cost)
+                            }
+                        }
                         Text(L10n.LLM.chatOnlyNote)
                         if let fetchHint { Text(fetchHint) }
                         if case .failed(let reason) = verify {
@@ -1865,7 +2412,7 @@ private struct ProviderConfigSheet: View {
             // spend dismissing the keyboard). This page is mostly fields, so let
             // the scroll dismiss the keyboard instead of eating taps.
             .scrollDismissesKeyboard(.immediately)
-            .navigationTitle(spec.name)
+            .navigationTitle(spec.localizedName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -1877,6 +2424,18 @@ private struct ProviderConfigSheet: View {
             }
         }
         .onAppear(perform: prime)
+        // ★ 2026-11-02：Key 快引导（复制提示词问 AI → 粘贴回复自动回填）。
+        .sheet(isPresented: $showKeyWizard) {
+            KeyWizardSheet(
+                vendorName: spec.localizedName,
+                fields: [.init(id: "apiKey", label: L10n.LLM.apiKey,
+                               aliases: ["api key", "apikey", "api 密钥", "密钥", "key"])],
+                consoleURL: spec.signupURL.flatMap(URL.init(string:))
+            ) { map in
+                if let v = map["apiKey"] { keyBinding.wrappedValue = v }
+                configService.scheduleSave()
+            }
+        }
     }
 
     // MARK: - Behaviour
@@ -1906,6 +2465,20 @@ private struct ProviderConfigSheet: View {
     }
 
     private func loadModels() async {
+        // ★ 2026-11-04: report the missing prerequisite instead of failing silently.
+        if spec.keyRequired, key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            verify = .failed(L10n.LLM.fetchNeedsKey)
+            fetchHint = nil
+            return
+        }
+        if endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            verify = .failed(L10n.LLM.fetchNeedsEndpoint)
+            fetchHint = nil
+            return
+        }
+        LLMRequestLog.attempt(provider: spec.id, endpoint: endpoint,
+                              protocol: configService.config.llmProviders.wireProtocol(for: spec.storage),
+                              hasKey: !key.isEmpty)
         verify = .verifying
         fetchHint = nil
         modelQuery = ""
@@ -1966,7 +2539,8 @@ private struct ProviderConfigSheet: View {
         probing = true
         probe = nil
         let result = await LLMConnectivityService.test(
-            spec: spec, endpoint: endpoint, apiKey: key, model: model
+            spec: spec, endpoint: endpoint, apiKey: key, model: model,
+            protocol: configService.config.llmProviders.wireProtocol(for: spec.storage)
         )
         guard !Task.isCancelled else { probing = false; return }
         probing = false
@@ -2010,6 +2584,20 @@ private struct ProviderConfigSheet: View {
             get: { model },
             set: { new in
                 configService.config.llmProviders.setModel(new, for: spec.storage)
+                probe = nil
+                configService.scheduleSave()
+            }
+        )
+    }
+
+    /// ★ 2026-11-04: custom-only. Changing the protocol invalidates the fetched
+    /// model list (Anthropic endpoints have no `/models`), so the probe result is cleared.
+    private var protocolBinding: Binding<LLMWireProtocol> {
+        Binding(
+            get: { configService.config.llmProviders.wireProtocol(for: spec.storage) },
+            set: { new in
+                configService.config.llmProviders.setWireProtocol(new, for: spec.storage)
+                verify = .idle
                 probe = nil
                 configService.scheduleSave()
             }
@@ -2160,21 +2748,11 @@ struct RecordingsSettingsView: View {
     @EnvironmentObject private var configService: ConfigService
     @EnvironmentObject private var bluetooth: BluetoothCoordinator
     @EnvironmentObject private var env: AppEnvironment
-    // ★ 2026-10-29 (饭耳移植 · 规格 §2.2): the cold-data downgrade runs from here;
-    // its @Published progress drives the "downgrade now" button.
-    @ObservedObject private var quality = RecordingQualityService.shared
-    // ★ 2026-10-30：文件夹备份状态（行尾"自动备份已开"徽标要实时反映开关）。
-    @ObservedObject private var folderExport = FolderExportService.shared
+    // ★ 2026-11-02：录音质量分区（含试听）已整体搬进 Apple Watch 设置页
+    // （只对手表录音生效），quality/folderExport 观察者随之移除。
     @State private var showGeneratedAlert = false
     @State private var encryptionError: String?
     @State private var encryptionBusy = false
-    // ★ 2026-10-29 (饭耳移植 · 规格 §2.2 试听): A/B the latest clip against the
-    // selected tier. `auditionSide` drives which button shows "playing".
-    @State private var auditionClips: [URL] = []
-    @State private var auditionIndex = 0
-    @State private var auditionBusy = false
-    @State private var auditionSide: String?
-    @State private var auditionPlayer: AVAudioPlayer?
     @State private var passphraseSheet: PassphraseSheetMode?
     /// Snapshot of the connected device's SN taken at the moment the user
     /// taps "Set/Rotate/Clear." Pinning prevents a mid-flow device switch
@@ -2183,6 +2761,9 @@ struct RecordingsSettingsView: View {
     /// account. Each device gets one passphrase; mixing them up is the
     /// one thing the per-SN Keychain scoping must never silently allow.
     @State private var pinnedSN: String = ""
+    /// ★ 2026-11-04：连接时判出来的钥匙状态（`KeyHealthService`）。
+    /// 观察它，这一行才能在连接/断开、手机解锁之后自己刷新。
+    @ObservedObject private var keyHealth = KeyHealthService.shared
 
     enum PassphraseSheetMode: Identifiable {
         case set    // derive + save locally
@@ -2192,9 +2773,6 @@ struct RecordingsSettingsView: View {
 
     /// ★ 2026-10-29：提醒事项权限被拒时提示去系统设置。
     @State private var remindersDenied = false
-    /// ★ 2026-10-30（用户："归纳到一个 webdav，点击按照类型选择，选择在弹页面设置"）：
-    /// WebDAV 入口改为弹层——先按类型选服务器，再在弹出的页面里配置。
-    @State private var showWebDAVSetup = false
 
     /// ★ 2026-10-29（用户："待办支持同步到 iPhone 里面的待办，需要打开这个开关"）：
     /// 开关打开时请求提醒事项授权；被拒就回拨开关并给「去设置」入口。
@@ -2256,66 +2834,11 @@ struct RecordingsSettingsView: View {
                         InfoTip(text: L10n.RecordingsSettings.deleteAfterTransferFooter)
                     }
                 }
-                // ★ 2026-10-29（用户："webdav 备份跟导出到文件夹还有相关都放到顶部的
-                // 录音跟传输里面"）：两个备份/导出入口搬到这里。
-                // ★ 2026-10-30（用户："增加自动上传到 iCloud 或者指定的服务器或 nas
-                // 当前里面有但是缺少引导"）：每行右侧加当前状态，分区底部加"怎么选"
-                // 引导——用户不用点进去就知道配没配、自动备份开没开。
-                // ★ 2026-10-30（用户："不要列表式的选择服务器类型的服务商，
-                // 归纳到一个 webdav，点击按照类型选择，在弹页面设置"）：
-                // 入口只有一个「WebDAV 备份」行；点开是类型选择弹层，选完
-                // 在弹层内的二级页配置（预设自动填端口/HTTPS/目录）。
-                Button {
-                    showWebDAVSetup = true
-                } label: {
-                    HStack {
-                        Label(L10n.WebDAV.title, systemImage: "externaldrive.badge.cloud")
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        if let webdav = configService.config.webdav, webdav.isConfigured {
-                            Text(webdav.preset ?? webdav.host)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text(L10n.WebDAV.unconfigured)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Color.secondary.opacity(0.6))
-                    }
-                }
-                NavigationLink {
-                    FolderBackupView()
-                } label: {
-                    HStack {
-                        Label(L10n.FolderExport.title, systemImage: "folder.badge.gearshape")
-                        Spacer()
-                        if folderExport.autoEnabled {
-                            Text(L10n.FolderExport.autoOn)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        } else if let name = folderExport.folderName {
-                            Text(name)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                // ★ 2026-10-30（用户："录音文件在本地/nas/iCloud 占用多少需要
-                // 显示出来"）：三处占用实测一页看完。
-                NavigationLink {
-                    StorageUsageView()
-                } label: {
-                    Label(L10n.StorageUsage.title, systemImage: "chart.pie")
-                }
-            } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.Backup.guideTitle).fontWeight(.semibold)
-                    Text(L10n.Backup.guideBody)
-                }
             }
+            // ★ 2026-11-02（用户："数据储存位置跟录音与传输好像也重复了"）：
+            // 「数据与存储位置」总枢纽只在设置主页出现（另有入口行），这里
+            // 不再重复；备份选择引导页脚随枢纽一起撤掉。手表录音质量分区
+            // 也已整体搬进 Apple Watch 设置页（它只对手表生效）。
 
             // ★ 2026-10-29（用户："待办支持同步到 iPhone 里面的待办，需要打开
             // 这个开关"）：打开后录音摘要里的待办行写进系统「提醒事项」。
@@ -2340,14 +2863,10 @@ struct RecordingsSettingsView: View {
                 }
             }
 
-            // ★ 2026-10-29 (饭耳移植 · 规格 §2.2 录音质量 + 冷数据降级):
-            // four bitrate tiers + "recordings older than N days get re-encoded
-            // to the selected tier". Transcription always runs on originals —
-            // see RecordingQualityService's safety rails.
-            recordingQualitySection
-
             // ★ 2026-10-30: 定时录音入口已挪进「设置 → Apple Watch」分区（真正
             // 在手表上录），这里不再重复出现。
+            // ★ 2026-11-02: 手表录音质量（转写后）同样只对手表生效，一并搬进
+            // Apple Watch 设置页（WatchFacePickerView）。
 
             Section {
                 TextField(L10n.RecordingsSettings.ssid, text: wifiSSIDBinding)
@@ -2416,10 +2935,8 @@ struct RecordingsSettingsView: View {
                 onError: { msg in encryptionError = msg }
             )
         }
-        // ★ 2026-10-30：WebDAV 类型选择弹层（见 showWebDAVSetup）。
-        .sheet(isPresented: $showWebDAVSetup) {
-            WebDAVSetupSheet()
-        }
+        // ★ 2026-11-02：WebDAV 类型选择弹层挪进「数据与存储位置」总枢纽页，
+        // 这里不再需要。
     }
 
     /// Threshold values offered in the picker, in KB. 0 means "always
@@ -2442,176 +2959,6 @@ struct RecordingsSettingsView: View {
     /// Passphrase / Keychain key management. Lives in this section instead
     /// of `deviceEncryptionSection` because it's host-side state that
     /// applies even when the device is not connected.
-    /// ★ 2026-10-29 (饭耳移植 · 规格 §2.2): the quality tier picker + cold-data
-    /// downgrade switch + threshold stepper + "run now" (with the last pass's
-    /// report). Kept as a computed section so `body`'s Form stays readable.
-    private var recordingQualitySection: some View {
-        Section {
-            Picker(L10n.RecordingsSettings.qualityTitle, selection: Binding(
-                get: {
-                    configService.config.recordingQualityTier
-                        .flatMap(RecordingQualityTier.init(rawValue:)) ?? .asIs
-                },
-                set: {
-                    configService.config.recordingQualityTier = $0.rawValue
-                    configService.scheduleSave()
-                }
-            )) {
-                ForEach(RecordingQualityTier.allCases) { tier in
-                    Text(Self.qualityTierLabel(tier)).tag(tier)
-                }
-            }
-
-            Toggle(isOn: Binding(
-                get: { configService.config.coldDataDowngradeEnabled },
-                set: { configService.config.coldDataDowngradeEnabled = $0; configService.scheduleSave() }
-            )) {
-                HStack(spacing: 4) {
-                    Text(L10n.RecordingsSettings.coldDowngrade)
-                    InfoTip(text: L10n.RecordingsSettings.coldDowngradeFooter)
-                }
-            }
-
-            if configService.config.coldDataDowngradeEnabled {
-                Stepper(
-                    L10n.RecordingsSettings.coldDowngradeDays(configService.config.coldDataDowngradeDays),
-                    value: Binding(
-                        get: { configService.config.coldDataDowngradeDays },
-                        set: { configService.config.coldDataDowngradeDays = $0; configService.scheduleSave() }
-                    ),
-                    in: 1...90
-                )
-            }
-
-            // ★ 2026-10-29 (饭耳移植 · 规格 §2.2 试听): A/B the newest clip against
-            // the selected tier before committing to it. Hidden for 原样 —
-            // there is nothing to compare against itself.
-            if let tier = configService.config.recordingQualityTier
-                .flatMap(RecordingQualityTier.init(rawValue:)), tier != .asIs {
-                auditionRow(tier: tier)
-            }
-
-            // "Run now" — same pass the launch hook runs, forced so it works
-            // even before the toggle is on (explicit user intent wins).
-            Button {
-                guard !quality.isRunning else { return }
-                Task {
-                    let config = configService.config
-                    await quality.runDowngrade(config: config, ignoreSwitch: true)
-                }
-            } label: {
-                HStack {
-                    Text(quality.isRunning
-                         ? L10n.RecordingsSettings.qualityRunning
-                         : L10n.RecordingsSettings.qualityRunNow)
-                    if quality.isRunning { Spacer(); ProgressView() }
-                }
-            }
-            .disabled(quality.isRunning)
-
-            if let report = quality.lastReport {
-                Text(report)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            HStack(spacing: 4) {
-                Text(L10n.RecordingsSettings.qualityTitle)
-                InfoTip(text: L10n.RecordingsSettings.qualityFooter)
-            }
-        } footer: {
-            EmptyView()
-        }
-    }
-
-    /// ★ 2026-10-29 (饭耳移植 · 规格 §2.2 试听): 原声 vs 所选档位 A/B 按钮 +
-    /// 「换一段」。预览转码结果缓存在 Caches（clip+tier 各一份），二次点按秒开。
-    private func auditionRow(tier: RecordingQualityTier) -> some View {
-        Group {
-            if auditionClips.isEmpty {
-                Button {
-                    auditionClips = RecordingQualityService.recentClips()
-                    auditionIndex = 0
-                } label: {
-                    Text(L10n.RecordingsSettings.auditionLoad)
-                }
-            } else if let clip = auditionClip {
-                HStack(spacing: 16) {
-                    auditionButton(side: "orig", label: L10n.RecordingsSettings.auditionOriginal, clip: clip, tier: tier)
-                    auditionButton(side: "tier", label: L10n.RecordingsSettings.auditionTier, clip: clip, tier: tier)
-                    Spacer()
-                    Button {
-                        auditionStop()
-                        auditionIndex = (auditionIndex + 1) % max(auditionClips.count, 1)
-                    } label: {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                    }
-                    .disabled(auditionClips.count < 2)
-                }
-                .font(.subheadline)
-                Text(L10n.RecordingsSettings.auditionClipLabel(
-                    (clip.lastPathComponent as NSString).deletingPathExtension))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var auditionClip: URL? {
-        auditionClips.indices.contains(auditionIndex) ? auditionClips[auditionIndex] : nil
-    }
-
-    private func auditionButton(side: String, label: String, clip: URL, tier: RecordingQualityTier) -> some View {
-        Button {
-            Task {
-                if auditionSide == side { auditionStop(); return }
-                auditionStop()
-                auditionBusy = true
-                defer { auditionBusy = false }
-                do {
-                    let url = try await RecordingQualityService.makeAudition(source: clip, tier: tier)
-                    auditionPlayer = try AVAudioPlayer(contentsOf: url)
-                    auditionPlayer?.play()
-                    auditionSide = side
-                } catch {
-                    auditionSide = nil
-                }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                if auditionSide == side {
-                    Image(systemName: "stop.fill")
-                } else {
-                    Image(systemName: "play.fill")
-                    if auditionBusy && side == "tier" { ProgressView().scaleEffect(0.7) }
-                }
-                Text(label)
-            }
-        }
-        .disabled(auditionBusy)
-    }
-
-    private func auditionStop() {
-        auditionPlayer?.stop()
-        auditionPlayer = nil
-        auditionSide = nil
-    }
-
-    /// ★ 2026-10-29 (饭耳移植 · 规格 §3.1 定时录音): enable switch, start/end
-    /// pickers, HealthKit prefill, and the scheduler's live status line.
-    // ★ 2026-10-30: timedRecordingSection 及其时间工具已整体挪进 SettingsView
-    // 的手表分区（"定时录音归纳到 Apple Watch"），这里不再保留副本。
-
-    private static func qualityTierLabel(_ tier: RecordingQualityTier) -> String {
-        let base: String
-        switch tier {
-        case .asIs: base = L10n.RecordingsSettings.qualityTierAsIs
-        case .standard: base = L10n.RecordingsSettings.qualityTierStandard
-        case .compact: base = L10n.RecordingsSettings.qualityTierCompact
-        case .minimal: base = L10n.RecordingsSettings.qualityTierMinimal
-        }
-        return L10n.RecordingsSettings.qualityTierLabel(base, tier.sizePerHourLabel, tier.recommendationLabel)
-    }
 
     @ViewBuilder
     private var passphraseSection: some View {
@@ -2635,6 +2982,11 @@ struct RecordingsSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            // ★ 2026-11-04（用户："在 Nomily 链接的时候增加检查密钥当前是否符合"）：
+            //   这一行回答的是"我这把钥匙到底能不能开设备上的录音"。
+            //   它和上面的"本地密钥 已配置"不是一回事——已配置也可能配错，
+            //   尤其是设备被官方 App 设过钥匙的时候。
+            keyCheckRow
             // When the device is already encrypted, this flow performs **verification**: record a probe, attempt decryption with the entered passphrase,
 // and only if it succeeds write it to the Keychain (see `PassphraseSheet.primaryActionLabel`). Naming the entry “Set Passphrase” would mislead users into thinking they are creating a new one, while the device does not store or retrieve the passphrase.
             Button(bluetooth.client?.deviceEncryptionOn == true
@@ -2652,6 +3004,11 @@ struct RecordingsSettingsView: View {
             Button(L10n.EncryptionOnboarding.clearButton, role: .destructive) {
                 guard !sn.isEmpty else { return }
                 PassphraseStore.clear(sn: sn)
+                // 钥匙没了，KCV 也就失去了对照物（它记的是"某把钥匙配这台设备"）。
+                KeyHealthService.forgetCheck(sn: sn)
+                if let client = bluetooth.client {
+                    Task { await KeyHealthService.shared.evaluate(client: client) }
+                }
             }
             .disabled(!hasLocalKey)
         } header: {
@@ -2663,6 +3020,53 @@ struct RecordingsSettingsView: View {
         // Sheet presentation lives on the Form (see `body`); attaching it
         // here on the Section is what caused the first tap to flash open
         // and immediately dismiss.
+    }
+
+    /// 钥匙校验行。
+    ///
+    /// 三种"要注意"的状态各有各的实话：
+    /// · 本机没有 → 请设口令（此时设口令会走验证，不会盲写）；
+    /// · 与设备不一致 → 设备上那把不是这台手机能推导出来的（多半官方 App 设的），
+    ///   重设口令没用，只能先解除或导入；
+    /// · 手机锁定读不到 → 什么都别做，解锁后会自己重判。
+    @ViewBuilder
+    private var keyCheckRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(L10n.KeyHealth.rowLabel)
+                Spacer()
+                Text(keyHealthText)
+                    .font(.callout)
+                    .foregroundStyle(keyHealthColor)
+            }
+            if let fingerprint = keyHealth.state.fingerprint {
+                Text(L10n.KeyHealth.fingerprintNote(fingerprint))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var keyHealthText: String {
+        switch keyHealth.state {
+        case .unknown:      return L10n.KeyHealth.unknown
+        case .notEncrypted: return L10n.KeyHealth.notEncrypted
+        case .noKey:        return L10n.KeyHealth.noKey
+        case .unreadable:   return L10n.KeyHealth.unreadable
+        case .unverified:   return L10n.KeyHealth.unverified
+        case .verified:     return L10n.KeyHealth.verified
+        case .mismatch:     return L10n.KeyHealth.mismatch
+        }
+    }
+
+    private var keyHealthColor: Color {
+        switch keyHealth.state {
+        case .verified:            return .green
+        case .mismatch:            return .red
+        case .noKey, .unreadable:  return .orange
+        case .notEncrypted:        return .secondary
+        case .unknown, .unverified: return .secondary
+        }
     }
 
     /// On-device encryption state (read-only here — toggling is firmware
@@ -3106,7 +3510,10 @@ struct DevicesLibraryView: View {
 // MARK: - Passphrase entry sheet
 
 struct PassphraseEntrySheet: View {
-    let mode: RecordingsSettingsView.PassphraseSheetMode
+    /// 可变：轮换被固件拒绝时，允许在**不关掉这张表单**的前提下切到「验证并解锁」，
+    /// 见 `foreignKeyBlocked`。用户 2026-11-09："轮换密钥覆盖都无法正常覆盖了"——
+    /// 拒绝之后原先只剩一条死路（关掉表单、自己去猜该去哪儿解锁）。
+    @State var mode: RecordingsSettingsView.PassphraseSheetMode
     let sn: String
     let client: DnoteClient?
     let onError: (String) -> Void
@@ -3129,6 +3536,9 @@ struct PassphraseEntrySheet: View {
     /// See `runSet` — at that point adopting the typed passphrase costs
     /// nothing, so the user is offered that instead of "wrong passphrase".
     @State private var adoptOffer: RotatePlan?
+    /// 固件拒绝放开旧钥匙（说明这把钥匙不是这句口令派生的）。留着表单，
+    /// 直接给一条「改用解锁模式」的出口，而不是让用户对着一段报错自行找路。
+    @State private var foreignKeyBlocked = false
 
     struct RotatePlan: Identifiable, Equatable {
         let passphrase: String
@@ -3144,6 +3554,17 @@ struct PassphraseEntrySheet: View {
         // their next download. When the device says OFF, no verify is
         // possible (and not useful: there are no encrypted files yet).
         client?.deviceEncryptionOn == true
+    }
+
+    /// 现问一次设备（0xA3）。`deviceIsEncrypted` 读的是缓存：连接刚建立、0xA3 还没
+    /// 回来时它是 **nil**，会被当成"设备未加密"——那就走进"直接存钥匙"的分支，
+    /// 存下一把从没验证过的钥匙。之后录音传得下来、解密全失败，正是这个洞。
+    private var deviceEncryptedLive: Bool {
+        get async {
+            guard let client else { return false }
+            if let live = try? await client.getEncryptionState() { return live }
+            return client.deviceEncryptionOn == true
+        }
     }
 
     private var primaryActionLabel: String {
@@ -3192,7 +3613,23 @@ struct PassphraseEntrySheet: View {
                         Text(footerCopy).font(.caption)
                     }
                     if let msg = localError {
-                        Section { Text(msg).foregroundStyle(.red).font(.caption) }
+                        Section {
+                            Text(msg).foregroundStyle(.red).font(.caption)
+                            if foreignKeyBlocked {
+                                Button(L10n.EncryptionOnboarding.switchToUnlock) {
+                                    foreignKeyBlocked = false
+                                    localError = nil
+                                    // 保留刚输入的口令：要验证的往往就是它
+                                    // （用户以为这是旧口令、才来轮换的）。
+                                    mode = .set
+                                }
+                                .font(.callout.weight(.medium))
+                            }
+                        } footer: {
+                            if foreignKeyBlocked {
+                                Text(L10n.EncryptionOnboarding.switchToUnlockHint).font(.caption)
+                            }
+                        }
                     }
                     Section {
                         Button(action: submit) {
@@ -3265,6 +3702,7 @@ struct PassphraseEntrySheet: View {
                     Task {
                         busy = true
                         localError = nil
+                        foreignKeyBlocked = false
                         defer { busy = false; progressMessage = "" }
                         do {
                             try await runRotate(passphrase: plan.passphrase, salt: plan.salt)
@@ -3290,6 +3728,7 @@ struct PassphraseEntrySheet: View {
                     Task {
                         busy = true
                         localError = nil
+                        foreignKeyBlocked = false
                         defer { busy = false; progressMessage = "" }
                         do {
                             try await runRotate(passphrase: plan.passphrase, salt: plan.salt)
@@ -3313,6 +3752,7 @@ struct PassphraseEntrySheet: View {
         Task {
             busy = true
             localError = nil
+            foreignKeyBlocked = false
             defer {
                 busy = false
                 progressMessage = ""
@@ -3337,7 +3777,10 @@ struct PassphraseEntrySheet: View {
     ///     the user enables encryption later; this is the case for a
     ///     freshly-purchased device that hasn't been turned on yet)
     private func runSet(passphrase: String, salt: String) async throws {
-        if deviceIsEncrypted {
+        // ★ 2026-11-09：先向设备问一次真实状态，别信缓存。缓存是 nil（0xA3 还没回来）
+        //   时会被判成"未加密"，于是把一句**从未验证过**的口令存进 Keychain —— 之后
+        //   录音传得下来、解密全失败（用户报的正是这个现象）。
+        if await deviceEncryptedLive {
             guard let client else {
                 localError = L10n.EncryptionOnboarding.errorConnectFirst
                 return
@@ -3352,6 +3795,8 @@ struct PassphraseEntrySheet: View {
             switch outcome.result {
             case .matches:
                 try PassphraseStore.save(outcome.derivedKey, sn: salt)
+                // 探针刚证明过这把钥匙能开这台设备，状态理应立刻变成"一致"。
+                await KeyHealthService.shared.evaluate(client: client)
                 dismiss()
             case .mismatch:
                 // A factory-fresh V05 always lands here: firmware v1.50
@@ -3421,16 +3866,345 @@ struct PassphraseEntrySheet: View {
         try PassphraseStore.save(key, sn: salt)
 
         progressMessage = L10n.EncryptionOnboarding.progressWritingKey
+        // 设备是否已被我们解除过——失败回滚时要把加密重新打开（见 catch）。
+        var deviceWasReleased = false
         do {
+            // ★ 2026-11-09（用户："轮换密钥覆盖都无法正常覆盖了…录音能传输但解密失败"）：
+            //   固件 0xA2 的硬规则（官方协议 PDF §0xa2）——
+            //   「已有密钥且开启状态下，必须**先解除**才能设新密钥；解除必须
+            //   **带对旧密钥**，固件比对不一致不予解除」。
+            //
+            //   所以解除这一步**必须拿旧钥匙**去做。旧实现用的是刚派生出来的新钥匙
+            //   （`key`），那等于要求"新旧口令一模一样"——只要用户真想换个口令，
+            //   固件必然拒绝，于是"轮换"永久失效。修复：先拿本机 Keychain 里那把
+            //   已知能开的旧钥匙（`previous`）去解，解开再写新钥匙。
+            if try await client.getEncryptionState() {
+                var released = false
+                // ① 本机保存的旧钥匙：正常路径（钥匙就是在这台手机上设的）
+                if let previous {
+                    if (try? await client.setEncryption(on: false, key: previous)) != nil {
+                        released = true
+                    }
+                }
+                // ② 用户刚输入的口令：本机 Keychain 丢过、或钥匙是别的手机设的，
+                //    但用户知道那句旧口令 → 新钥匙恰好等于旧钥匙，也能解开。
+                if !released {
+                    do {
+                        try await client.setEncryption(on: false, key: key)
+                    } catch let e as DnoteError {
+                        // 只有固件明确回 NAK 才算"拒绝解除"；超时、断链要如实报出来，
+                        // 否则用户会照着"去厂商 App 关加密"的指引白折腾一遍。
+                        if case .ackFailed = e { throw ForeignKeyKeyError() }
+                        throw e
+                    }
+                }
+                deviceWasReleased = true
+            }
             try await client.setEncryption(on: true, key: key)
         } catch {
+            if deviceWasReleased, let previous {
+                // 设备已经被解除、新钥匙却没写成 → 把加密按旧钥匙重新打开，
+                // 否则设备停在"加密关闭 + 旧文件"的状态，旧录音会被当明文处理。
+                try? await client.setEncryption(on: true, key: previous)
+            }
             if let previous {
                 try? PassphraseStore.save(previous, sn: salt)
             } else {
                 PassphraseStore.clear(sn: salt)
             }
+            if error is ForeignKeyKeyError { foreignKeyBlocked = true }
             throw error
         }
+        // ★ 2026-11-04：钥匙换了，旧的 KCV 立刻失效。
+        //   不清掉的话，下次连接会拿"旧钥匙 + 旧样本"比对，判出一个**假的**
+        //   mismatch——比没有校验更糟，它会让人以为新钥匙也不对。
+        KeyHealthService.forgetCheck(sn: salt)
+        await KeyHealthService.shared.evaluate(client: client)
         dismiss()
+    }
+}
+
+/// 设备上现役密钥不是这句口令派生的（官方 App / 其他 App / 旧口令），
+/// 固件拒绝带它解除旧密钥（协议 0xA2 规则 2）。
+private struct ForeignKeyKeyError: LocalizedError {
+    var errorDescription: String? { L10n.EncryptionOnboarding.foreignKeyBlocked }
+}
+
+// MARK: - ★ 2026-11-06 后台保护指南
+//
+// 用户原话："引导用户去设置里面打开 APP 刷新，然后设置白名单之类的，
+// 即使后台长期不动也要保持不被系统杀掉"。
+//
+// iOS 的诚实答案是：**没有 Android 那样的省电白名单**。系统能给的保活手段只有
+// 后台 App 刷新 + 后台音频（App 已内置静音保活）+ 关低电量，三样都能检测/引导，
+// 所以这一页就是「实时状态 + 去设置的按钮 + 检测不了的项目写清路径」。
+// 极端内存压力下系统仍可杀进程——届时的兜底是 BackgroundKeeper 的被杀哨兵通知。
+struct BackgroundProtectionGuideView: View {
+    @EnvironmentObject private var configService: ConfigService
+    @EnvironmentObject private var bluetooth: BluetoothCoordinator
+    @EnvironmentObject private var watch: WatchSyncService
+    @Environment(\.scenePhase) private var scenePhase
+    /// 通知权限是异步查的；nil = 还没查到（行里先显示占位）。
+    @State private var notificationGranted: Bool?
+    /// 麦克风权限（同步读；回前台重查时刷新）。
+    @State private var micDenied = false
+
+    var body: some View {
+        Form {
+            Section {
+                Text(L10n.ASR.bgpIntro)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                refreshRow
+                lowPowerRow
+                notificationRow
+                keeperRow
+            }
+
+            // ★ 2026-11-06（用户："后台保护指南里面也要把相关权限都加入进去，
+            // 例如手表链接，状态，蓝牙之类的我没想到的"）：设备链路 + 权限三行。
+            Section {
+                bluetoothRow
+                micRow
+                watchRow
+            }
+
+            Section {
+                Text(L10n.ASR.bgpLimitNote)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle(L10n.ASR.bgpTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            refreshNotificationStatus()
+            refreshMicStatus()
+        }
+        // 从系统设置回来时（scenePhase 变 active）把所有实时状态重查一遍，
+        // 否则用户开完开关回来看到的还是旧状态，会以为"开了也没用"。
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                refreshNotificationStatus()
+                refreshMicStatus()
+            }
+        }
+    }
+
+    // MARK: 蓝牙（权限 + 开关，一行的两半）
+
+    @ViewBuilder
+    private var bluetoothRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text(L10n.ASR.bgpBtTitle)
+            } icon: {
+                Image(systemName: icon)
+                    .foregroundStyle(tint)
+            }
+            Text(statusText)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            if needsFix {
+                Button(L10n.ASR.bgpOpenSettings) {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .font(.footnote)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var needsFix: Bool {
+        bluetooth.adapter == .unauthorized || bluetooth.adapter == .poweredOff
+    }
+    private var icon: String {
+        bluetooth.adapter == .poweredOn ? "dot.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash"
+    }
+    private var tint: Color {
+        bluetooth.adapter == .poweredOn ? .green : .orange
+    }
+    private var statusText: String {
+        switch bluetooth.adapter {
+        case .poweredOn: return L10n.ASR.bgpBtOn
+        case .poweredOff: return L10n.ASR.bgpBtOff
+        case .unauthorized: return L10n.ASR.bgpBtDenied
+        default: return L10n.ASR.bgpBtUnknown
+        }
+    }
+
+    // MARK: 麦克风
+
+    private var micRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text(L10n.ASR.bgpMicTitle)
+            } icon: {
+                Image(systemName: micDenied ? "mic.slash.fill" : "mic.fill")
+                    .foregroundStyle(micDenied ? .orange : .green)
+            }
+            Text(micDenied ? L10n.ASR.bgpMicDenied : L10n.ASR.bgpMicOk)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            if micDenied {
+                Button(L10n.ASR.bgpOpenSettings) {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .font(.footnote)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func refreshMicStatus() {
+        micDenied = AVAudioSession.sharedInstance().recordPermission == .denied
+    }
+
+    // MARK: Apple Watch 连接
+
+    @ViewBuilder
+    private var watchRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text(L10n.ASR.bgpWatchTitle)
+            } icon: {
+                Image(systemName: watch.isReachable ? "applewatch" : "applewatch.slash")
+                    .foregroundStyle(watch.isReachable ? .green : .secondary)
+            }
+            Text(watchStatusText)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var watchStatusText: String {
+        if !watch.isPaired { return L10n.ASR.bgpWatchNotPaired }
+        if bluetooth.adapter == .poweredOff { return L10n.ASR.bgpWatchBtOff }
+        if watch.isReachable { return L10n.ASR.bgpWatchReachable }
+        // 已配对但不可达：手表在休眠/不在附近——这是常态，不是故障。
+        return L10n.ASR.bgpWatchUnreachable
+    }
+
+    // MARK: 后台 App 刷新
+
+    @ViewBuilder
+    private var refreshRow: some View {
+        let status = UIApplication.shared.backgroundRefreshStatus
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text(L10n.ASR.bgpRefreshTitle)
+            } icon: {
+                Image(systemName: status == .available ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(status == .available ? Color.green : Color.orange)
+            }
+            Text(subtitle(for: status))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            if status != .available {
+                Button(L10n.ASR.bgpOpenSettings) {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .font(.footnote)
+                Text(L10n.ASR.bgpRefreshManual)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func subtitle(for status: UIBackgroundRefreshStatus) -> String {
+        switch status {
+        case .available: return L10n.ASR.bgpRefreshOk
+        case .denied: return L10n.ASR.bgpRefreshDenied
+        default: return L10n.ASR.bgpRefreshRestricted
+        }
+    }
+
+    // MARK: 低电量模式
+
+    private var lowPowerRow: some View {
+        let on = ProcessInfo.processInfo.isLowPowerModeEnabled
+        return VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text(L10n.ASR.bgpLowPowerTitle)
+            } icon: {
+                Image(systemName: on ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(on ? Color.orange : Color.green)
+            }
+            Text(on ? L10n.ASR.bgpLowPowerOn : L10n.ASR.bgpLowPowerOff)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+    }
+
+    // MARK: 中断提醒通知
+
+    private var notificationRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text(L10n.ASR.bgpNotifyTitle)
+            } icon: {
+                Image(systemName: notificationGranted == true ? "bell.badge.fill" : "bell.slash.fill")
+                    .foregroundStyle(notificationGranted == true ? Color.green : Color.orange)
+            }
+            Text(notificationSubtitle)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            if notificationGranted == false {
+                Button(L10n.ASR.bgpNotifyAuthorize) {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .font(.footnote)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var notificationSubtitle: String {
+        switch notificationGranted {
+        case .some(true): return L10n.ASR.bgpNotifyOn
+        case .some(false): return L10n.ASR.bgpNotifyDenied
+        case .none: return L10n.ASR.bgpNotifyOff
+        }
+    }
+
+    private func refreshNotificationStatus() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            Task { @MainActor in
+                notificationGranted = settings.authorizationStatus == .authorized
+                    || settings.authorizationStatus == .provisional
+            }
+        }
+    }
+
+    // MARK: App 内保活开关
+
+    private var keeperRow: some View {
+        Toggle(isOn: Binding(
+            get: { configService.config.backgroundKeepAliveEnabled },
+            set: { configService.config.backgroundKeepAliveEnabled = $0; configService.scheduleSave() }
+        )) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L10n.ASR.bgpKeeperTitle)
+                Text(configService.config.backgroundKeepAliveEnabled
+                     ? L10n.ASR.bgpKeeperOn : L10n.ASR.bgpKeeperOff)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }

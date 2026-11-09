@@ -478,6 +478,18 @@ final class TranscriptionService: ObservableObject {
             uploadURL = converted
         }
 
+        // ★ 2026-11-02: 把实际上传文件的体积 + 文件头 16 字节十六进制写进诊断日志。
+        //   上次排查「HTTP 422 InvalidAudioFormat」时拿不到文件本体（app group 拷不出
+        //   来），只能靠猜容器内容；有这行，下次拉日志一眼就能分辨 OggS/ftyp/encryt/垃圾。
+        let magicHex: String = {
+            guard let head = try? Data(contentsOf: uploadURL, options: [.alwaysMapped]),
+                  head.count >= 16 else { return "?" }
+            return head.prefix(16).map { String(format: "%02x", $0) }.joined()
+        }()
+        let uploadSize = (try? FileManager.default.attributesOfItem(
+            atPath: uploadURL.path))?[.size] as? Int ?? 0
+        TicNoteDiagLog.log("ASR", "upload clip=\(key) ext=\(uploadURL.pathExtension.lowercased()) size=\(uploadSize) magic=\(magicHex)")
+
         var lastError: Error?
         for (index, name) in chain.enumerated() {
             try Task.checkCancellation()
@@ -609,6 +621,9 @@ final class TranscriptionService: ObservableObject {
             // No credentials to check — only the switch, plus the honest question of whether
             // this phone actually has an offline model for the language we'd ask it for.
             return config.config.onDeviceASREnabled
+        case "sensevoice":
+            // ★ 2026-11-02: 本机 SenseVoice 模型——下载过就能用，无凭据。
+            return SenseVoiceModelStore.isDownloadedStatic
         case "custom":
             guard let c = config.config.asrProviders.custom else { return false }
             return !c.endpoint.isEmpty
@@ -658,10 +673,27 @@ final class TranscriptionService: ObservableObject {
                 ?? config.config.lastSourceLang
                 ?? (config.config.appLanguage ?? Locale.current.identifier)
             return try await OnDeviceASR.transcribeFile(url: fileURL, localeID: locale)
+        case "sensevoice":
+            // ★ 2026-11-02: SenseVoice 本机推理（sherpa-onnx）——离线、无 Key，
+            // 中/英/日/韩/粤。引擎内部自己切片，时间戳按片回填。
+            return try await SenseVoiceASR.transcribe(fileURL: fileURL, locales: locales)
         case "custom":
             guard let custom = config.config.asrProviders.custom,
                   !custom.endpoint.isEmpty else {
                 throw AsrError.missingCredentials("Custom server")
+            }
+            // ★ 2026-11-04: 同一个"自定义服务"入口下有两种接口形态。百炼（阿里云
+            // Model Studio）不提供 /audio/transcriptions，它把 ASR 放在
+            // chat/completions 的 input_audio 里，模型是 qwen3-asr-flash——所以按
+            // 配置里的 protocol 分派，而不是靠猜对端。
+            if custom.wireProtocol?.lowercased() == "bailian" {
+                let client = BailianASR(
+                    endpoint: custom.endpoint,
+                    apiKey: custom.apiKey ?? "",
+                    model: custom.model ?? "",
+                    language: custom.language ?? ""
+                )
+                return try await client.transcribe(fileURL: fileURL, locales: locales)
             }
             let client = CustomASR(
                 endpoint: custom.endpoint,

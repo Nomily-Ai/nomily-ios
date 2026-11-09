@@ -68,6 +68,10 @@ enum DingTalkA1Audio {
 
     struct Result {
         let ogg: Data
+        /// ★ 2026-11-02：卡里的裸 20 ms Opus 帧原样带出——落盘前直接转 m4a 用
+        /// （`SoundcoreTranscoder.transcode(packets:)`），播放不再依赖 iOS 17 的
+        /// Ogg 解码器。
+        let packets: [Data]
         let duration: TimeInterval
         let formatNote: String
     }
@@ -108,7 +112,7 @@ enum DingTalkA1Audio {
             + (kbps > 0 ? " · \(kbps) kbps" : "")
             + " · \(container.inputRate / 1000) kHz source"
         if container.isPartial { note += " · partial download" }
-        return Result(ogg: pages, duration: duration, formatNote: note)
+        return Result(ogg: pages, packets: container.packets, duration: duration, formatNote: note)
     }
 
     // MARK: Container

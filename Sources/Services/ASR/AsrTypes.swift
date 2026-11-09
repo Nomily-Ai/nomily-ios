@@ -48,7 +48,13 @@ enum AsrError: LocalizedError {
         case .azureRequiredForTranslation:
             return L10n.ASR.azureRequiredForTranslation
         case .http(let code, let body):
-            return "ASR provider returned HTTP \(code): \(body.prefix(200))"
+            // ★ 2026-11-06（用户："自定义端点仍报 400"）：只贴一段原始 body 不够——
+            // 空 body 的 400（网关/代理/路由没通）看上去和"参数写错"一模一样，
+            // 用户只能反复猜。现在：body 原样保留（截断），空体明确写 empty body，
+            // 并按状态码给一句"下一步查哪里"。文案是诊断细节，保持英文与上面一致。
+            let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            let shown = trimmed.isEmpty ? "(empty body)" : String(trimmed.prefix(200))
+            return "ASR provider returned HTTP \(code): \(shown)\(AsrError.httpHint(code))"
         case .transport(let err):
             return "Network error: \(err.localizedDescription)"
         case .decoding(let err):
@@ -61,6 +67,34 @@ enum AsrError: LocalizedError {
             return L10n.ASR.stillRunning(minutes)
         case .taskFailed(let detail):
             return L10n.ASR.taskFailed(detail)
+        }
+    }
+
+    /// 状态码 → 一句"下一步查哪里"。只给方向，不猜具体配置（那是用户的服务器）。
+    ///
+    /// ★ 2026-11-06：自定义/自建 ASR 的失败现场大多是"服务端没进业务逻辑"就被
+    /// 网关挡回来（空体 400/404/413），原始 body 里什么线索都没有。这里按码
+    /// 分类，把最可能的那一件事说出来，省掉一轮来回猜。
+    private static func httpHint(_ code: Int) -> String {
+        switch code {
+        case 400:
+            return " — check the model name, the language hint, and that the URL ends at /v1/audio/transcriptions"
+        case 401, 403:
+            return " — the key was rejected; re-check the token and whether it may use this model"
+        case 404:
+            return " — the path does not exist on that server; base URL should be the host (or …/v1), not a custom route"
+        case 413:
+            return " — the clip is larger than the server's upload limit; try a shorter take or raise the limit"
+        case 415:
+            return " — the server refused this audio container; WAV is the safest format for strict servers"
+        case 422:
+            return " — a required form field is missing or malformed (model / file / response_format)"
+        case 429:
+            return " — rate-limited or out of quota; wait and retry, or check the plan"
+        case 500...599:
+            return " — the server itself failed; its logs will say why (this is not a Nomily bug)"
+        default:
+            return ""
         }
     }
 }

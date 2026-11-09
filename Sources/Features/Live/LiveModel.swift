@@ -61,6 +61,18 @@ final class LiveModel: ObservableObject {
     ///   whatever we last received — "the number is stuck / doesn't match DingTalk". The card
     ///   keeps counting regardless and reports it in `0x0132`, so we adopt that number.
     @Published var deviceElapsed: TimeInterval?
+    /// 会话**墙钟**：只在"正在录音 + 未暂停 + 链路没在恢复"时累加的秒数（★ 2026-11-04）。
+    ///
+    /// 为什么需要第三个数：`frames`-based 的时长要等主 actor 把这一帧处理完才前进，
+    /// 而实时引擎有可能在主线程上干重活（阿里云/百炼每 500 ms 解 25 帧 Opus）。
+    /// 一旦主线程被压住，包计数就**成批跳**——用户看到的就是"秒数不按正常读秒走，
+    /// 只有 Azure 正常"（Azure 的 send 只是往 socket 写一帧，不占 CPU）。
+    /// 墙钟由独立的 0.25 s tick 累加，不受引擎忙闲影响，读数因此始终是匀速秒表。
+    ///
+    /// ⚠️ 只用于显示与时间戳（`durationLabel` / `largeDurationLabel` / `capturedDuration`）。
+    ///   落盘时长走分段自己的 `end - start`——链路断开时墙钟还在走，
+    ///   拿它当音频时长会把断流的那几十秒算进录音里。
+    @Published private(set) var clockSeconds: TimeInterval = 0
     @Published var error: String?
     /// True when the current `error` is "this device isn't paired with the
     /// app" — the view turns it into the same "Pair now" guidance the
@@ -215,6 +227,11 @@ final class LiveModel: ObservableObject {
         /// ★ 2026-10-23: Aliyun real-time — decodes the card's Opus packets to
         /// 16 kHz mono PCM, then streams them to `nls-gateway`.
         case aliyun(AliyunLiveASR)
+        /// ★ 2026-11-04: 自定义（OpenAI 兼容 / 百炼）端点。它没有 WS 双向流，
+        /// 只有 `chat/completions` + `input_audio` 整段音频，所以这里同样是
+        /// Opus → PCM，再按 5 s 切片上云（`BailianLiveASR`）。加这一条之前
+        /// custom 落到 `default:` 被静默跳过，链条一路走到 Azure。
+        case bailian(BailianLiveASR)
 
         func send(_ data: Data) {
             switch self {
@@ -224,6 +241,7 @@ final class LiveModel: ObservableObject {
             case .azure(let asr): asr.send(data)
             case .azureTranslate(let asr): asr.send(data)
             case .aliyun(let asr): asr.send(data)
+            case .bailian(let asr): asr.send(data)
             }
         }
 
@@ -235,6 +253,7 @@ final class LiveModel: ObservableObject {
             case .azure(let asr): asr.close()
             case .azureTranslate(let asr): asr.close()
             case .aliyun(let asr): asr.close()
+            case .bailian(let asr): asr.close()
             }
         }
     }
@@ -244,6 +263,11 @@ final class LiveModel: ObservableObject {
 
     /// Polls the card's own recording clock while a session runs (see `deviceElapsed`).
     private var clockTask: Task<Void, Never>?
+    /// 0.25 s 一跳的会话墙钟（见 `clockSeconds`）。
+    private var sessionClockTask: Task<Void, Never>?
+    /// 上一次 tick 的时刻——累加的是"两跳之间的真实间隔"，所以主线程被压住
+    /// 导致跳点变稀时，累加值会一次补回来，读数不会丢时间。
+    private var sessionClockMark: Date?
     /// Slow enough to be invisible next to a 50 Hz stream, fast enough that a frozen frame count
     /// never shows on screen for more than a few seconds.
     private static let clockPollSeconds: TimeInterval = 3
@@ -380,15 +404,25 @@ final class LiveModel: ObservableObject {
     }
 
     var durationLabel: String {
-        let secs = Int(sessionSeconds)
+        let secs = Int(displaySeconds)
         return String(format: "%d:%02d", secs / 60, secs % 60)
     }
 
     /// The big h:mm:ss counter on the recording screen (DingTalk puts the timer front and
     /// centre; `durationLabel` stays m:ss for the compact bar).
     var largeDurationLabel: String {
-        let secs = Int(sessionSeconds)
+        let secs = Int(displaySeconds)
         return String(format: "%d:%02d:%02d", secs / 3600, (secs % 3600) / 60, secs % 60)
+    }
+
+    /// 读数用的秒数 = 取三条来源里**最大的**那个（★ 2026-11-04）：
+    ///   · 卡片自己报的时钟（A1 有，其它设备为 nil）；
+    ///   · 已处理的包数 × 20 ms（精确，但会被主线程忙闲拖成"一跳一大格"）；
+    ///   · 墙钟（匀速，但断流期间也在走）。
+    /// 取 max 的结果是：正常时跟包数（最准），主线程被压住时跟墙钟（不卡），
+    /// 断流时也不至于倒退。
+    private var displaySeconds: TimeInterval {
+        max(sessionSeconds, clockSeconds)
     }
 
     /// Whether a recogniser is attached right now. `false` while running = the card is
@@ -460,6 +494,8 @@ final class LiveModel: ObservableObject {
         frames = 0
         bytes = 0
         deviceElapsed = nil
+        clockSeconds = 0
+        startSessionClock()
         error = nil
         errorNeedsPairing = false
         finalSegments = []
@@ -702,6 +738,45 @@ final class LiveModel: ObservableObject {
 
     // MARK: - device clock
 
+    /// 启动会话墙钟（★ 2026-11-04）。**与引擎无关**：不管当前是 Azure、阿里云
+    /// 还是自定义切片引擎，读数都以这条 0.25 s 的节拍匀速走。
+    private func startSessionClock() {
+        sessionClockTask?.cancel()
+        sessionClockMark = Date()
+        var ticks = 0
+        sessionClockTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard let self, !Task.isCancelled else { return }
+                guard self.isRunning else { return }
+                let now = Date()
+                let mark = self.sessionClockMark ?? now
+                self.sessionClockMark = now
+                // 暂停 / 链路恢复期间**不累加**，但 mark 照常推进——这样"暂停 3 分钟"
+                // 不会被记进录音里（与包计数口径一致）。
+                if !self.isPaused, !self.linkRecovering {
+                    self.clockSeconds += now.timeIntervalSince(mark)
+                }
+                // ★ 每 10 s 记一行"三条时间来源"，专门用来回答"读数为什么不走"：
+                //   包数时间 / 墙钟 / 卡片时钟 摆在一起，一眼就能看出是哪一路卡了。
+                ticks += 1
+                if ticks % 40 == 0 {
+                    self.diagLive(String(
+                        format: "clock packets=%.1fs wall=%.1fs device=%@ frames=%d bytes=%d provider=%@",
+                        self.sessionSeconds, self.clockSeconds,
+                        self.deviceElapsed.map { String(format: "%.1fs", $0) } ?? "-",
+                        self.frames, self.bytes, self.activeProvider))
+                }
+            }
+        }
+    }
+
+    private func stopSessionClock() {
+        sessionClockTask?.cancel()
+        sessionClockTask = nil
+        sessionClockMark = nil
+    }
+
     /// Keep `deviceElapsed` in sync with the card while the session runs.
     ///
     /// Stops on its own when the session ends (`isRunning == false`), and is restarted by
@@ -774,6 +849,7 @@ final class LiveModel: ObservableObject {
         streamTask = nil
         clockTask?.cancel()
         clockTask = nil
+        stopSessionClock()
 
         // ★ TicNote's "stop" does two extra things compared to D·NOTE, both in `liveStop()`:
         //   ① First stop the pull‑stream loop, then send the stop‑recording frame — otherwise the card's segment hasn't finished writing,
@@ -854,6 +930,7 @@ final class LiveModel: ObservableObject {
 
     private func handleDeviceStopped(source: any LiveAudioSource) async {
         streamTask = nil
+        stopSessionClock()
         commitPartial()
         // `closeASR()` clears `error` (it's meant for ASR-link errors on
         // pause / stop). The stream error that brought us here is the one
@@ -933,8 +1010,21 @@ final class LiveModel: ObservableObject {
         // Azure is also the chosen **live** engine. A user who pinned on-device /
         // local / remote for captions gets the LLM translation path instead —
         // otherwise "I picked on-device" silently came back as Azure on screen.
+        //
+        // ★★ 2026-11-04（用户截图：实时引擎=自动 + 当前服务=自定义服务 + 开了中→英
+        //     翻译，左下角却挂着 Azure 徽章）："自动"的含义是**跟随上方的顺序**，
+        //     所以这里判断的必须是"实际会跑的那个引擎"——
+        //     `liveProvider` 为空时它就是 `defaults.primary`，**不是恒真的空串**。
+        //     旧写法 `liveChoice.isEmpty || liveChoice == "azure"` 让"自动 + 主引擎
+        //     是 custom"的组合永远命中这条捷径，用户配的自定义服务在实时里
+        //     一次出场机会都没有（文件转写那侧早就改对了，实时这侧漏了）。
+        //     现在：主引擎是 custom → 走切片引擎 + LLM 翻译（`beginLiveTranslation`）；
+        //     主引擎确实是 azure → 行为与以前完全一致。
         let liveChoice = (config.config.defaults.asr.liveProvider ?? "").lowercased()
-        let azureIsLiveChoice = liveChoice.isEmpty || liveChoice == "azure"
+        let effectiveLiveEngine = liveChoice.isEmpty
+            ? config.config.defaults.asr.primary.lowercased()
+            : liveChoice
+        let azureIsLiveChoice = effectiveLiveEngine == "azure"
         if wantTranslation, azureUsable, azureIsLiveChoice, let azure,
            !deadASRProviders.contains("azuretranslate") {
             // ★★ The preferred option remains Azure real-time translation: the source and translated text **return together in the same stream**,
@@ -1083,6 +1173,30 @@ final class LiveModel: ObservableObject {
                     runEventLoop(aliyun: events)
                     return
                 }
+            case "custom":
+                // ★ 2026-11-04（用户："实时转录为啥不是我设置的自定义服务器"）：
+                // 自定义端点（OpenAI 兼容 / 百炼）没有 WS 双向流，只有
+                // `chat/completions` + `input_audio` 整段音频，所以这里走
+                // **5 s 切片准实时**（`BailianLiveASR`）。此前 custom 落到
+                // `default:` 被静默跳过，链路顺着 fallbacks 一路跑到 Azure，
+                // 用户配的服务器在实时里形同不存在。
+                if let custom = config.config.asrProviders.custom,
+                   !custom.endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let asr = BailianLiveASR(
+                        profile: opusProfile,
+                        endpoint: custom.endpoint,
+                        apiKey: custom.apiKey ?? "",
+                        model: custom.model ?? "",
+                        language: sourceLang)
+                    let events = try asr.connect()
+                    currentASR = .bailian(asr)
+                    activeProvider = "custom"
+                    activeASRKind = "custom"
+                    currentASRProducedResult = false
+                    diagLive("provider=custom (chunked \(URL(string: custom.endpoint)?.host ?? "-")) lang=\(sourceLang)")
+                    runEventLoop(bailian: events)
+                    return
+                }
             case "ondevice" where config.config.onDeviceASREnabled:
                 // Needs the phone's offline model for *this* language; if it isn't installed the
                 // only honest move is to skip it rather than start a recogniser that will fail
@@ -1106,6 +1220,9 @@ final class LiveModel: ObservableObject {
                     return
                 }
             default:
+                // ★ 2026-11-04: never skip silently. "provider=nothing happened"
+                // is the one log line that made the custom-endpoint bug invisible.
+                diagLive("provider=\(name) skipped: not a live engine")
                 break
             }
             } catch {
@@ -1154,12 +1271,18 @@ final class LiveModel: ObservableObject {
         translatePartial = nil
     }
 
-    /// Seconds of audio actually captured into `streamBuffer`. Used as the
-    /// transcript timestamp instead of wall-clock so paused gaps don't
-    /// desync the transcript from the saved clip.
+    /// Seconds of audio captured so far — the number every **timestamp** in this
+    /// screen is stamped with (in-flight line, finished segments, marks).
     ///
     /// `internal` on purpose: `LiveView` stamps the in-flight partial line with it.
-    var capturedDuration: TimeInterval { sessionSeconds }
+    ///
+    /// ★★ 2026-11-04（用户："阿里云/百炼的实时有语音，但秒数计时不是正常读秒，只有
+    ///   Azure 正常"）：改成 `displaySeconds`（取"包数 / 卡片时钟 / 墙钟"三者最大值）。
+    ///   只取包数时，主线程被解码压住的那些批次会让时间戳成批跳/停住——字幕上的
+    ///   0:05、0:10 就会挤在一起。墙钟是与引擎无关的匀速来源，这一点比"严格等于
+    ///   已解码音频长度"更重要：用户读的是"我说这句话的时候是第几秒"。
+    ///   ⚠️ 落盘时长不读这个值（`saveAndCleanup` 用分段的 `end - start`）。
+    var capturedDuration: TimeInterval { displaySeconds }
 
     // MARK: - event loops
 
@@ -1184,6 +1307,7 @@ final class LiveModel: ObservableObject {
         if !currentASRProducedResult, !activeProvider.isEmpty {
             // ★ (2026-10-20) Dead-mark the **kind**, not the display name: a failed
             // Azure *translation* link must not poison plain Azure transcription.
+            let failedProvider = activeProvider
             deadASRProviders.insert(activeASRKind.isEmpty ? activeProvider.lowercased() : activeASRKind)
             log.warning("ASR provider \(self.activeProvider, privacy: .public) produced nothing before closing — trying the next one")
             asrReconnectAttempts = 0
@@ -1192,6 +1316,15 @@ final class LiveModel: ObservableObject {
                       self.currentASR == nil, let config = self.config else { return }
                 do {
                     try self.openASR(config: config)
+                    // ★★ 2026-11-04（用户："实时没有跟随设置的 ASR"的另一半）：
+                    //   回落本身是对的——主引擎连不通时总得有东西出字；
+                    //   错的是**不说**。旧逻辑换引擎后徽章悄悄从 Custom 变 Azure，
+                    //   用户只会觉得"我的设置没生效"。现在把这次顶替明说。
+                    if self.activeProvider != failedProvider {
+                        self.serviceNotice = L10n.ASR.liveFellBack(
+                            from: failedProvider, to: self.activeProvider,
+                            reason: e?.localizedDescription)
+                    }
                 } catch {
                     // Same rule as `start`: losing the speech service mid-session degrades the
                     // session, it does not end it. The card is still recording; the clip will be
@@ -1295,6 +1428,34 @@ final class LiveModel: ObservableObject {
                     }
                     self.partialText = ""
                 case .closed(let e):
+                    self.handleASRClosed(e)
+                }
+            }
+        }
+    }
+
+    /// ★ 2026-11-04: 自定义端点的分段准实时。没有 partial —— 一次请求就是一整段
+    /// （5 s），回来的必然是定稿；`timestamp` 让每行落在它真正说话的分钟数上。
+    private func runEventLoop(bailian events: AsyncStream<BailianLiveASR.Event>) {
+        eventTask = Task { [weak self] in
+            for await event in events {
+                guard let self else { break }
+                switch event {
+                case .partial(let t):
+                    if !t.isEmpty {
+                        self.noteASRResult()
+                        self.partialText = t
+                    }
+                case .final(let t):
+                    self.noteASRResult()
+                    if !t.isEmpty {
+                        let ts = self.capturedDuration
+                        self.finalSegments.append(LiveSegment(text: t, translation: nil, timestamp: ts))
+                        self.diagLive("custom final at=\(Int(ts))s chars=\(t.count)")
+                    }
+                    self.partialText = ""
+                case .closed(let e):
+                    self.diagLive("custom engine closed: \(e?.localizedDescription ?? "clean")")
                     self.handleASRClosed(e)
                 }
             }

@@ -28,11 +28,22 @@ enum WatchHomeMenu: String, CaseIterable, Identifiable, Codable {
     case history
     case language
     case settings
-    // The last three are the "can be added on" ones.
-    case queue
+    // The last one is the "can be added on" one.
+    //
+    // ★ 2026-11-03（用户："手表里面的回顾跟最近功能都是一样的" + "这个页面跟等待同步到
+    // iPhone 页面重复了"）：删掉 `.queue` 与 `.recap` 两个菜单项——
+    // · 「回顾」和首页第 2 页「最近」是同一份 `WatchRecapStore` 数据的两张皮，留一个（最近）；
+    // · 「待传队列」和第 3 页「同步」重复，队列内容已并入同步页（列表），左上角待传胶囊
+    //   也直跳同步页。旧值还留在 `UserDefaults` 里也没关系，`compactMap` 会把未知值丢掉。
     case about
-    // ★ 2026-10-23: Siri-Recap-style digest pushed from the phone.
-    case recap
+    /// ★ 2026-11-03 八轮（用户："全天候录音要能监控 APP 的电量消耗，加在菜单栏里"）：
+    /// 电量 / 耗电页。**默认不进菜单**（`defaultItems` 不含它），用户在手表「设置 →
+    /// 快捷菜单」里勾上才出现——老用户的首页不该突然多一行。
+    case battery
+    /// ★ 2026-11-04（用户："需要在 Apple Watch 里面加入一个声纹，录制声纹说话"）：
+    /// 声纹录制页。**放进默认菜单**——这是一个需要用户主动做一次的动作，
+    /// 藏在"快捷菜单"设置里等于没人会做。
+    case voiceprint
 
     var id: String { rawValue }
 
@@ -42,21 +53,26 @@ enum WatchHomeMenu: String, CaseIterable, Identifiable, Codable {
         case .history:    return L10n.Watch.transferHistory
         case .language:   return L10n.Settings.language
         case .settings:   return L10n.Watch.menuSettings
-        case .queue:      return L10n.Watch.pendingHeader
         case .about:      return L10n.Settings.version
-        case .recap:      return L10n.Watch.recapTitle
+        case .battery:    return L10n.Watch.menuBattery
+        case .voiceprint: return L10n.Voiceprint.title
         }
     }
 
+    /// ★ 2026-11-03（V4 原型）：全部换成**描边版**（去掉 `.fill`）。
+    ///
+    /// 菜单页的材质改成了「发丝线行 + 1.5pt 描边图标」，和「最近 / 同步」两页同构。
+    /// 实心图标在这套材质里像一颗颗按钮，会把行的"轻"全部压掉。
     var symbol: String {
         switch self {
-        case .appearance: return "paintpalette.fill"
-        case .history:    return "arrow.up.arrow.down.circle.fill"
+        case .appearance: return "paintpalette"
+        case .history:    return "arrow.up.arrow.down.circle"
         case .language:   return "globe"
-        case .settings:   return "gearshape.fill"
-        case .queue:      return "tray.full.fill"
-        case .about:      return "info.circle.fill"
-        case .recap:      return "sparkles"
+        case .settings:   return "gearshape"
+        case .about:      return "info.circle"
+        // 「电池 75%」的描边版，和上面四个同为 1.5pt 描边，不抢焦点。
+        case .battery:    return "battery.75percent"
+        case .voiceprint: return "person.wave.2"
         }
     }
 
@@ -68,9 +84,9 @@ enum WatchHomeMenu: String, CaseIterable, Identifiable, Codable {
         case .history:    return L10n.Watch.menuHintHistory
         case .language:   return L10n.Watch.menuHintLanguage
         case .settings:   return L10n.Watch.menuHintSettings
-        case .queue:      return L10n.Watch.menuHintQueue
         case .about:      return L10n.Watch.menuHintAbout
-        case .recap:      return L10n.Watch.menuHintRecap
+        case .battery:    return L10n.Watch.menuHintBattery
+        case .voiceprint: return L10n.Watch.menuHintVoiceprint
         }
     }
 
@@ -86,9 +102,9 @@ enum WatchHomeMenu: String, CaseIterable, Identifiable, Codable {
         case .history:    WatchTransferHistoryView()
         case .language:   WatchLanguageView()
         case .settings:   WatchSettingsView()
-        case .queue:      WatchQueueView()
         case .about:      WatchAboutView()
-        case .recap:      WatchRecapView()
+        case .battery:    WatchBatteryView()
+        case .voiceprint: WatchVoiceprintView()
         }
     }
 }
@@ -105,7 +121,7 @@ final class WatchMenuPreferences: ObservableObject {
 
     /// Defaults to the original 4 corner dots. **Upgrading must still leave these four** —
     /// if an existing user never touched the settings yet the home screen lost two entries, that's losing a feature, not gaining one.
-    static let defaultItems: [WatchHomeMenu] = [.appearance, .history, .language, .settings]
+    static let defaultItems: [WatchHomeMenu] = [.appearance, .history, .language, .settings, .voiceprint]
 
     @Published var enabled: Set<WatchHomeMenu> {
         // `didSet` doesn't fire during init, so reading from disk in the initialiser won't write back to disk.

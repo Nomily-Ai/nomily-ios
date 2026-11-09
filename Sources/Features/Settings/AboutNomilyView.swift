@@ -91,6 +91,21 @@ struct AboutNomilyView: View {
             }
 
             Section {
+                // ★ 2026-11-03：站内那一份免责声明（首启同意页的同一套文案）。
+                //   放在「用户协议 / 隐私政策」两条外链之上——外链是法律全文，
+                //   这一条是用户在 App 里真正同意过的东西，随时能回看。
+                NavigationLink {
+                    LegalNoticeView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "checkmark.shield")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28)
+                        Text(L10n.Consent.aboutRow)
+                            .foregroundStyle(.primary)
+                    }
+                }
                 linkRow(nil, L10n.About.terms, url: Links.terms)
                 linkRow(nil, L10n.About.privacy, url: Links.privacy)
             } header: {

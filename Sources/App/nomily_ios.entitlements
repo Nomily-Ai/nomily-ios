@@ -4,5 +4,9 @@
 <dict>
 	<key>com.apple.developer.networking.HotspotConfiguration</key>
 	<true/>
+	<!-- ⛔ iCloud entitlement 刻意不加（2026-11-02 实测）：CLI 无法为新增能力
+	     重签（"No Accounts"），需要 Xcode GUI 登录账号手动开能力——与 HealthKit
+	     当年同款问题（见 project.yml 注释）。iCloud 默认路径改由「首次进入
+	     自动弹文件选择器（根目录即 iCloud 云盘）+ 页脚指引」实现，无需签名。 -->
 </dict>
 </plist>

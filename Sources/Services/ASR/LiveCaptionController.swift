@@ -116,8 +116,23 @@ final class LiveCaptionController: ObservableObject {
                     log.info("phone captions engine=ondevice")
                     return engine
                 }
+            case "custom":
+                // ★ 2026-11-04：手机麦克风也是裸 PCM，和卡片直连一样走
+                // 自定义端点的 5 s 切片准实时。原来 custom 被 default 的
+                // `continue` 吞掉，用户选的自定义服务器在实时链路里不存在。
+                if let custom = config.asrProviders.custom,
+                   !custom.endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    log.info("phone captions engine=custom chunked lang=\(localeID, privacy: .public)")
+                    TicNoteDiagLog.log("XLATE", "phone captions engine=custom (chunked)")
+                    return PlaudBailianLiveTranscriber(
+                        endpoint: custom.endpoint,
+                        apiKey: custom.apiKey ?? "",
+                        model: custom.model ?? "",
+                        language: config.lastSourceLang ?? "")
+                }
             default:
-                // local / remote / custom: Opus-only — the phone mic produces PCM.
+                // local / remote: Opus-only — the phone mic produces PCM.
+                TicNoteDiagLog.log("XLATE", "phone captions skip \(name): not a PCM live engine")
                 continue
             }
         }
@@ -142,10 +157,11 @@ final class LiveCaptionController: ObservableObject {
         engine.start()
         switch engine.unavailable {
         case .modelMissing: notice = L10n.Plaud.liveModelMissing
-        case .noRecognizer, .notAuthorized, .azureMissing, .aliyunMissing:
+        case .noRecognizer, .notAuthorized, .azureMissing, .aliyunMissing, .customMissing:
             notice = L10n.Plaud.liveNeedsPermission
         case .azureFailed(let message): notice = L10n.Plaud.liveAzureFailed(message)
         case .aliyunFailed(let message): notice = L10n.Plaud.liveAliyunFailed(message)
+        case .customFailed(let message): notice = L10n.Plaud.liveCustomFailed(message)
         case .none: notice = nil
         }
         providerName = engine.providerName
