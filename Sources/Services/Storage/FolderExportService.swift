@@ -28,6 +28,9 @@ final class FolderExportService: ObservableObject {
     /// ★ 2026-10-30：自动导出是否连录音一起。把页面上的「也导出录音」持久化
     /// 到服务里——自动路径没有 UI 在场，得自己读这份状态。
     static let audioKey = "export_folder_sync_audio"
+    /// ★ 2026-11-09（用户："可以选择上传哪些"）：文件夹目的地要写哪些产物。
+    /// 与 autoEnabled/syncAudio 同一套 UserDefaults 持久化模式。
+    static let contentKey = "export_folder_upload_content"
 
     @Published var isRunning = false
     @Published var lastReport: String?
@@ -44,10 +47,24 @@ final class FolderExportService: ObservableObject {
     @Published var syncAudio: Bool {
         didSet { UserDefaults.standard.set(syncAudio, forKey: Self.audioKey) }
     }
+    /// ★ 2026-11-09：要写哪些产物（转录/摘要/待办/导图/章节/转写数据/资料包）。
+    @Published var uploadContent: UploadContent {
+        didSet {
+            if let data = try? JSONEncoder().encode(uploadContent) {
+                UserDefaults.standard.set(data, forKey: Self.contentKey)
+            }
+        }
+    }
 
     private init() {
         autoEnabled = UserDefaults.standard.bool(forKey: Self.autoKey)
         syncAudio = UserDefaults.standard.bool(forKey: Self.audioKey)
+        if let data = UserDefaults.standard.data(forKey: Self.contentKey),
+           let decoded = try? JSONDecoder().decode(UploadContent.self, from: data) {
+            uploadContent = decoded
+        } else {
+            uploadContent = UploadContent()
+        }
     }
 
     /// True when the user picked a folder before (bookmark resolves).
@@ -291,34 +308,39 @@ final class FolderExportService: ObservableObject {
         let urls = StorageLocations.transcriptURLs(for: clipName)
 
         // 文本三件套：转写 txt / 转写数据 json / 章节 json（有就带）。
-        count(copyItem(urls.txt, as: L10n.WebDAV.remoteTranscript, into: subdirectory,
-                       folder: folder, fm: fm, failures: &failures), &copied, &skipped)
-        if fm.fileExists(atPath: urls.json.path) {
+        // ★ 2026-11-09：每类产物都听 uploadContent 开关的。
+        if uploadContent.transcript {
+            count(copyItem(urls.txt, as: L10n.WebDAV.remoteTranscript, into: subdirectory,
+                           folder: folder, fm: fm, failures: &failures), &copied, &skipped)
+        }
+        if uploadContent.asrJSON, fm.fileExists(atPath: urls.json.path) {
             count(copyItem(urls.json, as: L10n.WebDAV.remoteASR, into: subdirectory,
                            folder: folder, fm: fm, failures: &failures), &copied, &skipped)
         }
         let chapters = dir.appendingPathComponent("\(base).chapters.json")
-        if fm.fileExists(atPath: chapters.path) {
+        if uploadContent.chapters, fm.fileExists(atPath: chapters.path) {
             count(copyItem(chapters, as: L10n.WebDAV.remoteChapters, into: subdirectory,
                            folder: folder, fm: fm, failures: &failures), &copied, &skipped)
         }
 
         // 摘要.md：与网盘上那份同源（readableNote 的 markdown）。
-        if let note = WebDAVSyncService.readableNote(base: base, in: dir) {
+        if uploadContent.summary, let note = WebDAVSyncService.readableNote(base: base, in: dir) {
             count(writeData(Data(note.markdown.utf8), as: L10n.WebDAV.remoteNote, into: subdirectory,
                             folder: folder, fm: fm, failures: &failures), &copied, &skipped)
         }
 
         // 待办.md：与网盘/分享包同源（ShareBundle.todoMarkdown）。
-        if let todos = ShareBundle.todoMarkdown(
-            base: base, title: WebDAVSyncService.readableTitle(base: base, in: dir), in: dir
-        ) {
+        if uploadContent.todos,
+           let todos = ShareBundle.todoMarkdown(
+               base: base, title: WebDAVSyncService.readableTitle(base: base, in: dir), in: dir
+           ) {
             count(writeData(Data(todos.utf8), as: L10n.WebDAV.remoteTodos, into: subdirectory,
                             folder: folder, fm: fm, failures: &failures), &copied, &skipped)
         }
 
         // 思维导图.png：同一条渲染管线（有摘要有大纲才有图）。
-        if let note = WebDAVSyncService.readableNote(base: base, in: dir),
+        if uploadContent.mindMap,
+           let note = WebDAVSyncService.readableNote(base: base, in: dir),
            let png = MindMapSnapshot.pngData(markdown: noteBody(note), title: note.title),
            !png.isEmpty {
             count(writeData(png, as: L10n.WebDAV.remoteMindMap, into: subdirectory,

@@ -6471,3 +6471,37 @@ enum L10n {
 }
 
 // swiftlint:enable type_body_length file_length
+
+/// ★ 2026-11-09（用户："可以选择上传哪些"）：每个目的地的产物开关
+/// （WebDAV 编辑页与文件夹导出页共用同一组词条）。
+enum L10nUploadContent {
+    static var section: String {
+        NSLocalizedString("upload.section", value: "What to Upload",
+                          comment: "Storage destination: header of the per-artefact toggles")
+    }
+    static var footer: String {
+        NSLocalizedString("upload.footer", value: "Pick what lands in this destination. Recording audio has its own switch above.",
+                          comment: "Storage destination: footer of the per-artefact toggles")
+    }
+    static var transcript: String {
+        NSLocalizedString("upload.transcript", value: "Transcript Text", comment: "Artefact toggle: the plain-text transcript")
+    }
+    static var asr: String {
+        NSLocalizedString("upload.asr", value: "Transcription Data", comment: "Artefact toggle: the JSON with timing/speaker metadata")
+    }
+    static var summary: String {
+        NSLocalizedString("upload.summary", value: "Summary", comment: "Artefact toggle: the summary markdown")
+    }
+    static var todos: String {
+        NSLocalizedString("upload.todos", value: "To-dos", comment: "Artefact toggle: the to-do list")
+    }
+    static var mindMap: String {
+        NSLocalizedString("upload.mind_map", value: "Mind Map", comment: "Artefact toggle: the rendered mind-map image")
+    }
+    static var chapters: String {
+        NSLocalizedString("upload.chapters", value: "Chapters", comment: "Artefact toggle: the chapter timeline")
+    }
+    static var bundle: String {
+        NSLocalizedString("upload.bundle", value: "Resource Bundle (zip)", comment: "Artefact toggle: the all-in-one zip")
+    }
+}

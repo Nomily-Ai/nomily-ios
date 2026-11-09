@@ -988,6 +988,8 @@ struct WebDAVConfig: Codable, Equatable, Identifiable {
     /// URLSession 默认直接拒握。开了这个开关就信任该服务器的任何证书——
     /// 只对这一条备份配置生效，且默认关闭；走 Tailscale/局域网时 HTTP 也够安全。
     var allowSelfSigned: Bool
+    /// ★ 2026-11-09：这个目的地要传哪些产物（见 UploadContent）。
+    var uploadContent: UploadContent = UploadContent()
 
     var isConfigured: Bool {
         !host.trimmingCharacters(in: .whitespaces).isEmpty
@@ -998,6 +1000,7 @@ struct WebDAVConfig: Codable, Equatable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, host, port, useHTTPS, username, basePath, preset, password, syncAudio
         case allowSelfSigned = "allow_self_signed"
+        case uploadContent = "upload_content"
     }
 
     init(id: String? = nil,
@@ -1009,7 +1012,8 @@ struct WebDAVConfig: Codable, Equatable, Identifiable {
          preset: String? = nil,
          password: String? = nil,
          syncAudio: Bool = false,
-         allowSelfSigned: Bool = false) {
+         allowSelfSigned: Bool = false,
+         uploadContent: UploadContent = UploadContent()) {
         self.id = id ?? UUID().uuidString
         self.host = host
         self.port = port
@@ -1020,6 +1024,7 @@ struct WebDAVConfig: Codable, Equatable, Identifiable {
         self.password = password
         self.syncAudio = syncAudio
         self.allowSelfSigned = allowSelfSigned
+        self.uploadContent = uploadContent
     }
 
     /// 手写解码：老配置文件里没有 `allow_self_signed`，缺了按 false 处理，
@@ -1036,6 +1041,26 @@ struct WebDAVConfig: Codable, Equatable, Identifiable {
         password = try c.decodeIfPresent(String.self, forKey: .password)
         syncAudio = try c.decodeIfPresent(Bool.self, forKey: .syncAudio) ?? false
         allowSelfSigned = try c.decodeIfPresent(Bool.self, forKey: .allowSelfSigned) ?? false
+        uploadContent = try c.decodeIfPresent(UploadContent.self, forKey: .uploadContent) ?? UploadContent()
+    }
+}
+
+/// ★ 2026-11-09（用户："数据存储位置，需要一个设置就是可以选择上传哪些"）：
+/// 一个目的地要往服务器/文件夹里放哪些产物。录音走独立的 syncAudio 开关
+/// （它是"要拖带宽"的决定，和"要不要这份文件"分开），其余七类默认全开。
+/// 解码缺省 = 全开，老配置行为不变。
+struct UploadContent: Codable, Equatable {
+    var transcript: Bool = true   // 转录全文.txt
+    var asrJSON: Bool = true      // 转写数据.json
+    var summary: Bool = true      // 摘要.md
+    var todos: Bool = true        // 待办.md
+    var mindMap: Bool = true      // 思维导图.png
+    var chapters: Bool = true     // 章节.json
+    var bundle: Bool = true       // 资料包.zip
+
+    enum CodingKeys: String, CodingKey {
+        case transcript, asrJSON = "asr_json", summary, todos, mindMap = "mind_map"
+        case chapters, bundle
     }
 }
 

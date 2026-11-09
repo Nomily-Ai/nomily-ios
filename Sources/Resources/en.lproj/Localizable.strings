@@ -2170,3 +2170,14 @@
 "webdav.remote.todos" = "To-dos.md";
 
 "webdav.server_count" = "%d servers";
+
+/* per-destination artefact toggles */
+"upload.section" = "What to Upload";
+"upload.footer" = "Pick what lands in this destination. Recording audio has its own switch above.";
+"upload.transcript" = "Transcript Text";
+"upload.asr" = "Transcription Data";
+"upload.summary" = "Summary";
+"upload.todos" = "To-dos";
+"upload.mind_map" = "Mind Map";
+"upload.chapters" = "Chapters";
+"upload.bundle" = "Resource Bundle (zip)";

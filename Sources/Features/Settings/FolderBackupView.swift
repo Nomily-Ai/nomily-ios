@@ -79,6 +79,21 @@ struct FolderBackupView: View {
                 Text(L10n.FolderExport.syncAudioFooter)
             }
 
+            // ★ 2026-11-09（用户："可以选择上传哪些"）：写哪些产物到所选文件夹。
+            Section {
+                Toggle(L10nUploadContent.transcript, isOn: $exporter.uploadContent.transcript)
+                Toggle(L10nUploadContent.asr, isOn: $exporter.uploadContent.asrJSON)
+                Toggle(L10nUploadContent.summary, isOn: $exporter.uploadContent.summary)
+                Toggle(L10nUploadContent.todos, isOn: $exporter.uploadContent.todos)
+                Toggle(L10nUploadContent.mindMap, isOn: $exporter.uploadContent.mindMap)
+                Toggle(L10nUploadContent.chapters, isOn: $exporter.uploadContent.chapters)
+                Toggle(L10nUploadContent.bundle, isOn: $exporter.uploadContent.bundle)
+            } header: {
+                Text(L10nUploadContent.section)
+            } footer: {
+                Text(L10nUploadContent.footer)
+            }
+
             Section {
                 Button {
                     Task { await exporter.exportAll() }

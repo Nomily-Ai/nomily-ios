@@ -234,6 +234,8 @@ struct WebDAVView: View {
     @State private var password = ""
     @State private var basePath = "/nomily"
     @State private var syncAudio = false
+    /// ★ 2026-11-09（用户："可以选择上传哪些"）：这个目的地传哪些产物。
+    @State private var upload = UploadContent()
     @State private var preset = ""
 
     @State private var probing = false
@@ -415,6 +417,22 @@ struct WebDAVView: View {
                 Text(L10n.WebDAV.syncNowFooter)
             }
 
+            // ★ 2026-11-09（用户："可以选择上传哪些"）：这个目的地传哪些产物。
+            //   录音是上面那条「也传录音」开关（它决定要不要拖带宽）。
+            Section {
+                Toggle(L10nUploadContent.transcript, isOn: $upload.transcript)
+                Toggle(L10nUploadContent.asr, isOn: $upload.asrJSON)
+                Toggle(L10nUploadContent.summary, isOn: $upload.summary)
+                Toggle(L10nUploadContent.todos, isOn: $upload.todos)
+                Toggle(L10nUploadContent.mindMap, isOn: $upload.mindMap)
+                Toggle(L10nUploadContent.chapters, isOn: $upload.chapters)
+                Toggle(L10nUploadContent.bundle, isOn: $upload.bundle)
+            } header: {
+                Text(L10nUploadContent.section)
+            } footer: {
+                Text(L10nUploadContent.footer)
+            }
+
             // ★ 2026-11-09 多账户：编辑已保存的账户时，切换备份目标 / 移除账户
             //   都在这里显式完成（旧的"主机清空 = 删除"已废）。
             if accountID != nil {
@@ -489,16 +507,18 @@ struct WebDAVView: View {
     // MARK: - Load / save
 
     private func load() {
-        // ★ 2026-11-09 多账户：编辑模式从指定账户读，新建模式用预设预填。
+        // ★ 2026-11-09 多账户：编辑模式从指定账户读，新建模式**从空白开始**
+        //   （只按预设预填端口/HTTPS/目录）——不能再回落读 `config.webdav`，
+        //   否则"添加极空间"进去看到的还是 NC 的主机和账号（用户实测反馈）。
         let cfg: WebDAVConfig?
         if let accountID,
            let account = configService.config.webdavAccounts?.first(where: { $0.id == accountID }) {
             cfg = account
         } else if accountID != nil {
-            // 账户已被删除（左滑后返回）：不回填，也不该再落盘——标脏由 save 里挡。
+            // 账户已被删除（左滑后返回）：不回填，也不该再落盘——save 里挡。
             cfg = nil
         } else {
-            cfg = configService.config.webdav
+            cfg = nil
         }
         host = cfg?.host ?? ""
         portText = String(cfg?.port ?? 443)
@@ -508,6 +528,7 @@ struct WebDAVView: View {
         password = cfg?.password ?? ""
         basePath = cfg?.basePath ?? "/nomily"
         syncAudio = cfg?.syncAudio ?? false
+        upload = cfg?.uploadContent ?? UploadContent()
         // ★ 2026-10-30：从类型选择弹层跳进来且还没有配置时，预选该类型并把
         //   端口/HTTPS/目录预填好（原来靠已删除的 Picker onChange 触发）。
         preset = cfg?.preset ?? initialPreset ?? ""
@@ -553,7 +574,8 @@ struct WebDAVView: View {
             // ★ 2026-10-30：进 Keychain 之前就清干净，别把不可见字符存下去。
             password: password.credentialNormalized.isEmpty ? nil : password.credentialNormalized,
             syncAudio: syncAudio,
-            allowSelfSigned: allowSelfSigned
+            allowSelfSigned: allowSelfSigned,
+            uploadContent: upload
         )
         if let accountID { cfg.id = accountID } // 编辑：保持原账户身份（密码槽跟着 id 走）
         // 新建自动成为「使用中」；编辑不动使用中标记（切换走显式按钮）。

@@ -2536,3 +2536,14 @@
 "webdav.remote.todos" = "待办.md";
 
 "webdav.server_count" = "共 %d 台";
+
+/* ★ 2026-11-09 每目的地产物开关 */
+"upload.section" = "上传哪些内容";
+"upload.footer" = "勾选这个目的地要放的产物。录音是否上传是上面单独的「也传录音」开关。";
+"upload.transcript" = "转录全文";
+"upload.asr" = "转写数据";
+"upload.summary" = "摘要";
+"upload.todos" = "待办";
+"upload.mind_map" = "思维导图";
+"upload.chapters" = "章节";
+"upload.bundle" = "资料包（zip）";

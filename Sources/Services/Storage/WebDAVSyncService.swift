@@ -59,7 +59,9 @@ final class WebDAVSyncService: ObservableObject {
     /// Sync one clip's artefacts (called after transcription).
     func sync(clipName: String, config: AppConfig) async {
         guard let client = Self.client(from: config) else { return }
-        _ = try? await syncClip(clipName, client: client, syncAudio: config.webdav?.syncAudio ?? false)
+        _ = try? await syncClip(clipName, client: client,
+                                syncAudio: config.webdav?.syncAudio ?? false,
+                                content: config.webdav?.uploadContent ?? UploadContent())
     }
 
     /// Sweep every clip in the library that has a transcript.
@@ -91,7 +93,8 @@ final class WebDAVSyncService: ObservableObject {
         Self.trace("syncAll start · \(clips.count) clips · base \(cfg.basePath)")
         for clip in clips {
             do {
-                if try await syncClip(clip, client: client, syncAudio: cfg.syncAudio) {
+                if try await syncClip(clip, client: client, syncAudio: cfg.syncAudio,
+                                      content: cfg.uploadContent) {
                     outcome.uploaded += 1
                 } else {
                     outcome.skipped += 1
@@ -112,7 +115,9 @@ final class WebDAVSyncService: ObservableObject {
     /// Uploads the transcript pair (and audio when asked). Returns true if
     /// anything was uploaded, false when the server already has it (HEAD 200)
     /// — keeps repeated sweeps cheap.
-    private func syncClip(_ clipName: String, client: WebDAVClient, syncAudio: Bool) async throws -> Bool {
+    /// ★ 2026-11-09：`content` 决定传哪些产物（用户："可以选择上传哪些"）。
+    private func syncClip(_ clipName: String, client: WebDAVClient, syncAudio: Bool,
+                          content: UploadContent) async throws -> Bool {
         var uploaded = false
         let urls = StorageLocations.transcriptURLs(for: clipName)
         let base = (clipName as NSString).deletingPathExtension
@@ -121,12 +126,15 @@ final class WebDAVSyncService: ObservableObject {
 
         // ★ 2026-11-02：每条录音一个「日期 主题」文件夹，文件名给人看。总结/
         //   章节有就顺带传——在网盘网页端不用下载就能读，这才叫备份。
-        var artefacts: [(local: URL, remote: String)] = [
-            (urls.txt, L10n.WebDAV.remoteTranscript),
-            (urls.json, L10n.WebDAV.remoteASR),
-        ]
+        var artefacts: [(local: URL, remote: String)] = []
+        if content.transcript {
+            artefacts.append((urls.txt, L10n.WebDAV.remoteTranscript))
+        }
+        if content.asrJSON {
+            artefacts.append((urls.json, L10n.WebDAV.remoteASR))
+        }
         let chapters = dir.appendingPathComponent("\(base).chapters.json")
-        if FileManager.default.fileExists(atPath: chapters.path) {
+        if content.chapters, FileManager.default.fileExists(atPath: chapters.path) {
             artefacts.append((chapters, L10n.WebDAV.remoteChapters))
         }
         var confirmed = Set<String>()   // 新名字里确认已在服务器上的（本次传过或 HEAD 200）
@@ -147,7 +155,7 @@ final class WebDAVSyncService: ObservableObject {
         // 改回可编辑文本。PDF（`NotePDFRenderer`）留作以后"导出/分享"用，不再上传。
         // SHA256 没变且服务器已有就不重传——HEAD 只知道"有没有"，不知道
         // "内容变没变"，所以本地哈希是对"改过总结"的兜底。
-        if let note = Self.readableNote(base: base, in: dir) {
+        if content.summary, let note = Self.readableNote(base: base, in: dir) {
             let hash = Self.sha256Hex(Data(note.markdown.utf8))
             let stored = UserDefaults.standard.string(forKey: Self.noteHashKey(base))
             let remoteNote = "\(folder)/\(L10n.WebDAV.remoteNote)"
@@ -171,7 +179,8 @@ final class WebDAVSyncService: ObservableObject {
         // 的待办清单，和摘要、导图并列）。内容与分享包里的待办完全同源
         // （ShareBundle.todoMarkdown：AI 抓的行动项 + 手动添加，复选框、
         // 已完成的排后面）。没有待办就不放空文件。
-        if let todos = ShareBundle.todoMarkdown(base: base, title: Self.readableTitle(base: base, in: dir), in: dir) {
+        if content.todos,
+           let todos = ShareBundle.todoMarkdown(base: base, title: Self.readableTitle(base: base, in: dir), in: dir) {
             let hash = Self.sha256Hex(Data(todos.utf8))
             let key = Self.noteHashKey(base).replacingOccurrences(of: "note", with: "todos")
             let stored = UserDefaults.standard.string(forKey: key)
@@ -199,9 +208,9 @@ final class WebDAVSyncService: ObservableObject {
         // ★ 渲染结果留着给下面的 资料包.zip 复用：同一条录音一轮里只为导图
         //   付一次渲染成本（否则整轮同步的耗时几乎翻倍）。
         let summaryText = Self.summaryText(base: base, in: dir)
-        let mapPNG: Data? = summaryText.flatMap { text in
+        let mapPNG: Data? = content.mindMap ? summaryText.flatMap { text in
             MindMapSnapshot.pngData(markdown: text, title: Self.readableTitle(base: base, in: dir))
-        }
+        } : nil
         if let png = mapPNG, !png.isEmpty {
             let hash = Self.sha256Hex(png)
             let key = Self.noteHashKey(base).replacingOccurrences(of: "note", with: "mindmap")
@@ -234,7 +243,7 @@ final class WebDAVSyncService: ObservableObject {
             modified: Self.recordedDate(base: base, in: dir),
             mindMapPNG: mapPNG
         )
-        if summaryText != nil,
+        if content.bundle, summaryText != nil,
            let zipURL = try? await ShareBundle.makeZip(for: clipName, options: bundleOptions) {
             let data = FileManager.default.contents(atPath: zipURL.path)
             try? FileManager.default.removeItem(at: zipURL)
