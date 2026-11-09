@@ -54,3 +54,6 @@ Local.xcconfig
 # Internal development notes, not published with the source
 CLAUDE.md
 HANDOFF.md
+
+# A1 key extractor — local-only tooling (ships a signed .app; keep off the public repo)
+tools/a1/

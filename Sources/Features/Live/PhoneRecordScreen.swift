@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 /// Phone-microphone recording screen with live captions (★ 2026-10-22, 任务一).
@@ -18,6 +19,8 @@ struct PhoneRecordScreen: View {
     @StateObject private var recorder = PhoneMicRecorder()
     @StateObject private var captions = LiveCaptionController()
     @State private var savedName: String?
+    /// ★ 2026-11-06：麦克风"前置说明"弹窗（见 `requestStart`）。
+    @State private var showMicPrimer = false
     /// ★ 2026-10-26: set when the user came here **from a card's live screen**
     /// (the mic button on `PlaudLiveScreen`). Non-nil → a "back to card" button
     /// renders in the header; without it there was no way back while a card was
@@ -33,6 +36,12 @@ struct PhoneRecordScreen: View {
             captionBody
             Divider()
             controlBar
+        }
+        .confirmationDialog(L10n.Phone.micPrimerTitle, isPresented: $showMicPrimer, titleVisibility: .visible) {
+            Button(L10n.Phone.record) { startRecording() }
+            Button(L10n.Common.cancel, role: .cancel) {}
+        } message: {
+            Text(L10n.Phone.micPrimerBody)
         }
         .onChange(of: recorder.isRunning) { running in
             UIApplication.shared.isIdleTimerDisabled = running
@@ -194,7 +203,7 @@ struct PhoneRecordScreen: View {
     private var controlBar: some View {
         VStack(spacing: 10) {
             Button {
-                recorder.isRunning ? finishRecording() : startRecording()
+                recorder.isRunning ? finishRecording() : requestStart()
             } label: {
                 ZStack {
                     Circle()
@@ -219,6 +228,19 @@ struct PhoneRecordScreen: View {
     }
 
     // MARK: - Actions
+
+    /// ★ 2026-11-06（首次启动引导的缺口）：麦克风的系统弹窗是"冷"的——用户只看到
+    /// 一句系统文案就被要求当场决定，拒绝后还得自己翻设置改回来。iOS 的惯例是
+    /// 先在本 App 里说清"为什么、音频去哪"，再由系统弹窗确认。这里只在
+    /// `.undetermined` 时前置一屏：已授权（老用户）绝不重复打扰，已拒绝的出口
+    /// 是错误横幅里现成的「去设置」。
+    private func requestStart() {
+        if AVAudioSession.sharedInstance().recordPermission == .undetermined {
+            showMicPrimer = true
+        } else {
+            startRecording()
+        }
+    }
 
     private func startRecording() {
         savedName = nil

@@ -168,6 +168,21 @@ struct WebDAVClient {
         }
     }
 
+    /// DELETE one remote file. 404 counts as success — the goal is "it's gone",
+    /// and the caller (legacy-name migration) may run against a folder that was
+    /// already cleaned by hand.
+    func deleteFile(at remotePath: String) async throws {
+        guard let req = request(method: "DELETE", path: remotePath) else {
+            throw Failure(message: "bad path")
+        }
+        let (_, response) = try await session.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200...299).contains(status) || status == 404 else {
+            log.error("DELETE \(remotePath, privacy: .public) → \(status)")
+            throw Failure(message: "HTTP \(status)")
+        }
+    }
+
     /// PROPFIND Depth:0 against the base path — the "can I talk to this
     /// server at all" probe. Returns elapsed milliseconds on success.
     ///

@@ -409,15 +409,17 @@ final class FastTransferModel: ObservableObject {
                     let data = try await wifi.downloadFile(file.name, expectedSize: file.size) { [weak self] got, _ in
                         Task { @MainActor in self?.updateProgress(file.name, got) }
                     }
-                    let chachaKey = KeyResolver.key(for: client)
+                    // ★ 2026-11-06（传输/解密解耦）：快传同样不再自己解析密钥，
+                    // 交给 `PostDownload.ingest` 统一判定（与 BLE 下载同一条口径）。
                     let localName = library.localNameForDeviceFile(
                         file.name,
                         deviceSerial: deviceSerial
                     )
-                    let outcome = try PostDownload.process(
+                    let outcome = try PostDownload.ingest(
                         data,
                         name: localName,
-                        chacha20Key: chachaKey
+                        deviceSerial: deviceSerial,
+                        encryptionOn: client.deviceEncryptionOn
                     )
                     // Unreadable originals (no password set / incorrect password) **do not count as fully transferred**. Follow the BLE
                     // path `RecordingsView.writeAndDecrypt`: report failure, and **preserve the original on the

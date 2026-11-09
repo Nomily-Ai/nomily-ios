@@ -27,7 +27,12 @@ final class AIChatModel: ObservableObject {
     @Published var errorText: String?
 
     /// Set by the host once the summary/transcript are loaded. Empty = no Q&A block at all.
-    var context = ""
+    ///
+    /// ★ 2026-11-04：`@Published` 是必需的，不是顺手加的——底部入口条的显示条件
+    /// 就是 `isAvailable`（读这个属性）。转写常常在页面**开着的时候**才落盘，
+    /// 如果它不参与观察，`context` 变了也不会重绘，用户看到的是"摘要出来了、
+    /// 提问框却没有"，必须退出重进才出现——正是这一轮用户报的那个"没了"。
+    @Published var context = ""
 
     var isAvailable: Bool { !context.isEmpty }
 

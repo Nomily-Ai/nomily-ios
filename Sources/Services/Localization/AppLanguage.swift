@@ -250,7 +250,16 @@ extension Bundle {
     }
 
     /// `NSLocalizedString` against `systemLanguage` — `value` is the English fallback.
+    ///
+    /// ★ 2026-11-05（用户："设置了英文，开屏引导还是中文"）：原版只读**系统语言**，
+    /// 用户在 App 内切了英文但手机系统是中文时，欢迎页/协议页仍是中文。现在改为：
+    /// 用户在 App 内明确选过语言（`overrideBundle` 已就位）就跟随 App 内语言；
+    /// 没选过（真正的首启、尚未做任何选择）才跟随系统语言——首启那一刻
+    /// "跟随手机语言"的原需求仍然成立。
     static func systemString(_ key: String, value: String) -> String {
-        systemLanguage.localizedString(forKey: key, value: value, table: nil)
+        if let override = overrideBundle {
+            return override.localizedString(forKey: key, value: value, table: nil)
+        }
+        return systemLanguage.localizedString(forKey: key, value: value, table: nil)
     }
 }

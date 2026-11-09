@@ -44,7 +44,13 @@ struct ASRCloudSection: View {
         } header: {
             Text(L10n.ASRCloud.title)
         } footer: {
-            Text(L10n.ASRCloud.footer)
+            // ★ 2026-11-06（P0-2）：先给一句"怎么选"，再讲这一排是什么。
+            //   十家厂商并列时，用户缺的是指路而不是参数。
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.ASRCloud.decisionGuide)
+                Text(L10n.ASRCloud.footer)
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 }
@@ -141,16 +147,19 @@ private struct ASRCloudRow: View {
                     if let rec = spec.localizedRecommendation {
                         Text(rec)
                             .font(.caption2.weight(.medium))
-                            .foregroundStyle(rec.hasPrefix("推荐") ? Color.green : Color.orange)
+                            .foregroundStyle(spec.recommendationIsPositive ? Color.green : Color.orange)
                     }
                 }
-                Text(model.isEmpty ? spec.localizedTagline : model)
+                // ★ 2026-11-05：模型名走显示翻译（英文界面下"实时语音识别"就是这么漏出来的）。
+                    Text(model.isEmpty ? spec.localizedTagline : spec.localizedModel(model))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                // 价格 + 能力一行小字（"约 0.3 元/小时 · 分说话人"）；没数据的厂商不占位。
-                if model.isEmpty, let meta = spec.metaLine {
+                // 价格 + 分说话人 + 精度（"约 0.1 元/小时 · 分说话人 · 中文 CER 2.25%"）。
+                // ★ 2026-11-06（P0-2）：以前只在没选模型时显示——选完模型这行字就消失，
+                //   而"贵不贵、准不准"恰恰是选完之后才要比较的。现在常驻。
+                if let meta = spec.metaLine {
                     Text(meta)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -271,7 +280,7 @@ struct ASRCloudSheet: View {
                                 Text(meta).font(.caption2).foregroundStyle(.secondary)
                             }
                             if let rec = spec.localizedRecommendation {
-                                Text(String(format: L10n.ASRCloud.recommendationPrefix, rec)).font(.caption2).foregroundStyle(rec.hasPrefix("推荐") ? Color.green : Color.orange)
+                                Text(String(format: L10n.ASRCloud.recommendationPrefix, rec)).font(.caption2).foregroundStyle(spec.recommendationIsPositive ? Color.green : Color.orange)
                             }
                         }
                     }
@@ -347,12 +356,14 @@ struct ASRCloudSheet: View {
                             ModelPickerView(title: L10n.ASRCloud.model,
                                             options: options,
                                             current: model,
-                                            allowsEmpty: true) { picked in
+                                            allowsEmpty: true,
+                                            // ★ 2026-11-05：显示名走翻译，选中后存回原值。
+                                            displayName: { spec.localizedModel($0) }) { picked in
                                 modelBinding.wrappedValue = picked
                             }
                         } label: {
                             LabeledContent(L10n.ASRCloud.model) {
-                                Text(model.isEmpty ? L10n.LLM.selectModel : model)
+                                Text(model.isEmpty ? L10n.LLM.selectModel : spec.localizedModel(model))
                                     .font(model.isEmpty ? .body : .body.monospaced())
                                     .foregroundStyle(model.isEmpty ? .secondary : .primary)
                                     .lineLimit(1)
@@ -445,15 +456,17 @@ struct ASRCloudSheet: View {
 
     @ViewBuilder
     private func fieldRow(_ field: ASRCloudSpec.Field) -> some View {
-        let label = L10n.ASRCloud.field(field.id, fallback: field.label)
+        // ★ 2026-11-05：标签/占位符都按厂商命名空间翻译（见 `Field.localizedLabel`）。
+        let label = field.localizedLabel(vendor: spec.id)
+        let placeholder = field.localizedPlaceholder(vendor: spec.id)
         if field.kind == .secret {
-            SecureField(field.placeholder, text: secretBinding(field.id))
+            SecureField(placeholder, text: secretBinding(field.id))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .font(.body.monospaced())
                 .accessibilityLabel(Text(label))
         } else {
-            TextField(field.placeholder, text: valueBinding(field.id))
+            TextField(placeholder, text: valueBinding(field.id))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .font(.body.monospaced())

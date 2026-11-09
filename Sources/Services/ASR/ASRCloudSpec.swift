@@ -37,6 +37,19 @@ struct ASRCloudSpec: Identifiable, Equatable {
         let placeholder: String
         /// Keys that must be present before the probe can run.
         var required: Bool = true
+
+        /// ★ 2026-11-05：凭据字段的标签/占位符翻译。上一版只有标签走了
+        /// `L10n.ASRCloud.field`，而且键是**全局** `asr.cloud.field.<id>`——
+        /// 但 `apiKey` 这类 id 六家共用，一家翻译会串味，所以干脆没建 en 键，
+        /// 中文标签（"项目 Appkey"）就原样漏进了英文界面。改成按厂商命名空间：
+        /// `asr.cloud.<vendor>.fields.<id>.label|.placeholder`，en 只需要给
+        /// 原值是中文的那几条建键，其余回落（回落值本来就是英文）。
+        func localizedLabel(vendor: String) -> String {
+            NSLocalizedString("asr.cloud.\(vendor).fields.\(id).label", value: label, comment: "Credential field label")
+        }
+        func localizedPlaceholder(vendor: String) -> String {
+            NSLocalizedString("asr.cloud.\(vendor).fields.\(id).placeholder", value: placeholder, comment: "Credential field placeholder")
+        }
     }
 
     let id: String
@@ -71,11 +84,24 @@ struct ASRCloudSpec: Identifiable, Equatable {
     /// 选型建议短句："推荐 · 中文首选" / "偏贵" 等。nil = 中立。
     let recommendation: String?
 
+    /// ★ 2026-11-06（饭耳 1.0 移植 P0-2）：**准确率口径**——厂商公布的中文
+    /// CER / 英文 WER，形如「中文 CER 2.25% · 英文 WER 4.72%」。
+    ///
+    /// 为什么单独一个字段而不是塞进 `pricePerHour`：价格和精度是两个不同的问题
+    /// （"便不便宜"与"准不准"），混在一行里用户没法比较。有数据的厂商才显示，
+    /// 没有把握的一律 nil——**不编数字**，这条比"卡片看起来整齐"重要。
+    var cerHint: String? = nil
+
     /// 价格 + 能力一行小字（"约 0.3 元/小时 · 分说话人"）。空 = 没有可靠数据。
+    /// ★ 2026-11-05：价格走 `localizedPrice`——上一版直接用原始中文（"约 $0.3/小时"
+    /// 里的"约"就是这么漏进英文界面的），`localizedPrice` 键缺失时回落原值，行为不变。
     var metaLine: String? {
         var parts: [String] = []
-        if let pricePerHour { parts.append(pricePerHour) }
+        if let localizedPrice { parts.append(localizedPrice) }
         if supportsDiarization { parts.append(L10n.ASRCloud.diarization) }
+        // ★ 2026-11-06（P0-2）：精度跟在价格后面——"约 0.1 元/小时 · 分说话人 ·
+        // 中文 CER 2.25%"正是饭耳卡片那一行的排法。
+        if let localizedCerHint { parts.append(localizedCerHint) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
@@ -94,6 +120,26 @@ struct ASRCloudSpec: Identifiable, Equatable {
     }
     var localizedPrice: String? {
         pricePerHour.map { NSLocalizedString("asr.cloud.\(id).price", value: $0, comment: "") }
+    }
+    var localizedCerHint: String? {
+        cerHint.map { NSLocalizedString("asr.cloud.\(id).cer", value: $0, comment: "") }
+    }
+
+    /// ★ 2026-11-05（用户截图：英文界面下模型选择页全是中文）：
+    /// `models` 里存的是**要发给 API 的真名**（"录音文件识别（Paraformer）"），
+    /// 存进 config 的必须是原值——这里只翻译**显示层**。英文 UI 从 en 表读
+    /// `asr.cloud.<id>.models.<序号>`，键缺失回落原值（zh-Hans 不用建键）。
+    func localizedModel(_ raw: String) -> String {
+        guard let index = models.firstIndex(of: raw) else { return raw }
+        return NSLocalizedString("asr.cloud.\(id).models.\(index)", value: raw, comment: "")
+    }
+
+    /// ★ 2026-11-05：选型建议是不是"正面的"（绿色）。上一版用
+    /// `recommendation.hasPrefix("推荐")` 判断——英文翻译不以"推荐"开头，
+    /// 于是英文界面所有厂商都掉进橙色分支，"Recommended" 也显示成橙色。
+    /// 数据侧只认中文原值的这个前缀（en 翻译爱怎么写怎么写）。
+    var recommendationIsPositive: Bool {
+        recommendation?.hasPrefix("推荐") ?? false
     }
 
     /// Tile colour, same shape as `LLMProviderSpec.tint`.
@@ -164,9 +210,11 @@ struct ASRCloudSpec: Identifiable, Equatable {
         console: "① nls-portal.console.aliyun.com → 项目列表 拿 Appkey；② ram.console.aliyun.com 创建 AccessKey（需同时授权 OSS 读写）；③ 与区域一致建一个 OSS Bucket",
         consoleURL: URL(string: "https://nls-portal.console.aliyun.com/"),
         note: "转写流程：音频先上传到你的 OSS Bucket（私有），生成 2 小时有效的预签名链接交给阿里云识别（file_link 必须公网可下载，这是它的接口要求），识别完取回结果。这里填的是 **OSS 区域**（Bucket 建在杭州就填 cn-hangzhou）——填错会自动按 OSS 返回的 endpoint 纠正一次；实时字幕的网关区域与它无关，会自动归一化。实时字幕走它家的实时语音识别 WebSocket（同一个 Appkey），在「录音与转写 → 实时识别引擎」里选阿里云即可。",
-        pricePerHour: "约 0.3 元/小时",
+        pricePerHour: "约 0.1 元/小时（百炼 qwen-audio）",
         supportsDiarization: true,
-        recommendation: "推荐 · 中文首选"
+        recommendation: "推荐 · 中文首选",
+        // ★ 2026-11-06（P0-2）：饭耳 1.0 卡片原文口径（FLEURS 测试集）。
+        cerHint: "中文 CER 2.25% · 英文 WER 4.72%"
     )
 
     static let baidu = ASRCloudSpec(
@@ -234,7 +282,7 @@ struct ASRCloudSpec: Identifiable, Equatable {
         console: "console.cloud.tencent.com → 访问管理 → API 密钥管理",
         consoleURL: URL(string: "https://console.cloud.tencent.com/cam/capi"),
         note: "地址固定 asr.tencentcloudapi.com，区域是请求参数（TC3-HMAC-SHA256 签名）。探测调 DescribeTaskStatus（不存在的任务 ID）——只验证签名，不上传音频；热词表接口（DescribeVocabList 等）已在 asr 2019-06-14 下线，不要用它做探测。",
-        pricePerHour: "约 1.3 元/小时（录音文件识别）",
+        pricePerHour: "约 0.8 元/小时（录音识别大模型 2.0）",
         supportsDiarization: true,
         recommendation: "国内均衡 · 中英粤均可"
     )

@@ -55,9 +55,12 @@ struct LLMPreset: Identifiable, Equatable {
         name: "通义千问",
         mark: "通",
         endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        models: ["qwen-max", "qwen-plus", "qwen-turbo", "qwen-long", "qwen3-max", "qwen2.5-72b-instruct"],
+        // ★ 2026-11-04: 百炼线上已经是 qwen3.8 一代，旧清单里的 qwen-turbo / qwen2.5-72b
+        // 会让用户以为"通义千问只有老模型"。新清单把当前主力放前面，老模型留作兼容。
+        models: ["qwen3.8-max", "qwen3.7-max", "qwen-plus", "qwen-flash",
+                 "qwen3.8-flash", "qwen-long", "qwen-max", "qwen-turbo"],
         console: "bailian.console.aliyun.com → API-KEY",
-        note: nil
+        note: "阿里云百炼。业务空间有专属端点（https://ws-….maas.aliyuncs.com/compatible-mode/v1）时，直接把它填进上面的地址栏即可。"
     )
 
     static let deepseek = LLMPreset(

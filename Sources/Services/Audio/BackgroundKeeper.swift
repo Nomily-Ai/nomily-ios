@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import os.log
 import UIKit
+import UserNotifications
 
 private let log = Logger(subsystem: "com.nomily.app.ios", category: "background")
 
@@ -79,6 +80,10 @@ final class BackgroundKeeper {
         log.info("acquire \(token.rawValue, privacy: .public) → \(self.active.count) held")
         beginAssertion()
         if audioKeepAliveEnabled { startAudio() }
+        // ★ 2026-11-06：token 可能在**已经在后台**时才拿到（比如转写任务从后台排队
+        // 启动）。幂等：不在后台时它只是记一个标记，埋通知要等 armKillGuard 在
+        // 退后台时触发；在后台时立即把哨兵架起来。
+        armKillGuard()
     }
 
     func release(_ token: Token) {
@@ -87,6 +92,9 @@ final class BackgroundKeeper {
         guard active.isEmpty else { return }
         stopAudio()
         endAssertion()
+        // ★ 2026-11-06：最后一个 token 也还了 → 后台已经没有值得守护的东西，
+        // 哨兵通知立刻拆掉，别让它有朝一日误报。
+        disarmKillGuard()
     }
 
     /// Give a clean wrap-up before exit (also helps a self-check script reconcile).
@@ -94,6 +102,7 @@ final class BackgroundKeeper {
         active.removeAll()
         stopAudio()
         endAssertion()
+        disarmKillGuard()
     }
 
     // MARK: - Layer 1: the background task assertion
@@ -172,6 +181,96 @@ final class BackgroundKeeper {
                 self.startAudio()
             }
         }
+    }
+
+    // MARK: - ★ 2026-11-06 被杀预警（后台哨兵通知）
+    //
+    // 静音音频已经把"活着"做到 iOS 允许的极限，但**没有万无一失**：用户上滑杀 App、
+    // 低电量模式、内存压力，进程说没就没，而且被杀**一个日志都不会留**。用户视角就是
+    // "转写怎么没了"——所以退而求其次：**至少要在被杀后一分钟内告诉用户**。
+    //
+    // ## 机制
+    // 手里有 token 且 App 进后台时：
+    //   1. 落一个"在此后台期间有过活跃任务"的标记（冷启动善后用，见 `consumeKilledFlag`）；
+    //   2. 埋一颗 **60 秒后**触发的本地通知，并起一个 **30 秒一次**的循环：
+    //      每次"摘掉旧的、再埋一颗新的 60 秒"。App 活着（静音音频撑着进程，定时器就在跑）
+    //      → 通知永远差 30–60 秒才响、永远响不出来；进程被杀 → 循环停了，
+    //      最后埋的那颗 60 秒内必然落地 → 用户立刻知道"任务断了"。
+    //
+    // ## 为什么不用更长的间隔
+    // 60 秒意味着"被杀后最多 1 分钟用户就有感知"；循环摘埋的成本只是一次本地通知增删。
+    // 若 App 被**挂起**（静音音频被系统掐掉，比如低电量模式），定时器停了、通知会响——
+    // 这恰好也是我们想报的警：挂起 = 长任务已经跑不动了。
+    //
+    // ⚠️ 通知要权限：无权限时静默跳过（冷启动的善后提示仍然兜底）。
+
+    private var guardTimer: Timer?
+    private static let guardNotificationID = "com.nomily.guard.killed"
+    private static let killedFlagKey = "keeper.jobsActiveAtBackground.v1"
+
+    /// 退后台 / 后台拿到新 token 时调用（幂等）。前台调用是 no-op——
+    /// 前台杀不掉任务，不制造假警报。
+    func armKillGuard() {
+        guard UIApplication.shared.applicationState == .background, !active.isEmpty else { return }
+        UserDefaults.standard.set(true, forKey: Self.killedFlagKey)
+        requestGuardAuthorizationIfNeeded()
+        rescheduleGuardNotification()
+        guardTimer?.invalidate()
+        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.rescheduleGuardNotification()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        guardTimer = timer
+        log.info("kill guard armed (\(self.active.count) token(s) held)")
+    }
+
+    /// 回前台 / token 全部释放时调用：拆循环、撤待发通知、清"在途"标记。
+    /// 正常回前台时调用它之后，标记是 false——冷启动再看到 true 就说明进程是被杀的。
+    func disarmKillGuard() {
+        UserDefaults.standard.set(false, forKey: Self.killedFlagKey)
+        guardTimer?.invalidate()
+        guardTimer = nil
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.guardNotificationID])
+    }
+
+    private func rescheduleGuardNotification() {
+        guard !active.isEmpty else { return }
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [Self.guardNotificationID])
+        let content = UNMutableNotificationContent()
+        content.title = NSLocalizedString("keeper.guard_title",
+                                          value: "Nomily was interrupted",
+                                          comment: "Kill-guard notification: the app was terminated in the background")
+        content.body = NSLocalizedString("keeper.guard_body",
+                                         value: "iOS closed the app while a recording/transcription job was running. Tap to reopen and check.",
+                                         comment: "Kill-guard notification body")
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 60, repeats: false)
+        center.add(UNNotificationRequest(identifier: Self.guardNotificationID,
+                                         content: content, trigger: trigger))
+    }
+
+    private func requestGuardAuthorizationIfNeeded() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .notDetermined else { return }
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { granted, _ in
+                log.info("kill guard notification permission: \(granted, privacy: .public)")
+            }
+        }
+    }
+
+    /// 冷启动善后：**正常回前台会先 `disarmKillGuard` 清掉标记**，所以冷启动读到
+    /// `true` 只有两种可能——进程在后台被系统杀掉，或用户自己上滑杀掉（都可能带着
+    /// 活着的任务）。读到的同时清掉（一次性），由 RootView 弹一条"上次任务可能被中断"。
+    static func consumeKilledFlag() -> Bool {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: killedFlagKey) != nil,
+              defaults.bool(forKey: killedFlagKey)
+        else { return false }
+        defaults.set(false, forKey: killedFlagKey)
+        return true
     }
 
     /// 1 second of silence: 8 kHz mono 16-bit PCM WAV (16 044 bytes).

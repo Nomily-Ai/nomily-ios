@@ -670,8 +670,26 @@ final class PlaudDirectService: NSObject, ObservableObject {
                     log.info("plaud live asr engine=ondevice")
                     return engine
                 }
+            case "custom":
+                // ★ 2026-11-04（用户："实时转录为啥不是我设置的自定义服务器"）：
+                // 自定义端点（OpenAI 兼容 / 百炼）没有 WS 双向流，只有
+                // `chat/completions` + `input_audio` 整段音频，所以这里走
+                // **5 s 切片准实时**（`PlaudBailianLiveTranscriber`）。原来
+                // custom 落在 default 的 `continue` 里，链条直接走到 Azure，
+                // 用户配的服务器形同不存在。
+                if let custom = cfg?.asrProviders.custom,
+                   !custom.endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    log.info("plaud live asr engine=custom chunked lang=\(localeID, privacy: .public)")
+                    TicNoteDiagLog.log("PLAUD-ASR", "engine=custom (chunked) endpoint=\(custom.endpoint)")
+                    return PlaudBailianLiveTranscriber(
+                        endpoint: custom.endpoint,
+                        apiKey: custom.apiKey ?? "",
+                        model: custom.model ?? "",
+                        language: cfg?.lastSourceLang ?? "")
+                }
             default:
-                // local / remote / custom: Opus-only, cannot consume raw PCM.
+                // local / remote: Opus-only, cannot consume raw PCM.
+                TicNoteDiagLog.log("PLAUD-ASR", "skip \(name): not a PCM live engine")
                 continue
             }
         }
@@ -698,6 +716,8 @@ final class PlaudDirectService: NSObject, ObservableObject {
         case .azureFailed(let message): liveASRNotice = L10n.Plaud.liveAzureFailed(message)
         case .aliyunMissing: liveASRNotice = L10n.Plaud.liveNeedsPermission
         case .aliyunFailed(let message): liveASRNotice = L10n.Plaud.liveAliyunFailed(message)
+        case .customMissing: liveASRNotice = L10n.Plaud.liveNeedsPermission
+        case .customFailed(let message): liveASRNotice = L10n.Plaud.liveCustomFailed(message)
         case .none: liveASRNotice = nil
         }
         liveASRProvider = engine.providerName
@@ -717,8 +737,14 @@ final class PlaudDirectService: NSObject, ObservableObject {
     @MainActor private func fallbackLiveEngine(reason: PlaudLiveASRUnavailable) {
         // ★ 2026-10-23: Aliyun joins Azure in "died mid-take → keep the text,
         // continue on-device" instead of freezing the transcript.
+        // ★ 2026-11-04: 自定义端点同理——它是分段请求，一次失败不该让整场字幕消失。
         let dead = liveTranscriber?.providerName
-        guard dead == "azure" || dead == "aliyun" else { return }
+        guard dead == "azure" || dead == "aliyun" || dead == "custom" else { return }
+        if dead == "custom" {
+            // 自定义端点是"准实时"（5 s 一批），云端不通时换本机模型，
+            // 至少还能边录边看。
+            TicNoteDiagLog.log("PLAUD-ASR", "custom live failed (\(String(describing: reason))) — falling back")
+        }
         log.warning("plaud live asr: \(dead ?? "?", privacy: .public) failed (\(String(describing: reason), privacy: .public)) — falling back to on-device")
         guard let onDevice = PlaudLiveTranscriber.makeIfPermitted(localeID: configService?.config.lastSourceLang) else {
             liveASRNotice = L10n.Plaud.liveNeedsPermission

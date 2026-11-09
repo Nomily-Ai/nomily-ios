@@ -44,6 +44,20 @@ final class WatchLink: NSObject, ObservableObject {
         session.activate()
     }
 
+    /// 「重连」真正该做的那一半（★ 2026-11-03）。
+    ///
+    /// 断联往往不是"蓝牙远了"这么简单——会话会被系统拆掉（换机重连、watchOS
+    /// 把 App 杀掉再拉起、配对状态抖动），此时 `updateApplicationContext` 与
+    /// `transferFile` 全都静默失败，光"重发数据"什么也修不好，得先把会话
+    /// 重新激活。已激活时 `activate()` 本身无害，但会重设 delegate，
+    /// 所以只在真的没激活时才调。
+    func reactivateIfNeeded() {
+        guard WCSession.isSupported() else { return }
+        guard WCSession.default.activationState != .activated else { return }
+        log.info("session not activated — reactivating")
+        WCSession.default.activate()
+    }
+
     /// Queues a clip for the phone. Safe to call repeatedly — a clip already in
     /// the queue isn't sent twice, and the phone de-duplicates re-sends.
     func transfer(_ url: URL) {
@@ -54,12 +68,53 @@ final class WatchLink: NSObject, ObservableObject {
               WCSession.default.activationState == .activated else { return }
         let name = url.lastPathComponent
         guard !queuedNames.contains(name) else { return }
-        WCSession.default.transferFile(url, metadata: [WatchLinkMessage.fileNameKey: name])
+        // ★ 2026-11-03 八轮（打点）：把旁挂里的重点时间点塞进 metadata，
+        //   跟音频同一条传输送到手机——音频到，点必到（理由见
+        //   `WatchLinkMessage.marksKey`）。
+        var metadata: [String: Any] = [WatchLinkMessage.fileNameKey: name]
+        if let marks = Self.marks(for: url) {
+            metadata[WatchLinkMessage.marksKey] = marks
+        }
+        WCSession.default.transferFile(url, metadata: metadata)
         refreshQueue()
         // ★ Record-keeping. The size is taken here (the file is still around); the `didFinish` step no longer can.
         WatchTransferLog.shared.noteQueued(name: name, bytes: Self.fileSize(of: url))
         log.info("queued \(name, privacy: .public) for the iPhone")
         #endif
+    }
+
+    /// 声纹样本：走和录音**同一条**通道，只是 metadata 里多一个标记，
+    /// 手机端据此把它送去注册而不是入库（见 `WatchLinkMessage.voiceprintKey`）。
+    ///
+    /// 不进 `queuedNames` 的去重账本：样本不是待传录音，页面上的"待传 N 条"
+    /// 数到它会莫名其妙多一条。
+    func transferVoiceprint(_ url: URL) {
+        #if targetEnvironment(simulator)
+        transferViaSimulatorSharedInbox(url)
+        #else
+        guard WCSession.isSupported(),
+              WCSession.default.activationState == .activated else {
+            log.info("voiceprint sample not sent: session not activated")
+            return
+        }
+        let name = url.lastPathComponent
+        WCSession.default.transferFile(url, metadata: [
+            WatchLinkMessage.fileNameKey: name,
+            WatchLinkMessage.voiceprintKey: true
+        ])
+        log.info("queued voiceprint sample")
+        #endif
+    }
+
+    /// 读旁挂里的打点（秒）。没有旁挂 / 读不出来就返回 nil——**metadata 里缺这个键，
+    /// 手机端就当作"这段没有打点"**，不会因为一个可选的附属物把整条音频卡住。
+    private static func marks(for url: URL) -> [Double]? {
+        let sidecar = url.deletingPathExtension()
+            .appendingPathExtension(WatchLinkMessage.marksFileExtension)
+        guard let data = try? Data(contentsOf: sidecar),
+              let payload = try? JSONDecoder().decode([String: [Double]].self, from: data),
+              let marks = payload["seconds"], !marks.isEmpty else { return nil }
+        return marks
     }
 
     /// File byte count. 0 if it can't be read — showing 0 KB in the record beats the whole entry not showing up.
@@ -112,7 +167,12 @@ final class WatchLink: NSObject, ObservableObject {
         var context: [String: Any] = [
             WatchLinkMessage.recordingKey: isRecording,
             WatchLinkMessage.transferPendingKey: transferPending,
-            WatchLinkMessage.heartbeatKey: Date().timeIntervalSince1970
+            WatchLinkMessage.heartbeatKey: Date().timeIntervalSince1970,
+            // ★ 2026-11-05：手表侧全天候录音开关的当前值随每次状态推送回报，
+            // 手机的开关在"手机从未设置过"时显示它（见 WatchSyncService.watchAllDayState）。
+            WatchLinkMessage.allDayKey: WatchRecordingPrefs.shared.allDayRecording,
+            // ★ 2026-11-06：表情常亮开关同规则回报。
+            WatchLinkMessage.alwaysOnFaceKey: WatchRecordingPrefs.shared.alwaysOnFace
         ]
         if let since {
             context[WatchLinkMessage.recordingSinceKey] = since.timeIntervalSince1970
@@ -163,7 +223,55 @@ final class WatchLink: NSObject, ObservableObject {
         // indifferent to missing keys, so an old phone's context is harmless.
         WatchRecapStore.shared.apply(context)
         applyTimedRecordCommand(context)
+        // ★ 2026-11-05（全天候录音开关双端同步）：手机上翻的开关一次性随上下文到。
+        // 键缺省 = 这条推送不带（常态推送都不带），不动手表自己的值。
+        if let allDay = context[WatchLinkMessage.allDayKey] as? Bool {
+            onAllDaySetting?(allDay)
+        }
+        // ★ 2026-11-06（表情常亮开关）：手机上翻的开关一次性随上下文到。
+        // 键缺省 = 这条推送不带，不动手表自己的值。
+        if let alwaysOnFace = context[WatchLinkMessage.alwaysOnFaceKey] as? Bool {
+            onAlwaysOnFaceSetting?(alwaysOnFace)
+        }
+        // ★ 2026-11-06 二轮（"让脸活起来"四设置）：同一条一次性规则，键缺省不动。
+        if let raw = context[WatchLinkMessage.eyeShapeKey] as? String {
+            onEyeShapeSetting?(raw)
+        }
+        if let enabled = context[WatchLinkMessage.drowsyEnabledKey] as? Bool {
+            // 秒数缺省就带上一次的值——两个键总是一起推，这里只是容错。
+            let after = (context[WatchLinkMessage.drowsyAfterKey] as? Int)
+                ?? WatchRecordingPrefs.shared.drowsyAfter
+            onDrowsySetting?(enabled, after)
+        }
+        if let follow = context[WatchLinkMessage.pupilFollowKey] as? Bool {
+            onPupilFollowSetting?(follow)
+        }
+        // ★ 2026-11-06（声纹注册回执）：手机注册完（成败都回）随上下文到。
+        applyVoiceprintResult(context)
     }
+
+    /// 手机推来的声纹注册回执。由 `NomilyWatchApp` 接到 `WatchVoiceprintEnrollState`。
+    var onVoiceprintResult: ((_ id: Int, _ ok: Bool) -> Void)?
+
+    /// ★ 2026-11-06 二轮：手机推来的"让脸活起来"设置。由 `NomilyWatchApp`
+    /// 接到 `WatchRecordingPrefs`（翻设置的哪端说了算，对端跟随）。
+    var onEyeShapeSetting: ((_ raw: String) -> Void)?
+    var onDrowsySetting: ((_ enabled: Bool, _ afterSeconds: Int) -> Void)?
+    var onPupilFollowSetting: ((_ on: Bool) -> Void)?
+
+    private func applyVoiceprintResult(_ context: [String: Any]) {
+        guard let ok = context[WatchLinkMessage.voiceprintResultKey] as? Bool,
+              let id = context[WatchLinkMessage.voiceprintResultIDKey] as? Int
+        else { return }
+        onVoiceprintResult?(id, ok)
+    }
+
+    /// 手机推来的全天候录音开关值。由 `NomilyWatchApp` 接到 `WatchRecordingPrefs`
+    /// + `WatchRecorderModel` 上（翻开关的那一端说了算，对端跟随）。
+    var onAllDaySetting: ((_ on: Bool) -> Void)?
+
+    /// 手机推来的「表情常亮」开关值。由 `NomilyWatchApp` 接到 `WatchRecordingPrefs`。
+    var onAlwaysOnFaceSetting: ((_ on: Bool) -> Void)?
 
     // MARK: - Timed recording command (phone → watch, ★ 2026-10-30)
 
@@ -176,10 +284,26 @@ final class WatchLink: NSObject, ObservableObject {
     /// `retryUnconfirmedTimedCommand` 会补执行。
     private(set) var lastTimedCommand: (command: String, issuedAt: Date, endsAt: Date?)?
 
+    /// ★ 2026-11-06（全天候语义）：已处理过的命令 issuedAt（持久化）。
+    /// 手机端每次推上下文都带着持久化的最后一条定时命令（可能是一条陈年的
+    /// "stop"），手机 App 重启 → 会话重新激活 → 旧上下文重放——旧版这里没有
+    /// 去重，手表当场把正在录的全天候录音停掉。这正是"重新开的手机 Nomily
+    /// 手表就中断了"的根因。已处理时刻落盘，手表 App 重启后靠它挡住收件箱
+    /// 里的旧上下文；新命令的 issuedAt 一定更新，不受影响。
+    private static let processedTimedCommandKey = "watch.timed.processed.v1"
+
     private func applyTimedRecordCommand(_ context: [String: Any]) {
         guard let command = context[WatchLinkMessage.timedRecordCommandKey] as? String,
               let issued = context[WatchLinkMessage.timedRecordIssuedAtKey] as? Double
         else { return }
+        // 去重：同一 issuedAt（或更旧的）只回调一次。旧版注释宣称"按 issuedAt
+        // 去重，重发无害"，代码里其实根本没有去重——每次都原样重放。
+        let processed = UserDefaults.standard.double(forKey: Self.processedTimedCommandKey)
+        guard issued > processed else {
+            log.info("timed command \(command, privacy: .public) replayed (issuedAt ≤ processed) — dropped")
+            return
+        }
+        UserDefaults.standard.set(issued, forKey: Self.processedTimedCommandKey)
         let issuedAt = Date(timeIntervalSince1970: issued)
         let endsAt = (context[WatchLinkMessage.timedRecordEndsAtKey] as? Double)
             .map { Date(timeIntervalSince1970: $0) }

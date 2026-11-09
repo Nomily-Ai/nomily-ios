@@ -62,6 +62,13 @@ struct LLMProviderSpec: Identifiable, Equatable {
     /// Provider-specific caveat.
     let note: String?
 
+    /// ★ 2026-11-05（用户："给大语言模型的介绍里设置一个花费情况…中文展示人民币，
+    /// 英文展示 USD"）：这家厂商**摘要一小时录音**的大概 API 花费。粗口径——
+    /// 一小时转写约 1 万字符（3–8k tokens 入，1–2k 出），按各家主力模型牌价估的
+    /// 区间；ollama 本地运行就是 0。`nil` = 没有可估计的口径（custom）。
+    /// 显示时走 `localizedCost`（键 `llm.<id>.cost`），英文表给美元版。
+    var costNote: String? = nil
+
     /// Tile colour, as components so this file stays free of SwiftUI.
     var tint: (r: Double, g: Double, b: Double) {
         switch id {
@@ -167,6 +174,10 @@ struct LLMProviderSpec: Identifiable, Equatable {
     var localizedNote: String? {
         note.map { NSLocalizedString("llm.\(id).note", value: $0, comment: "") }
     }
+    /// 摘要一小时录音的大概花费（中文 ¥ / 英文 $，见 `costNote` 顶部说明）。
+    var localizedCost: String? {
+        costNote.map { NSLocalizedString("llm.\(id).cost", value: $0, comment: "") }
+    }
 
     static let chatgpt = LLMProviderSpec(
         id: "openai",
@@ -179,7 +190,8 @@ struct LLMProviderSpec: Identifiable, Equatable {
         keyRequired: true,
         curatedModels: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o3", "o4-mini"],
         console: "platform.openai.com → API keys",
-        note: nil
+        note: nil,
+        costNote: "摘要一小时录音约 $0.02–0.10（mini 档更低）"
     )
 
     static let claude = LLMProviderSpec(
@@ -196,7 +208,8 @@ struct LLMProviderSpec: Identifiable, Equatable {
             "claude-3-7-sonnet-20250219", "claude-3-5-haiku-20241022",
         ],
         console: "console.anthropic.com → API keys",
-        note: nil
+        note: nil,
+        costNote: "摘要一小时录音约 $0.05–0.25（Haiku 档更低）"
     )
 
     static let gemini = LLMProviderSpec(
@@ -210,7 +223,8 @@ struct LLMProviderSpec: Identifiable, Equatable {
         keyRequired: true,
         curatedModels: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"],
         console: "aistudio.google.com → API key",
-        note: nil
+        note: nil,
+        costNote: "摘要一小时录音约 $0.01–0.15（Flash 档更低）"
     )
 
     static let openRouter = LLMProviderSpec(
@@ -227,7 +241,8 @@ struct LLMProviderSpec: Identifiable, Equatable {
             "google/gemini-2.5-pro", "deepseek/deepseek-chat",
         ],
         console: "openrouter.ai/keys",
-        note: "一个 key 通吃各家模型；模型名要带厂牌前缀（anthropic/… 、openai/…）。"
+        note: "一个 key 通吃各家模型；模型名要带厂牌前缀（anthropic/… 、openai/…）。",
+        costNote: "取决于所选模型，通常 $0.01–0.30/小时录音"
     )
 
     static let ollama = LLMProviderSpec(
@@ -241,7 +256,8 @@ struct LLMProviderSpec: Identifiable, Equatable {
         keyRequired: false,
         curatedModels: [],
         console: nil,
-        note: "跑在本机或局域网里的电脑上，不联网、不花钱。要填电脑的地址而不是名字。"
+        note: "跑在本机或局域网里的电脑上，不联网、不花钱。要填电脑的地址而不是名字。",
+        costNote: "本地运行，不产生 API 费用"
     )
 
     static let custom = LLMProviderSpec(
@@ -255,7 +271,10 @@ struct LLMProviderSpec: Identifiable, Equatable {
         keyRequired: false,
         curatedModels: [],
         console: nil,
-        note: "任何 OpenAI 兼容的 /v1 地址（中转、自建 vLLM、LM Studio 都算）。密钥可以留空。"
+        // ★ 2026-11-04（用户："当前自定义的需要支持这种不只是 openai 的"）：
+        // 原来只写"OpenAI 兼容的 /v1 地址"，而实际拿到手的中转/专属端点常常已经带了
+        // 版本段（…/compatible-mode/v1），甚至只提供 Anthropic 格式——两种现在都能选。
+        note: "任何 OpenAI 兼容或 Anthropic 兼容的地址（中转、自建 vLLM、LM Studio、云厂商专属端点都算）。地址可带版本号，也可只填域名。密钥可以留空。"
     )
 
     // Domestic presets, derived from `LLMPreset` so the endpoint/model lists are
@@ -280,7 +299,19 @@ struct LLMProviderSpec: Identifiable, Equatable {
             keyRequired: true,
             curatedModels: preset.models,
             console: preset.console,
-            note: preset.note
+            note: preset.note,
+            // ★ 2026-11-05：国内厂的"一小时录音摘要"花费口径（英文表给 USD 版）。
+            costNote: Self.presetCostNotes[preset.id]
         )
     }
+
+    /// 国内预设的每小时摘要成本口径（键 = `LLMPreset.id`）。
+    private static let presetCostNotes: [String: String] = [
+        "qwen": "摘要一小时录音约 ¥0.02–0.10",
+        "deepseek": "摘要一小时录音约 ¥0.01–0.05",
+        "doubao": "摘要一小时录音约 ¥0.01–0.08",
+        "kimi": "摘要一小时录音约 ¥0.05–0.20",
+        "zhipu": "摘要一小时录音约 ¥0.02–0.10",
+        "minimax": "摘要一小时录音约 ¥0.02–0.10",
+    ]
 }

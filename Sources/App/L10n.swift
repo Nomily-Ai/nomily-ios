@@ -63,6 +63,8 @@ enum L10n {
         static var none: String { NSLocalizedString("common.none", comment: "") }
         static var recording: String { NSLocalizedString("common.recording", comment: "") }
         static var keepForeground: String { NSLocalizedString("common.keep_foreground", comment: "") }
+        /// ★ 2026-11-03 十一轮：长按复制回答用（Nomi 问答页）。
+        static var copyText: String { NSLocalizedString("common.copy", value: "Copy", comment: "Copy to clipboard") }
     }
 
     // MARK: - Tabs
@@ -71,6 +73,106 @@ enum L10n {
         static var recordings: String { NSLocalizedString("tab.recordings", comment: "") }
         static var live: String { NSLocalizedString("tab.live", comment: "") }
         static var settings: String { NSLocalizedString("tab.settings", comment: "") }
+        /// ★ 2026-11-03 十轮：底部第四个标签——问自己的录音（个人知识库问答）。
+        static var nomily: String { NSLocalizedString("tab.nomily", comment: "") }
+    }
+
+    // MARK: - Nomi 问答（★ 2026-11-03 十轮）
+
+    enum Nomily {
+        /// 系统提示词。三条纪律：只依据材料 / 标注来源 / 不编造。
+        /// 与单条录音页的 `ClipDetail.aiAskSystem` 是两套：那边只有一条录音的上下文，
+        /// 这边是"从全库检索出来的几条材料"，纪律必须更严。
+        static var system: String {
+            NSLocalizedString("nomily.system", value: """
+            You are Nomily, the assistant for the user's personal voice-note library. Answer the question using ONLY the library material below. Rules:
+            1. Cite which recordings support each claim, by their date and title, e.g. (11-02 产品周会).
+            2. If the material does not contain the answer, say so plainly — never invent recordings, quotes, or dates.
+            3. For to-do questions, list only commitments that actually appear in the material, with owner and deadline when stated.
+            4. Answer in the language of the question. Be concise: short paragraphs or a tight list, no filler.
+            5. Material snippets are truncated; treat them as excerpts, not complete transcripts.
+            """, comment: "System prompt for the library-wide Nomi Q&A tab")
+        }
+        static var tagline: String {
+            NSLocalizedString("nomily.tagline", value: "问你的录音，像问一个助理",
+                              comment: "Nomi tab: hero headline on the empty state")
+        }
+        static var explain: String {
+            NSLocalizedString("nomily.explain", value: "Nomi 会在你的录音库里检索相关内容再回答，回答里会注明出自哪天的哪条录音。找不到的会直说，不会编。",
+                              comment: "Nomi tab: one-line explanation of how answering works")
+        }
+        static var placeholder: String {
+            NSLocalizedString("nomily.placeholder", value: "问问你的录音、待办、约定…",
+                              comment: "Nomi tab: input field placeholder")
+        }
+        static var noMatch: String {
+            NSLocalizedString("nomily.no_match", value: "录音库里没有找到和这个问题相关的内容。可以换个说法再问一次。",
+                              comment: "Nomi tab: nothing in the library matched the question")
+        }
+        static var thinking: String {
+            NSLocalizedString("nomily.thinking", value: "Nomi 正在翻你的录音…",
+                              comment: "Nomi tab: while the answer is being generated")
+        }
+        static var clear: String {
+            NSLocalizedString("nomily.clear", value: "清空会话",
+                              comment: "Nomi tab: accessibility label for the reset button")
+        }
+        /// ★ 2026-11-04 十三轮：回答卡片头部右侧的覆盖数（客户端算，不走模型）。
+        static func coverage(_ count: Int) -> String {
+            String(format: NSLocalizedString("nomily.coverage", value: "Based on %d recordings",
+                                             comment: "Nomily answer card: how many recordings the retrieval covered"), count)
+        }
+        /// 回答卡片脚注的默认句（模型没给 note 时用）。
+        static var defaultNote: String {
+            NSLocalizedString("nomily.default_note", value: "Excerpts from library recordings, not full transcripts.",
+                              comment: "Nomily answer card: default footnote")
+        }
+        /// 提问组上方的时间戳。
+        static var today: String {
+            NSLocalizedString("nomily.today", value: "Today", comment: "Nomily chat: timestamp prefix")
+        }
+        static var yesterday: String {
+            NSLocalizedString("nomily.yesterday", value: "Yesterday", comment: "Nomily chat: timestamp prefix")
+        }
+        /// ★ 2026-11-03 十一轮：空态里的「最近问过」分组标题（历史提问落盘后显示）。
+        static var recentTitle: String {
+            NSLocalizedString("nomily.recent_title", value: "最近问过",
+                              comment: "Nomi tab: header of the recent-questions list")
+        }
+        /// ★ 2026-11-03 十一轮：回答请求 90s 超时的说明——上一版请求挂住时页面永远转圈。
+        static var timeout: String {
+            NSLocalizedString("nomily.timeout", value: "回答超时了。请检查网络或 LLM 配置后再试一次。",
+                              comment: "Nomi tab: the answer request timed out")
+        }
+        // MARK: ★ 2026-11-05 十四轮：空态卡片（待办 / 最近记录）与快捷提问
+        /// 待办卡标题。
+        static var cardTodos: String {
+            NSLocalizedString("nomily.card_todos", value: "待办",
+                              comment: "Nomi empty state: header of the open to-dos card")
+        }
+        static func cardOverdue(_ count: Int) -> String {
+            String(format: NSLocalizedString("nomily.card_overdue", value: "%d 条已过期",
+                                             comment: "Nomi to-dos card: red count past its MM-dd deadline"), count)
+        }
+        static func cardOthers(_ count: Int) -> String {
+            String(format: NSLocalizedString("nomily.card_others", value: "%d 条等别人",
+                                             comment: "Nomi to-dos card: grey count assigned to someone else"), count)
+        }
+        /// 最近记录卡标题。
+        static var cardRecent: String {
+            NSLocalizedString("nomily.card_recent", value: "最近记录",
+                              comment: "Nomi empty state: header of the recent recordings card")
+        }
+        /// 点某条录音卡时直接发出的提问；%@ = 录音标题。
+        static func suggestRecording(_ title: String) -> String {
+            String(format: NSLocalizedString("nomily.suggest_recording", value: "《%@》这条录音讲了什么？",
+                                             comment: "Nomi quick question; %@ = the recording's title"), title)
+        }
+        /// 待办卡底部按钮 / 快捷胶囊：汇总追问待办。
+        static var suggestTodos: String {
+            NSLocalizedString("nomily.suggest_todos", value: "我的待办还有哪些没做？",
+                              comment: "Nomi quick question: open to-dos across the library")
+        }
     }
 
     // MARK: - Settings
@@ -447,6 +549,8 @@ enum L10n {
                 return NSLocalizedString("plaud.live_engine_azure", value: "Azure", comment: "Live transcript engine: Azure Speech")
             case "ondevice":
                 return NSLocalizedString("plaud.live_engine_ondevice", value: "On-device", comment: "Live transcript engine: Apple's offline recogniser")
+            case "custom":
+                return ASR.customServer
             default:
                 return name
             }
@@ -458,6 +562,11 @@ enum L10n {
         /// token/quota/network failure there is not an "Azure" problem.
         static func liveAliyunFailed(_ message: String) -> String {
             String(format: NSLocalizedString("plaud.live_aliyun_failed", value: "Aliyun live transcription stopped: %@", comment: "Live transcript error from Aliyun; %@ = reason"), message)
+        }
+        /// ★ 2026-11-04: 自定义端点是分段请求（每 5 s 一次），失败原因必须
+        /// 原样报出来 —— "HTTP 400" 之外用户看不到任何线索。
+        static func liveCustomFailed(_ message: String) -> String {
+            String(format: NSLocalizedString("plaud.live_custom_failed", value: "Custom ASR server stopped: %@", comment: "Live transcript error from the user's own OpenAI-compatible endpoint; %@ = reason"), message)
         }
         static var liveAzureFellBack: String { NSLocalizedString("plaud.live_azure_fell_back", value: "Azure dropped out — continuing with on-device recognition.", comment: "Automatic fallback after Azure failed mid-take") }
         static var cardFiles: String { NSLocalizedString("plaud.card_files", value: "Recordings on the card", comment: "Home device segment: the card's own file list") }
@@ -584,6 +693,113 @@ enum L10n {
         static var usageGuideDetail: String {
             NSLocalizedString("settings.usage_guide_detail", value: "Replay the welcome screen and the tour",
                               comment: "Settings row subtitle: replays the welcome sheet as well")
+        }
+
+        // ★ 2026-11-06（用户两次反馈"找不到入口"）：设置页顶部搜索。
+        static var searchPlaceholder: String {
+            NSLocalizedString("settings.search_placeholder", value: "Search settings",
+                              comment: "Settings search field placeholder")
+        }
+        static var searchEmpty: String {
+            NSLocalizedString("settings.search_empty", value: "Nothing matches — try a shorter word",
+                              comment: "Settings search: no results")
+        }
+        static var searchHint: String {
+            NSLocalizedString("settings.search_hint", value: "Finds entries by name, not switch values",
+                              comment: "Settings search footer: what is indexed")
+        }
+
+        // ★ 2026-11-03（用户："设置的最上角增加一个横条…引导用户去购买 Vobot V05E"）：
+        // 设置页顶部的购买横幅。
+        // ★ 同日措辞修正（用户："要写最适配的录音卡硬件，而不是配套的——配套则是官方的 app"）：
+        //   「配套」会被读成"官方配对硬件"，实际卖点是"和本 App 最适配"。
+        static var buyBannerTitle: String {
+            NSLocalizedString("settings.buy_banner_title", value: "Vobot V05E Recorder Card",
+                              comment: "Settings top banner: recommended hardware name")
+        }
+        static var buyBannerSubtitle: String {
+            NSLocalizedString("settings.buy_banner_subtitle",
+                              value: "The recorder card that fits Nomily best — on Amazon",
+                              comment: "Settings top banner subtitle: best-matched hardware, where to buy")
+        }
+    }
+
+    // MARK: - 免责声明 / 使用须知（★ 2026-11-03）
+
+    /// 首启同意页与「关于 → 免责声明」共用的一套文案。
+    ///
+    /// ⚠️ 和 `Welcome` 一样走 `Bundle.systemString`（**系统语言**），不走 App 内语言：
+    ///    这一页出现在用户做任何语言选择之前，跟着系统走才合理。
+    enum Consent {
+        static var title: String {
+            Bundle.systemString("consent.title", value: "Before you start")
+        }
+        static var subtitle: String {
+            Bundle.systemString(
+                "consent.subtitle",
+                value: "Nomily records sound and turns it into text with AI models. Please read the three points below — they are the terms you agree to when you tap Accept."
+            )
+        }
+        static var recordingTitle: String {
+            Bundle.systemString("consent.recording.title", value: "Recording other people")
+        }
+        static var recordingBody: String {
+            Bundle.systemString(
+                "consent.recording.body",
+                value: "You are responsible for how you record. Get the consent of everyone in the room where the law requires it, and never use Nomily for surveillance or any unlawful purpose. Nomily cannot know whether a given recording is legal where you are."
+            )
+        }
+        static var aiTitle: String {
+            Bundle.systemString("consent.ai.title", value: "AI output can be wrong")
+        }
+        static var aiBody: String {
+            Bundle.systemString(
+                "consent.ai.body",
+                value: "Transcripts, summaries, chapters and to-dos are generated by models and may be inaccurate, incomplete or made up. Check anything important yourself, and never treat AI output as the only basis for legal, medical or financial decisions."
+            )
+        }
+        static var dataTitle: String {
+            Bundle.systemString("consent.data.title", value: "Your audio, your providers")
+        }
+        static var dataBody: String {
+            Bundle.systemString(
+                "consent.data.body",
+                value: "When you turn on a cloud speech or language service, your audio and text are sent to the provider you configured, under their terms. Your API keys and recordings stay yours: Nomily has no server of its own and does not collect them."
+            )
+        }
+        static var accept: String {
+            Bundle.systemString("consent.accept", value: "Accept and continue")
+        }
+        static var decline: String {
+            Bundle.systemString("consent.decline", value: "Do not accept")
+        }
+        static var declinedNote: String {
+            Bundle.systemString(
+                "consent.declined.note",
+                value: "Nomily needs this agreement before it can record or transcribe. You can read it again any time in Settings › About."
+            )
+        }
+        static var legalTitle: String {
+            Bundle.systemString("consent.legal.title", value: "Terms of use")
+        }
+        static var aboutRow: String {
+            Bundle.systemString("consent.about.row", value: "Disclaimer & terms of use")
+        }
+        static var statusLabel: String {
+            Bundle.systemString("consent.status.label", value: "Agreement")
+        }
+        static var statusAccepted: String {
+            Bundle.systemString("consent.status.accepted", value: "Accepted")
+        }
+        static var statusPending: String {
+            Bundle.systemString("consent.status.pending", value: "Not yet accepted")
+        }
+        /// 手表端只有一句（用户："手表只放短提示"）。
+        static var watchHint: String {
+            Bundle.systemString(
+                "consent.watch.hint",
+                value: "Record only with everyone's consent. AI transcripts can be wrong."
+            )
         }
     }
 
@@ -751,13 +967,13 @@ enum L10n {
             )
         }
         static var step3Title: String {
-            NSLocalizedString("a1.step3.title", value: "Run one command on that Mac",
+            NSLocalizedString("a1.step3.title", value: "On that Mac, run the A1 Key Extractor",
                               comment: "A1 setup step 3 title")
         }
         static var step3Body: String {
             NSLocalizedString(
                 "a1.step3.body",
-                value: "It turns the secret into one line of text and copies it to the clipboard.",
+                value: "Open the download page on that Mac: https://a1-key-extractor.app.workbuddy.host/?sharecode=QDT5ZC4DMF — get the A1 Key Extractor (install-free; first launch: right-click → Open), press Re-scan, then scan the on-screen QR code with this iPhone. Command-line fallback: python3 extract_secret_from_dingtalk_mac.py --copy --qr",
                 comment: "A1 setup step 3 body"
             )
         }
@@ -1345,7 +1561,7 @@ enum L10n {
         }
         static var liveEngineFooter: String {
             NSLocalizedString("asr.live_engine_footer",
-                              value: "Only engines that can stream audio are listed. Aliyun has a real-time WebSocket endpoint, so it works live too; Baidu, Tencent, Google and the other cloud vendors are batch file APIs and cannot do live captions. Automatic picks the first stream-capable service from the order above.",
+                              value: "Only engines that can stream audio are listed. Aliyun has a real-time WebSocket endpoint, so it works live too; Baidu, Tencent, Google and the other cloud vendors are batch file APIs and cannot do live captions. Your custom server is listed as well: it has no streaming socket, so captions arrive in ~5-second slices instead of word by word. Automatic picks the first stream-capable service from the order above.",
                               comment: "Explains why the live picker is shorter than the transcription picker")
         }
         static var autoTranscribeAfterDownload: String { NSLocalizedString("asr.auto_transcribe_after_download", comment: "") }
@@ -1378,12 +1594,221 @@ enum L10n {
         static var autoSummarize: String { NSLocalizedString("asr.auto_summarize", comment: "") }
         static var autoSummarizeFooter: String { NSLocalizedString("asr.auto_summarize_footer", comment: "") }
         static var liveRecordingWithoutASR: String { NSLocalizedString("asr.live_recording_without_asr", comment: "") }
+        /// ★ 2026-11-04: 实时链路里主引擎没出字就死了、换了下一个顶上时，**必须明说**。
+        /// "徽章悄悄从自定义变成 Azure"正是用户投诉"设置没生效"的形状。
+        /// `reason` 探不到（大多数 provider 关闭时不带错误）就整段省略，不写"未知错误"。
+        static func liveFellBack(from failed: String, to next: String, reason: String?) -> String {
+            let from = engineDisplayName(failed)
+            let to = engineDisplayName(next)
+            guard let reason, !reason.isEmpty else {
+                return String(format: NSLocalizedString("asr.live_fell_back", value: "%@ failed to produce text — switched to %@", comment: "Live engine fell back; 1st = failed engine, 2nd = replacement"), from, to)
+            }
+            return String(format: NSLocalizedString("asr.live_fell_back_reason", value: "%@ failed (%@) — switched to %@", comment: "Live engine fell back with a reason; 1st = failed engine, 2nd = reason, 3rd = replacement"), from, reason, to)
+        }
+        /// 实时引擎的显示名：provider key → 人话。custom/local/remote 都有中文名，
+        /// 裸 key（"custom failed — switched to azure"）读起来像调试日志。
+        private static func engineDisplayName(_ key: String) -> String {
+            switch key.lowercased() {
+            case "custom": return customServer
+            case "azure": return azure
+            case "aliyun": return aliyun
+            case "local": return localServer
+            case "remote": return remoteLive
+            case "ondevice": return NSLocalizedString("asr.engine.ondevice", value: "On-device", comment: "Live engine name")
+            case "azuretranslate": return azure
+            case "sensevoice": return NSLocalizedString("asr.engine.sensevoice", value: "Built-in model", comment: "File transcription fallback engine")
+            default: return key
+            }
+        }
         // ★ 2026-10-15: Background keep-alive toggle + transcription queue status.
         //
         // Wording rule: **never say "silent audio"**. Users don't need to know how we keep the process alive;
         // what they need to judge is "will it keep going after I switch away" and "will it drain the battery / make strange noises".
         static var backgroundKeepAlive: String { NSLocalizedString("asr.background_keep_alive", comment: "") }
         static var backgroundKeepAliveFooter: String { NSLocalizedString("asr.background_keep_alive_footer", comment: "") }
+        // ★ 2026-11-06（后台保活·用户引导与被杀善后）
+        static var lowPowerWarning: String {
+            NSLocalizedString("asr.low_power_warning",
+                              value: "Low Power Mode is on — iOS kills background audio sooner. Plug in or turn it off for long recordings.",
+                              comment: "Settings: warning shown under the keep-alive toggle while Low Power Mode is enabled")
+        }
+        static var killedAlertTitle: String {
+            NSLocalizedString("asr.killed_alert_title",
+                              value: "A task was interrupted last time",
+                              comment: "Cold-launch alert: the app was terminated in the background with jobs running")
+        }
+        static var killedAlertBody: String {
+            NSLocalizedString("asr.killed_alert_body",
+                              value: "iOS closed Nomily in the background while a job was running. Anything unfinished has been re-queued — to lower the risk, avoid swiping the app away and turn off Low Power Mode.",
+                              comment: "Cold-launch alert body explaining the kill and how to avoid it")
+        }
+        // MARK: ★ 2026-11-06 后台保护指南页（设置 → 后台保护指南）
+        static var bgpRow: String {
+            NSLocalizedString("asr.bgp_row", value: "Background Protection Guide",
+                              comment: "Settings row that opens the background protection guide")
+        }
+        static var bgpTitle: String {
+            NSLocalizedString("asr.bgp_title", value: "Background Protection",
+                              comment: "Title of the background protection guide page")
+        }
+        static var bgpIntro: String {
+            NSLocalizedString("asr.bgp_intro", value: "iOS has no always-on whitelist like Android, but the switches below are everything the system allows. Nomily also warns you within a minute if it is ever closed mid-job.",
+                              comment: "Intro text of the background protection guide")
+        }
+        static var bgpRefreshTitle: String {
+            NSLocalizedString("asr.bgp_refresh_title", value: "Background App Refresh",
+                              comment: "Guide row: the Background App Refresh check")
+        }
+        static var bgpRefreshOk: String {
+            NSLocalizedString("asr.bgp_refresh_ok", value: "Allowed — long jobs can keep running after you switch away.",
+                              comment: "Guide: background refresh is enabled")
+        }
+        static var bgpRefreshDenied: String {
+            NSLocalizedString("asr.bgp_refresh_denied", value: "Off for Nomily — background jobs get interrupted.",
+                              comment: "Guide: background refresh is denied for this app")
+        }
+        static var bgpRefreshRestricted: String {
+            NSLocalizedString("asr.bgp_refresh_restricted", value: "Restricted by the system (Low Power Mode or Screen Time).",
+                              comment: "Guide: background refresh is restricted globally")
+        }
+        static var bgpOpenSettings: String {
+            NSLocalizedString("asr.bgp_open_settings", value: "Open Settings",
+                              comment: "Guide: button that opens this app's page in the system Settings")
+        }
+        static var bgpRefreshManual: String {
+            NSLocalizedString("asr.bgp_refresh_manual", value: "If the toggle is dimmed: Settings → General → Background App Refresh, and turn the master switch on first.",
+                              comment: "Guide: path to the global Background App Refresh switch")
+        }
+        static var bgpLowPowerTitle: String {
+            NSLocalizedString("asr.bgp_lowpower_title", value: "Low Power Mode",
+                              comment: "Guide row: the Low Power Mode check")
+        }
+        static var bgpLowPowerOn: String {
+            NSLocalizedString("asr.bgp_lowpower_on", value: "On — iOS cuts background audio much sooner. Charge the phone or turn it off (Settings → Battery) for long recordings.",
+                              comment: "Guide: low power mode is on")
+        }
+        static var bgpLowPowerOff: String {
+            NSLocalizedString("asr.bgp_lowpower_off", value: "Off — no extra risk to background jobs.",
+                              comment: "Guide: low power mode is off")
+        }
+        static var bgpNotifyTitle: String {
+            NSLocalizedString("asr.bgp_notify_title", value: "Interruption Alerts",
+                              comment: "Guide row: the kill-guard notification permission")
+        }
+        static var bgpNotifyOn: String {
+            NSLocalizedString("asr.bgp_notify_on", value: "Allowed — you will be warned within a minute if iOS ever closes the app mid-job.",
+                              comment: "Guide: notifications are authorized")
+        }
+        static var bgpNotifyOff: String {
+            NSLocalizedString("asr.bgp_notify_off", value: "Not decided yet — tap to allow interruption alerts.",
+                              comment: "Guide: notification permission not determined")
+        }
+        static var bgpNotifyDenied: String {
+            NSLocalizedString("asr.bgp_notify_denied", value: "Denied — enable it to be warned when a job is interrupted.",
+                              comment: "Guide: notification permission denied")
+        }
+        static var bgpNotifyAuthorize: String {
+            NSLocalizedString("asr.bgp_notify_authorize", value: "Open Settings to Allow",
+                              comment: "Guide: button to open Settings for notifications")
+        }
+        static var bgpKeeperTitle: String {
+            NSLocalizedString("asr.bgp_keeper_title", value: "In-App Silent Keep-Alive",
+                              comment: "Guide row: the in-app silent keep-alive toggle")
+        }
+        static var bgpKeeperOn: String {
+            NSLocalizedString("asr.bgp_keeper_on", value: "On (recommended) — recording and transcription keep running after you switch away.",
+                              comment: "Guide: keep-alive enabled")
+        }
+        static var bgpKeeperOff: String {
+            NSLocalizedString("asr.bgp_keeper_off", value: "Off — background jobs stop about 30 seconds after you switch away.",
+                              comment: "Guide: keep-alive disabled")
+        }
+        static var bgpLimitNote: String {
+            NSLocalizedString("asr.bgp_limit_note", value: "Honest note: iOS can still close any app under extreme memory pressure — no setting can forbid that. When it happens, Nomily posts an interruption alert within a minute and re-queues unfinished work.",
+                              comment: "Guide: closing note about the limits of background protection")
+        }
+        // MARK: ★ 2026-11-06 权限体检弹窗（蓝牙没开 / 麦克风被拒 / 通知被拒…）
+        static var permAlertTitle: String {
+            NSLocalizedString("asr.perm_alert_title", value: "A permission is off",
+                              comment: "Alert title when a needed permission is disabled")
+        }
+        static var permMicDenied: String {
+            NSLocalizedString("asr.perm_mic_denied", value: "Microphone access was denied — recording cannot work. Enable it in Settings → Nomily AI.",
+                              comment: "Permission alert: microphone denied")
+        }
+        static var permBtDenied: String {
+            NSLocalizedString("asr.perm_bt_denied", value: "Bluetooth permission was denied — recorders cannot connect. Enable it in Settings → Nomily AI.",
+                              comment: "Permission alert: Bluetooth permission denied")
+        }
+        static var permBtOff: String {
+            NSLocalizedString("asr.perm_bt_off", value: "Bluetooth is off — recorders cannot connect. Turn it on from Control Center or Settings.",
+                              comment: "Permission alert: Bluetooth radio is off")
+        }
+        static var permNotifDenied: String {
+            NSLocalizedString("asr.perm_notif_denied", value: "Notifications are off — you won't be alerted if a background job is interrupted. Enable them in Settings → Notifications.",
+                              comment: "Permission alert: notification permission denied")
+        }
+        static var permGoSettings: String {
+            NSLocalizedString("asr.perm_go_settings", value: "Open Settings",
+                              comment: "Permission alert: button to open the app's system settings page")
+        }
+        static var permAck: String {
+            NSLocalizedString("asr.perm_ack", value: "Got it",
+                              comment: "Permission alert: dismiss button")
+        }
+        // MARK: ★ 2026-11-06 后台保护指南新增行（蓝牙 / 麦克风 / 手表连接）
+        static var bgpBtTitle: String {
+            NSLocalizedString("asr.bgp_bt_title", value: "Bluetooth",
+                              comment: "Guide row: Bluetooth permission and radio state")
+        }
+        static var bgpBtOn: String {
+            NSLocalizedString("asr.bgp_bt_on", value: "On — recorders can connect.",
+                              comment: "Guide: Bluetooth is powered on")
+        }
+        static var bgpBtOff: String {
+            NSLocalizedString("asr.bgp_bt_off", value: "Bluetooth is off — turn it on from Control Center or Settings.",
+                              comment: "Guide: Bluetooth radio is off")
+        }
+        static var bgpBtDenied: String {
+            NSLocalizedString("asr.bgp_bt_denied", value: "Permission denied for Nomily — enable Bluetooth for this app in Settings.",
+                              comment: "Guide: Bluetooth permission denied")
+        }
+        static var bgpBtUnknown: String {
+            NSLocalizedString("asr.bgp_bt_unknown", value: "Checking…",
+                              comment: "Guide: Bluetooth state not known yet")
+        }
+        static var bgpMicTitle: String {
+            NSLocalizedString("asr.bgp_mic_title", value: "Microphone",
+                              comment: "Guide row: microphone permission")
+        }
+        static var bgpMicOk: String {
+            NSLocalizedString("asr.bgp_mic_ok", value: "Allowed — recording can use the mic.",
+                              comment: "Guide: microphone permission granted")
+        }
+        static var bgpMicDenied: String {
+            NSLocalizedString("asr.bgp_mic_denied", value: "Denied — recording cannot work without it.",
+                              comment: "Guide: microphone permission denied")
+        }
+        static var bgpWatchTitle: String {
+            NSLocalizedString("asr.bgp_watch_title", value: "Apple Watch Link",
+                              comment: "Guide row: Apple Watch connection status")
+        }
+        static var bgpWatchNotPaired: String {
+            NSLocalizedString("asr.bgp_watch_notpaired", value: "No Apple Watch paired. Pair one in the iPhone Watch app to record from the wrist.",
+                              comment: "Guide: no watch paired")
+        }
+        static var bgpWatchBtOff: String {
+            NSLocalizedString("asr.bgp_watch_btoff", value: "Bluetooth is off — the watch cannot sync.",
+                              comment: "Guide: watch can't sync because Bluetooth is off")
+        }
+        static var bgpWatchReachable: String {
+            NSLocalizedString("asr.bgp_watch_reachable", value: "Connected — watch recordings sync automatically.",
+                              comment: "Guide: watch is reachable")
+        }
+        static var bgpWatchUnreachable: String {
+            NSLocalizedString("asr.bgp_watch_unreachable", value: "Paired but not nearby (or asleep). It reconnects automatically when you raise the wrist or open the app — normal, not a fault.",
+                              comment: "Guide: watch paired but not reachable")
+        }
         static var nightlyTranscribe: String { NSLocalizedString("asr.nightly_transcribe", comment: "") }
         static var nightlyTranscribeFooter: String { NSLocalizedString("asr.nightly_transcribe_footer", comment: "") }
         static var queueTitle: String { NSLocalizedString("asr.queue_title", comment: "") }
@@ -1479,6 +1904,22 @@ enum L10n {
             "asr.custom_server",
             value: "Custom Server (OpenAI-compatible)",
             comment: "Section header for the user-defined ASR provider"
+        ) }
+        // ★ 2026-11-04（用户："要的就是这个百炼的兼容"）：同一个自定义服务下的两种接口形态。
+        static var customShape: String { NSLocalizedString(
+            "asr.custom_shape",
+            value: "API shape",
+            comment: "Picker label: which transcription API the custom server speaks"
+        ) }
+        static var customShapeWhisper: String { NSLocalizedString(
+            "asr.custom_shape_whisper",
+            value: "OpenAI / Whisper (/audio/transcriptions)",
+            comment: "Custom ASR shape: the standard OpenAI transcription endpoint"
+        ) }
+        static var customShapeBailian: String { NSLocalizedString(
+            "asr.custom_shape_bailian",
+            value: "Alibaba Bailian (qwen3-asr-flash)",
+            comment: "Custom ASR shape: Bailian's chat/completions with input_audio"
         ) }
         static var customEndpoint: String { NSLocalizedString(
             "asr.custom_endpoint",
@@ -1788,6 +2229,47 @@ enum L10n {
         }
 
         static var activeProviderFooter: String { NSLocalizedString("llm.active_provider_footer", comment: "") }
+
+        // MARK: 推理力度（★ 2026-11-06 · 饭耳 1.0 移植 P1-4）
+
+        static var effortTitle: String {
+            NSLocalizedString("llm.effort_title", value: "Reasoning Effort",
+                              comment: "LLM settings: title of the reasoning-effort picker")
+        }
+        static var effortAuto: String {
+            NSLocalizedString("llm.effort_auto", value: "Auto", comment: "Reasoning effort: leave it to the model")
+        }
+        static var effortLow: String {
+            NSLocalizedString("llm.effort_low", value: "Fast", comment: "Reasoning effort: low")
+        }
+        static var effortMedium: String {
+            NSLocalizedString("llm.effort_medium", value: "Balanced", comment: "Reasoning effort: medium")
+        }
+        static var effortHigh: String {
+            NSLocalizedString("llm.effort_high", value: "Deep", comment: "Reasoning effort: high")
+        }
+        static var effortAutoHint: String {
+            NSLocalizedString("llm.effort_auto_hint", value: "Don't send the parameter — keeps the widest compatibility.",
+                              comment: "Reasoning effort hint: auto")
+        }
+        static var effortLowHint: String {
+            NSLocalizedString("llm.effort_low_hint", value: "Answer sooner. Good for short recordings and live questions.",
+                              comment: "Reasoning effort hint: low")
+        }
+        static var effortMediumHint: String {
+            NSLocalizedString("llm.effort_medium_hint", value: "A middle ground for everyday summaries.",
+                              comment: "Reasoning effort hint: medium")
+        }
+        static var effortHighHint: String {
+            NSLocalizedString("llm.effort_high_hint", value: "Think longer. Better for long meetings and messy transcripts.",
+                              comment: "Reasoning effort hint: high")
+        }
+        static var effortFooter: String {
+            NSLocalizedString("llm.effort_footer",
+                              value: "Sent as reasoning_effort to OpenAI-compatible models that support it (o-series, gpt-5 family, some relays). If a model rejects the request with HTTP 400, switch back to Auto — that means it doesn't know this parameter.",
+                              comment: "LLM settings: footer under the reasoning-effort picker")
+        }
+
         static var apiKey: String { NSLocalizedString("llm.api_key", comment: "") }
         static var model: String { NSLocalizedString("llm.model", comment: "") }
         static var selectModel: String { NSLocalizedString("llm.select_model", comment: "") }
@@ -1865,6 +2347,16 @@ enum L10n {
         static var presetEndpointFilled: String {
             NSLocalizedString("llm.preset.endpoint_filled", value: "Endpoint (already filled in)",
                               comment: "Endpoint field label on the preset sheet")
+        }
+        static var fetchNeedsKey: String {
+            NSLocalizedString("llm.fetch.needs_key",
+                              value: "Add the API key first — the model list is fetched with it.",
+                              comment: "Shown when tapping Fetch models with no key configured")
+        }
+        static var fetchNeedsEndpoint: String {
+            NSLocalizedString("llm.fetch.needs_endpoint",
+                              value: "Fill in the endpoint address first.",
+                              comment: "Shown when tapping Fetch models with an empty endpoint")
         }
         static var presetFetchModels: String {
             NSLocalizedString("llm.preset.fetch_models", value: "Fetch available models",
@@ -1947,6 +2439,35 @@ enum L10n {
         static var endpointFixedByAPI: String {
             NSLocalizedString("llm.endpoint_fixed", value: "This address is fixed by the vendor's API.",
                               comment: "Shown when the endpoint field is read-only")
+        }
+
+        // MARK: Custom endpoint protocol (★ 2026-11-04)
+
+        static var protocolTitle: String {
+            NSLocalizedString("llm.protocol.title", value: "Protocol",
+                              comment: "Picker label: which wire format a custom endpoint speaks")
+        }
+        static var protocolOpenAI: String {
+            NSLocalizedString("llm.protocol.openai", value: "OpenAI compatible",
+                              comment: "Custom endpoint speaks /chat/completions")
+        }
+        static var protocolAnthropic: String {
+            NSLocalizedString("llm.protocol.anthropic", value: "Anthropic compatible",
+                              comment: "Custom endpoint speaks the Anthropic Messages API")
+        }
+        static var protocolOpenAIHint: String {
+            NSLocalizedString(
+                "llm.protocol.openai_hint",
+                value: "Any OpenAI-compatible address works. A version segment is optional: …/v1 and …/compatible-mode/v1 are used as-is, a bare host gets /v1 appended. Relays, self-hosted vLLM, LM Studio and workspace endpoints all fit.",
+                comment: "Footnote under the protocol picker for the OpenAI option"
+            )
+        }
+        static var protocolAnthropicHint: String {
+            NSLocalizedString(
+                "llm.protocol.anthropic_hint",
+                value: "For endpoints that speak the Anthropic Messages API (…/v1/messages, or a workspace's …/apps/anthropic). The API key is sent as x-api-key.",
+                comment: "Footnote under the protocol picker for the Anthropic option"
+            )
         }
         static var modelSearch: String {
             NSLocalizedString("llm.model_search", value: "Filter models",
@@ -2054,6 +2575,16 @@ enum L10n {
         }
         static var credentials: String {
             NSLocalizedString("asr.cloud.credentials", value: "Credentials", comment: "Section header inside the Azure sheet")
+        }
+        /// ★ 2026-11-06（饭耳 1.0 移植 P0-2）：选型决策树。
+        ///
+        /// 云厂商一排十行，每行都写着"约 X 元/小时"，用户仍然不知道该选谁——
+        /// 缺的不是数据，是**一句话指路**。这段就是那句话，按"说什么话"分流，
+        /// 而不是按"哪家便宜"分流：方言/外语的人先试免费的，普通话会议才建议上云。
+        static var decisionGuide: String {
+            NSLocalizedString("asr.cloud.decision_guide",
+                              value: "Not sure which one? Mandarin meetings → Alibaba Bailian (≈¥0.1/h, Chinese CER 2.25%). Cantonese or other dialects/languages → try the free on-device SenseVoice first, and only go cloud if that falls short. Just want a quick read → Apple's built-in engine (free, one language at a time).",
+                              comment: "ASR vendor decision tree shown under the cloud list")
         }
         static var footer: String {
             NSLocalizedString("asr.cloud.footer",
@@ -2388,6 +2919,48 @@ enum L10n {
         static var unconfigured: String { NSLocalizedString("webdav.unconfigured", comment: "") }
         /// ★ 2026-10-30：类型选择弹层的引导语。
         static var setupFooter: String { NSLocalizedString("webdav.setup_footer", comment: "") }
+
+        // MARK: 多账户（★ 2026-11-09 · 用户："选择 nas 或者其他都是用的同一个，
+        // 没有区分每个品牌跟配置，都是点击出现的 NC 的配置"）
+
+        static var savedServers: String {
+            NSLocalizedString("webdav.saved_servers", value: "Saved Servers",
+                              comment: "WebDAV sheet: header of the saved-accounts list")
+        }
+        static var addServer: String {
+            NSLocalizedString("webdav.add_server", value: "Add a Server",
+                              comment: "WebDAV sheet: header of the brand-preset list")
+        }
+        static var inUse: String {
+            NSLocalizedString("webdav.in_use", value: "In use",
+                              comment: "WebDAV sheet: tag on the account that automatic backup targets")
+        }
+        static var setActive: String {
+            NSLocalizedString("webdav.set_active", value: "Use This Server for Backup",
+                              comment: "WebDAV edit page: make this account the active backup target")
+        }
+        static var setActiveDone: String {
+            NSLocalizedString("webdav.set_active_done", value: "This server is now the backup target.",
+                              comment: "WebDAV edit page: confirmation after switching the active account")
+        }
+        static var removeServer: String {
+            NSLocalizedString("webdav.remove_server", value: "Remove This Server",
+                              comment: "WebDAV edit page: delete this saved account")
+        }
+        static var accountsFooter: String {
+            NSLocalizedString("webdav.accounts_footer",
+                              value: "Every server keeps its own host, account and password — adding a second NAS no longer overwrites the first. Backup and sync go to the server marked In use; switch any time from this page.",
+                              comment: "WebDAV sheet: footer explaining multi-account behaviour")
+        }
+        /// 存储位置页 NAS 行的「共 N 台」。
+        static func serverCount(_ n: Int) -> String {
+            String(format: NSLocalizedString("webdav.server_count", value: "%d servers", comment: "Storage locations: how many WebDAV accounts are saved"), n)
+        }
+        /// 服务器上的待办清单文件名（与摘要.md 同目录）。
+        static var remoteTodos: String {
+            NSLocalizedString("webdav.remote.todos", value: "To-dos.md",
+                              comment: "Remote file name on the server: the to-do list extracted from the summary")
+        }
         static func reportAll(_ uploaded: Int, _ skipped: Int) -> String {
             String(format: NSLocalizedString("webdav.report_all", comment: ""), uploaded, skipped)
         }
@@ -2403,6 +2976,58 @@ enum L10n {
         static var noSubfolders: String { NSLocalizedString("webdav.no_subfolders", comment: "") }
         static var pickFolder: String { NSLocalizedString("webdav.pick_folder", comment: "") }
         static var pickFolderFooter: String { NSLocalizedString("webdav.pick_folder_footer", comment: "") }
+        // ★ 2026-11-02（用户："上传后的文件查看不友好，布局排版需要优化"）：
+        // 服务器上的文件名从机器名（<base>.asr.json）换成给人看的名字。文件名走
+        // 词条而不是常量，中文环境直接可读；词条缺失时回落英文 value。
+        static var remoteTranscript: String {
+            NSLocalizedString("webdav.remote.transcript", value: "Transcript.txt",
+                              comment: "Remote file name on the server: the readable transcript text")
+        }
+        static var remoteASR: String {
+            NSLocalizedString("webdav.remote.asr", value: "ASR Data.json",
+                              comment: "Remote file name on the server: raw ASR timing/speaker metadata")
+        }
+        static var remoteNote: String {
+            NSLocalizedString("webdav.remote.note", value: "Summary.md",
+                              comment: "Remote file name on the server: the editable summary + outline in Markdown")
+        }
+        /// ★ 2026-11-04（用户："转化过的录音不要加密的"）：服务器上放的是**可播放**的
+        /// m4a，而不是客户端多半解不开的 .opus。
+        static var remoteAudio: String {
+            NSLocalizedString("webdav.remote.audio", value: "Recording.m4a",
+                              comment: "Remote file name on the server: the playable audio")
+        }
+        /// ★ 2026-11-04（用户："思维导图直接就是生成的图"）：导图以 PNG 上传。
+        static var remoteMindMap: String {
+            NSLocalizedString("webdav.remote.mindmap", value: "Mind Map.png",
+                              comment: "Remote file name on the server: the rendered mind map image")
+        }
+        /// ★ 2026-11-04（用户："然后 NC 上传也是"）：和分享同一套打包，整条资料一个 zip。
+        /// 散文件仍然保留——网盘网页端能直接读、能直接看图，包是给"整条拿走"用的。
+        static var remoteBundle: String {
+            NSLocalizedString("webdav.remote.bundle", value: "Bundle.zip",
+                              comment: "Remote file name on the server: the zipped summary + mind map + to-dos + transcript")
+        }
+        static var remoteChapters: String {
+            NSLocalizedString("webdav.remote.chapters", value: "Chapters.json",
+                              comment: "Remote file name on the server: outline chapter data")
+        }
+        /// Attribution line inside the assembled note, after the date.
+        static var noteMeta: String {
+            NSLocalizedString("webdav.note.meta", value: "Nomily note",
+                              comment: "Attribution line inside the assembled note (after the date)")
+        }
+        /// ★ 2026-11-04：摘要正文的小节标题（正文里的 H1 统一降级到 H2 之后，
+        /// 整篇只剩文档标题一个一级标题，网盘里的目录才干净）。
+        static var noteSummaryHeading: String {
+            NSLocalizedString("webdav.note.summary_heading", value: "Summary",
+                              comment: "Markdown heading above the summary body in the uploaded note")
+        }
+        /// Markdown heading for the outline section inside the assembled note.
+        static var noteChaptersHeading: String {
+            NSLocalizedString("webdav.note.chapters_heading", value: "Chapters",
+                              comment: "Markdown heading for the outline section inside the assembled note")
+        }
     }
 
     enum RecordingsSettings {
@@ -2437,7 +3062,13 @@ enum L10n {
         }
         static func qualityTierLabel(_ base: String, _ sizePerHour: String, _ recommendation: String?) -> String {
             var s = "\(base) · \(sizePerHour)"
-            if let recommendation { s += "（\(recommendation)）" }
+            if let recommendation {
+                // ★ 2026-11-05：括号样式本地化——英文用半角括号（用户截图里
+                // "约 29MB/小时（不建议）"整段混排就是这么来的另一半）。
+                s += String(format: NSLocalizedString("rec_settings.quality_rec_parens", value: "（%@）",
+                                                      comment: "Quality picker: wraps the recommendation mark; %@ = e.g. not recommended"),
+                            recommendation)
+            }
             return s
         }
         static var decryption: String { NSLocalizedString("rec_settings.decryption", comment: "") }
@@ -3030,6 +3661,52 @@ enum L10n {
                 comment: "Button in the link-lost alert that re-pushes state and re-sends queued clips"
             )
         }
+        /// ★ 2026-11-03（用户："手表如果断开了，需要通知栏弹出，然后点击自动重连或者不点击也可以"）：
+        /// 系统通知正文。应用内 alert 的 `linkLostMessage` 太长，通知里只放一句。
+        /// ★ 2026-11-03（V4 原型）：省电录音时的状态标签。
+        /// 和 `listening` 一样保留英文——它是这套设计语言里的状态词，不翻译。
+        static var moonlit: String {
+            NSLocalizedString(
+                "watch.moonlit",
+                value: "MOONLIT",
+                comment: "Watch recording badge in power-saver mode (paired with a moon glyph)"
+            )
+        }
+        /// ★ 2026-11-03（V4 原型）：录音页中间那颗暖色 chip「已攒 3 段 ›」。
+        /// 省电模式下用户最需要的一句话是"东西还在，只是攒着没发"。
+        static func stashedCount(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "watch.stashed_count", value: "%d saved",
+                    comment: "Watch recording page: chip saying how many finished clips are being held back in power-saver mode"
+                ),
+                count
+            )
+        }
+        static var linkLostNoteRecording: String {
+            NSLocalizedString(
+                "watch.link_lost_note_recording",
+                value: "Still recording on your watch. It syncs once the iPhone is nearby — tap to reconnect now.",
+                comment: "Body of the system notification posted when the watch loses the iPhone mid-recording"
+            )
+        }
+        static var linkLostNotePending: String {
+            NSLocalizedString(
+                "watch.link_lost_note_pending",
+                value: "Some clips haven't reached your iPhone yet. Tap to reconnect now.",
+                comment: "Body of the system notification posted when the watch has unsynced clips and the iPhone is away"
+            )
+        }
+        /// ★ 2026-11-03：同步页待传列表最多展示 8 条，多出来的收成这一行。
+        static func pendingMore(_ count: Int) -> String {
+            String(
+                format: NSLocalizedString(
+                    "watch.pending_more", value: "+%d more",
+                    comment: "Watch sync page: how many more queued clips exist beyond the first eight rows"
+                ),
+                count
+            )
+        }
         static var pendingHeader: String { NSLocalizedString("watch.pending_header", comment: "") }
         static var sending: String { NSLocalizedString("watch.sending", comment: "") }
         static var waiting: String { NSLocalizedString("watch.waiting", comment: "") }
@@ -3053,6 +3730,8 @@ enum L10n {
         /// 「最近」页的标题（原型里的 `Recent`）。
         static var recent: String { NSLocalizedString("watch.recent", comment: "") }
         static var recentEmpty: String { NSLocalizedString("watch.recent_empty", comment: "") }
+        /// 摘要里既没有标题也没有要点时，列表里那行主题的兜底文案。
+        static var recentUntitled: String { NSLocalizedString("watch.recent_untitled", comment: "") }
         static var syncToPhone: String { NSLocalizedString("watch.sync_to_phone", comment: "") }
         /// 大数字旁边那个**不带数字**的单位词（原型：「1 项待传」）——
         /// `pendingCount` 是"整句带数字"，这里大号数字单独排版，所以要拆开。
@@ -3074,6 +3753,141 @@ enum L10n {
             String(format: NSLocalizedString("watch.points_count", comment: ""), count)
         }
         static var menuHeader: String { NSLocalizedString("watch.menu_header", comment: "") }
+
+        // ★ 2026-11-02 第二轮（用户："手表需要为全天候录音设置，这个功耗跟传输需要优化"）：
+        // 全天候录音（省电模式）——采样/重绘放慢 + 回传暂缓。
+        static var allDayTitle: String { NSLocalizedString("watch.allday_title", comment: "") }
+        static var allDayHint: String { NSLocalizedString("watch.allday_hint", comment: "") }
+        // MARK: ★ 2026-11-05 触感等级（录音起止震动的力度，1–5 档）
+        static var hapticLevelTitle: String {
+            NSLocalizedString("watch.haptic_level_title", value: "Record haptics",
+                              comment: "Watch settings: strength of the start/stop haptics")
+        }
+        static var hapticLevelHint: String {
+            NSLocalizedString("watch.haptic_level_hint", value: "Pick 1–5; a sample plays when you change it",
+                              comment: "Watch settings: hint under the haptic-strength picker")
+        }
+        static func hapticLevelName(_ level: Int) -> String {
+            let fallback: String
+            switch level {
+            case 1: fallback = "1 · Light tap"
+            case 2: fallback = "2 · Gentle"
+            case 3: fallback = "3 · Firm"
+            case 4: fallback = "4 · Strong"
+            default: fallback = "5 · Maximum"
+            }
+            return NSLocalizedString("watch.haptic_\(level)", value: fallback,
+                                     comment: "Watch settings: haptic strength level label")
+        }
+        // MARK: ★ 2026-11-05 第二轮（用户："停止录音跟结束录音震动效果也要多出几个"）
+        // 录音起止的**花样**（节奏），与上面的力度档位正交：力度管"多重"，这里管"怎么响"。
+        // ★ 第三轮（用户："震动样式里面分启动震动跟结束震动"）：拆成启动/结束两组标题。
+        // 键名按 `WatchHapticPattern.rawValue` 拼（single / double / triple / single_long / heartbeat / crescendo）。
+        static var hapticStartTitle: String {
+            NSLocalizedString("watch.haptic_start_title", value: "Start buzz",
+                              comment: "Watch settings: haptic rhythm played when a take starts")
+        }
+        static var hapticStopTitle: String {
+            NSLocalizedString("watch.haptic_stop_title", value: "Stop buzz",
+                              comment: "Watch settings: haptic rhythm played when a take ends")
+        }
+        static var hapticPatternHint: String {
+            NSLocalizedString("watch.haptic_pattern_hint", value: "Plays once when you pick one",
+                              comment: "Watch settings: hint under the start/stop pattern pickers")
+        }
+        // MARK: ★ 2026-11-05 第四轮：全天候录音中的「环境态」标签。
+        // "REC" 各语言通写不翻——它是仪表灯上的一个字，不是句子。
+        static var ambientRec: String {
+            NSLocalizedString("watch.ambient_rec", value: "REC",
+                              comment: "Watch ambient mode (all-day recording): tiny label next to the pulsing dot")
+        }
+        static func hapticPatternName(_ raw: String) -> String {
+            let fallback: String
+            switch raw {
+            case "double": fallback = "Double knock"
+            case "triple": fallback = "Triple tap"
+            case "singleLong": fallback = "One long buzz"
+            case "heartbeat": fallback = "Heartbeat"
+            case "crescendo": fallback = "Crescendo"
+            default: fallback = "Single tap"
+            }
+            // 键里的下划线是给字符串表看的，不是 rawValue 的一部分。
+            let key = raw == "singleLong" ? "single_long" : raw
+            return NSLocalizedString("watch.haptic_pattern_name.\(key)", value: fallback,
+                                     comment: "Watch settings: name of a start/stop haptic rhythm")
+        }
+        // MARK: ★ 2026-11-05 录音中断后的「继续录音」弹窗（全天候录音）
+        static var resumePromptTitle: String {
+            NSLocalizedString("watch.resume_prompt_title", value: "Recording was interrupted",
+                              comment: "Watch: alert title when the system ended a take and all-day mode is on")
+        }
+        static var resumePromptBody: String {
+            NSLocalizedString("watch.resume_prompt_body", value: "All-day recording is on. Pick up where it left off?",
+                              comment: "Watch: alert body offering to restart the interrupted take")
+        }
+        static var resumePromptContinue: String {
+            NSLocalizedString("watch.resume_prompt_continue", value: "Keep recording",
+                              comment: "Watch: alert button — restart the take now")
+        }
+        static var resumePromptDismiss: String {
+            NSLocalizedString("watch.resume_prompt_dismiss", value: "Not now",
+                              comment: "Watch: alert button — leave it stopped")
+        }
+        /// iPhone「Apple Watch」设置页里全天候录音开关的脚注。
+        static var allDayPhoneFooter: String {
+            NSLocalizedString("watch.allday_phone_footer", value: "Same switch as on the watch. Turning it on starts recording on the watch right away.",
+                              comment: "iPhone Watch settings: footer of the all-day recording toggle")
+        }
+        // MARK: ★ 2026-11-06 表情常亮开关（手机设置页，推到手表）
+        static var alwaysOnTitle: String {
+            NSLocalizedString("watch.alwayson_title", value: "Always-On Face",
+                              comment: "iPhone Watch settings: keep the bot face visible on the dimmed always-on display")
+        }
+        static var alwaysOnHint: String {
+            NSLocalizedString("watch.alwayson_hint", value: "Show the face (dimmed, no animation) when the screen rests. Off = black to save power.",
+                              comment: "iPhone Watch settings: hint under the always-on face toggle")
+        }
+        static var alwaysOnFooter: String {
+            NSLocalizedString("watch.alwayson_footer", value: "How long the face stays before returning to the watch face is set on the watch: Settings → General → Wake Screen → Return to Clock (you can set Nomily individually, up to 1 hour). While recording, the app always stays on screen.",
+                              comment: "iPhone Watch settings: footer explaining the system-side Return to Clock limit")
+        }
+        static var faceLifeHeader: String {
+            NSLocalizedString("watch.facelife_header", value: "Face Life",
+                              comment: "iPhone Watch settings: section header for face-life options (eye shape, drowsy, pupil follow)")
+        }
+        static var faceLifeFooter: String {
+            NSLocalizedString("watch.facelife_footer", value: "These settings apply to the face on your Apple Watch. The watch gets drowsy when untouched, and its pupils follow your finger while you press the screen.",
+                              comment: "iPhone Watch settings: footer for face-life section")
+        }
+        static var eyeShapeTitle: String {
+            NSLocalizedString("watch.eyeshape_title", value: "Eye Shape",
+                              comment: "iPhone Watch settings: eye shape picker title")
+        }
+        static var drowsyTitle: String {
+            NSLocalizedString("watch.drowsy_title", value: "Doze When Idle",
+                              comment: "iPhone Watch settings: drowsy toggle title")
+        }
+        static var drowsyHint: String {
+            NSLocalizedString("watch.drowsy_hint", value: "After a while without touching, the face gets sleepy and closes its eyes. Any tap wakes it up.",
+                              comment: "iPhone Watch settings: hint under the drowsy toggle")
+        }
+        static var drowsyAfterTitle: String {
+            NSLocalizedString("watch.drowsy_after_title", value: "Start Dozing After",
+                              comment: "iPhone Watch settings: picker title for idle time before dozing")
+        }
+        static func drowsyDelay(_ seconds: Int) -> String {
+            String(format: NSLocalizedString("watch.drowsy_delay", value: "%d s", comment: "iPhone Watch settings: seconds before dozing, e.g. 30 s"), seconds)
+        }
+        static var pupilFollowTitle: String {
+            NSLocalizedString("watch.pupil_title", value: "Pupil Follows Finger",
+                              comment: "iPhone Watch settings: pupil-follow toggle title")
+        }
+        static var pupilFollowHint: String {
+            NSLocalizedString("watch.pupil_hint", value: "While pressing the screen, the eyes look where your finger goes.",
+                              comment: "iPhone Watch settings: hint under the pupil-follow toggle")
+        }
+        /// 同步页的提示条：解释"待传数字为什么不动"。
+        static var deferNote: String { NSLocalizedString("watch.defer_note", comment: "") }
 
         /// The "shake to start recording" toggle in Settings.
         static var shakeToRecord: String {
@@ -3187,6 +4001,88 @@ enum L10n {
         static var menuHintAbout: String {
             NSLocalizedString("watch.menu_hint_about", value: "Build number on the watch",
                               comment: "Watch quick menu: what the version page holds")
+        }
+
+        // MARK: 电量监控（★ 2026-11-03 八轮，用户："手表菜单栏加一个电量消耗监控"）
+
+        static var menuBattery: String {
+            NSLocalizedString("watch.menu_battery", value: "Battery",
+                              comment: "Watch quick menu: battery / power consumption page")
+        }
+
+        static var menuHintBattery: String {
+            NSLocalizedString("watch.menu_hint_battery", value: "Drain while recording all day",
+                              comment: "Watch quick menu: what the battery page holds")
+        }
+        static var menuHintVoiceprint: String {
+            NSLocalizedString("watch.menu_hint_voiceprint", value: "Teach it your voice",
+                              comment: "Watch quick menu: what the voiceprint page holds")
+        }
+
+        static var batteryNow: String {
+            NSLocalizedString("watch.battery_now", value: "Now", comment: "Battery page: current level label")
+        }
+
+        static var batteryRate: String {
+            NSLocalizedString("watch.battery_rate", value: "Drain", comment: "Battery page: per-hour drain label")
+        }
+
+        static var batteryLeft: String {
+            NSLocalizedString("watch.battery_left", value: "Left", comment: "Battery page: estimated runtime label")
+        }
+
+        static var batteryCharging: String {
+            NSLocalizedString("watch.battery_charging", value: "Charging", comment: "Battery page: charging state")
+        }
+
+        static var batteryNoData: String {
+            NSLocalizedString("watch.battery_no_data", value: "Collecting…", comment: "Battery page: not enough samples yet")
+        }
+
+        /// ★ 九轮：样本还不够时不再干等一句 "Collecting…"，直接说还差几分钟。
+        static func batteryCollecting(_ minutes: Int) -> String {
+            String(format: NSLocalizedString("watch.battery_collecting", value: "%d min more",
+                                             comment: "Battery page: how many more minutes of samples are needed"), minutes)
+        }
+
+        /// ★ 九轮：待机档（区别于录音档）。两档速率不同，界面必须标出来。
+        static var batteryIdle: String {
+            NSLocalizedString("watch.battery_idle", value: "Standby", comment: "Battery page: not recording")
+        }
+
+        /// ★ 九轮：「今日录音」累计行。
+        static var batteryToday: String {
+            NSLocalizedString("watch.battery_today", value: "Today", comment: "Battery page: recording drain accumulated today")
+        }
+
+        /// 今日录音时长 + 累计掉电。时长用一小时一位小数（"3.2h"）：
+        /// 手表这一行只有百来点宽，时分秒写不下。
+        static func batteryTodayValue(hours: Double, drop: Double) -> String {
+            String(format: NSLocalizedString("watch.battery_today_value", value: "%.1fh · −%.0f%%",
+                                             comment: "Battery page: hours recorded today and how much battery that used"),
+                   hours, drop)
+        }
+
+        /// 速率小于 0.5%/h 时的说法。1% 一档的分辨率下，这个区间算不出更细的数，
+        /// 硬写 "0.0%/h" 会被读成"坏了"。
+        static var batteryRateSmall: String {
+            NSLocalizedString("watch.battery_rate_small", value: "<0.5%/h",
+                              comment: "Battery page: drain too small to resolve at 1% granularity")
+        }
+
+        /// 百分比 + 每小时耗电 + 预计还能录多久。
+        ///
+        /// ⚠️ 必须走 `String(format:)`：以前把数字插进 `value:` 里，一旦该键在
+        ///    `zh-Hans` 里存在（现在有了），`NSLocalizedString` 会返回**带占位符**的
+        ///    译文而不再用那个已插值的 value，屏幕上就会显示 "每小时 %@%%"。
+        static func batteryRateValue(_ percentPerHour: Double) -> String {
+            String(format: NSLocalizedString("watch.battery_rate_value", value: "%.1f%%/h",
+                                             comment: "Battery page: drain per hour"), percentPerHour)
+        }
+
+        static func batteryLeftValue(_ hours: Double) -> String {
+            String(format: NSLocalizedString("watch.battery_left_value", value: "%.1f h",
+                                             comment: "Battery page: estimated remaining hours"), hours)
         }
         static var menuHintRecap: String {
             NSLocalizedString("watch.menu_hint_recap", value: "AI digests pushed from the phone",
@@ -3414,6 +4310,33 @@ enum L10n {
         }
         static var curious: String {
             NSLocalizedString("face.curious", value: "Curious", comment: "Watch face expression: tall eyes tipped slightly inwards")
+        }
+        // ★ 2026-11-06：借鉴 agent-avatars（jamesalmeida/agent-avatars）表情库的两档。
+        static var wink: String {
+            NSLocalizedString("face.wink", value: "Wink", comment: "Watch face expression: one eye closed")
+        }
+        static var love: String {
+            NSLocalizedString("face.love", value: "Love", comment: "Watch face expression: heart-shaped eyes")
+        }
+        // ★ 2026-11-06 二轮：补齐 agent-avatars 缺的两档。
+        static var sorry: String {
+            NSLocalizedString("face.sorry", value: "Sorry", comment: "Watch face expression: drooping, apologetic eyes")
+        }
+        static var confused: String {
+            NSLocalizedString("face.confused", value: "Confused", comment: "Watch face expression: uneven eyes tilted the same way")
+        }
+        // ★ 2026-11-06 二轮：眼睛形状轴（借鉴 agent-avatars 的 4 种 eye styles）。
+        static var shapeTall: String {
+            NSLocalizedString("face.shape_tall", value: "Tall", comment: "Eye shape: tall capsules (default)")
+        }
+        static var shapeRound: String {
+            NSLocalizedString("face.shape_round", value: "Round", comment: "Eye shape: round eyes")
+        }
+        static var shapeCalm: String {
+            NSLocalizedString("face.shape_calm", value: "Calm", comment: "Eye shape: wide, short, relaxed eyes")
+        }
+        static var shapeCurious: String {
+            NSLocalizedString("face.shape_curious", value: "Curious", comment: "Eye shape: narrow and tall")
         }
 
         // Blink pace (a three-way setting, see `BotBlinkSpeed`).
@@ -4119,6 +5042,63 @@ enum L10n {
         }
         static var todosEmpty: String { NSLocalizedString("clip_detail.todos_empty", value: "No action items in the summary.", comment: "To-dos tab when the summary has no action-item section") }
         static var todosNeedSummary: String { NSLocalizedString("clip_detail.todos_need_summary", value: "Generate a summary to collect action items here.", comment: "To-dos tab when no summary exists yet") }
+
+        // MARK: 待办分组（★ 2026-11-03 九轮：重排待办页，加了进度行与「已完成」折叠）
+        /// 大数字右边那句（还有没做完的）。
+        static var todosRemaining: String {
+            NSLocalizedString("clip_detail.todos_remaining", value: "left to do",
+                              comment: "To-do header: word after the big remaining count")
+        }
+        /// 全部勾完时替代上面那句。
+        static var todosAllDone: String {
+            NSLocalizedString("clip_detail.todos_all_done", value: "all done",
+                              comment: "To-do header: shown when nothing is left")
+        }
+        /// 「共 8 项」。⚠️ 走 `String(format:)` 而不是字符串插值：
+        /// 中文里数字的位置和英文不同（"共 %d 项" / "of %d"），插值就把语序焊死了。
+        static func todosTotal(_ count: Int) -> String {
+            String(format: NSLocalizedString("clip_detail.todos_total", value: "of %d",
+                                             comment: "To-do header: trailing total, e.g. 'of 8'"), count)
+        }
+        /// 「已完成 3」——折叠组的小标题。
+        static func todosCompleted(_ count: Int) -> String {
+            String(format: NSLocalizedString("clip_detail.todos_completed", value: "Completed %d",
+                                             comment: "To-do header for the collapsed group of checked rows"), count)
+        }
+
+        // MARK: 打包分享（★ 2026-11-04 用户："把我当前总结、思维导图、待办都进行分享出去打包方式"）
+        //
+        // 之前分享是"一件一件来"：导图一张图、摘要一个 md、待办只能截屏，发给同事要来回翻。
+        // 这里给一个 zip 入口，两个粒度：只发文档 / 连录音一起。
+        static var todosTitle: String {
+            NSLocalizedString("clip_detail.todos_title", value: "To-dos",
+                              comment: "Heading of the to-do list inside the share bundle's 待办.md")
+        }
+        /// 菜单项。括号里写清包里有什么，省得用户点开才知道。
+        static var bundleShareTitle: String {
+            NSLocalizedString("clip_detail.bundle_title",
+                              value: "Share as a bundle (summary + mind map + to-dos)",
+                              comment: "Overflow menu entry that zips the note artefacts and opens the share sheet")
+        }
+        static var bundleDocsOnly: String {
+            NSLocalizedString("clip_detail.bundle_docs_only",
+                              value: "Documents only (summary / mind map / to-dos / transcript)",
+                              comment: "Bundle confirmation — no audio, fast")
+        }
+        static var bundleWithAudio: String {
+            NSLocalizedString("clip_detail.bundle_with_audio",
+                              value: "Include the recording (larger, takes a moment)",
+                              comment: "Bundle confirmation — include the audio file")
+        }
+        static var bundleBuilding: String {
+            NSLocalizedString("clip_detail.bundle_building", value: "Packaging…",
+                              comment: "Menu entry while the zip is being built")
+        }
+        static var bundleEmpty: String {
+            NSLocalizedString("clip_detail.bundle_empty",
+                              value: "Nothing to share yet — this recording has no summary, mind map, to-dos or transcript.",
+                              comment: "Bundle failed because every part of the package was missing")
+        }
         static var searchTranscript: String { NSLocalizedString("clip_detail.search_transcript", value: "Search transcript", comment: "Transcript search field placeholder") }
         static var speakerAll: String { NSLocalizedString("clip_detail.speaker_all", value: "All speakers", comment: "Speaker filter chip — clear the filter") }
         // ★ 2026-10-22 ("还要支持修改说话人的名称"): diarization ids are the vendor's
@@ -4134,6 +5114,27 @@ enum L10n {
             NSLocalizedString("clip_detail.trace_source",
                               value: "Jump to source in transcript",
                               comment: "Accessibility label for the small per-block button that locates the sentence in the transcript")
+        }
+
+        // MARK: 摘要自动版式（★ 2026-11-03 九轮）
+        //
+        // 四枚标签是"这篇摘要按什么模子排的"。文案刻意短：它们以胶囊形式出现在
+        // 摘要正文顶部，长一句就把整块挤到第二行。
+        static var layoutMinutes: String {
+            NSLocalizedString("summary.layout.minutes", value: "Meeting notes",
+                              comment: "Summary layout badge: the body reads like meeting minutes")
+        }
+        static var layoutQA: String {
+            NSLocalizedString("summary.layout.qa", value: "Q&A",
+                              comment: "Summary layout badge: the body is organised as questions and answers")
+        }
+        static var layoutChecklist: String {
+            NSLocalizedString("summary.layout.checklist", value: "Action list",
+                              comment: "Summary layout badge: most of the body is action items")
+        }
+        static var layoutNotes: String {
+            NSLocalizedString("summary.layout.notes", value: "Notes",
+                              comment: "Summary layout badge: the default clean document layout")
         }
         /// ★ 2026-10-30（用户："笔记来源要支持能够直接在摘要进行编辑"）：
         /// 摘要标题栏的编辑入口——带文字，不再是一枚看不出用途的小铅笔。
@@ -4223,6 +5224,35 @@ enum L10n {
         static var mindMapExportFailed: String { NSLocalizedString("clip_detail.mind_map_export_failed", value: "Couldn't export the mind map.", comment: "Alert title when mind-map PNG export fails") }
         static var mindMapExpandAll: String { NSLocalizedString("clip_detail.mind_map_expand_all", value: "Expand all", comment: "Toolbar button that opens every folded branch of the mind map") }
         static var mindMapCollapseAll: String { NSLocalizedString("clip_detail.mind_map_collapse_all", value: "Collapse all", comment: "Toolbar button that folds the mind map back to its top-level branches") }
+
+        // MARK: 思维导图结构模板（★ 2026-11-03 九轮）
+        //
+        // 五枚标签说明"这张图是按哪种结构排的"。名字对齐主流思维导图产品的说法
+        // （topic / org chart / timeline），用户不必学一套新词。
+        static var mapTemplateTopic: String {
+            NSLocalizedString("map.template.topic", value: "Topics",
+                              comment: "Mind map template badge: plain topic tree (default)")
+        }
+        static var mapTemplateMinutes: String {
+            NSLocalizedString("map.template.minutes", value: "Meeting",
+                              comment: "Mind map template badge: branches reordered as meeting minutes")
+        }
+        static var mapTemplatePeople: String {
+            NSLocalizedString("map.template.people", value: "By person",
+                              comment: "Mind map template badge: regrouped with each owner as a branch")
+        }
+        static var mapTemplateTimeline: String {
+            NSLocalizedString("map.template.timeline", value: "Timeline",
+                              comment: "Mind map template badge: branches numbered in sequence")
+        }
+        static var mapTemplateActions: String {
+            NSLocalizedString("map.template.actions", value: "Action first",
+                              comment: "Mind map template badge: the to-do branch is hoisted to the top")
+        }
+        static var mapTemplateOthers: String {
+            NSLocalizedString("map.template.others", value: "Others",
+                              comment: "Mind map branch that keeps the points which had no owner in front of them")
+        }
         // ---- "Image-text" poster share (DingTalk-style share card) ----
         static var shareAsImage: String {
             NSLocalizedString("clip_detail.share_as_image", value: "Share as Image",
@@ -4419,6 +5449,40 @@ enum L10n {
 
     // MARK: - Encryption passphrase / onboarding (v1.50)
 
+    /// ★ 2026-11-04：连接时"钥匙对不对"的状态文案。
+    ///
+    /// 这些句子存在的意义是**区分责任**：是设备上有别人的钥匙、是本机没有、
+    /// 还是手机锁着读不到。以前三种都只说"请设置密码"，而其中两种根本不该
+    /// 让用户去设密码。
+    enum KeyHealth {
+        static var rowLabel: String { NSLocalizedString("keyhealth.row_label", value: "Key check", comment: "Settings row — whether this iPhone's key opens the device's recordings") }
+        static var unknown: String { NSLocalizedString("keyhealth.unknown", value: "unknown", comment: "Key health — device state not read yet") }
+        static var notEncrypted: String { NSLocalizedString("keyhealth.not_encrypted", value: "device not encrypting", comment: "Key health — device encryption is off") }
+        static var noKey: String { NSLocalizedString("keyhealth.no_key", value: "no key on this iPhone", comment: "Key health — device encrypted, this iPhone has no key") }
+        static var unreadable: String { NSLocalizedString("keyhealth.unreadable", value: "locked — unlock to read", comment: "Key health — Keychain read was blocked (screen locked)") }
+        static var unverified: String { NSLocalizedString("keyhealth.unverified", value: "not verified yet", comment: "Key health — a key exists but nothing has been decrypted with it on this device") }
+        static var verified: String { NSLocalizedString("keyhealth.verified", value: "matches device", comment: "Key health — the key opens this device's recordings") }
+        static var mismatch: String { NSLocalizedString("keyhealth.mismatch", value: "doesn't match device", comment: "Key health — the key does NOT open this device's recordings") }
+        static func fingerprintNote(_ value: String) -> String {
+            String(format: NSLocalizedString("keyhealth.fingerprint_note", value: "Key fingerprint %@ — compare it with the device page to tell whether both sides hold the same key.", comment: "Key health footer with the short key fingerprint"), value)
+        }
+        /// 列表页横幅（只在"确定不匹配"时出现）。
+        static var bannerTitle: String { NSLocalizedString("keyhealth.banner_title", value: "This iPhone's key doesn't match the device", comment: "Banner title when the local key fails verification against the device") }
+        static var bannerMessage: String { NSLocalizedString("keyhealth.banner_message", value: "Recordings transferred now will save as encrypted files that can't be opened on this iPhone. They stay on the device untouched — fix the key first, or the files are unreadable until you do.", comment: "Banner body explaining transfer would land undecryptable files") }
+    }
+
+    /// ★ 2026-11-04：录音键被"设备加密 + 本机没钥匙"拦住时的提示。
+    ///
+    /// 这道闸门本身是对的（录下来的文件在这台手机上会永远打不开），但它以前是
+    /// **静默**的：按钮灰着、点了没反应、没有任何一句解释。P101 用户就是这么撞上的
+    /// ——"已经连上了，但没办法录音"。
+    enum RecordGate {
+        static var blockedTitle: String { NSLocalizedString("record_gate.title", value: "Can't start recording", comment: "Alert title when the record button is blocked by the encryption gate") }
+        static var blockedNoKey: String { NSLocalizedString("record_gate.no_key", value: "This device is encrypted and this iPhone has no matching key yet. Set the passphrase once before recording — anything recorded now could never be opened here.", comment: "Record button blocked: device encrypted, no local key") }
+        static var blockedMismatch: String { NSLocalizedString("record_gate.mismatch", value: "This iPhone's key doesn't match the device, so new recordings still couldn't be opened here. Fix the key first (see Settings → Recordings).", comment: "Record button blocked: local key mismatches the device") }
+        static var openSettings: String { NSLocalizedString("record_gate.open_settings", value: "Open settings", comment: "CTA next to the blocked-recording hint") }
+    }
+
     enum EncryptionOnboarding {
         // Settings — "Encryption passphrase" section
         static var sectionHeader: String { NSLocalizedString("encryption.section_header", value: "Encryption passphrase", comment: "Settings section header for the user passphrase") }
@@ -4470,8 +5534,11 @@ enum L10n {
 
         // Mismatch alert
         static var mismatchTitle: String { NSLocalizedString("encryption.mismatch.title", value: "Passphrase didn't match", comment: "Alert title when probe verify fails") }
-        static var mismatchMessage: String { NSLocalizedString("encryption.mismatch.message", value: "The probe clip didn't decrypt with that passphrase. Double-check it and try again. If you've truly forgotten it, use \"Rotate\" to overwrite the device key — but that permanently destroys every existing encrypted recording on the device.", comment: "Alert body explaining retry + rotate") }
+        static var mismatchMessage: String { NSLocalizedString("encryption.mismatch.message", value: "The probe clip didn't decrypt with that passphrase. Double-check it and try again. If the device's key was set by another app (e.g. the vendor's app) or another phone, remove encryption there first, then set the passphrase here. If you truly own this device but lost the passphrase, use \"Rotate\" — it only succeeds when the passphrase matches the device's current key.", comment: "Alert body explaining retry + rotate + mixed-app guidance") }
         static var mismatchTryAgain: String { NSLocalizedString("encryption.mismatch.try_again", value: "Try again", comment: "Alert button to retry") }
+        /// ★ 2026-11-03（混合使用兼容）：轮换时设备现役密钥不是这句口令派生的，
+        ///   固件拒绝解除（协议 0xA2 规则 2）——必须先去设置该密钥的 App 里解除加密。
+        static var foreignKeyBlocked: String { NSLocalizedString("encryption.foreign_key.blocked", value: "The device's current key wasn't set with this passphrase (it was likely created by the vendor's app or another phone). Firmware refuses to overwrite it. Open the app that set the key and turn encryption OFF there first — then come back and set the passphrase here. Recordings already on the device stay safe either way.", comment: "Rotate failed because the device holds a foreign key") }
 
         // Inline errors
         static var errorDeviceNotConnected: String { NSLocalizedString("encryption.error.device_not_connected", value: "Device not connected.", comment: "Error: Rotate attempted with no connection") }
@@ -4707,6 +5774,8 @@ enum L10n {
         static var actionScan: String { NSLocalizedString("scanner.action_scan", value: "Scan to connect", comment: "Card subtitle: BLE scan flow") }
         static var actionSDK: String { NSLocalizedString("scanner.action_sdk", value: "Official SDK direct connect", comment: "Card subtitle: PLAUD SDK flow") }
         static var actionWatch: String { NSLocalizedString("scanner.action_watch", value: "Install the Watch app", comment: "Card subtitle: Apple Watch flow") }
+        /// ★ 2026-11-05：这里原来写死中文（英文界面漏中文残留排查发现的最后一处）。
+        static var categorySoundcore: String { NSLocalizedString("scanner.category_soundcore", value: "soundcore Work (Feishu Recorder Bean)", comment: "Device family card: soundcore Work D3200, used alongside the Feishu app") }
         static func noNewInCategory(_ name: String) -> String {
             String(format: NSLocalizedString(
                 "scanner.no_new_in_category",
@@ -4779,6 +5848,14 @@ enum L10n {
         static var shortSourceNote: String {
             NSLocalizedString("summarize.short_source_note", value: "The transcript is very short — a simplified summary was used instead of the full template",
                               comment: "Job note: the template was skipped because the source is tiny")
+        }
+
+        /// ★ 2026-11-03 十轮：长录音只摘要重要片段时的一句说明。
+        static func salienceNote(dropped: Int) -> String {
+            String(format: NSLocalizedString("summarize.salience_note",
+                                             value: "This was a long take: %d%% of it was small talk, so only the salient parts were summarized",
+                                             comment: "Job note: filler lines were filtered out before summarizing"),
+                   dropped)
         }
         static var summarizing: String { NSLocalizedString("summarize.summarizing", comment: "") }
         static var error: String { NSLocalizedString("summarize.error", comment: "") }
@@ -4987,6 +6064,70 @@ enum L10n {
     ///
     /// ⚠️ Keep the wording consistent with the `ASR.queue_*` batch: **never say "silent audio"**. What users want
     ///    to judge is "will it keep going after I switch away", not how we keep the process alive.
+    /// 待办看板（★ 2026-11-06 · 饭耳 1.0 移植 P0-1）。
+    ///
+    /// 文案基调学饭耳：不说"待办项"，说人话——「都看完了」「今天做完 1 件」
+    /// 「卡片攒了很久，现在处理一下」。状态词用动词短语而不是名词，
+    /// 因为每个状态都是用户做过的一个**决定**。
+    enum Todo {
+        static var title: String { NSLocalizedString("todo.title", value: "To-dos", comment: "To-do board page title") }
+        static var settingsRow: String { NSLocalizedString("todo.settings_row", value: "To-do Board", comment: "Settings row for the to-do board") }
+        static var segmentList: String { NSLocalizedString("todo.segment_list", value: "List", comment: "To-do board segment: list view") }
+        static var segmentSchedule: String { NSLocalizedString("todo.segment_schedule", value: "Schedule", comment: "To-do board segment: calendar view") }
+
+        static var statusPending: String { NSLocalizedString("todo.status_pending", value: "New", comment: "To-do status: just extracted, undecided") }
+        static var statusAccepted: String { NSLocalizedString("todo.status_accepted", value: "To do", comment: "To-do status: accepted") }
+        static var statusDone: String { NSLocalizedString("todo.status_done", value: "Done", comment: "To-do status: done") }
+        static var statusWont: String { NSLocalizedString("todo.status_wont", value: "Skip", comment: "To-do status: decided not to do") }
+        static var statusDeferred: String { NSLocalizedString("todo.status_deferred", value: "Later", comment: "To-do status: snoozed") }
+
+        static var sectionInbox: String { NSLocalizedString("todo.section_inbox", value: "Waiting for your call", comment: "To-do board section: pending decisions") }
+        static var sectionActive: String { NSLocalizedString("todo.section_active", value: "To do", comment: "To-do board section: accepted items") }
+        static var sectionLater: String { NSLocalizedString("todo.section_later", value: "Remind me later", comment: "To-do board section: snoozed items") }
+        static var sectionClosed: String { NSLocalizedString("todo.section_closed", value: "Closed", comment: "To-do board section: done + skipped") }
+
+        static var emptyInbox: String { NSLocalizedString("todo.empty_inbox", value: "All caught up · nothing waiting on you", comment: "To-do board: empty inbox") }
+        static var emptyBoard: String { NSLocalizedString("todo.empty_board", value: "No to-dos yet. Finish a recording's summary and its action items land here automatically.", comment: "To-do board: empty state with no cards at all") }
+        static var emptyDay: String { NSLocalizedString("todo.empty_day", value: "Nothing due on this day", comment: "To-do board: empty schedule day") }
+
+        static var decideTitle: String { NSLocalizedString("todo.decide_title", value: "A backlog has piled up — clear it", comment: "Decision sheet title") }
+        static var decideHint: String { NSLocalizedString("todo.decide_hint", value: "Swipe right: done / skip · Swipe left: to do / later", comment: "Decision sheet hint") }
+        static var decideDone: String { NSLocalizedString("todo.decide_done", value: "Done", comment: "Decision sheet: mark done") }
+        static var decideWont: String { NSLocalizedString("todo.decide_wont", value: "Skip it", comment: "Decision sheet: not doing it") }
+        static var decideAccept: String { NSLocalizedString("todo.decide_accept", value: "To do", comment: "Decision sheet: accept") }
+        static var decideLater: String { NSLocalizedString("todo.decide_later", value: "Remind me later", comment: "Decision sheet: snooze") }
+        static var decideSkip: String { NSLocalizedString("todo.decide_skip", value: "Not now", comment: "Decision sheet: skip the whole clearing flow") }
+        static var decideProgressFormat: String {
+            NSLocalizedString("todo.decide_progress", value: "%1$d of %2$d", comment: "Decision sheet progress, e.g. 2 of 5")
+        }
+        static func decideProgress(_ done: Int, _ total: Int) -> String {
+            String(format: decideProgressFormat, done, total)
+        }
+        static var decideFinished: String { NSLocalizedString("todo.decide_finished", value: "Cleared. Nice.", comment: "Decision sheet: all cards handled") }
+
+        static var swipeDone: String { NSLocalizedString("todo.swipe_done", value: "Done", comment: "Swipe action: done") }
+        static var swipeWont: String { NSLocalizedString("todo.swipe_wont", value: "Skip", comment: "Swipe action: skip") }
+        static var swipeLater: String { NSLocalizedString("todo.swipe_later", value: "Later", comment: "Swipe action: snooze to tomorrow 8:30") }
+        static var swipeDelete: String { NSLocalizedString("todo.swipe_delete", value: "Delete", comment: "Swipe action: delete card") }
+        static var openSource: String { NSLocalizedString("todo.open_source", value: "Open recording", comment: "Open the source recording") }
+        static var sourceMissing: String { NSLocalizedString("todo.source_missing", value: "Source recording was deleted", comment: "Shown when the source recording no longer exists") }
+
+        static var doneToday: String {
+            NSLocalizedString("todo.done_today", value: "Nothing left · %d done today", comment: "Header line: nothing pending, N done today")
+        }
+        static func doneToday(_ count: Int) -> String { String(format: doneToday, count) }
+        static var overdue: String { NSLocalizedString("todo.overdue", value: "%d overdue", comment: "Overdue count badge") }
+        static func overdue(_ count: Int) -> String { String(format: overdue, count) }
+
+        static var notifyBody: String { NSLocalizedString("todo.notify_body", value: "From “%@”", comment: "Notification body, %@ = source recording title") }
+        static func notifyBody(_ source: String) -> String { String(format: notifyBody, source) }
+
+        static var reminderFooter: String {
+            NSLocalizedString("todo.reminder_footer", value: "Reminders fire at 8:30 tomorrow morning by default. Swipe a card to decide faster.",
+                              comment: "To-do board footer about notifications")
+        }
+    }
+
     enum Jobs {
 
         // MARK: Kinds of jobs (`JobKind.title`)
@@ -5211,6 +6352,120 @@ enum L10n {
         }
         static var savedToLibrary: String {
             NSLocalizedString("phone.saved", value: "Saved to Library", comment: "Toast after the phone recording is stored")
+        }
+        /// ★ 2026-11-06：麦克风权限的前置说明（系统弹窗之前的一屏）。
+        static var micPrimerTitle: String {
+            NSLocalizedString("phone.mic_primer_title", value: "Record with the phone microphone",
+                              comment: "Pre-permission explainer title")
+        }
+        static var micPrimerBody: String {
+            NSLocalizedString("phone.mic_primer_body",
+                              value: "Nomily records audio to transcribe it. Audio stays on this phone unless you have configured a cloud speech service.",
+                              comment: "Pre-permission explainer: why the mic is needed, where audio goes")
+        }
+    }
+
+    // MARK: - 声纹（★ 2026-11-04）
+
+    /// 用户本人的说话人标签。声纹匹配成功时，转写里那个说话人会被改成这个名字。
+    enum Voiceprint {
+        static var selfLabel: String {
+            NSLocalizedString("voiceprint.self_label", value: "我",
+                              comment: "Speaker label used when the voiceprint identifies the user")
+        }
+        static var title: String {
+            NSLocalizedString("voiceprint.title", value: "声纹",
+                              comment: "Watch menu entry / phone settings section title")
+        }
+        static var statusEnrolled: String {
+            NSLocalizedString("voiceprint.status_enrolled", value: "已录入声纹",
+                              comment: "Status: a voiceprint exists")
+        }
+        static var statusMissing: String {
+            NSLocalizedString("voiceprint.status_missing", value: "未录入声纹",
+                              comment: "Status: no voiceprint yet")
+        }
+        /// 手表上要朗读的示例句。刻意是一段正常语速的会议开场白——
+        /// 用"啊——啊——"录出来的声纹，和真实说话时的声道状态不一样。
+        static var enrollScript: String {
+            NSLocalizedString("voiceprint.enroll_script",
+                              value: "今天上午我们先过一下这周的进度，然后确认下个月的排期。",
+                              comment: "Sentence the user reads aloud when enrolling their voiceprint")
+        }
+        static var enrollHint: String {
+            NSLocalizedString("voiceprint.enroll_hint",
+                              value: "安静环境下，用平常的语速读完这句。",
+                              comment: "Instruction above the enrollment script")
+        }
+        static var enrollStart: String {
+            NSLocalizedString("voiceprint.enroll_start", value: "开始录音",
+                              comment: "Button that starts voiceprint enrollment")
+        }
+        static var enrollStop: String {
+            NSLocalizedString("voiceprint.enroll_stop", value: "完成",
+                              comment: "Button that finishes voiceprint enrollment")
+        }
+        static var enrolling: String {
+            NSLocalizedString("voiceprint.enrolling", value: "录音中…",
+                              comment: "Enrollment in progress")
+        }
+        static var sent: String {
+            NSLocalizedString("voiceprint.sent", value: "已发送到 iPhone，稍后完成注册",
+                              comment: "Shown after the watch sends the enrollment sample")
+        }
+        /// ★ 2026-11-06：样本已发出后，小号的"重录"出口（大的开始按钮此时不显示）。
+        static var rerecord: String {
+            NSLocalizedString("voiceprint.rerecord", value: "重新录制",
+                              comment: "Small secondary button: discard state and record a new sample")
+        }
+        /// ★ 2026-11-06：手机端注册失败的回执文案（手表端显示）。
+        static var failed: String {
+            NSLocalizedString("voiceprint.failed", value: "iPhone 没能注册这条样本，请再录一次。",
+                              comment: "Phone reported the enrollment failed")
+        }
+        static var done: String {
+            NSLocalizedString("voiceprint.done", value: "声纹已更新", comment: "Phone finished enrolling")
+        }
+        static var removed: String {
+            NSLocalizedString("voiceprint.removed", value: "已删除声纹", comment: "Voiceprint deleted")
+        }
+        static var remove: String {
+            NSLocalizedString("voiceprint.remove", value: "删除声纹", comment: "Delete the stored voiceprint")
+        }
+        static var explain: String {
+            NSLocalizedString("voiceprint.explain",
+                              value: "录一段自己的声音，之后转写会把你认出来、标成「我」。同一条录音里别人的话不受影响。",
+                              comment: "One-paragraph explanation on the settings page")
+        }
+        static func sampleInfo(_ seconds: Int, source: String) -> String {
+            String(format: NSLocalizedString("voiceprint.sample_info", value: "%@ · 有效语音 %d 秒",
+                                             comment: "Voiceprint status line: device it was recorded on, voiced seconds"),
+                   source, seconds)
+        }
+        static var deviceWatch: String {
+            NSLocalizedString("voiceprint.device_watch", value: "手表录制",
+                              comment: "Where the voiceprint sample came from")
+        }
+        static var devicePhone: String {
+            NSLocalizedString("voiceprint.device_phone", value: "手机录制",
+                              comment: "Where the voiceprint sample came from")
+        }
+        static var unreadable: String {
+            NSLocalizedString("voiceprint.error_unreadable", value: "这段音频读不了，换个格式再试。",
+                              comment: "Voiceprint enrollment failed: audio could not be decoded")
+        }
+        static var tooShort: String {
+            NSLocalizedString("voiceprint.error_short", value: "样本太短，至少要说三秒。",
+                              comment: "Voiceprint enrollment failed: sample too short")
+        }
+        static var noSpeech: String {
+            NSLocalizedString("voiceprint.error_nospeech", value: "没听到清晰的人声，安静一点再录一次。",
+                              comment: "Voiceprint enrollment failed: no voiced frames")
+        }
+        static var identityFooter: String {
+            NSLocalizedString("voiceprint.identity_footer",
+                              value: "识别在本机完成，声音样本不会上传到任何服务器。",
+                              comment: "Privacy footer under the voiceprint section")
         }
     }
 }

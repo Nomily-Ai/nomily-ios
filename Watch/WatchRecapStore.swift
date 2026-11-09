@@ -98,6 +98,22 @@ final class WatchRecapStore: ObservableObject {
 
     private static func prune(_ recaps: [WatchRecap]) -> [WatchRecap] {
         let cutoff = Date().addingTimeInterval(-WatchRecap.retention)
-        return Array(recaps.filter { $0.createdAt > cutoff }.prefix(WatchRecap.limit))
+        // ★★ 2026-11-04（用户："排序方式按照时间最新的排在最上面"）：**按录制时间倒序**。
+        //   以前完全靠"新条目 insert(at: 0)"维持顺序——那只是推送顺序，不是时间顺序：
+        //   手机补推一条旧录音的摘要（重新生成摘要很常见）就会把它插到最上面，
+        //   30 行的列表里那就成了"昨天那条怎么跑到今天前面去了"。
+        //   `recordedAt` 是**录音发生的时刻**，`createdAt` 只是摘要生成的时刻；
+        //   用户翻"最近"时问的是"什么时候录的"，所以主键用 `recordedAt`，
+        //   同一秒内再用 `createdAt` 和 `id` 兜底，保证顺序稳定（不会每次重排都抖）。
+        return Array(
+            recaps
+                .filter { $0.createdAt > cutoff }
+                .sorted { lhs, rhs in
+                    if lhs.recordedAt != rhs.recordedAt { return lhs.recordedAt > rhs.recordedAt }
+                    if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+                    return lhs.id > rhs.id
+                }
+                .prefix(WatchRecap.limit)
+        )
     }
 }

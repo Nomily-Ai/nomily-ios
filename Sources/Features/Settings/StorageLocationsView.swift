@@ -72,8 +72,13 @@ struct StorageLocationsView: View {
                             Label(L10n.StorageLocations.nas, systemImage: "server.rack")
                                 .foregroundStyle(.primary)
                             Spacer()
+                            // ★ 2026-11-09 多账户：右侧显示「当前使用」的那台；
+                            //   存了多台时补「共 N 台」，提示还有别的账户可切。
                             if let webdav = configService.config.webdav, webdav.isConfigured {
-                                Text(webdav.preset ?? webdav.host)
+                                let count = configService.config.webdavAccounts?.count ?? 1
+                                Text(count > 1
+                                     ? "\(webdav.preset ?? webdav.host) · \(L10n.WebDAV.serverCount(count))"
+                                     : webdav.preset ?? webdav.host)
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             } else {

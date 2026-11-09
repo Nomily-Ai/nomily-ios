@@ -363,6 +363,16 @@ enum TodoExtract {
                 cleaned.append(block)
                 continue
             }
+            // ★ 2026-11-04（摘要优化 D）：成文层现在输出
+            // `| 事项 | 责任人 | 截止 | 来源 |` 表格。表头与分隔行不是待办（直接扔掉），
+            // 数据行转成「事项 · @张伟 · 11-08 · [12:24]」一行——待办页再把三段拆成徽章。
+            if block.text.contains("|") {
+                guard let item = TodoItem.fromTableRow(block.text) else { continue }
+                let key = item.title.replacingOccurrences(of: " ", with: "").lowercased()
+                guard seen.insert(key).inserted else { continue }
+                cleaned.append(MarkdownBlock(kind: .bullet, text: item.composed))
+                continue
+            }
             let text = normalize(block.text)
             guard text.count >= 4 else { continue }
             if noisePrefixes.contains(where: { text.hasPrefix($0) }) { continue }
@@ -480,14 +490,14 @@ struct MarkdownBlocksView: View {
                 case .bullet:
                     HStack(alignment: .top, spacing: 6) {
                         Text("•").font(.body).foregroundStyle(.secondary)
-                        Text(inline(block.text)).font(.callout)
+                        Text(inline(StampRef.stripping(block.text))).font(.callout)
                         traceButton(block)
                     }
 
                 case .ordered(let number):
                     HStack(alignment: .top, spacing: 6) {
                         Text("\(number).").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                        Text(inline(block.text)).font(.callout)
+                        Text(inline(StampRef.stripping(block.text))).font(.callout)
                         traceButton(block)
                     }
 
@@ -496,7 +506,7 @@ struct MarkdownBlocksView: View {
                         RoundedRectangle(cornerRadius: 1.5)
                             .fill(Color.secondary.opacity(0.35))
                             .frame(width: 3)
-                        Text(inline(block.text))
+                        Text(inline(StampRef.stripping(block.text)))
                             .font(.callout)
                             .foregroundStyle(.secondary)
                         traceButton(block)
@@ -507,7 +517,7 @@ struct MarkdownBlocksView: View {
 
                 case .paragraph:
                     HStack(alignment: .top, spacing: 6) {
-                        Text(inline(block.text))
+                        Text(inline(StampRef.stripping(block.text)))
                             .font(.callout)
                             .lineSpacing(4)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -523,15 +533,31 @@ struct MarkdownBlocksView: View {
     @ViewBuilder
     private func traceButton(_ block: MarkdownBlock) -> some View {
         if let onTrace {
-            Button {
-                onTrace(block.text)
-            } label: {
-                Image(systemName: "arrow.right.circle")
-                    .font(.caption2)
-                    .foregroundStyle(Color.secondary.opacity(0.7))
+            // ★ 2026-11-04（摘要优化 C）：有来源时间时，按钮本身就是那枚时间。
+            if let seconds = StampRef.parse(block.text) {
+                Button {
+                    onTrace(block.text)
+                } label: {
+                    Text(StampRef.format(seconds))
+                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.appAccent.opacity(0.9))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.appAccent.opacity(0.1)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(L10n.ClipDetail.traceSource))
+            } else {
+                Button {
+                    onTrace(block.text)
+                } label: {
+                    Image(systemName: "arrow.right.circle")
+                        .font(.caption2)
+                        .foregroundStyle(Color.secondary.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(L10n.ClipDetail.traceSource))
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(L10n.ClipDetail.traceSource))
         }
     }
 
@@ -583,51 +609,68 @@ struct TodoChecklistView: View {
     /// 进待办列表就把行写进系统「提醒事项」（幂等：已建过的行不会重复）。
     private var remindersSyncOn: Bool { configService.config.remindersSyncEnabled }
 
+    /// 已完成的那一组默认收起。
+    @State private var showCompleted = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // ★ 2026-11-03 九轮（用户："APP 里面的待办展示太凌乱"）：
+        //   旧版把所有东西平铺在同一个 8pt 间距的 VStack 里——标题行、未勾的、
+        //   已勾的、手写的、输入框、提醒事项脚注首尾相接，视线找不到起点。
+        //   现在按"进度 → 未完成 → 已完成（收起）→ 添加"分层，每层只有一件事。
+        VStack(alignment: .leading, spacing: 0) {
+            if totalCount > 0 { progressHeader.padding(.bottom, 10) }
+
             ForEach(blocks) { block in
                 switch block.kind {
                 case .bullet, .ordered, .paragraph:
-                    row(block)
+                    if !done.contains(block.text) { row(block).padding(.bottom, 2) }
                 case .heading, .quote, .rule:
-                    // Headings/quotes/rules keep the plain rendering — only
-                    // actual to-do rows get a checkbox.
+                    // 标题/引用块没有"完成"的概念，照原样排在未完成组之前。
                     MarkdownBlocksView(blocks: [block])
+                        .padding(.bottom, 4)
                 }
             }
 
-            // ★ 2026-10-30：手写待办排在摘要待办之后——"我自己记的"和"AI 提取的"
-            // 混在一起会看不出边界，但都带同一个勾选框，操作一致。
-            ForEach(manual, id: \.self) { text in
+            // 手写待办排在摘要待办之后（"我自己记的"和"AI 提取的"混在一起会看不出边界）。
+            ForEach(manual.filter { !done.contains($0) }, id: \.self) { text in
                 row(MarkdownBlock(kind: .bullet, text: text), isManual: true)
+                    .padding(.bottom, 2)
             }
 
-            // 没有可提取的待办、也没手写过——说明为什么，而不是给一个空列表。
-            if blocks.isEmpty && manual.isEmpty {
-                Text(L10n.ClipDetail.todosNeedSummary)
+            if totalCount == 0 {
+                Text(blocks.isEmpty && manual.isEmpty
+                     ? L10n.ClipDetail.todosNeedSummary
+                     : L10n.ClipDetail.todosEmpty)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
             }
 
-            addTodoRow
+            if completedCount > 0 {
+                completedHeader
+                if showCompleted {
+                    ForEach(completedBlocks) { block in
+                        row(block, isManual: manual.contains(block.text))
+                            .padding(.bottom, 2)
+                    }
+                }
+            }
 
-            if remindersCreated > 0 {
+            addTodoRow.padding(.top, 10)
+
+            if remindersSyncOn && totalCount > 0 {
+                Text(L10n.Reminders.listFooter)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 8)
+            } else if remindersCreated > 0 {
                 HStack(spacing: 4) {
                     Image(systemName: "checklist")
                     Text(L10n.Reminders.syncedBadge)
                 }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            }
-
-            // ★ 2026-10-30（用户："同步到手机待办这个是同步到手机的提醒事项方便查看
-            // 需要做的事情"）：开关开着就常驻一行说明——不是"刚建了几条"的瞬时提示，
-            // 而是告诉用户**去哪儿看还剩什么要做**（否则同步了也等于没同步）。
-            if remindersSyncOn && !(blocks.isEmpty && manual.isEmpty) {
-                Text(L10n.Reminders.listFooter)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 2)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .padding(.top, 8)
             }
         }
         .onAppear {
@@ -638,12 +681,81 @@ struct TodoChecklistView: View {
         .onChange(of: blocks) { _ in syncToReminders() }
     }
 
+    // MARK: - 分组与进度（★ 2026-11-03 九轮）
+
+    /// 全部行（摘要提取 + 手写），已完成的排在后面由调用处处理。
+    private var allRows: [String] { blocks.map(\.text) + manual }
+    private var totalCount: Int { allRows.count }
+    private var completedCount: Int { allRows.filter { done.contains($0) }.count }
+    private var remainingCount: Int { totalCount - completedCount }
+
+    private var completedBlocks: [MarkdownBlock] {
+        let parsed = blocks.filter { done.contains($0.text) }
+        let manualDone = manual.filter { done.contains($0) }
+            .map { MarkdownBlock(kind: .bullet, text: $0) }
+        return parsed + manualDone
+    }
+
+    /// 「还剩 3 项 · 共 8 项」+ 一条细进度条。
+    ///
+    /// ★ 为什么值得占这一行：待办页最常被问的两个问题是"还有多少没做"和
+    ///   "这件事我做到哪了"，一个数字 + 一根条同时回答，比让用户自己数行短得多。
+    private var progressHeader: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(remainingCount)")
+                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(remainingCount == 0 ? Color.green : Color.primary)
+                Text(remainingCount == 0 ? L10n.ClipDetail.todosAllDone : L10n.ClipDetail.todosRemaining)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                Text(L10n.ClipDetail.todosTotal(totalCount))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.15))
+                    Capsule()
+                        .fill(remainingCount == 0 ? Color.green : Color.appAccent)
+                        .frame(width: geo.size.width * CGFloat(completedCount) / CGFloat(max(1, totalCount)))
+                }
+            }
+            .frame(height: 4)
+        }
+    }
+
+    private var completedHeader: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { showCompleted.toggle() }
+        } label: {
+            HStack(spacing: 5) {
+                Text(L10n.ClipDetail.todosCompleted(completedCount))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Image(systemName: showCompleted ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
     /// 手写一条待办：输入框 + 「+」。回车也能提交。
+    ///
+    /// ★ 2026-11-03 九轮：从"一颗灰加号 + 裸输入框"改成一条**淡底胶囊**——
+    ///   它现在在待办列表的最末尾，没有容器就会被读成"列表多了一行空行"。
     private var addTodoRow: some View {
         HStack(spacing: 8) {
-            Image(systemName: "plus.circle")
-                .font(.body)
-                .foregroundStyle(Color.secondary)
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(Color.appAccent.opacity(0.85))
             TextField(L10n.ClipDetail.addTodoPlaceholder, text: $newTodo)
                 .font(.callout)
                 .submitLabel(.done)
@@ -655,11 +767,17 @@ struct TodoChecklistView: View {
                     .foregroundStyle(Color.appAccent)
             }
         }
-        .padding(.top, 2)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.secondary.opacity(0.07))
+        )
     }
 
     private func row(_ block: MarkdownBlock, isManual: Bool = false) -> some View {
         let checked = done.contains(block.text)
+        let item = TodoItem.parse(block.text)
         return HStack(alignment: .top, spacing: 6) {
             Button {
                 if checked { done.remove(block.text) } else { done.insert(block.text) }
@@ -672,16 +790,35 @@ struct TodoChecklistView: View {
                         isCompleted: !checked)
                 }
             } label: {
-                HStack(alignment: .top, spacing: 8) {
+                HStack(alignment: .top, spacing: 10) {
+                    // ★ 2026-11-03 九轮：勾选框从 `.body` 收到 17pt 并吃主题色——
+                    //   原来它和正文同字号同灰度，整行读起来像"一句话前面多了一个圈"。
                     Image(systemName: checked ? "checkmark.circle.fill" : "circle")
-                        .font(.body)
-                        .foregroundStyle(checked ? Color.green : Color.secondary)
-                    Text(block.text)
-                        .font(.callout)
-                        .strikethrough(checked, color: .secondary)
-                        .foregroundStyle(checked ? Color.secondary : Color.primary)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .font(.system(size: 17))
+                        .foregroundStyle(checked ? Color.green.opacity(0.9) : Color.secondary.opacity(0.5))
+                        .padding(.top, 0.5)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(item.title)
+                            .font(.system(size: 14.5))
+                            .strikethrough(checked, color: .secondary)
+                            .foregroundStyle(checked ? Color.secondary : Color.primary)
+                            .multilineTextAlignment(.leading)
+                            .lineSpacing(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if item.owner != nil || item.due != nil {
+                            // ★ 2026-11-04（摘要优化 D）：责任人与截止做成两枚小徽章。
+                            //   以前它们混在句子里（"…，张伟，11-08 前"），扫一眼根本分不出
+                            //   "谁做"和"什么时候"——而这两件事正是待办页唯一要回答的。
+                            HStack(spacing: 6) {
+                                if let owner = item.owner {
+                                    badge("person", owner)
+                                }
+                                if let due = item.due {
+                                    badge("calendar", due)
+                                }
+                            }
+                        }
+                    }
                 }
                 .contentShape(Rectangle())
             }
@@ -708,6 +845,18 @@ struct TodoChecklistView: View {
                 }
             }
         }
+    }
+
+    /// 待办行的小徽章（责任人 / 截止）。
+    private func badge(_ symbol: String, _ text: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: symbol).font(.system(size: 8.5, weight: .semibold))
+            Text(text).font(.system(size: 10.5))
+        }
+        .foregroundStyle(Color.secondary)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(Capsule().fill(Color.secondary.opacity(0.1)))
     }
 
     // MARK: - 手写待办（★ 2026-10-30）

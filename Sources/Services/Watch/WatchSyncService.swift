@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import WatchConnectivity
 import os.log
@@ -50,6 +51,84 @@ final class WatchSyncService: NSObject, ObservableObject {
     @Published private(set) var isWatchRecording = false
     @Published private(set) var watchRecordingSince: Date?
     @Published private(set) var isWatchTransferring = false
+
+    /// ★ 2026-11-06：最近一次手表声纹注册的结果（时间戳 ID + 成败）。
+    /// 随 `pushCurrentContext` 推回手表，ID 用于手表端去重（上下文是"最新值"
+    /// 语义，同一条结果会被重复送达）。进程重启后为 nil——旧结果手表早已消费，
+    /// 不再重放，避免把"已更新"反复盖回去。
+    private(set) var lastVoiceprintResult: (id: Int, ok: Bool)?
+    /// ★ 2026-11-05：手表侧"全天候录音"开关的回报值（每次状态推送都带）。
+    /// `nil` = 还没收到过（旧版手表 App / 尚未激活）。手机设置页的开关在
+    /// "手机从未设置过"时显示它，见 `phoneAllDay`。
+    @Published private(set) var watchAllDayState: Bool?
+    /// 手机上用户最后一次设置的全天候录音值；`nil` = 手机上从来没动过这个开关
+    /// （此时显示跟手表走）。存 UserDefaults 而非 AppConfig：这是**手表的行为
+    /// 偏好**，和录音质量档位同类，不参与摘要/转写配置。
+    private static let phoneAllDayKey = "watch.all_day.phone.v1"
+    var phoneAllDay: Bool? {
+        UserDefaults.standard.object(forKey: Self.phoneAllDayKey) as? Bool
+    }
+
+    /// 手机设置页翻动全天候录音开关：落盘 + 立即推给手表（一次性，
+    /// 见 `pushCurrentContext(allDay:)`——常态推送不带这个键，不会盖掉手表自己的值）。
+    func setAllDayRecording(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: Self.phoneAllDayKey)
+        pushCurrentContext(allDay: on)
+    }
+
+    /// ★ 2026-11-06（用户："手表这边可以增加一个表情常亮…设置在 app 里面"）：
+    /// 手表上次回报的常亮开关值；`nil` = 还没收到过。
+    @Published private(set) var watchAlwaysOnFace: Bool?
+    /// 手机上用户最后一次设置的值；`nil` = 手机上从来没动过（显示跟手表走）。
+    private static let phoneAlwaysOnFaceKey = "watch.always_on_face.phone.v1"
+    var phoneAlwaysOnFace: Bool? {
+        UserDefaults.standard.object(forKey: Self.phoneAlwaysOnFaceKey) as? Bool
+    }
+
+    /// 手机设置页翻动「表情常亮」开关：落盘 + 立即推给手表（一次性带上键，
+    /// 与 allDay 同规则——常态推送不带，不盖掉手表自己的值）。
+    func setAlwaysOnFace(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: Self.phoneAlwaysOnFaceKey)
+        pushCurrentContext(alwaysOnFace: on)
+    }
+
+    // MARK: - ★ 2026-11-06 二轮："让脸活起来"的四个设置（手机端入口）
+    //
+    // 与 setAlwaysOnFace 完全同构：手机上改 → 落盘（`watch.<x>.phone.v1`，
+    // 设置页回显用）→ 随上下文一次性把键推给手表。手表端落在
+    // `WatchRecordingPrefs`，见 `NomilyWatchApp` 的接线。
+
+    /// 手机上最后一次设置的眼睛形状；`nil` = 从没动过（设置页显示跟手表走）。
+    var phoneEyeShape: String? {
+        UserDefaults.standard.string(forKey: "watch.eye_shape.phone.v1")
+    }
+    func setEyeShape(_ raw: String) {
+        UserDefaults.standard.set(raw, forKey: "watch.eye_shape.phone.v1")
+        pushCurrentContext(eyeShape: raw)
+    }
+
+    /// 手机上最后一次设置的打瞌睡配置（开关 + 秒数）。
+    var phoneDrowsyEnabled: Bool? {
+        UserDefaults.standard.object(forKey: "watch.drowsy.phone.v1") as? Bool
+    }
+    var phoneDrowsyAfter: Int? {
+        UserDefaults.standard.object(forKey: "watch.drowsy_after.phone.v1") as? Int
+    }
+    func setDrowsy(enabled: Bool, after seconds: Int) {
+        UserDefaults.standard.set(enabled, forKey: "watch.drowsy.phone.v1")
+        UserDefaults.standard.set(seconds, forKey: "watch.drowsy_after.phone.v1")
+        pushCurrentContext(drowsyEnabled: enabled, drowsyAfter: seconds)
+    }
+
+    /// 手机上最后一次设置的"瞳孔跟随"开关。
+    var phonePupilFollow: Bool? {
+        UserDefaults.standard.object(forKey: "watch.pupil_follow.phone.v1") as? Bool
+    }
+    func setPupilFollow(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "watch.pupil_follow.phone.v1")
+        pushCurrentContext(pupilFollow: on)
+    }
+
     /// When the wrist first told us a transfer was pending — drives the elapsed
     /// counter and the give-up timer on the status strip.
     @Published private(set) var watchTransferSince: Date?
@@ -181,6 +260,9 @@ final class WatchSyncService: NSObject, ObservableObject {
                 continue
             }
             let size = (try? target.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        // ★ 2026-11-04：记下"这条录音来自手表"。摘要提示词只在有这个标记时才敢
+        // 提用户的名字，其余录音不提——见 `ClipOrigin` 顶部的说明。
+        ClipOrigin.mark(ClipOrigin.watch, forClipName: target.lastPathComponent)
             log.info("sim inbox delivered \(target.lastPathComponent, privacy: .public)")
             Task { @MainActor in self.didImport(target, size: size) }
         }
@@ -191,6 +273,15 @@ final class WatchSyncService: NSObject, ObservableObject {
     private func apply(watchState context: [String: Any]) {
         guard let beat = context[WatchLinkMessage.heartbeatKey] as? Double else { return }
         isWatchRecording = context[WatchLinkMessage.recordingKey] as? Bool ?? false
+        // ★ 2026-11-05：手表回报的全天候录音状态（每次状态推送都带）。
+        // 键缺省（旧版手表 App）→ 不动本地值。
+        if let allDay = context[WatchLinkMessage.allDayKey] as? Bool {
+            watchAllDayState = allDay
+        }
+        // ★ 2026-11-06：手表回报的表情常亮开关值（每次状态推送都带）。
+        if let alwaysOnFace = context[WatchLinkMessage.alwaysOnFaceKey] as? Bool {
+            watchAlwaysOnFace = alwaysOnFace
+        }
         let transferring = context[WatchLinkMessage.transferPendingKey] as? Bool ?? false
         if transferring, !isWatchTransferring {
             watchTransferSince = Date()
@@ -337,7 +428,9 @@ final class WatchSyncService: NSObject, ObservableObject {
     ///    pushing recaps alone would wipe the face settings off the watch and
     ///    vice versa. That is why both `pushFaceSettings` and `pushRecap`
     ///    funnel into here instead of writing the session directly.
-    private func pushCurrentContext(face: FaceContext? = nil) {
+    private func pushCurrentContext(face: FaceContext? = nil, allDay: Bool? = nil, alwaysOnFace: Bool? = nil,
+                                    eyeShape: String? = nil, drowsyEnabled: Bool? = nil,
+                                    drowsyAfter: Int? = nil, pupilFollow: Bool? = nil) {
         guard WCSession.isSupported() else { return }
         let resolvedFace = face ?? savedFaceContext()
         guard let resolvedFace else { return }
@@ -346,6 +439,28 @@ final class WatchSyncService: NSObject, ObservableObject {
             WatchLinkMessage.faceAutoCycleKey: resolvedFace.autoCycle,
             WatchLinkMessage.faceFrameKey: resolvedFace.frameVisible,
         ]
+        // ★ 2026-11-05：只在手机上翻全天候开关时才带这个键——上下文整体替换，
+        // 常态带上会周期性地盖掉手表上用户自己翻的值（见 WatchLinkMessage.allDayKey）。
+        if let allDay {
+            context[WatchLinkMessage.allDayKey] = allDay
+        }
+        // ★ 2026-11-06：表情常亮开关同规则——只在翻开关时一次性带上。
+        if let alwaysOnFace {
+            context[WatchLinkMessage.alwaysOnFaceKey] = alwaysOnFace
+        }
+        // ★ 2026-11-06 二轮："让脸活起来"的四个设置，同一条一次性规则。
+        if let eyeShape {
+            context[WatchLinkMessage.eyeShapeKey] = eyeShape
+        }
+        if let drowsyEnabled {
+            context[WatchLinkMessage.drowsyEnabledKey] = drowsyEnabled
+        }
+        if let drowsyAfter {
+            context[WatchLinkMessage.drowsyAfterKey] = drowsyAfter
+        }
+        if let pupilFollow {
+            context[WatchLinkMessage.pupilFollowKey] = pupilFollow
+        }
         if let colorHex = resolvedFace.colorHex {
             context[WatchLinkMessage.faceColorKey] = colorHex
         }
@@ -355,9 +470,20 @@ final class WatchSyncService: NSObject, ObservableObject {
         if let data = try? JSONEncoder().encode(loadRecapOutbox()) {
             context[WatchLinkMessage.recapsKey] = data
         }
+        // ★ 2026-11-06：声纹注册回执（见 WatchLinkMessage.voiceprintResultKey）。
+        if let result = lastVoiceprintResult {
+            context[WatchLinkMessage.voiceprintResultIDKey] = result.id
+            context[WatchLinkMessage.voiceprintResultKey] = result.ok
+        }
         // ★ 2026-10-30：定时录音命令随完整上下文一起走（持久化了，所以手机
-        // 重启后的任何一次推送都会带上；手表端按 issuedAt 去重，重发无害）。
-        if let command = Self.loadTimedCommand() {
+        // 重启后的任何一次推送都会带上）。
+        // ★ 2026-11-06（全天候语义，用户："重新开的手机 Nomily 就中断了"）：
+        // 只带**新鲜**的命令——这里持久化的是"最后一条"，可能是一条陈年的
+        // "stop"，手机重启后的重放曾把手表正在录的全天候录音停掉（手表端
+        // 已加 issuedAt 去重兜底，这里再把源头掐掉）。15 分钟以外的命令对
+        // "定时录音窗口"早已没有意义，不再随上下文走。
+        if let command = Self.loadTimedCommand(),
+           Date().timeIntervalSince(command.issuedAt) < 15 * 60 {
             context[WatchLinkMessage.timedRecordCommandKey] = command.command
             context[WatchLinkMessage.timedRecordIssuedAtKey] = command.issuedAt.timeIntervalSince1970
             if let endsAt = command.endsAt {
@@ -445,7 +571,8 @@ final class WatchSyncService: NSObject, ObservableObject {
         title: String,
         points: [String],
         todos: [String] = [],
-        recordedAt: Date
+        recordedAt: Date,
+        duration: TimeInterval? = nil
     ) {
         guard config.config.watchRecapEnabled else {
             log.info("recap skipped: disabled in settings")
@@ -461,7 +588,8 @@ final class WatchSyncService: NSObject, ObservableObject {
                 points: points,
                 todos: Array(todos.prefix(Self.recapTodoLimit)),
                 recordedAt: recordedAt,
-                createdAt: Date()
+                createdAt: Date(),
+                duration: duration
             ),
             at: 0
         )
@@ -479,6 +607,122 @@ final class WatchSyncService: NSObject, ObservableObject {
         )
         pushCurrentContext(face: face)
         log.info("recap pushed: \(clipName, privacy: .public) points=\(points.count, privacy: .public) todos=\(todos.count, privacy: .public)")
+    }
+
+    // MARK: - 历史摘要回填（★ 2026-11-04）
+
+    /// 把**手机上已经存在的摘要**补进回顾 outbox。
+    ///
+    /// 为什么需要它：`pushRecap` 只在"摘要刚刚生成"那一刻推一条，outbox 也只从那时开始攒。
+    /// 把上限从 8 提到 30（用户："右滑的最近要能看到 30 条"）之后，一个装了很久的
+    /// 用户照样只能看到自己那 8 条——旧摘要从来没进过队列，不是被裁掉的。
+    /// 于是这里从磁盘扫一遍：最近 30 天、按录音名倒序、有 `.summary.md` 的录音，
+    /// 用与实时推送**完全相同**的提取链（`JobRunners.recapDigest` + `TodoExtract`）重建条目。
+    ///
+    /// 只做"填空"：outbox 已经满了就直接返回，所以正常情况下每次启动只是
+    /// 一次目录列举 + 一个 `count` 比较，没有额外开销；而新用户先装了 App、
+    /// 过几天才配对表时，那批摘要也能在激活那一刻补进来。
+    func backfillRecapsIfNeeded() {
+        guard config.config.watchRecapEnabled else { return }
+        let current = loadRecapOutbox()
+        guard current.count < WatchRecap.limit else { return }
+        let known = Set(current.map(\.id))
+        let need = WatchRecap.limit - current.count
+        Task.detached(priority: .utility) { [weak self] in
+            let built = await Self.recapsFromDisk(excluding: known, limit: need)
+            guard !built.isEmpty, let self else { return }
+            await MainActor.run {
+                var merged = self.loadRecapOutbox()
+                let have = Set(merged.map(\.id))
+                merged.append(contentsOf: built.filter { !have.contains($0.id) })
+                merged = Self.prune(merged)
+                Self.recapOutbox = merged
+                if let data = try? JSONEncoder().encode(merged) {
+                    UserDefaults.standard.set(data, forKey: Self.recapOutboxKey)
+                }
+                self.pushCurrentContext()
+                log.info("recap backfill: scanned and added \(built.count, privacy: .public), outbox=\(merged.count, privacy: .public)")
+            }
+        }
+    }
+
+    /// 扫磁盘重建回顾条目。**只读**：不写文件、不改摘要。
+    ///
+    /// 只扫最近 120 个录音名：摘要是"最近发生的事"，120 个之前的一定已经超出
+    /// 30 天的保留窗口；再往里扫只是拿 IO 换不到条目。
+    private static func recapsFromDisk(excluding known: Set<String>, limit: Int) async -> [WatchRecap] {
+        guard limit > 0 else { return [] }
+        let fm = FileManager.default
+        let cutoff = Date().addingTimeInterval(-WatchRecap.retention)
+        guard let names = try? fm.contentsOfDirectory(atPath: StorageLocations.audioDir.path) else {
+            return []
+        }
+        // 录音名是 `yyyyMMddHHmmss.ext`，字典序就是时间序 —— 倒序即"最新优先"。
+        let candidates = names
+            .filter { RecordingName.date(from: $0) != nil && !known.contains($0) }
+            .sorted(by: >)
+            .prefix(120)
+
+        var out: [WatchRecap] = []
+        for name in candidates {
+            if out.count >= limit { break }
+            let summaryURL = StorageLocations.summaryURL(for: name)
+            // 摘要文件的 mtime 就是"这条回顾诞生的时刻"，保留窗口按它算（与
+            // `pushRecap` 里的 `createdAt: Date()` 同义）。
+            guard let attrs = try? fm.attributesOfItem(atPath: summaryURL.path),
+                  let createdAt = attrs[.modificationDate] as? Date,
+                  createdAt > cutoff,
+                  let text = try? String(contentsOf: summaryURL, encoding: .utf8),
+                  !text.isEmpty else { continue }
+            let digest = JobRunners.recapDigest(
+                from: text,
+                fallbackTitle: RecordingName.displayTitle(for: name)
+            )
+            guard !digest.points.isEmpty else { continue }
+            let todos = TodoExtract.fromSummary(text)
+                .map { RemindersSyncService.stripMarkdown($0.text) }
+                .filter { !$0.isEmpty }
+            let duration = await clipDuration(name)
+            out.append(WatchRecap(
+                id: name,
+                title: digest.title,
+                points: digest.points,
+                todos: Array(todos.prefix(Self.recapTodoLimit)),
+                recordedAt: RecordingName.date(from: name) ?? createdAt,
+                createdAt: createdAt,
+                duration: duration
+            ))
+        }
+        return out
+    }
+
+    /// 这条录音有多长（秒），给「最近」那一行的暖色时长用（★ 2026-11-03 · V4 原型）。
+    ///
+    /// ⚠️ 只能在**手机**这边算：手表手上没有这条录音的音频文件，`WatchRecap` 里
+    /// 也没有任何能推出时长的字段。探不到就返回 nil —— 腕上宁可整段省略，
+    /// 也不要显示一个编出来的时长（"24:06"这种假数据比空白更糟）。
+    ///
+    /// 三级降级与 `LibraryView.probeDuration` 一致：Ogg 走自研页解析（AVFoundation
+    /// 读不出 Opus 容器的时长），其余先试 `AVURLAsset`，再退回 `AVAudioFile` 逐帧长度
+    /// （PlaudBleSDK 转出来的 VBR mp3 没有 Xing 头，`AVURLAsset` 会给不出时长）。
+    static func clipDuration(_ clipName: String) async -> TimeInterval? {
+        let base = (clipName as NSString).deletingPathExtension
+        for ext in ["m4a", "opus", "mp3", "wav", "caf", "aac", "ogg"] {
+            let url = StorageLocations.decryptedDir.appendingPathComponent("\(base).\(ext)")
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            if ext == "opus", let seconds = OpusOgg.duration(ofOggOpusAt: url), seconds > 0 {
+                return seconds
+            }
+            if let seconds = try? await AVURLAsset(url: url).load(.duration).seconds,
+               seconds.isFinite, seconds > 0 {
+                return seconds
+            }
+            if let file = try? AVAudioFile(forReading: url) {
+                let seconds = Double(file.length) / file.processingFormat.sampleRate
+                if seconds.isFinite, seconds > 0 { return seconds }
+            }
+        }
+        return nil
     }
 
     /// ★ 2026-10-30：设置里的「回顾摘要」开关变化。关掉时把待发队列清空并推一次
@@ -517,9 +761,21 @@ final class WatchSyncService: NSObject, ObservableObject {
 
     /// Cap + retention, applied identically at both ends so the two lists can't
     /// drift out of shape (numbers live on the shared `WatchRecap`).
+    ///
+    /// ★ 2026-11-04: 与技术表那侧同一套排序（`recordedAt` 倒序）——两端都排，
+    /// 推上去的顺序才和表上显示的顺序一致，不会出现"收到推送那一下列表跳一下"。
     private static func prune(_ recaps: [WatchRecap]) -> [WatchRecap] {
         let cutoff = Date().addingTimeInterval(-WatchRecap.retention)
-        return Array(recaps.filter { $0.createdAt > cutoff }.prefix(WatchRecap.limit))
+        return Array(
+            recaps
+                .filter { $0.createdAt > cutoff }
+                .sorted { lhs, rhs in
+                    if lhs.recordedAt != rhs.recordedAt { return lhs.recordedAt > rhs.recordedAt }
+                    if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+                    return lhs.id > rhs.id
+                }
+                .prefix(WatchRecap.limit)
+        )
     }
 
     /// Called with the file already copied out of the WatchConnectivity inbox.
@@ -584,6 +840,9 @@ extension WatchSyncService: WCSessionDelegate {
                 frameVisible: config.config.watchFaceFrame
             )
             log.info("session activated: paired=\(paired) installed=\(installed) reachable=\(reachable)")
+            // ★ 2026-11-04：激活是"两端真的连上了"的那一刻，也是补历史摘要的时机
+            //   （见 `backfillRecapsIfNeeded`）。放在所有推送之后，不挡前面那几件事。
+            self.backfillRecapsIfNeeded()
         }
     }
 
@@ -635,6 +894,31 @@ extension WatchSyncService: WCSessionDelegate {
         let requested = (file.metadata?[WatchLinkMessage.fileNameKey] as? String)
             ?? file.fileURL.lastPathComponent
         let safeName = requested.replacingOccurrences(of: "/", with: "-")
+
+        // ★ 2026-11-04（用户："需要在 Apple Watch 里面加入一个声纹"）：
+        // 手表传上来的还有**声纹样本**——它是注册用的素材，不是一条录音，
+        // 绝不能进 Library，也不能触发转写。
+        if (file.metadata?[WatchLinkMessage.voiceprintKey] as? Bool) == true {
+            // ★ 2026-11-06：注册完给手表一条回执（成败都回）——旧行为里手表
+            // 发完样本只能停在"已发送"，没有下文。结果随下一次上下文推回。
+            let resultID = Int(Date().timeIntervalSince1970)
+            let sample = VoiceprintService.sampleURL(name: "sample-\(resultID).m4a")
+            guard (try? FileManager.default.copyItem(at: file.fileURL, to: sample)) != nil else { return }
+            Task { @MainActor in
+                do {
+                    try VoiceprintService.shared.enroll(from: sample, source: ClipOrigin.watch)
+                    log.info("voiceprint enrolled from watch sample")
+                    self.lastVoiceprintResult = (id: resultID, ok: true)
+                } catch {
+                    log.error("voiceprint enroll failed: \(String(describing: error), privacy: .public)")
+                    self.lastVoiceprintResult = (id: resultID, ok: false)
+                }
+                // 立刻推而不是等下一次心跳——用户正盯着手表看。
+                self.pushCurrentContext()
+            }
+            return
+        }
+
         let dir = StorageLocations.decryptedDir
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let incomingSize = (try? file.fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
@@ -658,6 +942,14 @@ extension WatchSyncService: WCSessionDelegate {
             return
         }
         let size = (try? target.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        // ★ 2026-11-03 八轮（手表"标记重点"）：打点随 metadata 一起到，落成 `<base>.marks.json`
+        //   与转写文件同目录。写失败**不影响**入库和 ack——点丢了是小事，音频丢了是大事。
+        if let marks = file.metadata?[WatchLinkMessage.marksKey] as? [Double], !marks.isEmpty {
+            let url = StorageLocations.marksURL(for: target.lastPathComponent)
+            if let data = try? JSONEncoder().encode(["seconds": marks]) {
+                try? data.write(to: url, options: .atomic)
+            }
+        }
         acknowledge(safeName)
         Task { @MainActor in self.didImport(target, size: size) }
     }

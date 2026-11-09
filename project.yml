@@ -104,7 +104,7 @@ targets:
         # Must track `nomily_watch`'s build number — watchOS refuses to install
         # a companion whose version doesn't match its host, and an embedded
         # watch app one build ahead is enough to trip it. Bump both or neither.
-        CFBundleVersion: "61"
+        CFBundleVersion: "210"
         # Skip Apple's per-upload "Missing Compliance" prompt. `false` is
         # appropriate when the app's crypto use is exempt from US export
         # documentation requirements:
@@ -286,7 +286,7 @@ targets:
         CFBundleShortVersionString: "1.1.0"
         # Must track the iPhone app's build number — watchOS refuses to install
         # a companion whose version doesn't match its host.
-        CFBundleVersion: "61"
+        CFBundleVersion: "210"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.nomily.app
         NSMicrophoneUsageDescription: Nomily AI records voice notes on your Apple Watch and syncs them to your iPhone.
@@ -298,6 +298,18 @@ targets:
         # there risks installd rejecting the bundle outright.
         UIBackgroundModes:
           - audio
+        # ★ 2026-11-03（用户："开会的时候录音自己关闭了"，全天候录音前置）：
+        #   纯 `UIBackgroundModes: audio` 挡不住 watchOS 的挂起策略——会话被
+        #   打断后（会议里通知/计时器/来电极常见），后台续录被系统拒绝，
+        #   App 随即挂起，任何重试梯子都没机会跑（manifest 里今天的录音全是
+        #   2~4 分钟的短片段，就是这个死法）。`HKWorkoutSession` 是 Apple 给
+        #   长时间后台录音的正规通道： workout 存续期间 App 不会被挂起，
+        #   麦克风保持在手。声明 workout-processing 后台模式 + HealthKit
+        #   权限（见 nomily_watch.entitlements）是它的两个前置条件。
+        WKBackgroundModes:
+          - workout-processing
+        NSHealthShareUsageDescription: Nomily AI uses a workout session to keep background recording alive on your wrist. No health data is read.
+        NSHealthUpdateUsageDescription: Nomily AI uses a workout session to keep background recording alive on your wrist. No health data is written.
     entitlements:
       path: Watch/nomily_watch.entitlements
     settings:
@@ -361,7 +373,7 @@ targets:
         CFBundleShortVersionString: "1.1.0"
         # Must match the parent App — when an embedded binary's version numbers differ from the host's, watchOS
         # refuses to install the whole App.
-        CFBundleVersion: "61"
+        CFBundleVersion: "210"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

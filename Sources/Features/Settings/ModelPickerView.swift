@@ -32,6 +32,12 @@ struct ModelPickerView: View {
     let current: String
     /// Whether to offer "Select a model" (i.e. clearing the choice is legal).
     let allowsEmpty: Bool
+    /// ★ 2026-11-05：**显示名**翻译。`options` 的值是发 给 API 的真名（不能改存），
+    /// 英文界面下中文厂商的模型名（"录音文件识别（Paraformer）"）要从 en 表映射；
+    /// nil = 原样显示（LLM 模型名本来就是英文，不需要）。
+    /// 搜索同时对原值和显示名匹配——中文用户搜"录音"也能命中，哪怕存的是英文。
+    /// `var` + 默认 nil：LLM 那个调用点（SettingsView）不用传——模型名本来就是英文。
+    var displayName: ((String) -> String)? = nil
     let onPick: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -39,10 +45,14 @@ struct ModelPickerView: View {
     /// Snapshot taken on first appearance — see the note above.
     @State private var frozen: [String] = []
 
+    private func title(_ value: String) -> String {
+        displayName?(value) ?? value
+    }
+
     private var rows: [String] {
         guard !query.isEmpty else { return frozen }
         let q = query.lowercased()
-        return frozen.filter { $0.lowercased().contains(q) }
+        return frozen.filter { $0.lowercased().contains(q) || title($0).lowercased().contains(q) }
     }
 
     var body: some View {
@@ -51,7 +61,7 @@ struct ModelPickerView: View {
                 button(title: L10n.LLM.selectModel, value: "", selected: current.isEmpty)
             }
             ForEach(rows, id: \.self) { model in
-                button(title: model, value: model, selected: current == model)
+                button(title: title(model), value: model, selected: current == model)
             }
         }
         .listStyle(.insetGrouped)

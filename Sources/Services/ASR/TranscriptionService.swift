@@ -682,6 +682,19 @@ final class TranscriptionService: ObservableObject {
                   !custom.endpoint.isEmpty else {
                 throw AsrError.missingCredentials("Custom server")
             }
+            // ★ 2026-11-04: 同一个"自定义服务"入口下有两种接口形态。百炼（阿里云
+            // Model Studio）不提供 /audio/transcriptions，它把 ASR 放在
+            // chat/completions 的 input_audio 里，模型是 qwen3-asr-flash——所以按
+            // 配置里的 protocol 分派，而不是靠猜对端。
+            if custom.wireProtocol?.lowercased() == "bailian" {
+                let client = BailianASR(
+                    endpoint: custom.endpoint,
+                    apiKey: custom.apiKey ?? "",
+                    model: custom.model ?? "",
+                    language: custom.language ?? ""
+                )
+                return try await client.transcribe(fileURL: fileURL, locales: locales)
+            }
             let client = CustomASR(
                 endpoint: custom.endpoint,
                 apiKey: custom.apiKey ?? "",

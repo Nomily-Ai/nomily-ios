@@ -294,9 +294,28 @@ final class RecorderSessionModel: ObservableObject {
     }
 
     /// Start recording is blocked by \"encryption passphrase not set\" (only D·NOTE has this requirement; TicNote firmware has no encryption).
+    ///
+    /// ★ 2026-11-04：`unreadable` 不再拦。
+    /// `KeyResolver.setupIncomplete` 只能看到"有没有拿到钥匙"，锁屏时 Keychain 返回
+    /// `errSecInteractionNotAllowed`，它会认为用户没设过——于是有钥匙的人看到录音键
+    /// 变灰，还以为是自己没配好。钥匙校验（`KeyHealthService`）分得清这两种情况，
+    /// 这里按它让路：钥匙在、只是这一刻读不到，就不该拦着用户。
     var startBlocked: Bool {
         guard !isRecording, case .dnote(let client)? = target else { return false }
+        if case .unreadable = KeyHealthService.shared.state { return false }
         return KeyResolver.setupIncomplete(for: client)
+    }
+
+    /// 录音键为什么是灰的——给界面用的一句话。`nil` = 没被拦。
+    ///
+    /// 「灰着但不解释」是最糟的状态：用户已经连上了设备，看得到电池、看得到文件，
+    /// 唯独按不动录音键，也无从知道该去哪里修。
+    var startBlockedReason: String? {
+        guard startBlocked else { return nil }
+        switch KeyHealthService.shared.state {
+        case .mismatch: return L10n.RecordGate.blockedMismatch
+        default:        return L10n.RecordGate.blockedNoKey
+        }
     }
 
     /// Displayed recorded duration (seconds). `nil` = not started recording yet (UI shows 0:00).
@@ -671,6 +690,10 @@ enum RecorderSessionAlert: Identifiable {
 struct RecorderControl: View {
 
     @ObservedObject var model: RecorderSessionModel
+    /// ★ 2026-11-04：钥匙状态。被加密闸门拦住时，按下去要能说出原因，
+    /// 而不是"灰着、点不动、一句话都没有"——那是 P101 用户报的原始症状。
+    @ObservedObject private var keyHealth = KeyHealthService.shared
+    @State private var showBlockedAlert = false
 
     /// `TimelineView` phase anchor. Use **epoch** instead of `.now`:
     /// `from: .now` resets the phase each time the body is recomputed, causing the second hand to be repeatedly delayed.
@@ -711,10 +734,16 @@ struct RecorderControl: View {
                 }
             }
             Button {
+                // 被闸门拦住时**仍然可点**：点下去解释原因，并给一条去设置的路。
+                // 禁用状态是"静默的拒绝"，用户只能靠猜。
+                if model.startBlocked {
+                    showBlockedAlert = true
+                    return
+                }
                 Task { await model.toggle() }
             } label: {
                 ZStack {
-                    Image(systemName: symbolName)
+                    Image(systemName: model.startBlocked ? "lock.circle" : symbolName)
                         .font(.system(size: 30, weight: .regular))
                         .foregroundColor(tint)
                         .opacity(model.busy ? 0.3 : 1)
@@ -726,9 +755,20 @@ struct RecorderControl: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(!model.canToggle)
+            // 只在"忙 / 没有设备"时禁用；被钥匙拦住时保持可点（见上面的 action）。
+            .disabled(!model.canToggle && !model.startBlocked)
             .accessibilityLabel(model.isRecording ? L10n.DeviceFiles.stopRecording : L10n.Common.recording)
         }
         .animation(.none, value: model.isRecording)
+        .alert(L10n.RecordGate.blockedTitle, isPresented: $showBlockedAlert) {
+            Button(L10n.RecordGate.openSettings) {
+                AppEnvironment.shared?.navigateToRecordingsSettings = true
+                AppEnvironment.shared?.openPassphraseSheet = true
+                NotificationCenter.default.post(name: .navigateToSettings, object: nil)
+            }
+            Button(L10n.Common.cancel, role: .cancel) {}
+        } message: {
+            Text(model.startBlockedReason ?? L10n.RecordGate.blockedNoKey)
+        }
     }
 }

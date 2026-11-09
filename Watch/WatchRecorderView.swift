@@ -1,5 +1,6 @@
 import SwiftUI
 import WatchKit
+import os.log
 
 /// Wrist recorder page.
 ///
@@ -155,24 +156,25 @@ struct WatchRecorderView: View {
 
     /// Current page of the horizontal paging.
     ///
-    /// ★ 2026-11-02（用户："往左侧是按照这个网页里面手表来，往右侧则是现在有的菜单，
-    /// 然后他这个里面的内容你也可以加入进来"）：页面改成 **4 页**，录音页移到最左：
+    /// ★ 2026-11-02 第二轮（用户："菜单栏在左侧，右滑才是最近跟上传"）：页序改为
     ///
     /// ```
-    ///   0 录音（原型版）│ 1 最近 │ 2 同步 │ 3 菜单
+    ///   0 菜单 │ 1 录音（默认页）│ 2 最近 │ 3 同步
     /// ```
     ///
-    /// · **0 录音** —— 视觉照 `nomily-watch-v3-blink.html`：眼睛 ⇄ 波形的眨眼过场、
-    ///   顶栏时钟、LISTENING 暖点、底部细体大计时。
-    /// · **1 最近 / 2 同步** —— 原型第 2、3 页的内容（`WatchRecentsPane` / `WatchSyncPane`）。
-    /// · **3 菜单** —— 原来的左右两张菜单页合成一张（见 `menuPane` 调用处）。
-    ///
-    /// ⚠️ 默认停在第 **0** 页（以前是 1）：抬腕第一眼必须是"按一下就开始录音"的那一页。
-    @State private var page: Int = 0
+    /// 菜单回到机器人左侧；「最近 / 同步」在录音页右侧。默认落在第 **1** 页（录音）——
+    /// 抬腕第一眼仍是"能立刻开始录音"的那一页。
+    @State private var page: Int = 1
 
     /// 总页数。写成常量而不是散落的字面量：页码条、位移、边界判断三处必须同步，
     /// 少改一处就会出现"能划到不存在的第 5 页"或者"最后一页划不动"。
     private static let pageCount = 4
+
+    /// 录音页与同步页的索引。原来这些数字是散落的字面量（`page != 0`、`page = 3`），
+    /// 第二轮换过页序之后「暖线该在哪些页出现」就悄悄错了一格——改成常量，
+    /// 下次再换序只有这一处要动。
+    private static let recordPage = 1
+    private static let syncPage = 3
 
     /// The displacement (pt) the finger is currently dragging. Returns to 0 during the page-flip animation.
     ///
@@ -234,6 +236,16 @@ struct WatchRecorderView: View {
     /// 否则上一段的 `sleep` 醒来会把新状态写回 `hidden`。
     @State private var readoutTask: Task<Void, Never>?
 
+    /// ★ 2026-11-03 八轮（用户："有些需要标记重点的，能否在手表下方按一下就打点"）：
+    /// 打点按钮被按下的那 0.2 秒高亮。没有这一下，用户点完只会觉得"是不是没点中"
+    /// ——手表的触感反馈比屏幕迟，而这一下动作本身又没有任何别的东西在变。
+    @State private var markFlash = false
+    @State private var markFlashTask: Task<Void, Never>?
+
+    /// ★ 2026-11-03（V4 原型）：页码条的"滑动时出现、1.4 秒后淡出"整段**删掉**了。
+    /// 它现在常显在底部中央，`pageBarVisible` / `pageBarHideTask` 两个状态随之作废——
+    /// 留着它们只会变成"某个地方还在改一个没人读的布尔量"。
+
     /// Usable length of one side of the watch face: the actual screen width minus a 6pt inset on each side.
     ///
     /// ⚠️ Use `WKInterfaceDevice`'s **actual** screen width, never hard-code it -- the 40mm/44mm/45mm/49mm
@@ -242,19 +254,14 @@ struct WatchRecorderView: View {
         max(132, WKInterfaceDevice.current().screenBounds.width - 6)
     }
 
-    /// Fraction of the screen width taken by the Bot face's side length.
+    /// 机器人脸外面那圈环的直径相对脸径的倍数（长按进度环 / 呼吸光晕都骑在这条线上）。
     ///
-    /// ⚠️ It leaves room for two things: the charge ring around the face (1.14×) and the line of
-    /// Status text (timer/hint). 0.76 is 119pt on the 40mm, 136pt including the ring,
-    /// and with a line of text it still fits in a 162×194 screen.
-    ///
-    /// ⚠️ Revision eight raised it from 0.70 to 0.76: once the plate was deleted, the 0.70 box held only the two eyes,
-    ///    and at the original fraction the whole face looked small and empty. One size up exactly makes up the bulk lost with the plate.
-    ///
-    /// ★ 2026-11-02（v3 原型）：0.76 → **0.72**。底部多了一行 26pt 的细体计时，
-    ///    40mm 屏（197pt 高）上脸 + 大数字 + 一行小字必须一起放下；0.72 与 0.76 只差 5%，
-    ///    肉眼几乎分不出来，但正好腾出那 20pt。别再往回调——回调就得砍掉计时。
-    private static let botFraction: CGFloat = 0.72
+    /// ⚠️ 这个数字**同时**是"脸能长多大"的分母：环是画面上最外的东西，
+    /// 它顶到可用宽/高的那一刻，脸就到顶了。见 `recordPane` 里的 `budget`。
+    private static let ringSpan: CGFloat = 1.14
+
+    /// 轻点/呼吸动画的峰值缩放。算脸径时要**按峰值反除**，否则最大的那一帧会顶进表盘圆角。
+    private static let facePeak: CGFloat = 1.03
 
     var body: some View {
         // ★ Revision eight: **no more `TabView`**, we lay out a horizontal row ourselves. Reasons in the "revision eight" passage at the top of the file
@@ -264,24 +271,41 @@ struct WatchRecorderView: View {
         // makes it follow the finger while dragging.
         GeometryReader { geo in
             HStack(spacing: 0) {
+                // ★ 2026-11-02 第二轮（用户："菜单栏在左侧，右滑才是最近跟上传"）：
+                // 页序调整为 **菜单 · 录音 · 最近 · 同步**——
+                // 菜单回到机器人**左侧**（revision eight 之前的老位置），
+                // 原型新增的「最近 / 同步」放在录音页右侧；默认落在录音页。
+                // ⚠️ 若想再换序，改这里的排列即可，`pageCount` 与页码条不用动。
+                menuPane(menuPrefs.leadingItems + menuPrefs.trailingItems)
+                    .frame(width: geo.size.width)
                 recordPane
                     .frame(width: geo.size.width)
                 WatchRecentsPane()
                     .frame(width: geo.size.width)
                 WatchSyncPane()
                     .frame(width: geo.size.width)
-                // ★ 2026-11-02：原来的左右两张菜单页**合成一张**。
-                //   理由：① 用户这轮说的是"往右侧则是现在有的菜单"，是**一页**；
-                //        ② 四页已经到原型给出的"最多 3~4 页"边界，五页的页码条在 40mm 上认不出来；
-                //        ③ 两张菜单页本来是因为中间的机器人页把左右两侧都吃掉了才分家的。
-                //   ⚠️ 设置页里"左/右"两个分组的**数据不动**（`WatchMenuPreferences` 照旧），
-                //      这里只是按"左组 + 右组"的顺序排进同一张滚动列表。
-                menuPane(menuPrefs.leadingItems + menuPrefs.trailingItems)
-                    .frame(width: geo.size.width)
             }
             .frame(width: geo.size.width * CGFloat(Self.pageCount), alignment: .leading)
             .offset(x: -CGFloat(page) * geo.size.width + dragX)
         }
+        // ★★ 2026-11-03 三轮（用户："手表这边都错位了，上面的区域没办法显示了，
+        //    然后点击结束录音都没效果"）：**撤回** `.ignoresSafeArea([.top, .bottom])`。
+        //
+        // 上一版加它，是想把那 20pt 顶部 inset 抢回来（见下面被删掉的那段注释的历史）。
+        // 它在真机上换来两个更糟的后果，而且都是"画"和"点"不一致：
+        //
+        // ① **画的坐标放开了，命的坐标没放开**。SwiftUI 的 hit-test 只覆盖到父视图的
+        //    安全区矩形，安全区外的子视图照样被画出来，却收不到点击——
+        //    「结束」按钮正好落在那一带，于是"看得见、点不动"。
+        // ② 整页内容整体上移了约 20pt，`topBar` 的 LISTENING 徽章被顶到表盘上沿的
+        //    圆角/时钟带里，看起来就是"上面那块没了"。
+        //
+        // 结论：**可点的东西必须待在安全区里**。真正的竖向预算是靠 `recordPane` 里
+        // 那套"由 `geo.size.height` 反推脸尺寸"的算法去适配的，不是靠抢 inset——
+        // 抢来的 20pt 换来的是溢出，适得其反。
+        //
+        // ⚠️ 别再往这里加 `ignoresSafeArea`。要"用满屏"，改 `recordPane` 里
+        //    那段按状态现算的竖向预算（原 `bottomStackReserve`，已内联），别动安全区。
         // Three pages side by side, but only one should be visible -- without clipping, the left and right pages spill over the current one.
         .clipped()
         // `simultaneousGesture`, not `.gesture`: the paging gesture has to **coexist** with the subviews'
@@ -314,9 +338,17 @@ struct WatchRecorderView: View {
                 .fill(WatchHomeStyle.amber)
                 .frame(height: 2)
                 .padding(.horizontal, 16)
-                .opacity(model.isRecording && page != 0 ? 0.55 : 0)
+                .opacity(model.isRecording && page != Self.recordPage ? 0.55 : 0)
                 .animation(.easeInOut(duration: 0.35), value: page)
                 .allowsHitTesting(false)
+        }
+        // ★ 2026-11-03（V4 原型）：页码条从右上角搬到**底部中央、常显**。
+        //
+        // 两个理由都能单独成立：① 右上角已经压着系统时间，两条并排像两行字；
+        // ② 上一版让它在松手 1.4 秒后淡出，结果绝大多数用户根本不知道左边还有一页菜单——
+        //    一个"只有滑动时才出现"的入口等于没有入口。改成常显，代价只是 3pt 高的四根短线。
+        .overlay(alignment: .bottom) {
+            pageBar.padding(.bottom, 3)
         }
         // What's hidden is **this page's** navigation bar; the pushed sub-pages have their own bars and back buttons.
         //
@@ -353,6 +385,22 @@ struct WatchRecorderView: View {
         } message: {
             Text(L10n.Watch.linkLostMessage)
         }
+        // ★ 2026-11-05（用户："中断下次唤醒 Nomily AI APP 手表也要继续录音，
+        // 中断则弹窗继续"）：上一场录音被系统放弃（不是用户按停）且全天候录音
+        // 开着时，回到前台弹这一问。「继续」当场重开一场；「先不用」清掉标记。
+        // get 在 scenePhase 变化时会随 body 重估——抬腕唤醒正是靠这个时机。
+        .alert(
+            L10n.Watch.resumePromptTitle,
+            isPresented: Binding(
+                get: { model.shouldOfferResume },
+                set: { if !$0 { model.clearResumePending() } }
+            )
+        ) {
+            Button(L10n.Watch.resumePromptContinue) { model.resumeInterruptedTake() }
+            Button(L10n.Watch.resumePromptDismiss, role: .cancel) { model.clearResumePending() }
+        } message: {
+            Text(L10n.Watch.resumePromptBody)
+        }
         .onAppear {
             syncShakeDetector()
         }
@@ -386,8 +434,9 @@ struct WatchRecorderView: View {
     ///
     /// ① **计时搬到页面底部，并且变大变细**。以前它是贴在波形下面的 13pt semibold
     ///    （revision eleven 的"计时得贴着波形"），原型把它做成页面底部的一个 38pt 细体大数字。
-    ///    这里是 26pt（原型 38pt 是按 314px 宽的模拟屏量的，162pt 屏上等比折算只有 20pt，
-    ///    太细看不清；26pt 既保住"细体大数字"的气质，又能在抬腕 20cm 的距离读出来）。
+    ///    这里是 **34pt**（★ 2026-11-03 从 26pt 提级：原型 38pt 是按 314px 宽的模拟屏量的，
+    ///    162pt 屏上等比折算只有 20pt，太细看不清；34pt 保住了"细体大数字"的气质，
+    ///    又能在抬腕 20cm 的距离读出来）。
     /// ② **待机时不显示读数**。原型 idle 状态下 `readOp = 0` —— 没在录音，底部就是空的，
     ///    整页只有脸和一句提示。以前那行"长按开始"留着（它是唯一的可见入口），
     ///    但不再和数字抢位置。
@@ -397,18 +446,60 @@ struct WatchRecorderView: View {
     /// ⚠️ 脸从 0.76 缩到 0.72：40mm 总高只有 197pt，脸 + 大数字 + 一行小字要一起塞进去。
     ///    0.72 与 0.76 差 5%，肉眼几乎看不出，但正好腾出底部读数需要的那 20pt。
     private var recordPane: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-
-            WatchBotFace(
-                size: Self.dialSide * Self.botFraction,
+        // ★ 2026-11-03 二轮（用户："读数秒无法正常查看""结束录音点不到"）：
+        //   脸的尺寸不再只看**屏宽**，而是同时受**实际可用高度**约束——
+        //   40/41mm 上"脸(1.14 外框) + 34pt 读数 + meta 行 + 页码条避让"的竖向预算
+        //   一旦爆掉，SwiftUI 会把整根 VStack 居中后两端裁切，读数先出屏，
+        //   底部确认条（overlay 对齐 VStack 底）跟着一起出不了屏。
+        //   现在从 `geo.size.height` 反推脸的最大尺寸，读数/按钮**永远**在屏内。
+        //   ⚠️ `max(84, …)` 是兜底下限：再小脸就不可辨了，宁可牺牲 meta 行。
+        GeometryReader { geo in
+        #if DEBUG
+        let _ = Self.logLayout(geo: geo)
+        #endif
+        // ★★ 2026-11-03 五轮（用户："开录跟结束都有一个白色的光环往内靠，需要取消"）：
+        //   根因之一就是上一版的"按状态现算脸径"——待机一套、录音一套，开关录那一帧
+        //   整只脸连同外圈环一起缩放，环淡出时看起来正是一整圈白线**往里收**。
+        //   现在脸径只由屏宽/屏高**定一次**、与录音状态无关；读数与 meta 改成
+        //   **浮在底部空白区**（原型本来也是 absolute 定位：脸居中、readout 贴底 64px）。
+        //   ⇒ 开关录时画面里没有任何元素在缩放，只有眼睛/波形在形变。
+        // ★ 2026-11-03 九轮（用户："轻点一下眼睛的效果太夸张了，而且变大弄得超出屏幕边框，
+        //   上下要有一个保护距离"）：脸径必须按**峰值**（`facePeak`，1.03）反除，
+        //   保证最大的那一帧也不顶到表盘圆角。
+        // ★★ 2026-11-04 第三轮（用户："白色圆圈没有达到最大化，这个圆圈不协调需要大点"）：
+        //   上一版把宽那一侧的 0.78 折去掉了，但**竖向预算还在扣三笔**——
+        //   底部 14pt 给页码条、上下各 10pt 呼吸位。而页码条早就搬到顶部
+        //   （见 body 里 `.overlay(alignment: .top) { topBar }`），底部那 14pt 是**历史遗留的
+        //   空扣**；上下各 10pt 在圆形表盘上也不必要——圆环贴着圆角本来就是这套设计的样子。
+        //   结果就是竖项一直赢过宽项：45mm 上脸只到 ~141pt、外圈 ~161pt，而屏宽有 192pt，
+        //   四周一整圈黑边，正是用户说的"不协调"。
+        //   现在按**圆的本义**算：外圈直径 = min(可用宽, 可用高)，只留 4pt 上下余量。
+        //   读数与页码条都是浮层（`ZStack(alignment: .bottom)` 里的 VStack），
+        //   不占版面，也不参与这里的高度计算——这是脸能真正吃满屏的前提。
+        let budget = min(Self.dialSide, max(120, geo.size.height - 8))
+        let faceSize = max(84, budget / (Self.ringSpan * Self.facePeak))
+        ZStack(alignment: .bottom) {
+            // ★ 2026-11-05 第四轮（用户："点击了全天候录音的开关则需要自动就开启了录音…
+            // 然后其他的波纹也不要显示了"）：全天候录音**进行中**时整页换「环境态」——
+            // 波形、眨眼、表情全部退场，只剩一颗呼吸红点 + 计时 + 结束按钮。
+            // 对标 Plaud NotePin（红灯常亮=在录）与 Limitless Pendant（指示灯不可关）
+            // 的"指示灯哲学"：长录场景屏幕是仪表盘的**待机灯**，不是表演舞台。
+            // ⚠️ 只在"全天候开着**且**正在录"时替换；全天候开着但没在录（用户手动停过）
+            //    仍回正常脸——那是给"重新开录"用的操作台。
+            // 撑满整页 → ZStack 虽然是 bottom 对齐，这一层把脸/环境态都拉回页面正中。
+            Group {
+                if prefs.allDayRecording, model.isRecording {
+                    ambientRecording
+                } else {
+                    WatchBotFace(
+                size: faceSize,
                 isRecording: model.isRecording,
                 // ★ Revision thirteen: which expression to wear while idle is decided by the iPhone's settings.
                 style: faceStore.style,
                 // ★ 2026-10-20: the eye colour now comes from the iPhone when the user picked
                 // one there (`faceStore.colorHex`); only when they haven't (`nil`) does the
                 // watch fall back to its own "Appearance" palette.
-                tint: faceStore.colorHex.map { Color(botHex: $0) } ?? styleStore.style.tint,
+                tint: faceTint,
                 meter: model.meter,
                 // ★ 2026-11-02（v3 原型）：计时**不再贴在波形下面**，改为页面底部的大数字
                 //   （见 `readout`）。这里传 nil 之后 `figure` 里那层 `VStack` 只剩波形，
@@ -420,78 +511,418 @@ struct WatchRecorderView: View {
                 // ★ 2026-10-20: blink pace / auto-cycling expressions / square frame — all set on the iPhone.
                 blinkSpeed: faceStore.blinkSpeed,
                 autoCycle: faceStore.autoCycle,
-                frameVisible: faceStore.frameVisible,
+                // ★★ 2026-11-03 七轮（用户："为什么这个方框还是存在呀" +
+                //    "按下去会有一个透明的圆环往里面缩小，暂停录音也是"）：
+                //   那个"白色半透明圆环"就是**方框**——`BotFaceFrame` 的圆角是 0.30×size，
+                //   白 0.85、3~6pt 粗，在大脸上看起来已经很接近圆环。开录时它随 `eyesFade`
+                //   淡出（观感就是"圆环往里缩"），停录时又淡回来（"又出现一圈白光"）。
+                //   录音页**不再画方框**：这里直接传 false，不再看手机端那个开关
+                //   （开关保留给手机预览用；表上这个位置属于脸，不属于装饰）。
+                frameVisible: false,
                 onTap: handleTap,
                 onHold: beginRecordingByHold,
-                onToggle: handleToggle
+                onToggle: handleToggle,
+                // ★ 2026-11-02（全天候录音 · 省电）：波形重绘 30fps → 2fps。
+                lowPower: prefs.allDayRecording,
+                // ★ 2026-11-06（表情常亮）：暗显时首页显示表情（默认）还是黑屏省电。
+                alwaysOnFace: prefs.alwaysOnFace,
+                // ★ 2026-11-06 二轮（"让脸活起来"四设置）：形状 / 打盹 / 瞳孔跟随，
+                // 全部从手机设置或表上跟随值来（`WatchRecordingPrefs`）。
+                eyeShape: prefs.eyeShape,
+                drowsyEnabled: prefs.drowsyEnabled,
+                drowsyAfter: prefs.drowsyAfter,
+                pupilFollow: prefs.pupilFollow
             )
-            // ⚠️ Revision nine wired color back in, but **only a single solid color**: `tint` is the color picked on the "appearance"
-            //    page (user: "the color in the watch settings should be the color of the eye bot,
-            //    drop the gradient"). Revision eight removed it wholesale at one point -- what it removed was **the plate and the gradient**,
-            //    not color itself; don't pass the whole `style` struct in again, that would turn
-            //    "does this face use the breathing light" into a question you have to re-confirm every time.
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
 
-            readout
-
-            caption
-
-            Spacer(minLength: 0).frame(height: 7)
+            // 底部读数区：贴底浮层，**不参与脸的高度计算**（这是脸能被放大的关键）。
+            // readout / caption 都是纯文字，关掉命中测试，别挡住脸的长按与点按；
+            // stashChip 是按钮，保留可点。
+            // ★ 第四轮：环境态（全天候录音中）不显示——计时/chip 由 `ambientRecording`
+            //   自带，两份计时叠在一起没法看。
+            if !(prefs.allDayRecording && model.isRecording) {
+                VStack(spacing: 4) {
+                    stashChip
+                    readout.allowsHitTesting(false)
+                    caption.allowsHitTesting(false)
+                    // 底部留 10pt 给屏幕正中的页码条（V4 原型），否则最后一行小字会和 tick 叠在一起。
+                    Color.clear.frame(height: 10)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 4)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: geo.size.width, height: geo.size.height)
         // ★ 2026-11-02：读数的出现/消失跟着**眨眼的时间轴**走，不跟着 `isRecording` 走——
         //   按下那一刻眼睛刚开始压扁，这时候数字就弹出来会把"眨眼"打散。
         //   原型里数字在 520ms 才淡入、停止时 320ms 才换成「已保存」，见 `runReadoutTimeline`。
         .onChange(of: model.isRecording) { _, recording in
             runReadoutTimeline(recording: recording)
-        }
-        .onAppear { readoutState = model.isRecording ? .timer : .hidden }
-        .onDisappear { readoutTask?.cancel() }
-        // ★ 2026-10-20: double-tap / shake while recording land here instead of
-        // stopping outright. "End" takes the destructive role; "Keep recording" is
-        // the default the user most often wants after a misfire.
-        .alert(L10n.Watch.stopConfirmTitle, isPresented: $showStopConfirm) {
-            Button(L10n.Watch.stopConfirmAction, role: .destructive) {
-                // The 2-second timer must not fire *after* the answer was given.
+            // ★ 2026-11-03（用户："点击结束了那个窗口还在页面"）：兜底——录音只要不再录了，
+            //   确认条就必须走人。除了「结束」按钮，还有三条路会在条开着的时候结束录音：
+            //   手机端停、体能训练会话被系统结束、看门狗连拒 6 次自动停。它们都不经过按钮，
+            //   谁也不会去关这个条，所以在这里统一收口。
+            if !recording {
                 stopConfirmTask?.cancel()
-                tapGateUntil = Date().addingTimeInterval(0.5)
-                model.stop()
+                showStopConfirm = false
             }
-            Button(L10n.Watch.continueAction, role: .cancel) {
-                stopConfirmTask?.cancel()
-            }
-        } message: {
-            Text(L10n.Watch.stopConfirmMessage)
         }
+        .onAppear {
+            readoutState = model.isRecording ? .timer : .hidden
+            // ★ 2026-11-02（全天候录音）：启动时把设置页的开关同步进模型（幂等）。
+            model.setPowerSaver(prefs.allDayRecording)
+        }
+        .onDisappear {
+            readoutTask?.cancel()
+        }
+        // ★ 2026-11-02（全天候录音）：开关一翻，采样频率与回传策略立即跟着变；
+        //   关掉时模型会自动补发攒下的待传。
+        // ★ 第四轮：翻开时若还没在录（比如手机端刚推过来、而本页正活着）就地补开——
+        //   与设置页/链接回调共用一个幂等收口，重复触发无害。
+        .onChange(of: prefs.allDayRecording) { _, on in
+            model.setPowerSaver(on)
+            if on { model.autoStartForAllDayIfNeeded() }
+        }
+        // ★ 2026-11-03（用户："录音暂停会有弹窗如果不点击则继续录音这个交互也要加入"）：
+        //   系统弹窗换成**原型样式的底部确认条**（结束 / 继续录音 + 2 秒倒计时线）。
+        //   默认仍然是"不点 = 继续录音"，只是从系统 alert 换成页面内的条——
+        //   原型 `.sheet` 的样式（圆角 32、暖色"结束"、白色细线倒计时）在表上比 alert 轻得多。
+        }
+        // ★ 确认条挂在 **GeometryReader** 上（而不是里面那根 VStack）：
+        //   它必须钉在页面真正的底边——之前它对齐的是 VStack 的底，
+        //   VStack 一旦超出屏幕，确认条就跟着到屏幕外去了（"结束按钮点不到"的直接原因）。
+        .overlay(alignment: .bottom) { stopConfirmSheet }
+        // ★ 2026-11-03 八轮：录音中的「标记重点」按钮——放在右下角，**不参与任何竖向预算**
+        //   （读数字号、脸径都不因为它变），也不压住居中的大计时。
+        //   只在录音中出现：待机时没有"当前录音"可打点。
+        .overlay(alignment: .bottomTrailing) { markButton }
+    }
+
+    // MARK: - 打点（★ 2026-11-03 八轮）
+
+    /// 录音中的「标记重点」。
+    ///
+    /// 交互按用户原话定：**底部按一下**就记一个点，不弹窗、不暂停、不需要二次确认。
+    /// 已经在听的场合（会议、访谈）里，任何"点完还要再点一次"的设计都会让人放弃使用。
+    ///
+    /// ⚠️ 尺寸按下限给的：38×30 是拇指在 45mm 表上能稳定命中的最小尺寸，
+    ///    再小就会被表冠/边缘手势抢走。位置贴右下角，和居中的读数字号不重叠。
+    // MARK: - 环境态（★ 2026-11-05 第四轮，全天候录音中的界面）
+
+    /// 全天候录音进行中的整页视图。
+    ///
+    /// ## 设计对标（用户："对比其他做全天候显示的 app"）
+    /// * **Plaud Note / NotePin**：没有屏幕，录音中 = 一颗**红灯常亮**，官方明确"不能关"——
+    ///   长录场景要的不是信息量，是"还在录"这一个 bit。
+    /// * **Limitless Pendant**：录音中白色 LED 常亮，同样不可关闭（知情同意 + 状态透明）。
+    /// * **Apple Watch 体能训练**：常亮变暗后只剩数据与小图标，动画全部停掉。
+    ///
+    /// 共同点 = **"仪表盘 → 指示灯"**：活跃元素压到一枚点，其余信息（时长/段数）
+    /// 全是静态文本，波形/眨眼/表情这类"表演"退场。落到实现上：
+    ///
+    /// * 呼吸红点：唯一的动画元素，2.4 s 一个周期——比波形每秒重绘省电得多，
+    ///   也比"完全静止"更容易确认"没卡死"。
+    /// * 计时：38pt thin 大数字，与常规录音页同款（`readoutFontSize` 大表档）。
+    /// * 「已攒 N 段」chip 直接复用 `stashChip`（省电承诺的可点入口）。
+    /// * 「结束」小按钮：环境态里脸不在了，点按/长按手势跟着脸一起消失，
+    ///   必须给一个显式出口；点了走**同一条**结束确认条（`askStopConfirm`），
+    ///   不直接停——误触保护在长录场景更重要。
+    @State private var ambientDotOn = true
+
+    private var ambientRecording: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 7, height: 7)
+                    .opacity(ambientDotOn ? 1 : 0.25)
+                Text(L10n.Watch.ambientRec)
+                    .font(.system(size: 12, weight: .semibold))
+                    .tracking(2)
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            Text(WatchFormat.compactDuration(model.elapsed))
+                .font(.system(size: 38, weight: .thin))
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.94))
+            stashChip
+            Button {
+                askStopConfirm()
+            } label: {
+                Text(L10n.Watch.stop)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(Color.white.opacity(0.12)))
+            }
+            .buttonStyle(.plain)
+        }
+        .onAppear {
+            // 呼吸：repeatForever 挂在 onAppear，仅这一颗点有动画。
+            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                ambientDotOn = false
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var markButton: some View {
+        // 结束确认条占着底部那块地方时先收起来：两条东西叠在一起，用户会点到下面那个。
+        if model.isRecording, !showStopConfirm {
+            Button {
+                model.addBookmark()
+                markFlashTask?.cancel()
+                withAnimation(.easeOut(duration: 0.12)) { markFlash = true }
+                markFlashTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 180_000_000)
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeOut(duration: 0.22)) { markFlash = false }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "flag.fill")
+                        .font(.system(size: 9.5, weight: .semibold))
+                    if model.totalMarks > 0 {
+                        Text("\(model.totalMarks)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .monospacedDigit()
+                    }
+                }
+                .foregroundStyle(faceTint)
+                .frame(width: 38, height: 30)
+                .background(
+                    Capsule().fill(Color.white.opacity(markFlash ? 0.24 : 0.10))
+                )
+                .overlay(
+                    Capsule().strokeBorder(faceTint.opacity(0.45), lineWidth: 0.5)
+                )
+                .scaleEffect(markFlash ? 1.08 : 1)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 6)
+            // 让开底部页码条（3pt 高、贴底 3pt）与屏幕圆角。
+            .padding(.bottom, 26)
+            .transition(.opacity)
+        }
+    }
+
+    /// 录音页底部（读数 + meta + 避让 + chip 预算）的竖向预算。
+    /// 脸的尺寸 = (可用高度 - 这个数) / 1.14 与屏宽比例取小。
+    ///
+    /// ★ 2026-11-03 四轮：`bottomStackReserve` 常量**已废弃删除**——竖向预算
+    ///   改为在 `recordPane` 里按当前状态现算（待机 18 / 录音 +读数行 +meta /
+    ///   省电 chip +26），脸在待机时不再被读数预算压小。
+    ///   读数字号本身见 `readoutFontSize`（小表 30 / 大表 34，仍有效）。
+
+    /// 脸的**主题色**（眼睛 / 波形 / 长按环 / 结束按钮同一支颜色）。
+    ///
+    /// 来源：手机端「外观」页选的色板（`faceStore.colorHex`）；没选过才回落到手表
+    /// 自己那套 `styleStore.style.tint`。
+    /// ★ 2026-11-03 七轮：抽成一个属性——确认条里的「结束」按钮要跟它同色，
+    ///   写在两处迟早会漂。
+    private var faceTint: Color {
+        faceStore.colorHex.map { Color(botHex: $0) } ?? styleStore.style.tint
+    }
+
+    /// 底部大数字的字号：小表 **26**、大表 **30**。
+    ///
+    /// ★ 2026-11-03 下午（用户："眼睛为啥缩小了"）：34pt 放在 40mm 上会连带把脸压小，
+    ///   而 30pt 在抬腕距离上仍然读得出"仪表感"（.thin 字重是关键，不是字号）。
+    ///   优先保脸：脸是这只表的识别符号，读数是它的仪表盘。
+    /// ★ 2026-11-03 七轮（用户："那个数字可以再小一点"）：30/34 → **26/30**。
+    ///   读数现在浮在底部（不参与脸的高度计算），所以缩小纯粹是为了"别抢脸"。
+    private static var readoutFontSize: CGFloat {
+        dialSide < 176 ? 26 : 30
+    }
+
+    #if DEBUG
+    /// 布局取证：真机上"读数被裁"这类问题光靠算数追不出来，把两个关键值打进日志。
+    /// `log stream --predicate 'category == "recorder"'` 即可看到。
+    private static func logLayout(geo: GeometryProxy) {
+        let log = Logger(subsystem: "com.nomily.app.watch", category: "layout")
+        let screen = WKInterfaceDevice.current().screenBounds.size
+        log.info("record pane layout: geo=\(geo.size.width, privacy: .public)x\(geo.size.height, privacy: .public) screen=\(screen.width, privacy: .public)x\(screen.height, privacy: .public)")
+    }
+    #endif
+
+    // MARK: - 结束录音确认条（★ 2026-11-03 · V4 原型）
+
+    /// 录音中轻点 / 双指捏合 / 摇一摇弹出的底部确认条。
+    ///
+    /// ⚠️ 语义与旧 alert 完全一致：**2 秒不动 = 自动继续录音**（`askStopConfirm` 里的
+    ///   `stopConfirmTask`），倒计时线走到头就是那个"自动继续"——看得见的默认值。
+    @ViewBuilder
+    private var stopConfirmSheet: some View {
+        if showStopConfirm {
+            VStack(spacing: 8) {
+                Text(L10n.Watch.stopConfirmTitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
+                HStack(spacing: 6) {
+                    Button {
+                        // The 2-second timer must not fire *after* the answer was given.
+                        stopConfirmTask?.cancel()
+                        tapGateUntil = Date().addingTimeInterval(0.5)
+                        // 触感统一由 `model.stop()` 里的「两下」负责（2026-11-04）。
+                        // 这里原来先放一发 `.stop`——那是**带声音**的触感，而且此刻
+                        // 麦克风还开着，那声"当"会落在录音尾巴上。
+                        // ★ 2026-11-06（全天候语义）：用户点"结束" = 关开关语义，
+                        // 走 stopByUser（全天候开着时先翻开关再停，录音不会被打断
+                        // 又立刻自动续上）。
+                        model.stopByUser()
+                        // ★ 2026-11-03（用户："点击结束了那个窗口还在页面"）：
+                        //   这里以前**只**调了 `model.stop()`，没有收条——而上面刚把
+                        //   自动收条的 Task cancel 掉了，于是这个确认条再没人负责关闭，
+                        //   会一直停在录音页上（「继续录音」那条路径才有 dismiss）。
+                        //   收条与结束必须原子：先落 stop，再关条，顺序反过来会闪一帧。
+                        withAnimation(.easeOut(duration: 0.22)) { showStopConfirm = false }
+                    } label: {
+                        Text(L10n.Watch.stopConfirmAction)
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    // ★ 2026-11-03 七轮（用户："结束这个选项要跟随主题颜色"）：
+                                    //   「结束」原来是固定的暖色 amber；现在跟脸/波形同一个
+                                    //   主题色（手机上选的 Appearance 色），三者同源。
+                                    .fill(faceTint)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    Button {
+                        stopConfirmTask?.cancel()
+                        withAnimation(.easeOut(duration: 0.25)) { showStopConfirm = false }
+                    } label: {
+                        Text(L10n.Watch.continueAction)
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(Color.white.opacity(0.10))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+                // 2 秒倒计时线：走完 = 自动继续（和 `askStopConfirm` 的 Task 同一条时间轴）。
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.12))
+                        Capsule()
+                            .fill(Color.white.opacity(0.40))
+                            .frame(width: geo.size.width * stopConfirmCountdown)
+                    }
+                }
+                .frame(height: 1.5)
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            // ★ 2026-11-03：底部 12 → 18。页码条（3pt 高、贴底 3pt）和屏幕圆角
+            //   都在这一带，确认条贴得太低会被两者夹住、末排按钮难按。
+            .padding(.bottom, 18)
+            .background(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(Color(white: 0.09).opacity(0.95))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
+                    )
+            )
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    /// 倒计时线的剩余比例（1 → 0）。弹出时用 `Self.stopConfirmSeconds` 的线性动画走完，
+    /// 和 `askStopConfirm` 里那个 Task 是同一个时长（同源常量，不会走岔）。
+    @State private var stopConfirmCountdown: CGFloat = 1
+
+    private func armStopConfirmCountdown() {
+        var tx = Transaction()
+        tx.disablesAnimations = true
+        withTransaction(tx) { stopConfirmCountdown = 1 }
+        withAnimation(.linear(duration: Self.stopConfirmSeconds)) { stopConfirmCountdown = 0 }
     }
 
     /// The small line below the face. While idle it's a usage hint; while recording it's the **byte count written so far**.
     ///
-    /// ⚠️ While idle that hint **cannot be dropped**. "Hold for 2 seconds" is an **invisible** interaction --
-    /// without the hint, a first-time user just pokes once, finds nothing happens, and gives up.
     /// ⚠️ The byte count is the **only** hard evidence that "the recording is really being written to disk" --
     ///   the wave is a flat line hugging the bottom when things are quiet, and from it alone you can't tell "no sound" from "broken".
     ///
     /// ★ 2026-11-02（v3 原型）：计时搬去 `readout` 之后，这一行只剩两件事要说，
-    /// 于是从"两行竖排"压成**一行**（字节数 · 长按结束）——40mm 上每一行都是预算。
+    /// 于是从"两行竖排"压成**一行**——40mm 上每一行都是预算。
+    /// ★ 2026-11-03（用户："长按 2s 开始录音这个字体显示这个需要取消"）：待机的提示字**整行删掉**。
+    ///   长按的进度现在有"眯眼 + 细环走满"两路动画，比一句永远挂着的字更有说服力；
+    ///   首次用户的引导交给手机端首用引导（`FirstRunGuide`），表上不再常驻说明书。
     @ViewBuilder
     private var caption: some View {
         if model.isRecording {
-            // 字节数是"真的在往文件里写"唯一的硬证据；后面跟一句手势说明，
-            // 因为"长按开始"和"长按停止"长得一模一样，没有说明这两次按下的意义分不开。
-            Text("\(WatchFormat.bytes(model.currentBytes)) · \(L10n.Watch.holdToStop)")
+            // ★ 2026-11-03（V4 原型）：这行改成「● 1.2 MB · 12.5Hz」——录音页要能回答
+            //   "录了多少、用的是什么节奏"，而不是再重复一遍手势说明（原型里也没有）。
+            //   ⚠️ 字节数不能删：波形在安静时是贴着底的一条线，从它看不出"没声音"和"坏了"的区别，
+            //      落盘的字节数是唯一的硬证据。
+            HStack(spacing: 3) {
+                Circle()
+                    .fill(Color.white.opacity(0.32))
+                    .frame(width: 3, height: 3)
+                Text(metaLine)
+                    .monospacedDigit()
+            }
+            .font(.system(size: 9.5, weight: .regular))
+            .foregroundStyle(.white.opacity(0.34))
+            .lineLimit(1)
+            .minimumScaleFactor(0.65)
+            .padding(.top, 2)
+        }
+        // 待机：什么都不显示——原型的 idle 页只有脸和提示，提示已按用户要求取消。
+    }
+
+    /// 音量表的采样节奏：常规 12.5Hz、省电 2Hz（与 `WatchRecorderModel` 的
+    /// `meterInterval` / `meterIntervalSaver` 一一对应）。原型在读数下面写着这个值，
+    /// 它是"省电模式真的生效了"唯一看得见的证据——否
+    /// 则用户只看到波形变钝，会以为麦克风出了问题。
+    private var metaLine: String {
+        let rate = model.powerSaver ? "2Hz" : "12.5Hz"
+        return "\(WatchFormat.bytes(model.currentBytes)) · \(rate)"
+    }
+
+    /// 省电 + 有待传时，录音页中间那颗暖色 chip：「已攒 N 段 ›」。
+    ///
+    /// ★ 2026-11-03（V4 原型）：省电模式的核心承诺是"攒着、充电再传"，
+    ///   翻译到界面上就是这句话。它必须**可点**且直跳同步页——否则用户看到
+    ///   "已攒 3 段"却找不到人在哪传，只能下滑到菜单里翻。
+    @ViewBuilder
+    private var stashChip: some View {
+        if model.powerSaver, !model.pending.isEmpty {
+            Button {
+                WKInterfaceDevice.current().play(.click)
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                    page = Self.syncPage
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(L10n.Watch.stashedCount(model.pending.count))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 7, weight: .bold))
+                }
                 .font(.system(size: 9.5, weight: .medium))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
-                .padding(.top, 2)
-        } else {
-            Text(L10n.Watch.holdToRecord)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .padding(.top, 4)
+                .foregroundStyle(WatchHomeStyle.amber)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3)
+                .overlay(
+                    Capsule().stroke(WatchHomeStyle.amber.opacity(0.4), lineWidth: 0.5)
+                )
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, 5)
+            .accessibilityLabel(L10n.Watch.stashedCount(model.pending.count))
         }
     }
 
@@ -509,7 +940,11 @@ struct WatchRecorderView: View {
             EmptyView()
         case .timer:
             Text(WatchFormat.compactDuration(model.elapsed))
-                .font(.system(size: 26, weight: .thin))
+                // ★ 2026-11-03（V4 原型）：26 → **34pt thin**。计时是录音页真正的仪表，
+                //   26pt 在抬腕 20cm 的距离上只是"一行字"；34pt 细体才读得出"仪表"。
+                //   ⚠️ 重量必须留 `.thin`：换成 `.light` 立刻变回 UI 标签。
+                // ★ 2026-11-03 下午：小表降到 30pt，把高度让回给脸（见 `readoutFontSize`）。
+                .font(.system(size: Self.readoutFontSize, weight: .thin))
                 .monospacedDigit()
                 .foregroundStyle(.white.opacity(0.94))
                 .transition(.opacity)
@@ -522,25 +957,25 @@ struct WatchRecorderView: View {
         }
     }
 
-    /// 读数跟着「眨眼」的时间轴走（原型 opening/closing 两段的分段时刻）。
+    /// 读数跟着「眨眼」的时间轴走。
     ///
     /// | 时刻 | 读数 |
     /// |---|---|
-    /// | 开始录音 0ms | 不动（眼睛正在压扁，这时候弹数字会把眨眼打散） |
-    /// | 开始录音 520ms | 计时淡入 |
+    /// | 开始录音 0ms | 计时**立即**淡入（★ 第二轮改） |
     /// | 停止录音 320ms | 换成「已保存」 |
     /// | 停止录音 1450ms | 收掉（此时眼睛已经睁回来） |
     ///
-    /// ⚠️ 数字只在 `isRecording` 翻转时**延迟**出现，之后由 `model.elapsed` 自己刷新——
+    /// ★ 2026-11-02 第二轮（用户："手表的录音时长没有了"）：计时从"起录 520ms 后才淡入"
+    ///   改为**按下就出现**。原型的延迟是为了让眨眼独占前半秒，但真机上"这个数字什么时候来"
+    ///   比"节奏感"重要——计时是"录音还在进行"最硬的证据，它迟到的半秒里用户只能对着
+    ///   一条还没起振的波形猜。省下的 520ms 也顺带让"有没有在录"不再依赖波形那一下。
+    ///
+    /// ⚠️ 数字只在 `isRecording` 翻转时出现，之后由 `model.elapsed` 自己刷新——
     ///    不要把它绑到 `elapsed` 上做动画，秒级刷新会把每一下都变成一次淡入。
     private func runReadoutTimeline(recording: Bool) {
         readoutTask?.cancel()
         if recording {
-            readoutTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 520_000_000)
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: 0.4)) { readoutState = .timer }
-            }
+            withAnimation(.easeOut(duration: 0.35)) { readoutState = .timer }
         } else {
             readoutTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 320_000_000)
@@ -561,7 +996,8 @@ struct WatchRecorderView: View {
         // The lift is read by the `Button` as a tap (see the `tapGateUntil` passage).
         tapGateUntil = Date().addingTimeInterval(0.5)
         if model.isRecording {
-            model.stop()
+            // ★ 2026-11-06（全天候语义）：长按停 = 关开关语义（stopByUser）。
+            model.stopByUser()
         } else {
             model.toggleRecording()
         }
@@ -588,14 +1024,22 @@ struct WatchRecorderView: View {
         }
     }
 
-    /// Show "End this recording? / End · Keep recording" and **arm the 2-second
-    /// auto-close**. Every recording-state gesture funnels through here so the three
-    /// of them can never drift apart again.
+    /// Show "End this recording? / End · Keep recording" and **arm the auto-close**.
+    /// Every recording-state gesture funnels through here so the three of them
+    /// can never drift apart again.
+    ///
+    /// ★ 2026-11-03 三轮（用户："点击结束录音都没效果"）：窗口 2s → **3.5s**。
+    ///   2 秒是 10-22 那轮按"误触后要尽快恢复录音"定的；但在真机上，
+    ///   从手指离开脸、眼睛看到条、挪到「结束」上，2 秒根本不够——
+    ///   条在手指落下的前一帧就自己收了，于是"点了没反应"。
+    ///   弹条本身已经挡住了误触（不点就是继续），所以这 1.5 秒不增加误停风险。
+    ///   ⚠️ 想调回去只改 `Self.stopConfirmSeconds`，倒计时线跟着它走。
     private func askStopConfirm() {
         stopConfirmTask?.cancel()
         showStopConfirm = true
+        armStopConfirmCountdown()
         stopConfirmTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(Self.stopConfirmSeconds * 1_000_000_000))
             guard !Task.isCancelled else { return }
             // Timeout = "keep recording", never "end". The user asked for the
             // default to be the safe one, and it also matches what the alert's
@@ -603,6 +1047,12 @@ struct WatchRecorderView: View {
             showStopConfirm = false
         }
     }
+
+    /// 确认条存在多久后自动按「继续录音」收掉（秒）。
+    ///
+    /// ⚠️ 倒计时线（`armStopConfirmCountdown`）必须用同一个常量，
+    ///    否则线走完了按钮还在、或者反过来，两种都让人以为界面卡死。
+    private static let stopConfirmSeconds: Double = 3.5
 
     /// Double tap. Start / stop-with-confirmation.
     ///
@@ -643,7 +1093,9 @@ struct WatchRecorderView: View {
         //   ② 内容贴边：第一块砖被顶部页码条压住、最后一块被底边裁掉，看起来"下面还有
         //      但够不着"。现在上下各留出避让空间（顶部 12pt 让页码条，底部 8pt 兜底）。
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(spacing: 7) {
+            // ★ 2026-11-03：行之间不留间距——发丝线就是分隔，再留 7pt 的空会变成
+            //   "一堆分开的卡片"，又回到磁贴的样子。
+            VStack(spacing: 0) {
                 // ★ 2026-11-02：加一个小标题，和「最近 / 同步」两页的语言对齐
                 // （三页都以一行压暗、字距拉开的小标题开头）。空列表时它也是唯一的说明。
                 Text(L10n.Watch.menuHeader)
@@ -676,82 +1128,83 @@ struct WatchRecorderView: View {
 
                 editTile
             }
-            .padding(.horizontal, 5)
-            // 13 → 26：顶栏现在多了一行时钟（15pt + 3pt 间距），小标题再贴 13 会被压住。
-            .padding(.top, 26)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 10)
+            // ★ 2026-11-03 二轮（用户："顶部跟底部的显示好像又没用全"）：顶部 30 → **12**，
+            //   只让开右上角系统时间那一行；底部 16 给页码条避让。
+            .padding(.top, 12)
+            .padding(.bottom, 16)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// A menu item.
+    /// A menu item: **52pt 行 + 0.5pt 发丝线 + 1.5pt 描边图标**（★ 2026-11-03 · V4 原型）。
     ///
-    /// ★ Revision nine: the icon color goes from "cycling through the palette" to **all using the same color**
-    /// (`WatchRingStyle.tint`). The reason is that this round fixed "one theme = one color" solid
-    /// (see the top of `WatchRingStyle`) -- with cycling, the three-color palette (`activity`) would give
-    /// the 2nd menu item that neon green, so under one theme the face is one color while
-    /// the menu is another. That's one of the sources of last round's "green" complaint.
+    /// 以前是"白 0.12 圆底卡片 + 32pt 实心圆图标"，那是 iOS 设置页的语言；
+    /// 而「最近 / 同步」两页是黑底 + 发丝线 + 行内文字。一个 App 里两套材质，
+    /// 翻页时最刺眼的不是内容不同，是**同一样东西长得不一样**。
+    /// 现在改成和「最近」页完全同构的行，整页终于像同一个 App 的第四页，
+    /// 而不是"从设置里抠出来的一屏"。
+    ///
+    /// 唯一例外：待传队列右侧的**暖色反白数字**——它是全页唯一带「量」的入口，
+    /// 静默一个数字等于让用户猜"有没有东西没传上去"。
     private func menuTile(_ item: WatchHomeMenu) -> some View {
-        // ★ 2026-10-30（用户："这个菜单选择需要大一点，不要太小了"）：整块从
-        //   "38pt 高、14pt 字"放大到 **约 50pt 高、16pt 字**，图标底盘 28 → 32。
-        //   40mm 表盘上一行 50pt 正好是"一屏三块半"，既点得准又不至于一屏只放得下两块。
-        //   这也是"方框"优化的正题：原来方框偏矮、文字贴边，底部一行压着屏幕边缘，
-        //   现在方框有固定的最小高度、内边距左右一致、圆角跟着高度走，视觉上不再被裁。
-        HStack(spacing: 9) {
+        HStack(spacing: 14) {
             Image(systemName: item.symbol)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(styleStore.style.tint)
-                .frame(width: 32, height: 32)
-                .background(Circle().fill(Color.white.opacity(0.14)))
+                // ⚠️ SF Symbols 改不了描边宽度，用 `.light` 近似原型的 1.5pt 描边：
+                //    换成 `.semibold` 会立刻变回"实心图标"的观感。
+                .font(.system(size: 19, weight: .light))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 30, height: 30)
             Text(item.title)
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.92))
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.25))
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.white.opacity(0.12))
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(WatchHomeStyle.hairline)
+                .frame(height: 0.5)
+        }
+        .contentShape(Rectangle())
         .accessibilityLabel(item.title)
     }
 
-    /// The "edit quick menu" entry. A dashed border and secondary color set it apart from the real menu items above --
-    /// it isn't "the Nth menu", it's "where you edit the menus".
+    /// 「添加快捷菜单」。和真菜单项同构，只把颜色压暗、上面加一道虚线——
+    /// 它读作"这里还能加东西"，而不是"第 N 个菜单"。
     private var editTile: some View {
         NavigationLink {
             WatchQuickMenuSettingsView()
         } label: {
-            HStack(spacing: 9) {
-                Image(systemName: "plus.circle")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 32, height: 32)
+            HStack(spacing: 14) {
+                Image(systemName: "plus")
+                    .font(.system(size: 17, weight: .light))
+                    .frame(width: 30, height: 30)
                 Text(L10n.Watch.quickMenuAdd)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: 13.5, weight: .regular))
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(
-                        Color.white.opacity(0.18),
-                        style: StrokeStyle(lineWidth: 1, dash: [4, 3])
-                    )
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .foregroundStyle(.white.opacity(0.45))
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.16))
+                    .frame(height: 0.5)
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(L10n.Watch.quickMenuAdd)
@@ -820,53 +1273,50 @@ struct WatchRecorderView: View {
     ///    modifiers would stack on the same spot, which is the mistake the old
     ///    bottom bar documented and then this rewrite removed along with it.
     ///
-    /// ★ 2026-11-02（v3 原型）：右上角从"只有页码条"变成**时钟 + 页码条**竖排，
-    /// 左上角在录音时多一颗呼吸的暖点 + LISTENING。
-    /// 时钟是补上来的——这一页 `.persistentSystemOverlays(.hidden)` 把系统时钟关掉了，
-    /// 以前抬腕是看不到时间的。
+    /// ★ 2026-11-02：左上角在录音时多一颗呼吸的暖点 + LISTENING。
+    ///
+    /// ★★ 2026-11-02（用户："顶部右上角已经有时间了，这个 bot 的右上角就不要出时间，
+    ///    不然就是 2 个时间了"）：**自己画的那个时钟已经删掉**。
+    ///    上一版加它是想照原型的「时钟 + 页码条」竖排，但在真机上 watchOS 自己
+    ///    就会在右上角画时间（`persistentSystemOverlays(.hidden)` 只压掉了导航栏那一层，
+    ///    状态栏的时间仍在），于是屏幕上出现了两个一样的时间。
+    ///    现在右上角只剩页码条，并且**往下让开系统时间那一行**（`padding(.top, 24)`）。
     private var topBar: some View {
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
                 if model.isRecording {
-                    WatchListeningBadge()
+                    // ★ 2026-11-03（V4 原型）：省电时换成月亮 + MOONLIT。
+                    WatchListeningBadge(powerSaver: model.powerSaver)
                 }
                 queueBar
             }
             Spacer(minLength: 0)
-            VStack(alignment: .trailing, spacing: 3) {
-                WatchClockFace()
-                pageBar
-            }
+            // ★ 2026-11-03：页码条已搬到**底部中央常显**（见 `body` 的 bottom overlay）。
+            //   右上角现在只剩系统时间，两者不再抢同一块地方。
         }
         .padding(.horizontal, 5)
         // 顶部留 6pt：那根 2pt 暖线贴着屏幕最上沿，压住它会看起来像标签被裁了。
         .padding(.top, 6)
     }
 
-    /// Four little **segments** showing which page you're on.
+    /// 页码条：**底部中央常显**的四根发丝 tick（★ 2026-11-03 · V4 原型）。
     ///
-    /// ★ Rewritten 2026-10-23 from dots to a bar, for the reason in `body`:
-    /// three round dots under a face read as a mouth. Three short capsules in a
-    /// row read as a page control — the shape itself is the explanation.
+    /// 常态白 0.24，当前页拉长到 14pt、白 0.66——不抢视线，但一直答得出
+    /// "我在第几页、还能往哪边划"。搬家的理由见 `body` 里那处 overlay 的注释。
     ///
-    /// ★ Added in revision eight as dots. The user reported "swiping left and
-    /// right doesn't reach the menus"; half of that was broken behavior
-    /// (`.page` not giving horizontal paging, now fixed) and the other half was
-    /// **discoverability**: nothing on screen ever hinted that you could swipe here.
-    ///
-    /// ⚠️ Deliberately **not tappable**: a 4pt-tall bar is impossible to hit on a
-    ///    40mm watch, and making it a button would only bring "I tapped and
-    ///    nothing happened". Its job is "tell you that you can swipe".
+    /// ⚠️ 刻意**不可点**：3pt 高、40mm 表上根本点不中，做成按钮只会带来
+    ///    "我点了没反应"。它的职责是"告诉你这里能滑"。
     private var pageBar: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 6) {
             ForEach(0 ..< Self.pageCount, id: \.self) { index in
                 Capsule()
-                    .fill(Color.white.opacity(index == page ? 0.85 : 0.22))
-                    .frame(width: index == page ? 11 : 5, height: 3)
+                    .fill(Color.white.opacity(index == page ? 0.66 : 0.24))
+                    .frame(width: index == page ? 14 : 3, height: 3)
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: page)
         .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     // MARK: - The pending hint
@@ -880,8 +1330,12 @@ struct WatchRecorderView: View {
     @ViewBuilder
     private var queueBar: some View {
         if !model.pending.isEmpty {
-            NavigationLink {
-                WatchQueueView()
+            // ★ 2026-11-03：直接跳**同步页**——「待传队列」独立页和同步页重复，已并入那里。
+            Button {
+                WKInterfaceDevice.current().play(.click)
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                    page = Self.syncPage
+                }
             } label: {
                 HStack(spacing: 3) {
                     Image(systemName: "arrow.up.circle.fill")
@@ -892,10 +1346,15 @@ struct WatchRecorderView: View {
                         .font(.system(size: 8, weight: .bold))
                 }
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(styleStore.style.tint)
+                // ★★ 2026-11-04（用户："左上角的 1 项目待传为啥不跟随手表的主题颜色，
+                //    当前是白色他是红色"）：用的是 `styleStore.style.tint` —— 表本地
+                //   「外观」里那套配色，和手机推下来的**眼睛颜色**（faceTint，用户说的
+                //   "主题颜色"）是两个来源。用户在外观里选了浅色系时，这个 pill 就是白的。
+                //   录音页上所有该带主题色的元素（眼睛 / stashChip / 这里）统一走 faceTint。
+                .foregroundStyle(faceTint)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(Capsule().fill(Color.white.opacity(0.12)))
+                .background(Capsule().fill(faceTint.opacity(0.14)))
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -912,15 +1371,18 @@ struct WatchRecorderView: View {
             return
         }
         shake.start { [model] in
-            // Fire a haptic on trigger: at that moment nobody is looking at the screen (raising the wrist is the shake),
-            // so without feedback you can't tell whether it actually started recording. Two different feels, "start/stop",
-            // let the haptic alone tell start from stop.
-            WKInterfaceDevice.current().play(model.isRecording ? .stop : .start)
-            // ★ 2026-10-20: while **recording** the shake asks before acting (user:
-            // "摇一摇也是需要弹出是否确认取消") — a shake is the easiest gesture to
-            // produce by accident while moving, and it used to end the take outright.
-            // (The detector fires on the main queue, so the @State write is safe.)
+            // 触感分工（2026-11-04）：
+            //   · 真开/真停 → 由 `WatchRecorderModel.playHaptics` 出「开始一下、结束两下」，
+            //     这里**不再自己放**，否则一次摇动会响两遍（且 `.start`/`.stop` 带声音，
+            //     开录那一下会被录进文件开头）。
+            //   · 录音中摇一摇只是**弹确认**、不会真停，模型那边不会响，所以这里补一下，
+            //     用 `.click` 而不是 `.stop`——此时麦克风还开着。
             guard !model.isRecording else {
+                WKInterfaceDevice.current().play(.click)
+                // ★ 2026-10-20: while **recording** the shake asks before acting (user:
+                // "摇一摇也是需要弹出是否确认取消") — a shake is the easiest gesture to
+                // produce by accident while moving, and it used to end the take outright.
+                // (The detector fires on the main queue, so the @State write is safe.)
                 // ★ 2026-10-22: same prompt as tap / pinch, and it closes itself
                 // after 2 s with "keep recording" — see `askStopConfirm`.
                 askStopConfirm()
@@ -946,66 +1408,10 @@ struct WatchRecorderView: View {
     }
 }
 
-// MARK: - The pending page
-
-/// The separate page for the pending list (reached by tapping the hint at the bottom of the home screen).
-struct WatchQueueView: View {
-    @EnvironmentObject private var model: WatchRecorderModel
-    @EnvironmentObject private var link: WatchLink
-
-    var body: some View {
-        Group {
-            if model.pending.isEmpty {
-                // ★ 2026-10-16 revision seven: this page can now be **reached straight from the menu** (it became one
-                // of the addable menu items), so "empty" is the normal case and it needs an empty state --
-                // otherwise tapping in from the menu just shows a black screen.
-                VStack(spacing: 5) {
-                    Image(systemName: "checkmark.circle")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.secondary)
-                    Text(L10n.Watch.queueEmpty)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-            } else {
-                List {
-                    ForEach(model.pending) { clip in
-                        // Queued or delivered-but-unconfirmed both read as "in flight";
-                        // only a clip with neither state needs the retry affordance.
-                        let isQueued = link.queuedNames.contains(clip.name)
-                            || link.deliveredNames.contains(clip.name)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(clip.displayTitle)
-                                .font(.caption2)
-                                .lineLimit(2)
-                            Text("\(isQueued ? L10n.Watch.sending : L10n.Watch.waiting) · \(WatchFormat.bytes(clip.bytes))")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            HStack(spacing: 10) {
-                                if !isQueued {
-                                    Button { model.retry(clip) } label: {
-                                        Label(L10n.Common.retry, systemImage: "arrow.clockwise")
-                                            .labelStyle(.iconOnly)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel(L10n.Common.retry)
-                                }
-                                Button(role: .destructive) { model.delete(clip) } label: {
-                                    Label(L10n.Common.delete, systemImage: "trash")
-                                        .labelStyle(.iconOnly)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(L10n.Common.delete)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .navigationTitle(L10n.Watch.pendingHeader)
-    }
-}
+// MARK: - The pending page（已删除，2026-11-03）
+//
+// 「待传队列」独立页和「同步」页是同一份数据的两张皮，队列列表已并入
+// `WatchSyncPane`（见 WatchHomePanes.swift），左上角待传胶囊直跳同步页。
 
 enum WatchFormat {
     /// What fits inside the ring. `mm:ss` while the hours field would only

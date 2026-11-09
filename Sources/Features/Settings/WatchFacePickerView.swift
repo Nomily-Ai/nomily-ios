@@ -18,6 +18,9 @@ struct WatchFacePickerView: View {
     @EnvironmentObject private var env: AppEnvironment
     // ★ 2026-11-02：录音质量降级进度（"立即降级"按钮与最近一次报告）。
     @ObservedObject private var quality = RecordingQualityService.shared
+    /// ★ 2026-11-04：声纹状态（有无、在哪台设备录的）。手表录的样本传上来后
+    /// 由 `VoiceprintService` 在本机注册，这一行是用户唯一能看到"到底注册成功没有"的地方。
+    @ObservedObject private var voiceprint = VoiceprintService.shared
 
     // ★ 2026-10-30：称呼草稿（从主设置页搬来，逻辑不变）。
     @State private var userNameDraft = ""
@@ -55,7 +58,19 @@ struct WatchFacePickerView: View {
 
             userNameSection
 
+            voiceprintSection
+
             timedRecordingSection
+
+            // ★ 2026-11-05：全天候录音开关（用户："nomily AI APP 设置也要有一个开关"）。
+            allDayRecordingSection
+
+            // ★ 2026-11-06：表情常亮开关（用户："增加一个表情常亮让手表持续显示在首页
+            // 的设置在 app 里面"）。
+            alwaysOnFaceSection
+
+            // ★ 2026-11-06 二轮（"让脸活起来"）：眼睛形状 / 打瞌睡 / 瞳孔跟随。
+            faceLifeSection
 
             // ★ 2026-11-02：手表录音质量（转写后）——只作用于手表录音。
             recordingQualitySection
@@ -119,6 +134,44 @@ struct WatchFacePickerView: View {
             Text(L10n.Profile.userName)
         } footer: {
             Text(L10n.Profile.footer)
+        }
+    }
+
+    // MARK: - 声纹（★ 2026-11-04）
+
+    /// 手表上录的那段声音，最终注册成了什么。
+    ///
+    /// 这里只做三件事：显示有没有、说明它怎么用、给一个删除入口。
+    /// **不做"在手机上重录"**——声纹要和录音用同一个麦克风，手机上录的样本拿去
+    /// 认手表录音只会更不准（见 `VoiceprintEngine` 顶部关于"音频通道"的说明）。
+    @ViewBuilder
+    private var voiceprintSection: some View {
+        Section {
+            if let profile = voiceprint.profile {
+                LabeledContent {
+                    Text(L10n.Voiceprint.sampleInfo(
+                        Int(profile.seconds.rounded()),
+                        source: profile.source == ClipOrigin.watch
+                            ? L10n.Voiceprint.deviceWatch
+                            : L10n.Voiceprint.devicePhone
+                    ))
+                    .foregroundStyle(.secondary)
+                } label: {
+                    Label(L10n.Voiceprint.statusEnrolled, systemImage: "checkmark.seal")
+                }
+                Button(role: .destructive) {
+                    voiceprint.forget()
+                } label: {
+                    Label(L10n.Voiceprint.remove, systemImage: "trash")
+                }
+            } else {
+                Label(L10n.Voiceprint.statusMissing, systemImage: "person.wave.2")
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(L10n.Voiceprint.title)
+        } footer: {
+            Text(L10n.Voiceprint.explain + "\n" + L10n.Voiceprint.identityFooter)
         }
     }
 
@@ -211,6 +264,118 @@ struct WatchFacePickerView: View {
     private static func timeString(_ date: Date) -> String {
         let comps = Calendar.current.dateComponents([.hour, .minute], from: date)
         return String(format: "%02d:%02d", comps.hour ?? 23, comps.minute ?? 30)
+    }
+
+    // MARK: - 全天候录音开关（★ 2026-11-05，双端同步）
+
+    /// 手机上的全天候录音开关（手表「设置」页里也有一颗）。翻动即刻推给手表；
+    /// 手机从未动过这个开关时，显示跟手表回报的值走。
+    private var allDayRecordingSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { watch.phoneAllDay ?? watch.watchAllDayState ?? false },
+                set: { watch.setAllDayRecording($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.Watch.allDayTitle)
+                    Text(L10n.Watch.allDayHint)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } footer: {
+            Text(L10n.Watch.allDayPhoneFooter)
+        }
+    }
+
+    // MARK: ★ 2026-11-06 表情常亮
+    //
+    // 用户："手表这边可以增加一个表情常亮让手表持续显示在首页的设置在 app 里面"。
+    // 语义边界（诚实）：watchOS 7 起没有任何公开 API 能让 App 改"返回表盘时间"，
+    // 那由手表上的 设置 → 通用 → 唤醒屏幕 → 返回表盘时间 决定（可按 App 单独设置，
+    // 最长 1 小时）。这个开关管的是**暗显的那段时间**：画表情（默认，暗态停帧）
+    // 还是黑屏省电。录音中例外——workout 会话期间本来就一直常驻常显。
+    private var alwaysOnFaceSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { watch.phoneAlwaysOnFace ?? watch.watchAlwaysOnFace ?? true },
+                set: { watch.setAlwaysOnFace($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.Watch.alwaysOnTitle)
+                    Text(L10n.Watch.alwaysOnHint)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } footer: {
+            Text(L10n.Watch.alwaysOnFooter)
+        }
+    }
+
+    // MARK: - ★ 2026-11-06 二轮："让脸活起来"（借鉴 agent-avatars）
+
+    /// 眼睛形状 / 打瞌睡 / 瞳孔跟随，三个设置一组。借鉴的是 agent-avatars
+    /// 的**能力**（4 种 eye styles、drowsy→asleep 阶梯、followPointer），
+    /// 触发逻辑换成了 Nomily 自己的：打瞌睡看"多久没触摸"，跟随看"手指按住拖动"。
+    private var faceLifeSection: some View {
+        Section {
+            Picker(L10n.Watch.eyeShapeTitle, selection: Binding(
+                get: {
+                    watch.phoneEyeShape
+                        .flatMap(BotEyeShape.init(rawValue:))
+                        ?? BotEyeShape.tall
+                },
+                set: { watch.setEyeShape($0.rawValue) }
+            )) {
+                ForEach(BotEyeShape.allCases) { shape in
+                    Text(shape.title).tag(shape)
+                }
+            }
+
+            Toggle(isOn: Binding(
+                get: { watch.phoneDrowsyEnabled ?? true },
+                set: { on in
+                    watch.setDrowsy(enabled: on, after: watch.phoneDrowsyAfter ?? 45)
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.Watch.drowsyTitle)
+                    Text(L10n.Watch.drowsyHint)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if watch.phoneDrowsyEnabled ?? true {
+                Picker(L10n.Watch.drowsyAfterTitle, selection: Binding(
+                    get: { watch.phoneDrowsyAfter ?? 45 },
+                    set: { seconds in
+                        watch.setDrowsy(enabled: true, after: seconds)
+                    }
+                )) {
+                    ForEach([15, 30, 60, 120], id: \.self) { seconds in
+                        Text(L10n.Watch.drowsyDelay(seconds)).tag(seconds)
+                    }
+                }
+            }
+
+            Toggle(isOn: Binding(
+                get: { watch.phonePupilFollow ?? true },
+                set: { watch.setPupilFollow($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.Watch.pupilFollowTitle)
+                    Text(L10n.Watch.pupilFollowHint)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text(L10n.Watch.faceLifeHeader)
+        } footer: {
+            Text(L10n.Watch.faceLifeFooter)
+        }
     }
 
     // MARK: - 手表录音质量（★ 2026-11-02 自录音与转写页整体搬入）
@@ -535,7 +700,10 @@ struct WatchFaceStyleSettingsView: View {
             if frameOn {
                 BotFaceFrame(size: Self.previewSize, tint: tint)
             }
-            BotFacePair(style: style, size: Self.previewSize, tint: tint)
+            // ★ 2026-11-06 二轮：预览也带上眼睛形状轴——选了"圆眼"这里就画圆眼，
+            //   手机预览与表上同源（BotFaceEye 是唯一的画法实现）。
+            BotFacePair(style: style, size: Self.previewSize, tint: tint,
+                        shape: watch.phoneEyeShape.flatMap(BotEyeShape.init(rawValue:)) ?? .tall)
         }
         if chosenColorHex != nil {
             face

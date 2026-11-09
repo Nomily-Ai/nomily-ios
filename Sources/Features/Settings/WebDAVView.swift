@@ -6,20 +6,63 @@ import SwiftUI
 
 /// ★ 2026-10-29（饭耳移植 · 规格 §2.3 存储分层 · WebDAV 目的地）
 ///
-/// The NAS form, ported: preset picker (群晖/威联通/绿联/飞牛/极空间/Nextcloud/
-/// 坚果云/其他) → the four connection fields → 「也传录音」 → probe → sync-now.
-/// Presets only prefill port/https + a setup hint; the protocol underneath is
-/// plain WebDAV for every one of them.
-/// ★ 2026-10-30（用户："不要列表式的选择服务器类型的服务商，归纳到一个
-/// webdav，点击按照类型选择，选择在弹页面设置"）：WebDAV 的唯一入口是一个
-/// 弹层——先挑服务器类型，再在弹层内推入配置页。
+/// ★ 2026-11-09 多账户改版（用户："选择 nas 或者其他都是用的同一个，没有区分
+/// 每个品牌跟配置，都是点击出现的 NC 的配置"）：旧版只有一个 `webdav` 槽位，
+/// 弹层里选哪个品牌都只是"给同一条配置换皮"——已配过 Nextcloud 时，点群晖
+/// 进去看到的还是 NC 的主机和账号，保存还会把 NC 覆盖掉。
+/// 现在弹层分两段：
+///   · **已保存的服务器** —— 每条账户独立编辑（各自的主机/账号/密码），
+///     标「使用中」的是自动备份目标；左滑可删。
+///   · **添加服务器** —— 按品牌预填端口/HTTPS/目录，新建一条账户，
+///     保存后自动成为「使用中」。
 struct WebDAVSetupSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var configService: ConfigService
 
+    private var accounts: [WebDAVConfig] {
+        configService.config.webdavAccounts ?? (configService.config.webdav.map { [$0] } ?? [])
+    }
+
     var body: some View {
         NavigationStack {
             List {
+                if !accounts.isEmpty {
+                    Section {
+                        ForEach(accounts) { account in
+                            NavigationLink {
+                                WebDAVView(accountID: account.id)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    presetIcon(account.preset)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(account.preset ?? L10n.WebDAV.title)
+                                        Text(account.host)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer(minLength: 8)
+                                    if isActive(account) {
+                                        Text(L10n.WebDAV.inUse)
+                                            .font(.caption2.weight(.medium))
+                                            .foregroundStyle(.green)
+                                    }
+                                }
+                            }
+                        }
+                        .onDelete { indexSet in
+                            let ids = indexSet.compactMap { accounts[safe: $0]?.id }
+                            for id in ids {
+                                configService.config.removeWebDAVAccount(id: id)
+                                SecretStore.delete(key: ConfigService.webdavPasswordKey(accountID: id))
+                            }
+                            configService.saveNow()
+                        }
+                    } header: {
+                        Text(L10n.WebDAV.savedServers)
+                    }
+                }
+
                 Section {
                     ForEach(WebDAVPresets.all, id: \.label) { item in
                         NavigationLink {
@@ -46,18 +89,15 @@ struct WebDAVSetupSheet: View {
                                 }
                                 Text(item.label)
                                 Spacer(minLength: 8)
-                                if configService.config.webdav?.preset == item.label {
-                                    Image(systemName: "checkmark")
-                                        .font(.footnote.weight(.semibold))
-                                        .foregroundStyle(Color.appAccent)
-                                }
                             }
                         }
                     }
                 } header: {
-                    Text(L10n.WebDAV.serverType)
+                    Text(L10n.WebDAV.addServer)
                 } footer: {
-                    Text(L10n.WebDAV.setupFooter)
+                    Text(accounts.isEmpty
+                         ? L10n.WebDAV.setupFooter
+                         : L10n.WebDAV.accountsFooter)
                 }
             }
             .navigationTitle(L10n.WebDAV.title)
@@ -69,6 +109,42 @@ struct WebDAVSetupSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func isActive(_ account: WebDAVConfig) -> Bool {
+        configService.config.activeWebDAVAccount?.id == account.id
+    }
+
+    @ViewBuilder
+    private func presetIcon(_ label: String?) -> some View {
+        if let item = WebDAVPresets.item(named: label ?? "") {
+            if let appIcon = item.appIcon {
+                Image(appIcon)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            } else {
+                Image(systemName: item.symbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 28, height: 28)
+                    .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(item.tint.gradient))
+            }
+        } else {
+            Image(systemName: "server.rack")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.gray.gradient))
+        }
+    }
+}
+
+/// 数组安全下标（onDelete 的 IndexSet → 元素）。
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 
@@ -130,10 +206,20 @@ enum WebDAVPresets {
 struct WebDAVView: View {
     @EnvironmentObject private var configService: ConfigService
     @ObservedObject private var sync = WebDAVSyncService.shared
+    @Environment(\.dismiss) private var dismiss
 
     /// ★ 2026-10-30（用户："归纳到一个 webdav，点击按照类型选择，在弹页面设置"）：
     /// 从 WebDAVSetupSheet 选完类型跳进来时带上预设；已有配置时忽略（以配置为准）。
     var initialPreset: String? = nil
+
+    /// ★ 2026-11-09 多账户：非 nil = 编辑已保存的某一条账户（按 id 从
+    /// `webdavAccounts` 里读/写）；nil = 新建一条（保存后自动成为「使用中」）。
+    var accountID: String? = nil
+
+    /// ★ 2026-11-09：编辑已有账户时把它设为备份目标的确认提示（一次）。
+    @State private var activeNote: String?
+    /// ★ 2026-11-09：账户刚被本页删除——onDisappear 的 save() 不能把它复活。
+    @State private var removed = false
 
     /// Form-local editable copy — committed to config on save, password lives
     /// in the Keychain via ConfigService's strip/restore.
@@ -329,6 +415,34 @@ struct WebDAVView: View {
                 Text(L10n.WebDAV.syncNowFooter)
             }
 
+            // ★ 2026-11-09 多账户：编辑已保存的账户时，切换备份目标 / 移除账户
+            //   都在这里显式完成（旧的"主机清空 = 删除"已废）。
+            if accountID != nil {
+                Section {
+                    if let activeNote {
+                        Label {
+                            Text(activeNote)
+                        } icon: {
+                            Image(systemName: "checkmark.circle.fill")
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(.green)
+                    }
+                    Button {
+                        setActive()
+                    } label: {
+                        Label(L10n.WebDAV.setActive, systemImage: "checkmark.seal")
+                    }
+                    Button(role: .destructive) {
+                        removeAccount()
+                    } label: {
+                        Label(L10n.WebDAV.removeServer, systemImage: "trash")
+                    }
+                } footer: {
+                    Text(L10n.WebDAV.accountsFooter)
+                }
+            }
+
             // ★ 2026-10-29 (饭耳移植 · 规格 #10): one privacy sentence per page.
             Section {
                 PrivacyNote(flavor: .backup)
@@ -375,7 +489,17 @@ struct WebDAVView: View {
     // MARK: - Load / save
 
     private func load() {
-        let cfg = configService.config.webdav
+        // ★ 2026-11-09 多账户：编辑模式从指定账户读，新建模式用预设预填。
+        let cfg: WebDAVConfig?
+        if let accountID,
+           let account = configService.config.webdavAccounts?.first(where: { $0.id == accountID }) {
+            cfg = account
+        } else if accountID != nil {
+            // 账户已被删除（左滑后返回）：不回填，也不该再落盘——标脏由 save 里挡。
+            cfg = nil
+        } else {
+            cfg = configService.config.webdav
+        }
         host = cfg?.host ?? ""
         portText = String(cfg?.port ?? 443)
         useHTTPS = cfg?.useHTTPS ?? true
@@ -404,20 +528,20 @@ struct WebDAVView: View {
     }
 
     private func save() {
+        // 删除后离开页面：什么都不写，否则 upsert 会把刚删的账户加回来。
+        guard !removed else { return }
         applyPastedEndpoint()
         let trimmedHost = host.trimmingCharacters(in: .whitespaces)
         guard trimmedHost.isEmpty == false, let port = parsedPort else {
-            // 主机清空 = 移除整个目的地；只填了主机但端口非法 → 不落盘（保留旧配置），
-            // 错误留给状态行，避免静默存进一条连不上的脏配置。
+            // ★ 2026-11-09 多账户：旧版「主机清空 = 移除整个目的地」的隐式删除
+            //   改为 no-op（删除走编辑页里的「移除这个服务器」按钮），只留
+            //   端口非法的报错，避免半填的表单静默清掉配置。
             if !trimmedHost.isEmpty {
                 probe = (false, L10n.WebDAV.badPort)
-            } else {
-                configService.config.webdav = nil
             }
-            configService.saveNow()
             return
         }
-        configService.config.webdav = WebDAVConfig(
+        var cfg = WebDAVConfig(
             host: trimmedHost,
             port: port,
             useHTTPS: useHTTPS,
@@ -431,7 +555,29 @@ struct WebDAVView: View {
             syncAudio: syncAudio,
             allowSelfSigned: allowSelfSigned
         )
+        if let accountID { cfg.id = accountID } // 编辑：保持原账户身份（密码槽跟着 id 走）
+        // 新建自动成为「使用中」；编辑不动使用中标记（切换走显式按钮）。
+        configService.config.upsertWebDAVAccount(cfg, makeActive: accountID == nil)
         configService.saveNow()
+    }
+
+    /// ★ 2026-11-09：把正在编辑的账户设为自动备份目标。
+    private func setActive() {
+        guard let accountID else { return }
+        configService.config.webdavActiveID = accountID
+        configService.config.syncWebDAVMirror()
+        configService.saveNow()
+        activeNote = L10n.WebDAV.setActiveDone
+    }
+
+    /// ★ 2026-11-09：移除正在编辑的账户（显式删除，替代旧的「主机清空」）。
+    private func removeAccount() {
+        guard let accountID else { return }
+        removed = true
+        configService.config.removeWebDAVAccount(id: accountID)
+        SecretStore.delete(key: ConfigService.webdavPasswordKey(accountID: accountID))
+        configService.saveNow()
+        dismiss()
     }
 
     // MARK: - Endpoint parsing

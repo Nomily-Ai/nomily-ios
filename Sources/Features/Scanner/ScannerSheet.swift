@@ -29,7 +29,7 @@ struct ScannerSheet: View {
             case .dingtalkA1: return L10n.Scanner.categoryA1
             // ★ 飞书录音豆（soundcore Work D3200）——与飞书 App 并行使用，
             //   App 端不做绑定（红线），仅控制/拉取录音。
-            case .soundcore: return "soundcore Work · 飞书录音豆"
+            case .soundcore: return L10n.Scanner.categorySoundcore
             case .appleWatch: return L10n.Scanner.categoryWatch
             }
         }

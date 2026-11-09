@@ -78,6 +78,11 @@ struct ClipDetailView: View {
     @State private var showExportChoice = false
     /// ★ 任务二 (2026-10-22): email-with-attachments sheet.
     @State private var showMailExport = false
+    /// ★ 2026-11-04（"把我当前总结、思维导图、待办都进行分享出去打包方式"）：
+    /// 一条录音打成一个 zip 走系统分享。三件套分开发，收件人要来回翻三个附件。
+    @State private var showBundleChoice = false
+    @State private var bundleBusy = false
+    @State private var bundleError: String?
     /// "Marks" pushed by a recorder card while it was recording.
     ///
     /// ★ Read once on appear from `<base>.marks.json` and never re-read: a sidecar only ever appears
@@ -119,9 +124,13 @@ struct ClipDetailView: View {
     @State private var traceScrollTo: Double?
     /// Q&A state lives in the page, not in the section: the input bar is pinned to the bottom
     /// while the answers stay in the scrolling list.
-    /// ★ 2026-10-30：底部入口条（"方框"）已删——aiChat 保留但当前无入口，
-    /// 等确认新的挂载点（如"更多"菜单）再接回 showAskSheet。
+    /// ★ 2026-11-04（用户："转录后的摘要来源笔记里面的底部的提问怎么没了，原来有，来源下面的提问也没了"）：
+    ///   入口条回来了，但**换了挂载方式**——不再 `overlay` 悬浮，改用
+    ///   `.safeAreaInset(edge: .bottom)`，条子占自己的高度、内容区自动让位。
+    ///   2026-10-30 删它的理由是"方框挡住了待办输入行"，那是悬浮才有的毛病；
+    ///   参与布局之后就不存在遮挡。
     @StateObject private var aiChat = AIChatModel()
+    @State private var showAskSheet = false
     /// ★ 2026-10-23 ("生成的摘要需要能够支持编辑点击能够写入修改"): tap 编辑 on a
     /// note page and the markdown becomes a `TextEditor`; 保存 writes straight
     /// back to the page's file — the same file the reader, share poster and
@@ -132,6 +141,22 @@ struct ClipDetailView: View {
     /// Plaud's wording, per tab.
     private var askPlaceholder: String {
         detailTab == .notes ? L10n.ClipDetail.aiAskPlaceholderNote : L10n.ClipDetail.aiAskPlaceholder
+    }
+
+    /// 底部入口条本体。
+    ///
+    /// 三个"不出现"的条件，各有一条理由：
+    /// · 没转写也没摘要（`!aiChat.isAvailable`）——没有材料可问，摆一条只能问空气的框；
+    /// · 正在编辑笔记（`isEditingSummary`）——键盘已经占着下半屏，再叠一条会把
+    ///   `TextEditor` 挤成两三行，用户是在改字，不是在提问；
+    /// · 正在生成摘要/转写时**不隐藏**——那反而是最想问"这段到底说了啥"的时候，
+    ///   点进去会看到已有的旧材料（context 是随页面刷新的）。
+    @ViewBuilder
+    private var askBar: some View {
+        if aiChat.isAvailable, !isEditingSummary {
+            AIChatAskBar(placeholder: askPlaceholder) { showAskSheet = true }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
     }
 
     /// ★ 2026-10-23 ("参考一下页面布局跟结构", Plaud 截图 4029/4028): Plaud puts
@@ -209,6 +234,11 @@ struct ClipDetailView: View {
             // card — visible in the 17:04 screenshot. The tab strip now carries
             // its own divider, so the Form keeps its normal inset.
             }
+            // ★ 2026-11-04：底部问答入口条。
+            //   用 `safeAreaInset` 而不是 `overlay`：条子自己占高度，Form 的滚动内容
+            //   在它上面结束，既不会像 2026-10-30 那次那样压住待办输入行，也不会
+            //   让最后一屏内容被永久遮住。两个 tab 都有（来源/笔记问的是同一份材料）。
+            .safeAreaInset(edge: .bottom, spacing: 0) { askBar }
             .onChange(of: traceScrollTo) { target in
                 // 纪要溯源：滚到定位的那一行（清掉目标避免重复滚动）。
                 guard let target else { return }
@@ -223,10 +253,9 @@ struct ClipDetailView: View {
         // made a decision about — and the Q&A bar needs that strip.
         .toolbar(.hidden, for: .tabBar)
         // ★ 2026-10-30（用户第二次点名："方框不是删除了，为啥直接在我手机上显示"）：
-        //   底部那条 AI 问答入口条（AIChatAskBar）就是要删的"方框"——它悬浮在
-        //   页面底部，把待办输入行等底部内容挡住。入口条连同挂载的 sheet 一起
-        //   撤掉；AIChatModel / AIChatSheet 的代码保留，以后想从"更多"菜单
-        //   重新接入随时可以。
+        //   当年删的是**悬浮**版本——它压在页面底部，把待办输入行挡住，所以被撤掉。
+        // ★ 2026-11-04（用户："来源下面的提问也没了"）：入口条回来了，改成
+        //   `.safeAreaInset(edge: .bottom)` 参与布局，不再叠在内容上。见 `askBar`。
         // ★ 2026-10-15: The detail page counts as "opened" the moment it appears, and the red dot on the list row goes away with it.
         //
         // Hooked here rather than in the list's tap callback: the detail page has several entry points (library,
@@ -271,6 +300,17 @@ struct ClipDetailView: View {
                         } label: {
                             Label(L10n.ClipDetail.emailTitle, systemImage: "envelope")
                         }
+                        // ★ 2026-11-04：一次性把摘要 / 导图 / 待办（/ 转写）打成 zip。
+                        //   「有没有东西可发」交给 ShareBundle 判断——这里只按是否生成过
+                        //   摘要或转写给入口，导图与待办都从摘要派生，不会单独存在。
+                        Button {
+                            showBundleChoice = true
+                        } label: {
+                            Label(bundleBusy ? L10n.ClipDetail.bundleBuilding
+                                             : L10n.ClipDetail.bundleShareTitle,
+                                  systemImage: "doc.zipper")
+                        }
+                        .disabled(bundleBusy || activeJob(.export) != nil)
                     }
                     if activeJob(.export) == nil, let staged = ExportCenter.shared.ready(forOrigin: item.name) {
                         Button {
@@ -484,6 +524,25 @@ struct ClipDetailView: View {
         .sheet(isPresented: $showMailExport) {
             MailExportSheet(clipName: item.name)
         }
+        // ★ 2026-11-04：打包分享的轻重两档。默认只发文档——一条一小时录音的 m4a
+        //   能有三四十 MB，微信/邮件都传不动，所以音频必须用户自己点头才带。
+        .confirmationDialog(L10n.ClipDetail.bundleShareTitle,
+                            isPresented: $showBundleChoice,
+                            titleVisibility: .visible) {
+            Button(L10n.ClipDetail.bundleDocsOnly) { buildShareBundle(includeAudio: false) }
+            if item.hasAudio {
+                Button(L10n.ClipDetail.bundleWithAudio) { buildShareBundle(includeAudio: true) }
+            }
+            Button(L10n.Common.cancel, role: .cancel) {}
+        }
+        .alert(L10n.ClipDetail.bundleShareTitle, isPresented: Binding(
+            get: { bundleError != nil },
+            set: { if !$0 { bundleError = nil } }
+        )) {
+            Button(L10n.Common.ok, role: .cancel) { bundleError = nil }
+        } message: {
+            Text(bundleError ?? "")
+        }
         // ★ 2026-10-23 ("页面模板"): deleting a note page — the chip's context menu
         //   hands the page over here. The primary page is excluded in the menu: its
         //   deletion goes through "删除摘要" (trash flow + translation sidecar).
@@ -530,6 +589,11 @@ struct ClipDetailView: View {
             Button(L10n.Common.cancel, role: .cancel) {}
         } message: {
             Text(L10n.ClipDetail.deleteSummaryMessage)
+        }
+        // ★ 2026-11-04：底部入口条点开的对话页。对话本身在 sheet 里滚，
+        //   页面主体保持纯内容——这是 2026-10-23 就定下的形状，只是入口断了一周。
+        .sheet(isPresented: $showAskSheet) {
+            AIChatSheet(model: aiChat, placeholder: askPlaceholder)
         }
         .sheet(isPresented: $showTranslatePicker) {
             LanguagePickerSheet(
@@ -869,8 +933,14 @@ struct ClipDetailView: View {
     /// 切到来源 tab → 文本匹配定位到最像的转写段 → 滚过去（黄底高亮几秒）
     /// → 播放器 seek 到那句话开头开始播。
     private func traceToSource(_ text: String) {
-        guard let doc = transcript, !doc.segments.isEmpty,
-              let seg = Self.bestMatchingSegment(for: text, in: doc.segments) else { return }
+        guard let doc = transcript, !doc.segments.isEmpty else { return }
+        // ★ 2026-11-04（摘要优化 C）：摘要现在会带 `[mm:ss]` 来源时间。有它就**直接按秒定位**——
+        //   精确、零猜测；没有才退回字符二元组模糊匹配（老摘要、被用户改过的行）。
+        let seg: AsrSegment? = StampRef.parse(text).flatMap { seconds in
+            doc.segments.first { seconds >= $0.start && seconds < $0.end }
+                ?? doc.segments.last { $0.start <= seconds }
+        } ?? Self.bestMatchingSegment(for: StampRef.stripping(text), in: doc.segments)
+        guard let seg else { return }
         // 摘要在笔记 tab——先切回来源，转写行才有机会出现。
         let alreadyOnSource = detailTab == .source
         if !alreadyOnSource {
@@ -1539,13 +1609,12 @@ struct ClipDetailView: View {
                 if isEditingSummary {
                     summaryEditor
                 } else {
-                    // ★ (2026-10-19) The summary tab is the "AI minutes" reading surface, so the
-                    //   whole document renders inline (headings / bullets, no truncation) instead of
-                    //   a 14-block teaser behind a link.
-                    // ★ 2026-10-23 ("笔记也是，无需收纳"): the "view full summary"
-                    //   push is gone — this page IS the full document.
-                    // ★ 2026-10-30（纪要溯源跳转）：要点块行尾加「跳到原文」。
-                    MarkdownBlocksView(blocks: MarkdownBlocks.parse(text), onTrace: traceToSource)
+                    // ★ 2026-11-03 九轮（用户："摘要显示不够清楚，页面不够美观简洁，
+                    //   根据内容自动生成合适的模板"）：换成 `SummaryDocView`——
+                    //   它先按 `##` 分节、按标题信号判体裁（会议/问答/行动/笔记），
+                    //   再决定导语字重、章节竖条、待办是否置顶。旧的 `MarkdownBlocksView`
+                    //   仍是待办页与思维导图预览的渲染器，没有删。
+                    SummaryDocView(blocks: MarkdownTable.fold(MarkdownBlocks.parse(text)), onTrace: traceToSource)
                         // 长按正文也能进编辑——用户直觉是"点摘要本身改它"，
                         // 而不是先去找标题栏那枚按钮。
                         .contextMenu {
@@ -1722,6 +1791,11 @@ struct ClipDetailView: View {
         } else {
             pageText = nil
         }
+        // ★ 2026-11-04：问答上下文跟着材料走。
+        //   摘要/转写可能在页面开着的时候才落盘（队列里刚跑完），而底部问答条
+        //   的显示条件就是 `aiChat.isAvailable`——不在这里刷新，用户会看到
+        //   "摘要出来了，底下的提问框却没有"，必须退出重进页面才出现。
+        aiChat.context = aiContext ?? ""
     }
 
     private func loadSummary() {
@@ -1842,6 +1916,25 @@ struct ClipDetailView: View {
     private func enqueueDocumentExport(_ format: String) {
         pendingExportShare = true
         jobs.enqueue(Job.export(clip: item.name, format: format))
+    }
+
+    /// ★ 2026-11-04：打包分享。**不进 JobQueue**——zip 是本机文件 I/O 加一次
+    /// 离屏渲染，秒级完成，排队反而让用户以为卡住了；`bundleBusy` 只挡住重复点击。
+    /// 失败分两种：一件东西都没有（`bundleEmpty`，属于正常状态）和真的写盘失败，
+    /// 都走同一个 alert，文案由 `ShareBundle` 抛出的 error 决定。
+    private func buildShareBundle(includeAudio: Bool) {
+        guard !bundleBusy else { return }
+        bundleBusy = true
+        Task { @MainActor in
+            var options = ShareBundle.Options()
+            options.includeAudio = includeAudio
+            do {
+                exportShareURL = try await ShareBundle.makeZip(for: item.name, options: options)
+            } catch {
+                bundleError = error.localizedDescription
+            }
+            bundleBusy = false
+        }
     }
 
     // MARK: - delete

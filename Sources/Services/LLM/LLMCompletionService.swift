@@ -47,6 +47,42 @@ enum LLMCompletionError: LocalizedError {
     }
 }
 
+/// ★ 2026-11-06（饭耳 1.0 移植 P1-4）：推理力度档。
+///
+/// 饭耳 1.0 在问答输入条上给了"推理力度"芯片（low/medium/high）；这里做成
+/// **全局默认档**，摘要 / 大纲 / 问答共用——理由很实际：用户对"要快还是要深"
+/// 的偏好是稳定的，按页面各设一份只会让人忘了上次在哪改的。
+///
+/// `.auto` 默认**不发送** `reasoning_effort`：OpenAI 兼容面上支持这个参数的
+/// 只有一部分模型（o 系列 / gpt-5 系 / 部分中转），对不支持的模型塞进去就是 400。
+/// 所以能力是"用户显式开启"的，而不是默认打开。
+enum LLMEffort: String, CaseIterable, Codable, Identifiable {
+    case auto, low, medium, high
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .auto: return L10n.LLM.effortAuto
+        case .low: return L10n.LLM.effortLow
+        case .medium: return L10n.LLM.effortMedium
+        case .high: return L10n.LLM.effortHigh
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .auto: return L10n.LLM.effortAutoHint
+        case .low: return L10n.LLM.effortLowHint
+        case .medium: return L10n.LLM.effortMediumHint
+        case .high: return L10n.LLM.effortHighHint
+        }
+    }
+
+    /// 发给厂商的原值；`auto` 不发。
+    var wireValue: String? { self == .auto ? nil : rawValue }
+}
+
 struct LLMCompletionService {
 
     /// Result of one completion. `truncated` is the provider telling us it
@@ -656,6 +692,11 @@ struct LLMCompletionService {
         providerKey: String, systemPrompt: String, userContent: String, config: AppConfig
     ) async throws -> Completion {
         let providers = config.llmProviders
+        // ★ 2026-11-06（饭耳 1.0 移植 P1-4）：推理力度档。摘要 / 大纲 / 问答
+        // 三条链路都从这里出发，所以**只读一次配置**就覆盖全部请求。
+        // `.auto` = 不发送 `reasoning_effort`，行为与旧版一致（不认识该参数的
+        // 厂商不会被我们塞一个 400 进去）。
+        let effort = LLMEffort(rawValue: config.llmEffort ?? "") ?? .auto
         switch providerKey {
         case "openai":
             guard let p = providers.openai else { throw LLMCompletionError.noProvider }
@@ -665,7 +706,7 @@ struct LLMCompletionService {
                 endpoint: "https://api.openai.com/v1/chat/completions",
                 apiKey: p.apiKey, model: model,
                 systemPrompt: systemPrompt, userContent: userContent,
-                session: cloudSession, maxTokens: maxOutputTokens
+                session: cloudSession, maxTokens: maxOutputTokens, effort: effort
             )
 
         case "claude":
@@ -692,11 +733,11 @@ struct LLMCompletionService {
             guard let model = p.model, !model.isEmpty else { throw LLMCompletionError.noModel(providerLabel(providerKey)) }
             let ep = p.endpoint.isEmpty
                 ? "https://openrouter.ai/api/v1/chat/completions"
-                : "\(p.endpoint)/chat/completions"
+                : LLMEndpoint.chatURL(p.endpoint)
             return try await openAICompatible(
                 endpoint: ep, apiKey: key, model: model,
                 systemPrompt: systemPrompt, userContent: userContent,
-                session: cloudSession, maxTokens: maxOutputTokens
+                session: cloudSession, maxTokens: maxOutputTokens, effort: effort
             )
 
         case "ollama":
@@ -705,23 +746,46 @@ struct LLMCompletionService {
             guard let model = p.model, !model.isEmpty else { throw LLMCompletionError.noModel(providerLabel(providerKey)) }
             let base = p.endpoint.hasSuffix("/") ? String(p.endpoint.dropLast()) : p.endpoint
             return try await openAICompatible(
-                endpoint: "\(base)/v1/chat/completions",
+                endpoint: LLMEndpoint.chatURL(base),
                 apiKey: p.apiKey ?? "", model: model,
                 systemPrompt: systemPrompt, userContent: userContent,
-                session: localSession, maxTokens: localMaxOutputTokens
+                session: localSession, maxTokens: localMaxOutputTokens, effort: effort
             )
 
         case "custom":
             guard let p = providers.custom else { throw LLMCompletionError.noProvider }
             guard !p.endpoint.isEmpty else { throw LLMCompletionError.noEndpoint(providerLabel(providerKey)) }
             guard let model = p.model, !model.isEmpty else { throw LLMCompletionError.noModel(providerLabel(providerKey)) }
-            let base = p.endpoint.hasSuffix("/") ? String(p.endpoint.dropLast()) : p.endpoint
-            return try await openAICompatible(
-                endpoint: "\(base)/chat/completions",
-                apiKey: p.apiKey ?? "", model: model,
-                systemPrompt: systemPrompt, userContent: userContent,
-                session: localSession, maxTokens: localMaxOutputTokens
-            )
+            // ★ 2026-11-04: two corrections to the old "always local, always OpenAI" path.
+            //
+            // 1. A custom endpoint is not necessarily on this machine. Treating every one as
+            //    local sent a cloud relay the 2048-token cap and the 600 s session — half the
+            //    output of a preset, for nothing. The host decides: private ⇒ local budget.
+            // 2. The protocol is a user choice now (`LLMWireProtocol`). A 百炼 workspace
+            //    endpoint publishes both `…/compatible-mode/v1` (OpenAI) and
+            //    `…/apps/anthropic` (Messages API); the previous code could only speak the first.
+            let remote = !LLMEndpoint.isPrivate(p.endpoint)
+            let session = remote ? cloudSession : localSession
+            let cap = remote ? maxOutputTokens : localMaxOutputTokens
+            switch providers.wireProtocol(for: .endpoint("custom")) {
+            case .openai:
+                return try await openAICompatible(
+                    endpoint: LLMEndpoint.chatURL(p.endpoint),
+                    apiKey: p.apiKey ?? "", model: model,
+                    systemPrompt: systemPrompt, userContent: userContent,
+                    session: session, maxTokens: cap, effort: effort
+                )
+            case .anthropic:
+                guard let key = p.apiKey, !key.isEmpty else {
+                    throw LLMCompletionError.noAPIKey(providerLabel(providerKey))
+                }
+                return try await anthropic(
+                    apiKey: key, model: model,
+                    systemPrompt: systemPrompt, userContent: userContent,
+                    url: LLMEndpoint.messagesURL(p.endpoint),
+                    session: session, maxTokens: cap
+                )
+            }
 
         default:
             // A preset: same OpenAI-compatible wire format as `custom`, but over
@@ -733,10 +797,10 @@ struct LLMCompletionService {
                 guard let model = p.model, !model.isEmpty else { throw LLMCompletionError.noModel(providerLabel(providerKey)) }
                 let base = p.endpoint.hasSuffix("/") ? String(p.endpoint.dropLast()) : p.endpoint
                 return try await openAICompatible(
-                    endpoint: "\(base)/chat/completions",
+                    endpoint: LLMEndpoint.chatURL(base),
                     apiKey: key, model: model,
                     systemPrompt: systemPrompt, userContent: userContent,
-                    session: cloudSession, maxTokens: maxOutputTokens
+                    session: cloudSession, maxTokens: maxOutputTokens, effort: effort
                 )
             }
             throw LLMCompletionError.noProvider
@@ -765,13 +829,14 @@ struct LLMCompletionService {
         endpoint: String, apiKey: String, model: String,
         systemPrompt: String, userContent: String,
         session: URLSession, maxTokens: Int,
+        effort: LLMEffort = .auto,
         onDelta: ((String) -> Void)? = nil
     ) async throws -> Completion {
         do {
             return try await openAICompatibleStream(
                 endpoint: endpoint, apiKey: apiKey, model: model,
                 systemPrompt: systemPrompt, userContent: userContent,
-                session: session, maxTokens: maxTokens, onDelta: onDelta
+                session: session, maxTokens: maxTokens, effort: effort, onDelta: onDelta
             )
         } catch let error as LLMCompletionError {
             // Only "the streaming path itself didn't work" falls back to non-streaming:
@@ -789,7 +854,7 @@ struct LLMCompletionService {
             return try await openAICompatibleOnce(
                 endpoint: endpoint, apiKey: apiKey, model: model,
                 systemPrompt: systemPrompt, userContent: userContent,
-                session: session, maxTokens: maxTokens
+                session: session, maxTokens: maxTokens, effort: effort
             )
         }
     }
@@ -797,7 +862,7 @@ struct LLMCompletionService {
     private static func request(
         endpoint: String, apiKey: String, model: String,
         systemPrompt: String, userContent: String,
-        maxTokens: Int, stream: Bool
+        maxTokens: Int, stream: Bool, effort: LLMEffort = .auto
     ) throws -> URLRequest {
         guard let url = URL(string: endpoint) else {
             throw LLMCompletionError.httpError(0, L10n.LLM.errorBadEndpointURL)
@@ -818,6 +883,8 @@ struct LLMCompletionService {
             "max_tokens": maxTokens
         ]
         if stream { body["stream"] = true }
+        // ★ 2026-11-06（P1-4）：只在用户显式选了非 auto 档位时才带这个键。
+        if let wire = effort.wireValue { body["reasoning_effort"] = wire }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         return req
     }
@@ -827,12 +894,13 @@ struct LLMCompletionService {
         endpoint: String, apiKey: String, model: String,
         systemPrompt: String, userContent: String,
         session: URLSession, maxTokens: Int,
+        effort: LLMEffort = .auto,
         onDelta: ((String) -> Void)?
     ) async throws -> Completion {
         let req = try request(
             endpoint: endpoint, apiKey: apiKey, model: model,
             systemPrompt: systemPrompt, userContent: userContent,
-            maxTokens: maxTokens, stream: true
+            maxTokens: maxTokens, stream: true, effort: effort
         )
         let (stream, response) = try await session.bytes(for: req)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -901,12 +969,13 @@ struct LLMCompletionService {
     private static func openAICompatibleOnce(
         endpoint: String, apiKey: String, model: String,
         systemPrompt: String, userContent: String,
-        session: URLSession, maxTokens: Int
+        session: URLSession, maxTokens: Int,
+        effort: LLMEffort = .auto
     ) async throws -> Completion {
         let req = try request(
             endpoint: endpoint, apiKey: apiKey, model: model,
             systemPrompt: systemPrompt, userContent: userContent,
-            maxTokens: maxTokens, stream: false
+            maxTokens: maxTokens, stream: false, effort: effort
         )
         let (data, response) = try await session.data(for: req)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -952,11 +1021,17 @@ struct LLMCompletionService {
 
     // MARK: - Anthropic (Claude)
 
+    /// ★ 2026-11-04: `url` / `session` / `maxTokens` became parameters so a **custom**
+    /// Anthropic-compatible endpoint (百炼 `…/apps/anthropic`, 各种中转) can reuse this
+    /// instead of the OpenAI path. Defaults reproduce the Claude cloud behaviour exactly.
     private static func anthropic(
         apiKey: String, model: String,
-        systemPrompt: String, userContent: String
+        systemPrompt: String, userContent: String,
+        url rawURL: String = "https://api.anthropic.com/v1/messages",
+        session: URLSession = cloudSession,
+        maxTokens: Int = maxOutputTokens
     ) async throws -> Completion {
-        guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
+        guard let url = URL(string: rawURL) else {
             throw LLMCompletionError.httpError(0, L10n.LLM.errorBadEndpointURL)
         }
         var req = URLRequest(url: url)
@@ -971,11 +1046,11 @@ struct LLMCompletionService {
             "messages": [
                 ["role": "user", "content": userContent]
             ],
-            "max_tokens": maxOutputTokens
+            "max_tokens": maxTokens
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, resp) = try await cloudSession.data(for: req)
+        let (data, resp) = try await session.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else {
             let msg = String(data: data, encoding: .utf8) ?? ""

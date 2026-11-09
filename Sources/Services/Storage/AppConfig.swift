@@ -144,6 +144,12 @@ struct AppConfig: Codable, Equatable {
     /// 它交代「录音的主人是谁」，转写说话人标注也能对上「X（我）」。
     /// `nil`/空 = 用户没填，prompt 里不加这条（保持旧行为）。
     var userName: String?
+    /// ★ 2026-11-06（饭耳 1.0 移植 P1-4）：推理力度档 `auto|low|medium|high`。
+    ///
+    /// 存成字符串而不是枚举：`config.json` 是跨版本共享的，未知值必须能原样读进来
+    /// 再回落到 `.auto`（枚举解码遇到未知值会整份配置读失败——那是灾难）。
+    /// `nil`/空 = auto，与旧配置行为一致。
+    var llmEffort: String?
     /// ★ 2026-10-30（用户："回顾摘要要支持在手机设置里面支持设置"）：
     /// 是否把「回顾摘要」推到手表（默认开）。关掉后手机不再推送，并把待发队列
     /// 清空、推一次空列表，让手表也清掉旧摘要。
@@ -156,6 +162,17 @@ struct AppConfig: Codable, Equatable {
     /// is offered on the device-files screen. 0 disables the suggestion
     /// and the button never appears.
     var fastTransferThresholdKB: Int
+    /// ★ 2026-11-09（用户："选择 nas 或者其他都是用的同一个，没有区分每个品牌
+    /// 跟配置，都是点击出现的 NC 的配置"）：**全部**已保存的 WebDAV 目的地。
+    ///
+    /// 之前只有一个槽位（`webdav`），弹层里选哪个品牌都会把上一家覆盖掉，
+    /// 而且配置页读到的永远是那唯一一条——用户的原话就是"点谁都是 NC 的配置"。
+    /// 现在每家各占一条（`WebDAVConfig.id` 区分），「当前使用」的那条继续镜像
+    /// 进 `webdav`，所有旧读取方（同步/占用/后台上传）零改动。
+    /// `nil` = 尚未迁移（旧配置）；迁移在 `init(from:)` 里做一次。
+    var webdavAccounts: [WebDAVConfig]?
+    /// 「当前使用」的账户 id（自动备份/手动同步走它）。nil = 取第一条。
+    var webdavActiveID: String?
 
     static let empty = AppConfig(
         asrProviders: AsrProviders(),
@@ -219,6 +236,9 @@ struct AppConfig: Codable, Equatable {
         case remindersSyncEnabled = "reminders_sync_enabled"
         case watchRecapEnabled = "watch_recap_enabled"
         case fastTransferThresholdKB = "fast_transfer_threshold_kb"
+        case llmEffort = "llm_effort"
+        case webdavAccounts = "webdav_accounts"
+        case webdavActiveID = "webdav_active_id"
     }
 
     /// Decode with `decodeIfPresent` for new / optional keys so a
@@ -283,6 +303,17 @@ struct AppConfig: Codable, Equatable {
         self.fastTransferThresholdKB = try c.decodeIfPresent(Int.self, forKey: .fastTransferThresholdKB) ?? 512
         self.remindersSyncEnabled = try c.decodeIfPresent(Bool.self, forKey: .remindersSyncEnabled) ?? false
         self.watchRecapEnabled = try c.decodeIfPresent(Bool.self, forKey: .watchRecapEnabled) ?? true
+        self.llmEffort = try c.decodeIfPresent(String.self, forKey: .llmEffort)
+        // ★ 2026-11-09 多账户迁移：老配置只有 `webdav` 一条——包成数组，
+        // 并给它定下 id（WebDAVConfig 解码时已生成）。「当前使用」就是它。
+        if let legacy = try c.decodeIfPresent(WebDAVConfig.self, forKey: .webdav) {
+            self.webdavAccounts = try c.decodeIfPresent([WebDAVConfig].self, forKey: .webdavAccounts)
+                ?? [legacy]
+        } else {
+            self.webdavAccounts = try c.decodeIfPresent([WebDAVConfig].self, forKey: .webdavAccounts)
+        }
+        self.webdavActiveID = try c.decodeIfPresent(String.self, forKey: .webdavActiveID)
+            ?? webdavAccounts?.first?.id
     }
 
     init(
@@ -327,7 +358,10 @@ struct AppConfig: Codable, Equatable {
         userName: String? = nil,
         fastTransferThresholdKB: Int = 512,
         remindersSyncEnabled: Bool = false,
-        watchRecapEnabled: Bool = true
+        watchRecapEnabled: Bool = true,
+        llmEffort: String? = nil,
+        webdavAccounts: [WebDAVConfig]? = nil,
+        webdavActiveID: String? = nil
     ) {
         self.asrProviders = asrProviders
         self.llmProviders = llmProviders
@@ -371,6 +405,57 @@ struct AppConfig: Codable, Equatable {
         self.fastTransferThresholdKB = fastTransferThresholdKB
         self.remindersSyncEnabled = remindersSyncEnabled
         self.watchRecapEnabled = watchRecapEnabled
+        self.llmEffort = llmEffort
+        self.webdavAccounts = webdavAccounts
+        self.webdavActiveID = webdavActiveID
+    }
+
+    // MARK: - WebDAV 多账户（★ 2026-11-09）
+
+    /// 「当前使用」的账户。没有数组或数组为空时回落旧的 `webdav` 槽位
+    /// （保持"零配置"和旧语义一致），因此所有既有读取方不需要动。
+    var activeWebDAVAccount: WebDAVConfig? {
+        if let accounts = webdavAccounts, !accounts.isEmpty {
+            return accounts.first { $0.id == webdavActiveID } ?? accounts.first
+        }
+        return webdav
+    }
+
+    /// 保存一条账户；`makeActive` 同时把它设为「当前使用」。
+    /// `webdav` 镜像始终等于当前使用的账户——旧读取方（同步/占用/后台上传）
+    /// 读的还是这个字段。
+    mutating func upsertWebDAVAccount(_ cfg: WebDAVConfig, makeActive: Bool = false) {
+        var accounts = webdavAccounts ?? []
+        if let index = accounts.firstIndex(where: { $0.id == cfg.id }) {
+            accounts[index] = cfg
+        } else {
+            accounts.append(cfg)
+        }
+        webdavAccounts = accounts
+        if makeActive || webdavActiveID == nil || !accounts.contains(where: { $0.id == webdavActiveID }) {
+            webdavActiveID = cfg.id
+        }
+        webdav = activeWebDAVAccount
+    }
+
+    /// 删除一条账户；删的是当前使用的那条就回落到剩下两条里的第一条。
+    mutating func removeWebDAVAccount(id: String) {
+        guard var accounts = webdavAccounts, !accounts.isEmpty else {
+            // 只有一条旧槽位配置时的"删除"= 清空。
+            if webdav != nil { webdav = nil }
+            return
+        }
+        accounts.removeAll { $0.id == id }
+        webdavAccounts = accounts
+        if webdavActiveID == id {
+            webdavActiveID = accounts.first?.id
+        }
+        webdav = activeWebDAVAccount
+    }
+
+    /// 把 `webdav` 镜像与「当前使用」对齐（解码迁移后、改完激活项后调用）。
+    mutating func syncWebDAVMirror() {
+        webdav = activeWebDAVAccount
     }
 
     /// True when the active configuration would send user data to a cloud
@@ -476,12 +561,27 @@ struct AppConfig: Codable, Equatable {
             var model: String?
             /// Optional ISO-639-1 hint; empty = server-side detection.
             var language: String?
+            /// ★ 2026-11-04: which shape the server speaks — `whisper` (OpenAI
+            /// `/audio/transcriptions`, the default) or `bailian` (阿里云百炼
+            /// `chat/completions` + `input_audio`, model `qwen3-asr-flash`).
+            /// Stored as a string so an older `config.json` still decodes.
+            var wireProtocol: String?
 
             enum CodingKeys: String, CodingKey {
                 case endpoint
                 case apiKey = "api_key"
                 case model
                 case language
+                case wireProtocol = "protocol"
+            }
+
+            init(endpoint: String, apiKey: String? = nil, model: String? = nil,
+                 language: String? = nil, wireProtocol: String? = nil) {
+                self.endpoint = endpoint
+                self.apiKey = apiKey
+                self.model = model
+                self.language = language
+                self.wireProtocol = wireProtocol
             }
         }
 
@@ -547,10 +647,25 @@ struct AppConfig: Codable, Equatable {
             var apiKey: String?
             var endpoint: String
             var model: String?
+            /// ★ 2026-11-04: wire format of a *custom* endpoint — `openai` or `anthropic`.
+            /// Only the custom slot reads it; presets and Open Router are always OpenAI-shaped,
+            /// so it stays `nil` there and the accessors below do not expose it to them.
+            var wireProtocol: String?
+
             enum CodingKeys: String, CodingKey {
                 case apiKey = "api_key"
                 case endpoint
                 case model
+                case wireProtocol = "protocol"
+            }
+
+            /// Explicit init so the new field keeps every existing
+            /// `.init(apiKey:endpoint:model:)` call site compiling.
+            init(apiKey: String? = nil, endpoint: String = "", model: String? = nil, wireProtocol: String? = nil) {
+                self.apiKey = apiKey
+                self.endpoint = endpoint
+                self.model = model
+                self.wireProtocol = wireProtocol
             }
         }
 
@@ -778,6 +893,21 @@ extension AppConfig.LlmProviders {
         }
     }
 
+    /// ★ 2026-11-04: wire format for the custom channel (`openai` / `anthropic`).
+    /// Kept out of `LLMProviderStorage` on purpose — it is one field of one slot,
+    /// not a new shape every provider has to answer for.
+    func wireProtocol(for storage: LLMProviderStorage) -> LLMWireProtocol {
+        guard case .endpoint(let id) = storage, id == "custom" else { return .openai }
+        return LLMWireProtocol.parse(custom?.wireProtocol)
+    }
+
+    mutating func setWireProtocol(_ value: LLMWireProtocol, for storage: LLMProviderStorage) {
+        guard case .endpoint(let id) = storage, id == "custom" else { return }
+        var slot = custom ?? .init(apiKey: nil, endpoint: "")
+        slot.wireProtocol = value.rawValue
+        setEndpointSlot(id, slot)
+    }
+
     mutating func removeProvider(for storage: LLMProviderStorage) {
         switch storage {
         case .keyed(let id):    setKeyedSlot(id, nil)
@@ -834,7 +964,11 @@ extension AppConfig.LlmProviders {
 /// `password` is stored in the Keychain via `SecretStore.save(toKey: "webdav.password")`
 /// and stripped from `config.json` on save (ConfigService, same pattern as the
 /// cloud ASR secrets) — it exists in this struct only as the in-memory round trip.
-struct WebDAVConfig: Codable, Equatable {
+struct WebDAVConfig: Codable, Equatable, Identifiable {
+    /// ★ 2026-11-09（用户："选择 nas 或者其他都是用的同一个，没有区分每个品牌
+    /// 跟配置"）：多账户后每条配置的稳定标识——Keychain 密码槽、列表编辑、
+    /// 「当前使用」标记都靠它。旧配置解码时缺省生成一个，落盘即固化。
+    var id: String = UUID().uuidString
     var host: String
     var port: Int
     var useHTTPS: Bool
@@ -862,11 +996,12 @@ struct WebDAVConfig: Codable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case host, port, useHTTPS, username, basePath, preset, password, syncAudio
+        case id, host, port, useHTTPS, username, basePath, preset, password, syncAudio
         case allowSelfSigned = "allow_self_signed"
     }
 
-    init(host: String,
+    init(id: String? = nil,
+         host: String,
          port: Int,
          useHTTPS: Bool,
          username: String,
@@ -875,6 +1010,7 @@ struct WebDAVConfig: Codable, Equatable {
          password: String? = nil,
          syncAudio: Bool = false,
          allowSelfSigned: Bool = false) {
+        self.id = id ?? UUID().uuidString
         self.host = host
         self.port = port
         self.useHTTPS = useHTTPS
@@ -890,6 +1026,7 @@ struct WebDAVConfig: Codable, Equatable {
     /// 不能让升级用户的所有 WebDAV 配置解码失败。
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
         host = try c.decode(String.self, forKey: .host)
         port = try c.decode(Int.self, forKey: .port)
         useHTTPS = try c.decode(Bool.self, forKey: .useHTTPS)

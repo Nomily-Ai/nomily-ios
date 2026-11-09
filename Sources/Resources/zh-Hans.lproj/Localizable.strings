@@ -57,6 +57,64 @@
 "asr.local_vad_footer" = "在本机上检测人声活动，将静音段去掉后再发送到转录服务，可降低上传量和转录费用。";
 "asr.background_keep_alive" = "切到后台也继续转录";
 "asr.background_keep_alive_footer" = "开着时，切走或锁屏后转录仍会继续跑完，不会停下。关掉后只保留约 30 秒的收尾时间，长录音切到后台会中断。无论开关如何，都不会发出声音。";
+/* ★ 2026-11-06：后台保活·用户引导与被杀善后 */
+"asr.low_power_warning" = "低电量模式开启中——系统会更快掐掉后台任务。长时间录音/转写建议插电或关闭低电量模式。";
+"asr.killed_alert_title" = "上次有任务被中断";
+"asr.killed_alert_body" = "Nomily 上次在后台被系统关闭，没跑完的任务已恢复排队。想降低被杀概率：别上滑关闭 App、关闭低电量模式。";
+"keeper.guard_title" = "Nomily 在后台被中断了";
+"keeper.guard_body" = "系统在录音/转写进行时关闭了 App。点按打开查看进度。";
+
+/* ★ 2026-11-06：后台保护指南页（设置 → 后台保护指南） */
+"asr.bgp_row" = "后台保护指南";
+"asr.bgp_title" = "后台保护";
+"asr.bgp_intro" = "iOS 没有 Android 那样的常驻白名单，但下面这几项就是系统允许的全部开关。另外，Nomily 万一在任务中被系统关闭，会在 1 分钟内推送提醒你。";
+"asr.bgp_refresh_title" = "后台 App 刷新";
+"asr.bgp_refresh_ok" = "已允许——切走后长任务可以继续跑。";
+"asr.bgp_refresh_denied" = "Nomily 被关闭——后台任务会被中断。";
+"asr.bgp_refresh_restricted" = "被系统限制（低电量模式或屏幕使用时间）。";
+"asr.bgp_open_settings" = "去设置开启";
+"asr.bgp_refresh_manual" = "如果开关是灰的：请到 设置 → 通用 → 后台 App 刷新，先打开总开关。";
+"asr.bgp_lowpower_title" = "低电量模式";
+"asr.bgp_lowpower_on" = "开启中——系统会更快掐掉后台任务。长时间录音建议插电，或到 设置 → 电池 关闭低电量模式。";
+"asr.bgp_lowpower_off" = "已关闭——对后台任务没有额外风险。";
+"asr.bgp_notify_title" = "中断提醒通知";
+"asr.bgp_notify_on" = "已允许——万一 App 被系统关闭，1 分钟内会提醒你。";
+"asr.bgp_notify_off" = "还未决定——点按允许中断提醒。";
+"asr.bgp_notify_denied" = "已拒绝——建议到设置里开启，任务被中断时才有提醒。";
+"asr.bgp_notify_authorize" = "去设置允许";
+"asr.bgp_keeper_title" = "App 内静音保活";
+"asr.bgp_keeper_on" = "已开启（推荐）——切走后录音和转写继续跑完。";
+"asr.bgp_keeper_off" = "已关闭——切后台约 30 秒后任务会被中断。";
+"asr.bgp_limit_note" = "说句实话：极端内存不足时 iOS 仍可能关闭任何 App，任何设置都无法禁止。真发生时 Nomily 会在 1 分钟内推送中断提醒，并把没跑完的任务自动恢复排队。";
+
+/* ★ 2026-11-06：权限体检弹窗（蓝牙没开 / 麦克风被拒 / 通知被拒…） */
+"asr.perm_alert_title" = "有权限未开启";
+"asr.perm_mic_denied" = "麦克风权限被拒绝——录音无法使用。请到 设置 → Nomily AI 里打开麦克风。";
+"asr.perm_bt_denied" = "蓝牙权限被拒绝——无法连接录音设备。请到 设置 → Nomily AI 里打开蓝牙。";
+"asr.perm_bt_off" = "蓝牙已关闭——无法连接录音设备。请从控制中心或设置打开蓝牙。";
+"asr.perm_notif_denied" = "通知权限未开启——后台任务被中断时无法提醒你。请到 设置 → 通知 里开启。";
+"asr.perm_go_settings" = "去设置";
+"asr.perm_ack" = "知道了";
+
+/* ★ 2026-11-06：手表「表情常亮」开关（手机设置页） */
+"watch.alwayson_title" = "表情常亮";
+"watch.alwayson_hint" = "手表休眠时首页以暗态显示表情（动画停止）；关闭则黑屏省电。";
+"watch.alwayson_footer" = "表情能停留多久由手表上的 设置 → 通用 → 唤醒屏幕 → 返回表盘时间 决定（可单独为 Nomily 设置，最长 1 小时）；录音期间 App 会一直显示在屏幕上。";
+
+/* ★ 2026-11-06：后台保护指南新增行（蓝牙 / 麦克风 / 手表连接） */
+"asr.bgp_bt_title" = "蓝牙";
+"asr.bgp_bt_on" = "已开启——录音设备可以连接。";
+"asr.bgp_bt_off" = "蓝牙已关闭——请从控制中心或设置打开。";
+"asr.bgp_bt_denied" = "Nomily 的蓝牙权限被拒绝——请到设置里为本 App 开启蓝牙。";
+"asr.bgp_bt_unknown" = "检测中…";
+"asr.bgp_mic_title" = "麦克风";
+"asr.bgp_mic_ok" = "已允许——录音可以正常使用麦克风。";
+"asr.bgp_mic_denied" = "已拒绝——没有麦克风录音无法工作。";
+"asr.bgp_watch_title" = "Apple Watch 连接";
+"asr.bgp_watch_notpaired" = "未配对手表。请先在 iPhone 的 Watch App 里配对，才能用手表录音。";
+"asr.bgp_watch_btoff" = "蓝牙已关闭——手表无法同步。";
+"asr.bgp_watch_reachable" = "已连接——手表录音会自动同步到手机。";
+"asr.bgp_watch_unreachable" = "已配对，但手表不在附近或休眠中。抬腕或打开 App 会自动重连——这是正常现象，不是故障。";
 "asr.nightly_transcribe" = "夜间自动补转写";
 "asr.nightly_transcribe_footer" = "开着时，手机在夜间充电并联网时，系统可能在后台唤醒 App，自动为还没有文本的录音补上转写。关掉后只在打开 App 时转写。";
 "asr.queue_title" = "转录队列";
@@ -84,6 +142,8 @@
 "asr.auto_summarize" = "转写完成后自动生成摘要";
 "asr.auto_summarize_footer" = "转写一完成就交给已配置的 AI 服务生成摘要，打开这条录音时摘要已经在了。需要先配置 AI 服务；没配置就跳过。";
 "asr.live_recording_without_asr" = "正在录音并取流，但没有可用的语音服务——这段录音保存后会自动转写。";
+"asr.live_fell_back" = "%@ 没有产出文字，实时已改用 %@";
+"asr.live_fell_back_reason" = "%@ 连接失败（%@），实时已改用 %@";
 "asr.transcribe_auto" = "自动检测语言";
 "asr.specify_languages" = "指定语言…";
 "asr.languages_footer" = "Azure 会对每一句单独识别语言，而非整段音频——特别适合多语种混合的会议。";
@@ -388,6 +448,10 @@
 "live.mark_added" = "已打点";
 "asr.custom_server" = "自定义服务（OpenAI 兼容）";
 "asr.custom_endpoint" = "服务器地址";
+/* 自定义语音识别服务的接口形态（2026-11-04） */
+"asr.custom_shape" = "接口形态";
+"asr.custom_shape_whisper" = "OpenAI / Whisper（/audio/transcriptions）";
+"asr.custom_shape_bailian" = "阿里云百炼（qwen3-asr-flash）";
 "asr.custom_api_key" = "API 密钥（可选）";
 "asr.custom_model" = "模型（默认 whisper-1）";
 "asr.custom_language" = "语言提示（可选，如 zh）";
@@ -567,6 +631,25 @@
 "developer_mode.taps_to_disable" = "再点击 %d 次关闭开发者模式";
 
 /* 加密口令 / 引导 (v1.50) */
+/* ★ 2026-11-04 连接时钥匙校验（KeyHealth） */
+/* ★ 2026-11-04 录音键被加密闸门拦住的提示 */
+"record_gate.title" = "无法开始录音";
+"record_gate.no_key" = "这台设备开着加密，手机里还没有对应的钥匙。请先设置一次口令再录音——现在录下来的文件在这台手机上永远打不开。";
+"record_gate.mismatch" = "手机里的钥匙和设备里的对不上，现在录下来的文件仍然打不开。请先解决钥匙问题（设置 → 录音）。";
+"record_gate.open_settings" = "去设置";
+
+"keyhealth.row_label" = "钥匙校验";
+"keyhealth.unknown" = "未知";
+"keyhealth.not_encrypted" = "设备未加密";
+"keyhealth.no_key" = "本机没有钥匙";
+"keyhealth.unreadable" = "手机已锁定，解锁后可读";
+"keyhealth.unverified" = "尚未验证";
+"keyhealth.verified" = "与设备一致";
+"keyhealth.mismatch" = "与设备不一致";
+"keyhealth.fingerprint_note" = "钥匙指纹 %@——和设备页上的指纹比一下，就知道两边是不是同一把。";
+"keyhealth.banner_title" = "这台手机的钥匙和设备对不上";
+"keyhealth.banner_message" = "现在传输下来的录音会存成打不开的加密文件。设备上的原件不会被删——先把钥匙的问题解决，否则这些文件一直读不了。";
+
 "encryption.section_header" = "加密口令";
 "encryption.section_footer" = "通过 Argon2id 派生密钥，使用设备序列号作为盐。密钥保存在 iOS 钥匙串中，仅限本机使用。遗失口令将导致加密录音无法恢复。换机恢复方法：在新手机上输入相同口令。";
 "encryption.local_key" = "本地密钥";
@@ -599,10 +682,11 @@
 "encryption.progress.checking_device" = "正在检查设备上的录音…";
 "encryption.rotate_confirm.title" = "确定轮换设备密钥？";
 "encryption.rotate_confirm.message_empty" = "设备上已没有录音，不会丢失任何内容。请记好新口令——今后录制的内容只能用它打开，且无法找回。";
-"encryption.rotate_confirm.message" = "设备上还有 %d 条录音，它们用旧密钥录制，轮换后将永久无法解密。要保留请先下载。另请记好新口令：今后录制的内容只能用它打开，且无法找回。";
+"encryption.rotate_confirm.message" = "设备上还有 %d 条录音。若口令与设备当前密钥一致，轮换只是重写同一把钥匙，已录内容不受影响；若设备密钥来自其他 App，固件会拒绝并提示。新口令请务必记好：今后录制的内容只能用它打开。";
 "encryption.progress.probe_subtitle" = "正在录制一小段探测片段以验证口令，验证后会自动删除。";
 "encryption.mismatch.title" = "口令不匹配";
-"encryption.mismatch.message" = "无法使用该口令解密探测片段。请仔细确认后再试。如果您确实已遗忘口令，可使用「轮换」覆盖设备密钥 —— 但这会永久销毁设备上现有的所有加密录音。";
+"encryption.mismatch.message" = "无法用该口令解密探测片段。请确认后重试。注意：如果设备密钥是由其他 App（如官方 App）或其他手机设置的，请先在那边解除加密，再回这里设置口令。轮换只有在口令与设备当前密钥一致时才会成功。";
+"encryption.foreign_key.blocked" = "设备当前的密钥不是用这句口令设置的（可能来自官方 App 或其他手机），固件拒绝覆盖。请先在设置该密钥的 App 里关闭加密，再回来设置口令。设备上已有的录音不受影响，始终安全。";
 "encryption.mismatch.try_again" = "重试";
 "encryption.error.device_not_connected" = "设备未连接。";
 "encryption.error.connect_first" = "请先连接设备 —— 需要用真实录音来验证口令。";
@@ -722,6 +806,10 @@
 "watch.link_lost_title" = "iPhone 已断开";
 "watch.link_lost_message" = "录音仍在手表上继续。把 iPhone 带回附近会自动重连，也可以点「重新连接」。";
 "watch.link_lost_retry" = "重新连接";
+"watch.link_lost_note_recording" = "录音仍在手表上继续，回到手机附近会自动补传。点按立即重连。";
+"watch.link_lost_note_pending" = "有录音还没传到 iPhone，回到附近会自动补传。点按立即重连。";
+"watch.stashed_count" = "已攒 %d 段";
+"watch.pending_more" = "还有 %d 条";
 "watch.pending_header" = "等待同步到 iPhone";
 "watch.pending_count" = "%d 项待传";
 "watch.shake_to_record" = "摇一摇开始录音";
@@ -1237,8 +1325,8 @@
 "a1.step1.body" = "二手买来的话，先让卖家解绑，然后你在钉钉里扫码绑定。这一步只能你自己做——它决定了这张卡把密钥交给哪个账号。";
 "a1.step2.title" = "在电脑版钉钉打开一次「AI 听记」";
 "a1.step2.body" = "随便点一个模板就行。钉钉会把设备列表（含密钥）写进那台电脑上的日志。";
-"a1.step3.title" = "在那台 Mac 上跑一条命令";
-"a1.step3.body" = "它会把密钥变成一行文字复制到剪贴板，同时打出一个二维码——手机扫码或粘贴都行。脚本放的位置不同就改下面那条命令。";
+"a1.step3.title" = "在那台 Mac 上打开「A1 密钥提取器」";
+"a1.step3.body" = "在这台 Mac 的浏览器打开下载页：https://a1-key-extractor.app.workbuddy.host/?sharecode=QDT5ZC4DMF ，下载「A1 密钥提取器」（免安装，首次打开右键→打开），点「重新扫描」后用本机扫屏幕上的二维码。命令行后备：python3 extract_secret_from_dingtalk_mac.py --copy --qr";
 "a1.copy_command" = "复制这条命令";
 "a1.command_footer" = "提取器只读这台 Mac 上钉钉自己的日志，不碰卡片、不改固件、不动你的钉钉账号。";
 "a1.command.editor_title" = "提取命令";
@@ -1484,6 +1572,7 @@
 "scanner.category_a1" = "钉钉 A1";
 "scanner.category_plaud" = "PLAUD";
 "scanner.category_watch" = "Apple Watch";
+"scanner.category_soundcore" = "soundcore Work · 飞书录音豆";
 "scanner.action_scan" = "扫描连接";
 "scanner.action_sdk" = "官方 SDK 直连";
 "scanner.action_watch" = "安装 Watch App";
@@ -1586,6 +1675,7 @@
 "plaud.live_engine_ondevice" = "本机识别";
 "plaud.live_azure_failed" = "Azure 实时识别中断：%@";
 "plaud.live_aliyun_failed" = "阿里云实时识别中断：%@";
+"plaud.live_custom_failed" = "自定义识别服务中断：%@";
 "plaud.live_azure_fell_back" = "Azure 连接中断，已切换到本机识别，文字会继续。";
 
 /* Phone recording (任务一) */
@@ -1657,6 +1747,8 @@
 "llm.preset.needs_key" = "待填密钥";
 "llm.preset.console" = "密钥申请地址";
 "llm.preset.endpoint_filled" = "接口地址（已自动填好）";
+"llm.fetch.needs_key" = "先填 API Key —— 模型清单要用它去拉取。";
+"llm.fetch.needs_endpoint" = "先把接口地址填上。";
 "llm.preset.fetch_models" = "拉取可用模型";
 "llm.preset.builtin_hint" = "这家不提供模型清单接口，下面是内置的常用模型，可直接选用。";
 "llm.preset.manual_model" = "手动填写模型名";
@@ -1667,6 +1759,12 @@
 "llm.grid.title" = "模型服务商";
 "llm.grid.footer" = "点一个图标就进去配置，地址已经填好——你只需要贴密钥、选模型。清单里只留真正能写转写摘要的模型，embedding / 语音 / 图像类会被过滤掉，因为选了它们只会在摘要那一步才报错。";
 "llm.endpoint_fixed" = "这个地址由官方接口固定，不可修改。";
+/* 自定义接口的协议选择（2026-11-04） */
+"llm.protocol.title" = "接口协议";
+"llm.protocol.openai" = "OpenAI 兼容";
+"llm.protocol.anthropic" = "Anthropic 兼容";
+"llm.protocol.openai_hint" = "任何 OpenAI 兼容地址都行：带不带版本号都能识别——…/v1、…/compatible-mode/v1 原样使用，只填域名会自动补 /v1。中转、自建 vLLM、LM Studio、云厂商的专属端点都适用。";
+"llm.protocol.anthropic_hint" = "对端说的是 Anthropic Messages 接口时选这个（…/v1/messages，或业务空间的 …/apps/anthropic）。密钥按 x-api-key 发送。";
 "llm.model_search" = "筛选模型";
 "llm.chat_only_note" = "只显示可用于对话的模型——embedding、TTS、图像、审核类都隐藏了，因为它们只会在摘要阶段才失败。";
 "llm.no_chat_models" = "这家没有返回可用于对话的模型。";
@@ -1742,7 +1840,7 @@
 "asr.task_failed" = "阿里云识别任务失败：%@";
 "asr.live_engine" = "实时识别引擎";
 "asr.live_engine_auto" = "自动（跟随上方的顺序）";
-"asr.live_engine_footer" = "只列出能推流的引擎。阿里云有实时语音识别 WebSocket 接口，所以也能做实时；百度、腾讯、谷歌等云服务是文件转写接口，做不了实时字幕。选“自动”时按上方识别服务的顺序挑第一个能实时的。";
+"asr.live_engine_footer" = "只列出能出字的引擎。阿里云有实时语音识别 WebSocket 接口，所以也能做实时；百度、腾讯、谷歌等云服务是文件转写接口，做不了实时字幕。你自己填的自定义服务也会出现在这里：它没有流式接口，客户端会把声音按约 5 秒切成一段一段送过去，文字也是一段一段出来，不是逐字上屏。选“自动”时按上方识别服务的顺序挑第一个能实时的。";
 "find.notify_denied" = "这个 App 的通知权限是关的，断开提醒响不了。到系统设置里打开。";
 "find.open_settings" = "打开系统设置";
 "find.test_alert" = "发一条测试通知";
@@ -1858,6 +1956,16 @@
 "webdav.no_subfolders" = "这里没有子文件夹";
 "webdav.pick_folder" = "选择文件夹";
 "webdav.pick_folder_footer" = "点文件夹逐层下钻，选好点「使用这个目录」。列表来自服务器实时查询；列不出来一般是账号密码或目录权限的问题。";
+"webdav.remote.transcript" = "转录全文.txt";
+"webdav.remote.asr" = "转写数据.json";
+"webdav.remote.note" = "摘要.md";
+"webdav.remote.audio" = "录音.m4a";
+"webdav.remote.mindmap" = "思维导图.png";
+"webdav.remote.bundle" = "资料包.zip";
+"webdav.remote.chapters" = "章节.json";
+"webdav.note.meta" = "Nomily 智能转写";
+"webdav.note.summary_heading" = "摘要";
+"webdav.note.chapters_heading" = "章节";
 
 "rec_settings.audition_load" = "加载最近一段录音试听";
 "rec_settings.audition_empty" = "没有找到可试听的手表录音";
@@ -2137,6 +2245,7 @@
 /* ★ 2026-11-02 手表 V3 原型：首页新增「最近 / 同步」两页 + 顶栏 */
 "watch.recent" = "最近";
 "watch.recent_empty" = "还没有回顾\n在 iPhone 上生成摘要后会同步过来";
+"watch.recent_untitled" = "未命名摘要";
 "watch.sync_to_phone" = "同步到 iPhone";
 "watch.pending_unit" = "项待传";
 "watch.phone_label" = "iPhone";
@@ -2147,6 +2256,283 @@
 "watch.sync_now" = "立即同步";
 "watch.syncing" = "正在上传…";
 "watch.listening" = "LISTENING";
+"watch.moonlit" = "MOONLIT";
 "watch.saved" = "已保存";
 "watch.points_count" = "%d 条要点";
 "watch.menu_header" = "菜单";
+
+/* ★ 2026-11-02 全天候录音（省电模式） */
+"watch.allday_title" = "全天候录音";
+"watch.allday_hint" = "一戴一整天时更省电：采样与波形刷新放慢，录音不会立即回传，而是攒着等充电或关闭此开关时自动上传。「立即同步」随时可用。";
+"watch.defer_note" = "省电中：攒着，充电或关闭后自动上传";
+
+/* ★ 2026-11-03 设置页顶部购买横幅（Vobot V05E） */
+"settings.buy_banner_title" = "Vobot V05E 录音卡";
+"settings.buy_banner_subtitle" = "最适配 Nomily 的录音卡硬件 · Amazon 有售";
+
+/* ★ 2026-11-03 免责声明 / 使用须知（首启同意页 + 关于页回看） */
+"consent.title" = "开始之前";
+"consent.subtitle" = "Nomily 会录下声音，并用 AI 模型把它变成文字。下面三条是你在点「同意」时接受的约定，请先读一遍。";
+"consent.recording.title" = "关于录别人";
+"consent.recording.body" = "怎么录、录什么，由你负责。在法律要求的地方，请先取得在场每个人的同意；不要用它做窃听、跟踪或任何违法用途。Nomily 无法判断某一次录音在你所在地是否合法。";
+"consent.ai.title" = "AI 结果可能有错";
+"consent.ai.body" = "转写、摘要、章节和待办都由模型生成，可能不准确、不完整，甚至凭空编造。重要内容请自己核对，不要把它们当作法律、医疗或财务决定的唯一依据。";
+"consent.data.title" = "你的音频，你选的服务商";
+"consent.data.body" = "开启云端语音或大模型服务后，音频与文本会按你配置的服务商条款发给他们。密钥和录音始终属于你自己：Nomily 没有自己的服务器，也不会收集这些内容。";
+"consent.accept" = "同意并继续";
+"consent.decline" = "不同意";
+"consent.declined.note" = "Nomily 需要这份同意才能录音和转写。你随时可以在「设置 › 关于」里重看。";
+"consent.legal.title" = "使用条款";
+"consent.about.row" = "免责声明与使用须知";
+"consent.status.label" = "同意状态";
+"consent.status.accepted" = "已同意";
+"consent.status.pending" = "尚未同意";
+"consent.watch.hint" = "录音前请取得在场各方同意；AI 转写可能有误。";
+
+/* ★ 2026-11-03 九轮：摘要自动版式 / 待办分组 / 思维导图结构模板 */
+"summary.layout.minutes" = "会议纪要";
+"summary.layout.qa" = "问答";
+"summary.layout.checklist" = "行动清单";
+"summary.layout.notes" = "笔记";
+"clip_detail.todos_remaining" = "项待完成";
+"clip_detail.todos_all_done" = "全部完成";
+"clip_detail.todos_total" = "共 %d 项";
+"clip_detail.todos_completed" = "已完成 %d 项";
+"clip_detail.todos_title" = "待办";
+"clip_detail.bundle_title" = "打包分享（摘要 + 导图 + 待办）";
+"clip_detail.bundle_docs_only" = "只发文档（摘要 / 导图 / 待办 / 转写）";
+"clip_detail.bundle_with_audio" = "连录音一起发（体积大，要等一下）";
+"clip_detail.bundle_building" = "正在打包…";
+"clip_detail.bundle_empty" = "这条录音还没有可打包的内容——摘要、导图、待办、转写都没有生成。";
+"map.template.topic" = "话题结构";
+"map.template.minutes" = "会议结构";
+"map.template.people" = "按人组织";
+"map.template.timeline" = "时间轴";
+"map.template.actions" = "行动优先";
+"map.template.others" = "其他";
+
+/* ★ 2026-11-03：补齐历史遗漏的键（手表电量页整页显示英文就是这批没翻） */
+"watch.menu_battery" = "电量";
+"watch.menu_hint_battery" = "全天候录音的耗电";
+"watch.battery_now" = "当前";
+"watch.battery_rate" = "耗电";
+"watch.battery_left" = "可用";
+"watch.battery_charging" = "充电中";
+"watch.battery_no_data" = "正在采样…";
+"watch.battery_rate_value" = "每小时 %.1f%%";
+"watch.battery_left_value" = "%.1f 小时";
+/* ★ 2026-11-04 九轮：采样提示 / 待机档 / 今日录音累计 */
+"watch.battery_collecting" = "还需 %d 分";
+"watch.battery_idle" = "待机档";
+"watch.battery_today" = "今日录音";
+"watch.battery_today_value" = "%.1f 小时 · 掉 %.0f%%";
+"watch.battery_rate_small" = "不到 0.5%/h";
+"watch.recap_clear_all" = "删除手表上的全部回顾？";
+"watch.recap_clear_all_confirm" = "全部删除";
+"asr.cloud.diarization" = "说话人分离";
+"asr.cloud.recommendation_prefix" = "结论：%@";
+"clip_detail.no_transcript_match" = "没有匹配的行。";
+
+/* ★ 2026-11-03 十轮：Nomi 问答（底部第四个标签） */
+"nomily.tagline" = "问你的录音，像问一个助理";
+"nomily.explain" = "Nomi 会在你的录音库里检索相关内容再回答，回答里会注明出自哪天的哪条录音。找不到的会直说，不会编。";
+"nomily.placeholder" = "问问你的录音、待办、约定…";
+"nomily.no_match" = "录音库里没有找到和这个问题相关的内容。可以换个说法再问一次。";
+"nomily.clear" = "清空会话";
+/* ★ 2026-11-04 十三轮：回答卡片 */
+"nomily.coverage" = "基于 %d 条录音";
+"nomily.default_note" = "以上均来自库内录音节选，并非完整转写。";
+"nomily.today" = "今天";
+"nomily.yesterday" = "昨天";
+"nomily.system" = "你是 Nomily，用户个人录音库的助理。只依据下面的库内材料回答。规则：
+1. 每个论断注明出自哪天的哪条录音，例如（11-02 产品周会）。
+2. 材料里没有的就直说没有——绝不编造录音、原话或日期。
+3. 问待办时，只列材料里真实出现的承诺事项，说过的负责人和截止时间要带上。
+4. 用提问者的语言回答，简洁：短段落或紧凑列表，不要客套。
+5. 材料片段可能被截断，把它们当节选而不是完整转写。";
+
+/* ★ 2026-11-03 十一轮：Nomi→Nomily 统一命名 + 历史提问 + 超时 */
+"tab.nomily" = "Nomily";
+"nomily.thinking" = "Nomily 正在翻你的录音…";
+"nomily.recent_title" = "最近问过";
+"nomily.timeout" = "回答超时了。请检查网络或 LLM 配置后再试一次。";
+"nomily.suggest_recent" = "我最近记了些什么？";
+"nomily.suggest_todos" = "我的待办还有哪些没做？";
+"nomily.suggest_last_meeting" = "上次开会定了什么？";
+"nomily.suggest_recording" = "《%@》这条录音讲了什么？";
+"nomily.card_todos" = "待办";
+"nomily.card_overdue" = "%d 条已过期";
+"nomily.card_others" = "%d 条等别人";
+"nomily.card_recent" = "最近记录";
+
+/* ★ 2026-11-05 十五轮：手表触感等级 / 中断续录 / 全天候开关（手机侧） */
+"watch.haptic_level_title" = "录音震动";
+"watch.haptic_level_hint" = "选 1–5 档，换档立刻试震一下";
+"watch.haptic_1" = "1 · 轻点";
+"watch.haptic_2" = "2 · 轻敲";
+"watch.haptic_3" = "3 · 明显";
+"watch.haptic_4" = "4 · 强";
+"watch.haptic_5" = "5 · 最强";
+"watch.resume_prompt_title" = "录音被中断了";
+"watch.resume_prompt_body" = "全天候录音已开启，要从刚才中断的地方继续录吗？";
+"watch.resume_prompt_continue" = "继续录音";
+"watch.resume_prompt_dismiss" = "先不用";
+"watch.allday_phone_footer" = "与手表上的开关是同一个设置——打开后手表会立即自动开始录音。";
+
+/* ★ 2026-11-05 十六轮：起止录音的震动花样（力度之外的节奏档；十七轮拆成启动/结束两组） */
+"watch.haptic_start_title" = "启动震动";
+"watch.haptic_stop_title" = "结束震动";
+"watch.haptic_pattern_hint" = "换一个立刻试震一遍";
+"watch.haptic_pattern_name.single" = "一下（默认）";
+"watch.haptic_pattern_name.double" = "两下（默认）";
+"watch.haptic_pattern_name.triple" = "三连敲";
+"watch.haptic_pattern_name.single_long" = "一记长嗡";
+"watch.haptic_pattern_name.heartbeat" = "心跳";
+"watch.haptic_pattern_name.crescendo" = "渐强";
+
+/* ★ 2026-11-05 十七轮：全天候录音中的环境态（波形退场，只剩指示灯 + 计时） */
+"watch.ambient_rec" = "REC";
+
+/* ★ 2026-11-05 十五轮：录音质量档位的体积/建议标 */
+"rec_settings.quality_size_as_is" = "约 29MB/小时";
+"rec_settings.quality_size_standard" = "约 15MB/小时";
+"rec_settings.quality_size_compact" = "约 11MB/小时";
+"rec_settings.quality_size_minimal" = "约 8MB/小时";
+"rec_settings.quality_rec_compact" = "不建议";
+"rec_settings.quality_rec_minimal" = "极度不建议";
+"rec_settings.quality_rec_parens" = "（%@）";
+
+/* ★ 2026-11-05 十五轮：LLM 摘要一小时录音的大概花费（人民币口径） */
+"llm.openai.cost" = "摘要一小时录音约 $0.02–0.10（mini 档更低）";
+"llm.claude.cost" = "摘要一小时录音约 $0.05–0.25（Haiku 档更低）";
+"llm.gemini.cost" = "摘要一小时录音约 $0.01–0.15（Flash 档更低）";
+"llm.openRouter.cost" = "取决于所选模型，通常 $0.01–0.30/小时录音";
+"llm.ollama.cost" = "本地运行，不产生 API 费用";
+"llm.qwen.cost" = "摘要一小时录音约 ¥0.02–0.10";
+"llm.deepseek.cost" = "摘要一小时录音约 ¥0.01–0.05";
+"llm.doubao.cost" = "摘要一小时录音约 ¥0.01–0.08";
+"llm.kimi.cost" = "摘要一小时录音约 ¥0.05–0.20";
+"llm.zhipu.cost" = "摘要一小时录音约 ¥0.02–0.10";
+"llm.minimax.cost" = "摘要一小时录音约 ¥0.02–0.10";
+"common.copy" = "拷贝";
+"common.done" = "完成";
+
+// MARK: - 声纹（2026-11-04）
+"voiceprint.self_label" = "我";
+"voiceprint.title" = "声纹";
+"voiceprint.status_enrolled" = "已录入声纹";
+"voiceprint.status_missing" = "未录入声纹";
+"voiceprint.enroll_script" = "今天上午我们先过一下这周的进度，然后确认下个月的排期。";
+"voiceprint.enroll_hint" = "安静环境下，用平常的语速读完这句。";
+"voiceprint.enroll_start" = "开始录音";
+"voiceprint.enroll_stop" = "完成";
+"voiceprint.enrolling" = "录音中…";
+"voiceprint.sent" = "已发送到 iPhone，稍后完成注册";
+"voiceprint.done" = "声纹已更新";
+"voiceprint.removed" = "已删除声纹";
+"voiceprint.remove" = "删除声纹";
+"voiceprint.explain" = "录一段自己的声音，之后转写会把你认出来、标成「我」。同一条录音里别人的话不受影响。";
+"voiceprint.sample_info" = "%@ · 有效语音 %d 秒";
+"voiceprint.device_watch" = "手表录制";
+"voiceprint.device_phone" = "手机录制";
+"voiceprint.error_unreadable" = "这段音频读不了，换个格式再试。";
+"voiceprint.error_short" = "样本太短，至少要说三秒。";
+"voiceprint.error_nospeech" = "没听到清晰的人声，安静一点再录一次。";
+"voiceprint.identity_footer" = "识别在本机完成，声音样本不会上传到任何服务器。";
+"watch.menu_hint_voiceprint" = "录一段自己的声音，认出你";
+
+/* ★ 2026-11-06 Settings search */
+"settings.search_placeholder" = "搜索设置";
+"settings.search_empty" = "没有匹配项——换个短一点的词试试";
+"settings.search_hint" = "按入口名称搜索，不搜开关的值";
+
+/* ★ 2026-11-06 Mic permission pre-explainer */
+"phone.mic_primer_title" = "用手机麦克风录音";
+"phone.mic_primer_body" = "Nomily 要录音才能转写。音频只存在这台手机上，除非你自己配置了云端语音服务。";
+
+/* ★ 2026-11-06 Voiceprint enroll receipt */
+"voiceprint.rerecord" = "重新录制";
+"voiceprint.failed" = "iPhone 没能注册这条样本，请再录一次。";
+
+/* ★ 2026-11-06 借鉴 agent-avatars 表情库的两档 */
+"face.wink" = "眨眼";
+"face.love" = "爱心";
+"face.sorry" = "抱歉";
+"face.confused" = "疑惑";
+"face.shape_tall" = "杏眼";
+"face.shape_round" = "圆眼";
+"face.shape_calm" = "眯眯眼";
+"face.shape_curious" = "好奇眼";
+"watch.facelife_header" = "表情活力";
+"watch.facelife_footer" = "以下设置作用于手表上的表情：久不触摸会犯困闭眼，按住屏幕时眼睛会跟着手指看。";
+"watch.eyeshape_title" = "眼睛形状";
+"watch.drowsy_title" = "不操作时打瞌睡";
+"watch.drowsy_hint" = "一段时间没有触摸后，表情会犯困并慢慢闭上眼睛；轻点任意位置即可唤醒。";
+"watch.drowsy_after_title" = "多久开始打盹";
+"watch.drowsy_delay" = "%d 秒";
+"watch.pupil_title" = "瞳孔跟随手指";
+"watch.pupil_hint" = "按住屏幕时，眼睛会看向手指移动的方向。";
+
+/* ---- 待办看板（2026-11-06 · 饭耳 1.0 移植 P0-1）---- */
+"todo.title" = "待办";
+"todo.settings_row" = "待办清单";
+"todo.segment_list" = "清单";
+"todo.segment_schedule" = "日程";
+"todo.status_pending" = "待定";
+"todo.status_accepted" = "要做";
+"todo.status_done" = "做完";
+"todo.status_wont" = "不用做";
+"todo.status_deferred" = "稍后";
+"todo.section_inbox" = "等你决定";
+"todo.section_active" = "要做的事";
+"todo.section_later" = "稍后提醒";
+"todo.section_closed" = "已结束";
+"todo.empty_inbox" = "都看完了 · 没有欠着的事";
+"todo.empty_board" = "还没有待办。录音生成摘要后，行动项会自动收进这里。";
+"todo.empty_day" = "这天没有到期的事";
+"todo.decide_title" = "卡片攒了很久，现在处理一下";
+"todo.decide_hint" = "右滑：做完了 / 不用做 · 左滑：要做 / 稍后提醒";
+"todo.decide_done" = "做完了";
+"todo.decide_wont" = "不用做";
+"todo.decide_accept" = "要做";
+"todo.decide_later" = "稍后提醒";
+"todo.decide_skip" = "先不选了";
+"todo.decide_progress" = "第 %1$d / %2$d 张";
+"todo.decide_finished" = "都处理完了";
+"todo.swipe_done" = "做完";
+"todo.swipe_wont" = "不用做";
+"todo.swipe_later" = "稍后";
+"todo.swipe_delete" = "删除";
+"todo.open_source" = "打开录音";
+"todo.source_missing" = "原录音已删除";
+"todo.done_today" = "都看完了 · 今天做完 %d 件";
+"todo.overdue" = "%d 条已过期";
+"todo.notify_body" = "来自《%@》";
+"todo.reminder_footer" = "提醒默认在明早 8:30 发出。在卡片上左右滑动可以更快做决定。";
+
+/* ---- ASR 选型决策树（2026-11-06 · P0-2）---- */
+"asr.cloud.decision_guide" = "不知道怎么选？普通话会议录音 → 阿里云百炼（约 0.1 元/小时，中文 CER 2.25%）；说粤语等方言或外语 → 先试免费的端上 SenseVoice，不够准再上云端；只想快速看个大概 → 苹果自带（免费，一次只认一种语言）。";
+
+/* ---- 推理力度（2026-11-06 · 饭耳 1.0 移植 P1-4）---- */
+"llm.effort_title" = "推理力度";
+"llm.effort_auto" = "自动";
+"llm.effort_low" = "快";
+"llm.effort_medium" = "均衡";
+"llm.effort_high" = "深";
+"llm.effort_auto_hint" = "不发送这个参数，兼容性最好。";
+"llm.effort_low_hint" = "更快出结果，适合短录音和即时提问。";
+"llm.effort_medium_hint" = "日常摘要的折中档。";
+"llm.effort_high_hint" = "想得更久，适合长会议和转写比较乱的录音。";
+"llm.effort_footer" = "以 reasoning_effort 发给支持的 OpenAI 兼容模型（o 系列、gpt-5 系、部分中转）。如果某个模型报 HTTP 400，切回「自动」——说明它不认这个参数。";
+
+/* ★ 2026-11-09 多账户 WebDAV */
+"webdav.saved_servers" = "已保存的服务器";
+"webdav.add_server" = "添加服务器";
+"webdav.in_use" = "使用中";
+"webdav.set_active" = "设为备份目标";
+"webdav.set_active_done" = "已切换为备份目标。";
+"webdav.remove_server" = "移除这个服务器";
+"webdav.accounts_footer" = "每台服务器各自保存主机、账号和密码——添加第二台 NAS 不会再覆盖第一台。自动备份与同步只发到标了「使用中」的服务器，随时可以在这一页切换。";
+"webdav.remote.todos" = "待办.md";
+
+"webdav.server_count" = "共 %d 台";

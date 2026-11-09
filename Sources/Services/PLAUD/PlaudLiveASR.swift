@@ -16,6 +16,10 @@ enum PlaudLiveASRUnavailable: Equatable {
     case aliyunMissing
     /// ★ 2026-10-23: the Aliyun socket reported a failure (token, quota, network).
     case aliyunFailed(String)
+    /// ★ 2026-11-04: 自定义（OpenAI 兼容 / 百炼）端点未填地址。
+    case customMissing
+    /// ★ 2026-11-04: 自定义端点的分段请求失败（地址 / key / 模型名 / 网络）。
+    case customFailed(String)
 }
 
 /// A live transcription engine fed with the PLAUD card's **raw PCM**.

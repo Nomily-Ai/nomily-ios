@@ -44,23 +44,30 @@ enum RecordingQualityTier: String, CaseIterable, Codable, Identifiable {
     }
 
     /// "约 29MB/小时" — shown in the picker; `asIs` carries the measured default.
+    ///
+    /// ★ 2026-11-05（用户截图：英文界面下拉里"约 29MB/小时（不建议）"）：这三段
+    /// 原来是写死中文——走本地化，英文回落时显示 MB/hour 口径。
     var sizePerHourLabel: String {
+        let raw: String
         switch self {
-        case .asIs: return "约 29MB/小时"
-        case .standard: return "约 15MB/小时"
-        case .compact: return "约 11MB/小时"
-        case .minimal: return "约 8MB/小时"
+        case .asIs: raw = "约 29MB/小时"
+        case .standard: raw = "约 15MB/小时"
+        case .compact: raw = "约 11MB/小时"
+        case .minimal: raw = "约 8MB/小时"
         }
+        return NSLocalizedString("rec_settings.quality_size_\(rawValue)", value: raw, comment: "")
     }
 
     /// Spec's recommendation marks: nil for the neutral tiers.
     var recommendationLabel: String? {
+        let raw: String?
         switch self {
-        case .asIs: return nil
-        case .standard: return nil
-        case .compact: return "不建议"
-        case .minimal: return "极度不建议"
+        case .asIs, .standard: raw = nil
+        case .compact: raw = "不建议"
+        case .minimal: raw = "极度不建议"
         }
+        guard let raw else { return nil }
+        return NSLocalizedString("rec_settings.quality_rec_\(rawValue)", value: raw, comment: "")
     }
 }
 

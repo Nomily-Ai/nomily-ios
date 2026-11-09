@@ -33,28 +33,15 @@ enum WatchHomeStyle {
     static let dim = Color.white.opacity(0.45)
 }
 
-// MARK: - 顶栏时钟
-
-/// 首页右上角的时钟。
-///
-/// ⚠️ 为什么自己画：这一页 `.persistentSystemOverlays(.hidden)` 把系统时钟**关掉了**
-///    （为了让机器人脸不被压住，见 `WatchRecorderView.body`），所以"现在几点"以前在抬腕时是无处可看的。
-///    原型把时钟放在右上角，正好补上这个缺口。
-///
-/// ⚠️ 20 秒一跳：秒不需要（抬腕看的是"几分"），而 `Text(date, style: .time)` 跟着
-///    `TimelineView` 重算，20 秒一次足够跨过分钟边界，功耗上又远好于每秒刷新。
-struct WatchClockFace: View {
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 20)) { context in
-            Text(context.date, style: .time)
-                .font(.system(size: 15, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(.white.opacity(0.95))
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-}
+// MARK: - 顶栏时钟（已移除，2026-11-02）
+//
+// 这里曾经有一个 `WatchClockFace`：照 v3 原型在右上角画「时间 + 页码条」。
+// 真机上它和 **watchOS 系统状态栏的时间**并排出现，屏幕上是两个一模一样的时间
+// （`persistentSystemOverlays(.hidden)` 只压掉导航栏那一层，压不住状态栏）。
+// 用户："顶部右上角已经有时间了，这个 bot 的右上角就不要出时间"。
+//
+// ⚠️ 别再把它加回来。页码条现在由 `WatchRecorderView.topBar` 单独摆放，
+//    并且向下让开系统时间那一行。
 
 // MARK: - LISTENING 呼吸点
 
@@ -68,27 +55,42 @@ struct WatchClockFace: View {
 ///    `repeatForever(autoreverses: true)` 在这里是允许的，别照搬文件顶部对"眨眼"的那条禁令
 ///    （那条禁的是用固定周期假装随机，这里本来就是心跳）。
 struct WatchListeningBadge: View {
+    /// ★ 2026-11-03（V4 原型）：省电模式下不换颜色、换**材质**——暖点变月牙，
+    /// 标签变「MOONLIT」，呼吸放慢到 4.2s。用户要一眼看出"它不是录得更勤了，
+    /// 而是在省电"，用同一个暖点只改文字做不到这件事。
+    var powerSaver: Bool = false
+
     @State private var dim = false
     /// 降低动态：不做呼吸，只留一颗静止的暖点。
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 5) {
-            Circle()
-                .fill(WatchHomeStyle.amber)
-                .frame(width: 5, height: 5)
-                .opacity(dim ? 0.34 : 0.95)
-                .scaleEffect(dim ? 0.86 : 1)
-                // 一点暖光，让这颗点在纯黑底上"亮着"而不是"贴着"。
-                .shadow(color: WatchHomeStyle.amber.opacity(0.6), radius: 3)
-            Text(L10n.Watch.listening)
+            if powerSaver {
+                // 月牙：一个圆 + 一个同色挖空。用 SF Symbols 而不是自己画，
+                // 是为了和系统的月亮图标（低电量、勿扰）保持同一套形状。
+                Image(systemName: "moon")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(WatchHomeStyle.amber)
+                    .opacity(dim ? 0.34 : 0.95)
+                    .scaleEffect(dim ? 0.9 : 1)
+            } else {
+                Circle()
+                    .fill(WatchHomeStyle.amber)
+                    .frame(width: 5, height: 5)
+                    .opacity(dim ? 0.34 : 0.95)
+                    .scaleEffect(dim ? 0.86 : 1)
+                    // 一点暖光，让这颗点在纯黑底上"亮着"而不是"贴着"。
+                    .shadow(color: WatchHomeStyle.amber.opacity(0.6), radius: 3)
+            }
+            Text(powerSaver ? L10n.Watch.moonlit : L10n.Watch.listening)
                 .font(.system(size: 8.5, weight: .semibold))
                 .tracking(1.1)
                 .foregroundStyle(.white.opacity(0.55))
         }
         .onAppear {
             guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true)) {
+            withAnimation(.easeInOut(duration: powerSaver ? 4.2 : 1.3).repeatForever(autoreverses: true)) {
                 dim = true
             }
         }
@@ -111,18 +113,19 @@ struct WatchRecentsPane: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(L10n.Watch.recent)
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(1.5)
-                    .foregroundStyle(WatchHomeStyle.header)
-                    .padding(.bottom, 4)
+                header
 
                 if store.recaps.isEmpty {
                     emptyState
                 } else {
-                    // 最多 6 条：原型是 3 条，这里多给一倍——摘要是"翻回上一段"用的，
-                    // 多两条能覆盖"今天 + 昨天"，再多就只是滚动条。
-                    ForEach(Array(store.recaps.prefix(6))) { recap in
+                    // ★★ 2026-11-04（用户："右滑的最近要能看到 30 条摘要，时间最新的排在最上面，
+                    //   每条要有一个主题，点主题看这条摘要"）：
+                    //   · 条数 6 → **30**（上限在 `WatchRecap.limit`，这里只是"全都显示"）；
+                    //   · 顺序由 `WatchRecapStore.prune` 统一按 `recordedAt` 倒序排好，
+                    //     这一层不再自己 sort —— 两处各排一次，早晚会排成两种顺序；
+                    //   · 每行的主标题换成 `recap.topic`（一行能扫完的主题），
+                    //     完整标题留在详情页。
+                    ForEach(Array(store.recaps.prefix(WatchRecap.limit))) { recap in
                         NavigationLink {
                             WatchRecapDetailView(recap: recap)
                         } label: {
@@ -132,11 +135,30 @@ struct WatchRecentsPane: View {
                     }
                 }
             }
-            .padding(.horizontal, 5)
-            // 顶部留出顶栏（时钟 + 页码条）的高度，否则第一行标题会被压在时钟底下。
-            .padding(.top, 26)
-            .padding(.bottom, 6)
+            .padding(.horizontal, 10)
+            // ★ 2026-11-03 二轮（用户："顶部跟底部的显示好像又没用全"）：顶部 30 → **12**。
+            //   页码条在底部、右上角只有系统时间一行，30pt 的让位等于把第一行标题摁到半屏以下。
+            .padding(.top, 12)
+            .padding(.bottom, 16)
         }
+    }
+
+    /// 页标题 + 条数。30 条的时候，"还有多少条"本身就是一屏信息，
+    /// 没有它用户不知道自己翻到哪儿了（腕上没有滚动条刻度）。
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(L10n.Watch.recent)
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.5)
+                .foregroundStyle(WatchHomeStyle.header)
+            Spacer(minLength: 0)
+            if !store.recaps.isEmpty {
+                Text("\(store.recaps.count)")
+                    .font(.system(size: 10, weight: .medium).monospacedDigit())
+                    .foregroundStyle(WatchHomeStyle.dim)
+            }
+        }
+        .padding(.bottom, 4)
     }
 
     private var emptyState: some View {
@@ -155,22 +177,26 @@ struct WatchRecentsPane: View {
     private func row(_ recap: WatchRecap) -> some View {
         HStack(spacing: 7) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(recap.title)
+                // ★★ 2026-11-04：**主题**（`recap.topic`）而不是完整标题。
+                //   完整标题常常是一整句（"关于下季度产品路线图的讨论与结论"），
+                //   在 126pt 宽的一行里只能显示前半截，30 行看下来全是"关于……"。
+                //   主题是手机用 `RecapTopic` 压出来的一行话，详情页里照样有完整标题。
+                Text(recap.topic)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.92))
                     .lineLimit(1)
-                // 时间 + 要点条数。原型那行是"今天 09:12 · 24:06 · 已转写"——
-                // 时长和转写状态手表上都没有（转写在手机上跑），换成它真正知道的两件事。
-                Text("\(WatchFormat.dayTime(recap.recordedAt)) · \(L10n.Watch.pointsCount(recap.points.count))")
-                    .font(.system(size: 10))
-                    .foregroundStyle(WatchHomeStyle.header)
+                    .minimumScaleFactor(0.85)
+                // ★ 2026-11-03（V4 原型）：行内改成「日期 · N 条要点 · 24:06」，
+                //   时长是唯一值得暖色的信息——它回答"这条值不值得点开"。
+                //   手机没推时长（老版本 / 探不到音频）时**整段省略**，不显示假数据。
+                subtitle(recap)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
             Spacer(minLength: 0)
             WatchMiniWaveMark(seed: recap.id)
         }
-        .padding(.vertical, 7)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -178,6 +204,18 @@ struct WatchRecentsPane: View {
                 .frame(height: 0.5)
         }
         .contentShape(Rectangle())
+    }
+
+    /// 行内那行小字。用 `Text` 拼接而不是 `HStack`：只有「 · 24:06」这一段要暖色，
+    /// 分开排会让三段各自按内容宽度对齐，读起来像三个字段而不是一句话。
+    private func subtitle(_ recap: WatchRecap) -> Text {
+        let head = "\(WatchFormat.dayTime(recap.recordedAt)) · \(L10n.Watch.pointsCount(recap.points.count))"
+        var line = Text(head).foregroundColor(WatchHomeStyle.header)
+        if let duration = recap.duration, duration > 0 {
+            line = line + Text(" · \(WatchFormat.compactDuration(duration))")
+                .foregroundColor(WatchHomeStyle.amber)
+        }
+        return line.font(.system(size: 10))
     }
 }
 
@@ -240,70 +278,140 @@ struct WatchSyncPane: View {
     @EnvironmentObject private var model: WatchRecorderModel
     @EnvironmentObject private var link: WatchLink
 
-    /// 可用空间的字符串。`onAppear` 算一次即可：它不会在一页停留的几秒内变化，
-    /// 每帧去问文件系统是没必要的开销。
+    // ★ 2026-11-03 八轮（用户："立即同步的按键橙色背景需要跟随主题颜色，进度条也是"）：
+    //   「立即同步」和进度条以前写死暖色 amber——那是"系统在说话"的语义色。
+    //   用户要它们跟眼睛/波形同一支主题色。这里读同一对 store（与录音页一致）。
+    @ObservedObject private var styleStore = WatchRingStyleStore.shared
+    @ObservedObject private var faceStore = WatchFaceStore.shared
+
+    /// 主题色：手机端「外观」选过就用它，否则手表自己那套。
+    private var accent: Color {
+        faceStore.colorHex.map { Color(botHex: $0) } ?? styleStore.style.tint
+    }
+
+    /// 可用空间的字符串。`onAppear` 算一次即可：它不会在一页停留的几秒内变化。
     @State private var freeSpace: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(L10n.Watch.syncToPhone)
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(1.5)
-                .foregroundStyle(WatchHomeStyle.header)
+        // ★ 2026-11-03（用户："手表屏幕没有把屏幕利用完全，立即同步的按钮只显示了一半"）：
+        // ① 包进 `ScrollView`——之前内容一高，最底下的「立即同步」就被裁掉半截；
+        // ② 顶部留白 36 → **12**（页码条在底部，顶部只剩系统时间一行，不用让那么多）；
+        // ③ 大数字 44 → **36**，把竖向空间还给列表和按钮。
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(L10n.Watch.syncToPhone)
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(1.5)
+                    .foregroundStyle(WatchHomeStyle.header)
 
-            HStack(alignment: .center, spacing: 7) {
-                Text("\(model.pending.count)")
-                    .font(.system(size: 44, weight: .thin))
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-                    .contentTransition(.numericText())
-                Text(L10n.Watch.pendingUnit)
-                    .font(.system(size: 10, weight: .medium))
-                    .tracking(0.8)
-                    .foregroundStyle(WatchHomeStyle.dim)
-                    .padding(.top, 8)
-            }
-            .padding(.top, 2)
+                HStack(alignment: .center, spacing: 7) {
+                    Text("\(model.pending.count)")
+                        .font(.system(size: 36, weight: .thin))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .contentTransition(.numericText())
+                    Text(L10n.Watch.pendingUnit)
+                        .font(.system(size: 10, weight: .medium))
+                        .tracking(0.8)
+                        .foregroundStyle(WatchHomeStyle.dim)
+                        .padding(.top, 6)
+                }
+                .padding(.top, 2)
 
-            WatchSyncPulseBar(active: !model.pending.isEmpty)
+                WatchSyncPulseBar(active: !model.pending.isEmpty, tint: accent)
+                    .padding(.top, 7)
+
+                VStack(spacing: 4) {
+                    stat(L10n.Watch.phoneLabel,
+                         value: link.phoneReachable ? L10n.Watch.phoneNear : L10n.Watch.phoneFar,
+                         emphasised: link.phoneReachable)
+                    if let freeSpace {
+                        stat(L10n.Watch.storageLabel, value: L10n.Watch.storageFree(freeSpace), emphasised: false)
+                    }
+                }
                 .padding(.top, 8)
 
-            VStack(spacing: 4) {
-                stat(L10n.Watch.phoneLabel,
-                     value: link.phoneReachable ? L10n.Watch.phoneNear : L10n.Watch.phoneFar,
-                     emphasised: link.phoneReachable)
-                if let freeSpace {
-                    stat(L10n.Watch.storageLabel, value: L10n.Watch.storageFree(freeSpace), emphasised: false)
+                // ★ 2026-11-02（全天候录音）：省电模式且没在充电时，明说"为什么不动"。
+                if model.transfersDeferred, !model.pending.isEmpty {
+                    Label(L10n.Watch.deferNote, systemImage: "moon")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(WatchHomeStyle.amber.opacity(0.9))
+                        .labelStyle(.titleAndIcon)
+                        .padding(.top, 7)
                 }
-            }
-            .padding(.top, 9)
 
-            if !model.pending.isEmpty {
-                Button {
-                    WKInterfaceDevice.current().play(.click)
-                    // `retry` 只做"重新投递"，`WatchLink` 自己会去重，
-                    // 所以已经在队列里的条目多点几次没有副作用。
-                    for clip in model.pending where !link.deliveredNames.contains(clip.name) {
-                        model.retry(clip)
+                if !model.pending.isEmpty {
+                    Button {
+                        WKInterfaceDevice.current().play(.click)
+                        for clip in model.pending where !link.deliveredNames.contains(clip.name) {
+                            model.retry(clip)
+                        }
+                    } label: {
+                        Text(L10n.Watch.syncNow)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                            .background(Capsule().fill(accent.opacity(0.92)))
                     }
-                } label: {
-                    Text(L10n.Watch.syncNow)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(WatchHomeStyle.amber.opacity(0.92)))
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 10)
-            }
+                    .buttonStyle(.plain)
+                    .padding(.top, 10)
 
-            Spacer(minLength: 0)
+                    // ★ 2026-11-03（用户："这个页面跟等待同步到 iPhone 页面重复了"）：
+                    // 「待传队列」独立页删除，列表搬到这里——同步页从此是"待传"的唯一入口：
+                    // 上面是量与操作，下面是每一份还没到的东西。
+                    pendingList
+                        .padding(.top, 8)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 13)
+            .padding(.top, 12)
+            .padding(.bottom, 14)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 13)
-        .padding(.top, 26)
         .onAppear { freeSpace = Self.formattedFreeSpace() }
+    }
+
+    /// 待传片段的紧凑列表（原「待传队列」页的内容）。
+    ///
+    /// ⚠️ 只保留"是什么 + 多大"，不再给每行放重试/删除按钮：重试有上面的「立即同步」，
+    ///    删除去手机端做——在表上滑来滑去找垃圾桶，命中率远低于误触率。
+    private var pendingList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(model.pending.prefix(8)) { clip in
+                let isQueued = link.queuedNames.contains(clip.name)
+                    || link.deliveredNames.contains(clip.name)
+                HStack(spacing: 6) {
+                    Image(systemName: isQueued ? "arrow.up.circle" : "clock")
+                        .font(.system(size: 9))
+                        .foregroundStyle(isQueued ? WatchHomeStyle.amber : WatchHomeStyle.dim)
+                    Text(clip.displayTitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    Spacer(minLength: 0)
+                    Text(WatchFormat.bytes(clip.bytes))
+                        .font(.system(size: 9))
+                        .foregroundStyle(WatchHomeStyle.dim)
+                        .monospacedDigit()
+                }
+                .padding(.vertical, 5)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(WatchHomeStyle.hairline)
+                        .frame(height: 0.5)
+                }
+            }
+            if model.pending.count > 8 {
+                Text(L10n.Watch.pendingMore(model.pending.count - 8))
+                    .font(.system(size: 9))
+                    .foregroundStyle(WatchHomeStyle.dim)
+                    .padding(.vertical, 5)
+            }
+        }
     }
 
     private func stat(_ label: String, value: String, emphasised: Bool) -> some View {
@@ -342,6 +450,8 @@ struct WatchSyncPane: View {
 ///    一根卡在 38% 的条读作"卡住了"。卡住与否由"项待传"那个数字说话。
 struct WatchSyncPulseBar: View {
     let active: Bool
+    /// ★ 2026-11-03 八轮：跟随主题色（默认暖色，保留给别处调用）。
+    var tint: Color = WatchHomeStyle.amber
     @State private var wide = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -352,7 +462,7 @@ struct WatchSyncPulseBar: View {
                     .fill(Color.white.opacity(0.14))
                 if active {
                     Capsule()
-                        .fill(WatchHomeStyle.amber.opacity(0.85))
+                        .fill(tint.opacity(0.85))
                         .frame(width: geo.size.width * (wide ? 0.72 : 0.10))
                 }
             }

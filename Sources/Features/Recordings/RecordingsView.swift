@@ -340,6 +340,9 @@ private struct DeviceFilesView: View {
     let env: AppEnvironment
     var onFileTransferred: ((String) -> Void)?
     var onFastTransferDone: (() -> Void)?
+    /// ★ 2026-11-04：连接时判出来的钥匙状态。观察它，连接一完成横幅就出现，
+    /// 不必等用户点了传输才发现传下来的是打不开的文件。
+    @ObservedObject private var keyHealth = KeyHealthService.shared
     @StateObject private var model = DeviceFilesModel()
     @State private var pendingDelete: DeviceFile?
     @State private var showFastTransfer = false
@@ -366,8 +369,14 @@ private struct DeviceFilesView: View {
     /// Banner trigger: device says it's encrypted, but this iPhone has no
     /// matching key in the Keychain. Without this prompt, the user discovers
     /// the problem only when a download lands and the row goes "raw."
+    ///
+    /// ★ 2026-11-04：`getKeychain` 读不到（手机锁屏）时不再算"没设口令"。
+    /// `KeyResolver.setupIncomplete` 只能看到"有没有拿到钥匙"，看不到"为什么
+    /// 没拿到"——锁屏时它会说有钥匙的人没设过，然后引导用户去重设一个本来
+    /// 就存在的口令。钥匙校验已经分得清这两种情况，这里按它让路。
     private var needsPassphraseOnboarding: Bool {
-        KeyResolver.setupIncomplete(for: client)
+        if case .unreadable = keyHealth.state { return false }
+        return KeyResolver.setupIncomplete(for: client)
     }
 
     var body: some View {
@@ -424,6 +433,21 @@ private struct DeviceFilesView: View {
                             env.openPassphraseSheet = true
                             NotificationCenter.default.post(name: .navigateToSettings, object: nil)
                         }
+                    )
+                } else if keyHealth.state.isMismatch {
+                    // ★ 2026-11-04：有钥匙，但跟设备对不上（多半是官方 App 设的）。
+                    // 这种状态以前完全看不见，用户只在"传完了却打不开"时才发现。
+                    // 与上面那条互斥：`needsPassphraseOnboarding` 说的是"没钥匙"，
+                    // 这条说的是"有钥匙但不是这把"，同时显示只会让人更糊涂。
+                    PassphraseOnboardingBanner(
+                        recordingsAtRisk: model.files.count,
+                        onOpenSettings: {
+                            env.navigateToRecordingsSettings = true
+                            NotificationCenter.default.post(name: .navigateToSettings, object: nil)
+                        },
+                        titleOverride: L10n.KeyHealth.bannerTitle,
+                        messageOverride: L10n.KeyHealth.bannerMessage,
+                        forceWarning: true
                     )
                 }
                 if model.hasActiveTransfers {
@@ -937,7 +961,12 @@ final class DeviceFilesModel: ObservableObject {
                     file.name,
                     deviceSerial: deviceSerial
                 )
-                let saved = try self.writeAndDecrypt(data, name: localName, env: env)
+                let saved = try self.writeAndDecrypt(
+                    data,
+                    name: localName,
+                    deviceSerial: deviceSerial,
+                    encryptionOn: client.deviceEncryptionOn
+                )
                 // A raw encrypted file with a missing/wrong key is not a
                 // completed download: recording it in the manifest would make
                 // this device file look done and prevent the retry the UI asks
@@ -1071,17 +1100,27 @@ final class DeviceFilesModel: ObservableObject {
     }
 
     /// Save the device's bytes under `audio_clips/<name>` and produce the
-    /// playable `audio_clips/decrypted/<name>` artefact. Dispatch:
+    /// playable `audio_clips/decrypted/<name>` artefact.
     ///
-    ///   - head starts with `"encryt"` → ChaCha20-decrypt with the
-    ///     SN-scoped Keychain key (via `KeyResolver`) and wrap raw frames.
-    ///     If no key is configured locally, the file is left as raw and
-    ///     the user sees a "set passphrase in Settings" prompt.
-    ///   - `OggS` / `RIFF` magic → already-plain container.
-    ///   - anything else `.opus` → raw OPUS frames; wrap.
-    private func writeAndDecrypt(_ data: Data, name: String, env: AppEnvironment) throws -> FileSavedState {
-        let key = env.bluetooth.client.map(KeyResolver.key(for:)) ?? nil
-        let outcome = try PostDownload.process(data, name: name, chacha20Key: key)
+    /// ★ 2026-11-06（传输/解密解耦）：这个方法**不再自己解析密钥**。它只把
+    /// "字节 + 设备身份"交给 `PostDownload.ingest`，密钥从哪来（Keychain /
+    /// 设备没开加密 / 状态未知）由那一边统一判定。传输代码从此不需要认识
+    /// `KeyResolver` / `PassphraseStore`——接新设备只加一条传输，不用碰加密。
+    ///
+    /// 分支仍由 `PostDownload` 决定：加密信封 → ChaCha20 解密并封装；
+    /// `OggS`/`RIFF` → 已是普通容器；裸 OPUS 帧 → 封装。
+    private func writeAndDecrypt(
+        _ data: Data,
+        name: String,
+        deviceSerial: String?,
+        encryptionOn: Bool?
+    ) throws -> FileSavedState {
+        let outcome = try PostDownload.ingest(
+            data,
+            name: name,
+            deviceSerial: deviceSerial,
+            encryptionOn: encryptionOn
+        )
         switch outcome {
         case .ready(let url, .alreadyPlain):
             return .ready(url, source: .alreadyPlain)
@@ -1118,17 +1157,25 @@ final class DeviceFilesModel: ObservableObject {
 private struct PassphraseOnboardingBanner: View {
     let recordingsAtRisk: Int
     let onOpenSettings: () -> Void
+    /// ★ 2026-11-04：钥匙校验（`KeyHealthService`）复用同一条横幅，但要换文案。
+    /// 传 nil 就走原来那套"设口令/有风险"的措辞，行为不变。
+    var titleOverride: String? = nil
+    var messageOverride: String? = nil
+    /// 校验失败（mismatch）必须按告警样式显示——它不是"还没设置"，是"设置了但不对"。
+    var forceWarning: Bool = false
 
-    private var isWarning: Bool { recordingsAtRisk > 0 }
+    private var isWarning: Bool { forceWarning || recordingsAtRisk > 0 }
 
     private var title: String {
-        isWarning
+        if let titleOverride { return titleOverride }
+        return isWarning
             ? L10n.EncryptionOnboarding.bannerTitle
             : L10n.EncryptionOnboarding.bannerSetupTitle
     }
 
     private var message: String {
-        isWarning
+        if let messageOverride { return messageOverride }
+        return isWarning
             ? L10n.EncryptionOnboarding.bannerMessage
             : L10n.EncryptionOnboarding.bannerSetupMessage
     }

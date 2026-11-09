@@ -57,6 +57,64 @@
 "asr.local_vad_footer" = "Voice activity detection runs on-device and removes silent stretches before sending audio to the transcription provider. Cuts upload size and ASR cost.";
 "asr.background_keep_alive" = "Keep transcribing in the background";
 "asr.background_keep_alive_footer" = "When on, transcription keeps running to completion after you switch away or lock the screen. When off, only about 30 seconds of wrap-up time is granted and a long clip will be interrupted. Either way, no sound is played.";
+/* ★ 2026-11-06：后台保活·用户引导与被杀善后 */
+"asr.low_power_warning" = "Low Power Mode is on — iOS kills background audio sooner. Plug in or turn it off for long recordings.";
+"asr.killed_alert_title" = "A task was interrupted last time";
+"asr.killed_alert_body" = "iOS closed Nomily in the background while a job was running. Anything unfinished has been re-queued — to lower the risk, avoid swiping the app away and turn off Low Power Mode.";
+"keeper.guard_title" = "Nomily was interrupted";
+"keeper.guard_body" = "iOS closed the app while a recording/transcription job was running. Tap to reopen and check.";
+
+/* ★ 2026-11-06：后台保护指南页（设置 → 后台保护指南） */
+"asr.bgp_row" = "Background Protection Guide";
+"asr.bgp_title" = "Background Protection";
+"asr.bgp_intro" = "iOS has no always-on whitelist like Android, but the switches below are everything the system allows. Nomily also warns you within a minute if it is ever closed mid-job.";
+"asr.bgp_refresh_title" = "Background App Refresh";
+"asr.bgp_refresh_ok" = "Allowed — long jobs can keep running after you switch away.";
+"asr.bgp_refresh_denied" = "Off for Nomily — background jobs get interrupted.";
+"asr.bgp_refresh_restricted" = "Restricted by the system (Low Power Mode or Screen Time).";
+"asr.bgp_open_settings" = "Open Settings";
+"asr.bgp_refresh_manual" = "If the toggle is dimmed: Settings → General → Background App Refresh, and turn the master switch on first.";
+"asr.bgp_lowpower_title" = "Low Power Mode";
+"asr.bgp_lowpower_on" = "On — iOS cuts background audio much sooner. Charge the phone or turn it off (Settings → Battery) for long recordings.";
+"asr.bgp_lowpower_off" = "Off — no extra risk to background jobs.";
+"asr.bgp_notify_title" = "Interruption Alerts";
+"asr.bgp_notify_on" = "Allowed — you will be warned within a minute if iOS ever closes the app mid-job.";
+"asr.bgp_notify_off" = "Not decided yet — tap to allow interruption alerts.";
+"asr.bgp_notify_denied" = "Denied — enable it to be warned when a job is interrupted.";
+"asr.bgp_notify_authorize" = "Open Settings to Allow";
+"asr.bgp_keeper_title" = "In-App Silent Keep-Alive";
+"asr.bgp_keeper_on" = "On (recommended) — recording and transcription keep running after you switch away.";
+"asr.bgp_keeper_off" = "Off — background jobs stop about 30 seconds after you switch away.";
+"asr.bgp_limit_note" = "Honest note: iOS can still close any app under extreme memory pressure — no setting can forbid that. When it happens, Nomily posts an interruption alert within a minute and re-queues unfinished work.";
+
+/* ★ 2026-11-06：权限体检弹窗（蓝牙没开 / 麦克风被拒 / 通知被拒…） */
+"asr.perm_alert_title" = "A permission is off";
+"asr.perm_mic_denied" = "Microphone access was denied — recording cannot work. Enable it in Settings → Nomily AI.";
+"asr.perm_bt_denied" = "Bluetooth permission was denied — recorders cannot connect. Enable it in Settings → Nomily AI.";
+"asr.perm_bt_off" = "Bluetooth is off — recorders cannot connect. Turn it on from Control Center or Settings.";
+"asr.perm_notif_denied" = "Notifications are off — you won't be alerted if a background job is interrupted. Enable them in Settings → Notifications.";
+"asr.perm_go_settings" = "Open Settings";
+"asr.perm_ack" = "Got it";
+
+/* ★ 2026-11-06：手表「表情常亮」开关（手机设置页） */
+"watch.alwayson_title" = "Always-On Face";
+"watch.alwayson_hint" = "Show the face (dimmed, no animation) when the screen rests. Off = black to save power.";
+"watch.alwayson_footer" = "How long the face stays before returning to the watch face is set on the watch: Settings → General → Wake Screen → Return to Clock (you can set Nomily individually, up to 1 hour). While recording, the app always stays on screen.";
+
+/* ★ 2026-11-06：后台保护指南新增行（蓝牙 / 麦克风 / 手表连接） */
+"asr.bgp_bt_title" = "Bluetooth";
+"asr.bgp_bt_on" = "On — recorders can connect.";
+"asr.bgp_bt_off" = "Bluetooth is off — turn it on from Control Center or Settings.";
+"asr.bgp_bt_denied" = "Permission denied for Nomily — enable Bluetooth for this app in Settings.";
+"asr.bgp_bt_unknown" = "Checking…";
+"asr.bgp_mic_title" = "Microphone";
+"asr.bgp_mic_ok" = "Allowed — recording can use the mic.";
+"asr.bgp_mic_denied" = "Denied — recording cannot work without it.";
+"asr.bgp_watch_title" = "Apple Watch Link";
+"asr.bgp_watch_notpaired" = "No Apple Watch paired. Pair one in the iPhone Watch app to record from the wrist.";
+"asr.bgp_watch_btoff" = "Bluetooth is off — the watch cannot sync.";
+"asr.bgp_watch_reachable" = "Connected — watch recordings sync automatically.";
+"asr.bgp_watch_unreachable" = "Paired but not nearby (or asleep). It reconnects automatically when you raise the wrist or open the app — normal, not a fault.";
 "asr.nightly_transcribe" = "Transcribe backlog overnight";
 "asr.nightly_transcribe_footer" = "When on, iOS may wake the app overnight (while charging and online) to fill in transcripts for recordings that don't have one yet. When off, transcription only runs while the app is open.";
 "asr.queue_title" = "Transcription queue";
@@ -360,6 +418,25 @@
 "developer_mode.taps_to_disable" = "%d more taps to disable developer mode";
 
 /* Encryption passphrase / onboarding (v1.50) */
+/* 2026-11-04 connect-time key check (KeyHealth) */
+/* 2026-11-04 record button blocked by the encryption gate */
+"record_gate.title" = "Can't start recording";
+"record_gate.no_key" = "This device is encrypted and this iPhone has no matching key yet. Set the passphrase once before recording — anything recorded now could never be opened here.";
+"record_gate.mismatch" = "This iPhone's key doesn't match the device, so new recordings still couldn't be opened here. Fix the key first (see Settings → Recordings).";
+"record_gate.open_settings" = "Open settings";
+
+"keyhealth.row_label" = "Key check";
+"keyhealth.unknown" = "unknown";
+"keyhealth.not_encrypted" = "device not encrypting";
+"keyhealth.no_key" = "no key on this iPhone";
+"keyhealth.unreadable" = "locked — unlock to read";
+"keyhealth.unverified" = "not verified yet";
+"keyhealth.verified" = "matches device";
+"keyhealth.mismatch" = "doesn't match device";
+"keyhealth.fingerprint_note" = "Key fingerprint %@ — compare it with the device page to tell whether both sides hold the same key.";
+"keyhealth.banner_title" = "This iPhone's key doesn't match the device";
+"keyhealth.banner_message" = "Recordings transferred now will save as encrypted files that can't be opened on this iPhone. The originals stay on the device — fix the key first, or those files stay unreadable.";
+
 "encryption.section_header" = "Encryption passphrase";
 "encryption.section_footer" = "Derived via Argon2id with the device serial as salt. Stored in the iOS Keychain, scoped to this device. Losing the passphrase makes encrypted recordings unrecoverable. Cross-iPhone recovery: enter the same passphrase on the new phone.";
 "encryption.local_key" = "Local key";
@@ -392,10 +469,11 @@
 "encryption.progress.checking_device" = "Checking what's on the device…";
 "encryption.rotate_confirm.title" = "Rotate the device key?";
 "encryption.rotate_confirm.message_empty" = "The device has no recordings left, so nothing will be lost. Write down the new passphrase — it's the only way to open recordings made from now on, and there is no recovery.";
-"encryption.rotate_confirm.message" = "%d recording(s) are still on the device. They were made with the old key and will become permanently unreadable — download them first if you want to keep them. Write down the new passphrase: it's the only way to open recordings made from now on, and there is no recovery.";
+"encryption.rotate_confirm.message" = "%d recording(s) are still on the device. If the passphrase matches the device's current key, rotating just rewrites the same key and existing recordings are untouched; if the key came from another app, the firmware refuses and explains. Write down the new passphrase: recordings made from now on can only be opened with it.";
 "encryption.progress.probe_subtitle" = "Recording a short probe to verify the passphrase. The probe is auto-deleted.";
 "encryption.mismatch.title" = "Passphrase didn't match";
-"encryption.mismatch.message" = "The probe clip didn't decrypt with that passphrase. Double-check it and try again. If you've truly forgotten it, use \"Rotate\" to overwrite the device key — but that permanently destroys every existing encrypted recording on the device.";
+"encryption.mismatch.message" = "The probe clip didn't decrypt with that passphrase. Double-check it and try again. Note: if the device's key was set by another app (e.g. the vendor's app) or another phone, turn encryption OFF there first, then set the passphrase here. Rotate only succeeds when the passphrase matches the device's current key.";
+"encryption.foreign_key.blocked" = "The device's current key wasn't set with this passphrase (it was likely created by the vendor's app or another phone), and the firmware refuses to overwrite it. Turn encryption OFF in the app that set the key first, then set the passphrase here. Recordings already on the device stay safe either way.";
 "encryption.mismatch.try_again" = "Try again";
 "encryption.error.device_not_connected" = "Device not connected.";
 "encryption.error.connect_first" = "Connect the device first — the passphrase needs to be verified against a real recording.";
@@ -704,6 +782,9 @@
 "watch.link_lost_title" = "iPhone disconnected";
 "watch.link_lost_message" = "The recording keeps running on the watch. Bring the iPhone nearby — it reconnects automatically, or tap Reconnect.";
 "watch.link_lost_retry" = "Reconnect";
+"watch.link_lost_note_recording" = "Still recording on your watch. It syncs once the iPhone is nearby — tap to reconnect now.";
+"watch.link_lost_note_pending" = "Some clips haven't reached your iPhone yet. Tap to reconnect now.";
+"watch.stashed_count" = "%d saved";
 "watch.pending_header" = "Waiting for iPhone";
 "watch.pending_count" = "%d to send";
 "watch.shake_to_record" = "Shake to Record";
@@ -1197,8 +1278,8 @@
 "a1.step1.body" = "Bought it second-hand? Ask the seller to unbind it first, then scan the code in DingTalk to bind it yourself. Only you can do this step — it decides which account the card hands its secret to.";
 "a1.step2.title" = "Open “AI Notes” once on the desktop app";
 "a1.step2.body" = "Any template will do. DingTalk writes the device list — secret included — into its own log on that computer.";
-"a1.step3.title" = "Run one command on that Mac";
-"a1.step3.body" = "It turns the secret into one line of text, copies it to the clipboard and shows a QR code — scan it or paste it. If your copy of the script lives somewhere else, edit the command below.";
+"a1.step3.title" = "Open the A1 Key Extractor on that Mac";
+"a1.step3.body" = "Open the download page on that Mac: https://a1-key-extractor.app.workbuddy.host/?sharecode=QDT5ZC4DMF — get the A1 Key Extractor (install-free; first launch: right-click → Open), press Re-scan, then scan the on-screen QR code with this iPhone. Command-line fallback: python3 extract_secret_from_dingtalk_mac.py --copy --qr";
 "a1.copy_command" = "Copy the command";
 "a1.command_footer" = "The extractor only reads DingTalk's log on this Mac. It doesn't touch the card, the firmware or your DingTalk account.";
 "a1.command.editor_title" = "Extractor command";
@@ -1530,6 +1611,13 @@
 "webdav.no_subfolders" = "No subfolders here";
 "webdav.pick_folder" = "Pick a folder";
 "webdav.pick_folder_footer" = "Tap a folder to descend, then \"Use this folder\" to commit. The list is queried from the server live; failures usually mean wrong credentials or permissions.";
+"webdav.remote.transcript" = "Transcript.txt";
+"webdav.remote.asr" = "ASR Data.json";
+"webdav.remote.note" = "Summary.md";
+"webdav.remote.chapters" = "Chapters.json";
+"webdav.remote.bundle" = "Bundle.zip";
+"webdav.note.meta" = "Nomily note";
+"webdav.note.chapters_heading" = "Chapters";
 
 "rec_settings.audition_load" = "Load a recent recording to audition";
 "rec_settings.audition_empty" = "No watch recordings available to audition";
@@ -1638,7 +1726,8 @@
 "asr.cloud.aliyun.console" = "① nls-portal.console.aliyun.com → Projects for the Appkey; ② ram.console.aliyun.com to create an AccessKey (grant OSS read/write too); ③ create an OSS bucket in the matching region";
 "asr.cloud.aliyun.note" = "How transcription works: audio is staged in your own OSS bucket (private), a 2-hour presigned link is handed to Aliyun (their API requires a publicly downloadable file_link), and the result is fetched afterwards. The region entered here is the **OSS region** (a bucket in Hangzhou means cn-hangzhou) — a wrong value is auto-corrected once from OSS's response. The live-caption gateway region is unrelated and normalized automatically. Live captions use their real-time WebSocket (same Appkey): pick Alibaba Cloud under Recording & Transcription → Live recognition engine.";
 "asr.cloud.aliyun.recommendation" = "Recommended · best for Chinese";
-"asr.cloud.aliyun.price" = "≈ ¥0.3/hour";
+"asr.cloud.aliyun.price" = "≈ ¥0.1/hour (Bailian qwen-audio)";
+"asr.cloud.aliyun.cer" = "Chinese CER 2.25% · English WER 4.72%";
 
 "asr.cloud.baidu.name" = "Baidu Cloud Speech";
 "asr.cloud.baidu.tagline" = "Short utterances · solid Chinese baseline";
@@ -1659,7 +1748,7 @@
 "asr.cloud.tencent.console" = "console.cloud.tencent.com → Access Management → API Key Management";
 "asr.cloud.tencent.note" = "The host is fixed at asr.tencentcloudapi.com; the region travels as a request parameter (TC3-HMAC-SHA256 signature). The probe calls DescribeTaskStatus with a non-existent task ID — signature check only, no audio upload. The hot-word API (DescribeVocabList etc.) was retired under asr 2019-06-14; do not use it for probing.";
 "asr.cloud.tencent.recommendation" = "Balanced · Mandarin / English / Cantonese";
-"asr.cloud.tencent.price" = "≈ ¥1.3/hour (file recognition)";
+"asr.cloud.tencent.price" = "≈ ¥0.8/hour (ASR large model 2.0)";
 
 "asr.cloud.google.name" = "Google Cloud";
 "asr.cloud.google.tagline" = "Speech-to-Text v1 · 125+ languages";
@@ -1834,6 +1923,7 @@
 /* ★ 2026-11-02 watch V3 prototype: new Recent / Sync pages plus the top chrome */
 "watch.recent" = "Recent";
 "watch.recent_empty" = "No recaps yet\nThey arrive once the iPhone builds a summary";
+"watch.recent_untitled" = "Untitled recap";
 "watch.sync_to_phone" = "Sync to iPhone";
 "watch.pending_unit" = "to send";
 "watch.phone_label" = "iPhone";
@@ -1844,6 +1934,239 @@
 "watch.sync_now" = "Sync now";
 "watch.syncing" = "Uploading…";
 "watch.listening" = "LISTENING";
+"watch.moonlit" = "MOONLIT";
 "watch.saved" = "Saved";
 "watch.points_count" = "%d points";
 "watch.menu_header" = "Menu";
+
+/* ★ 2026-11-02 all-day recording (power saver) */
+"watch.allday_title" = "All-Day Recording";
+"watch.allday_hint" = "For all-day wear: sampling and waveform refresh slow down, and finished takes are held back instead of sent right away — they upload automatically while charging or when you turn this off. “Sync now” always works.";
+"watch.defer_note" = "Power saver: held back — uploads while charging or when turned off";
+
+/* ★ 2026-11-03 settings top purchase banner (Vobot V05E) */
+"settings.buy_banner_title" = "Vobot V05E Recorder Card";
+"settings.buy_banner_subtitle" = "The recorder card that fits Nomily best — on Amazon";
+
+/* ★ 2026-11-05：全局英文界面去中文残留（用户："设置在英文界面下为啥还有中文显示，
+   这是 ASR 的这块，其他的也都要检查一下"）。三类：① 不带 value: 的键（tab.nomily
+   之前在英文界面直接显示 key 原文）；② value: 是中文的键（回落值就是中文）；
+   ③ ASR 模型名 / 凭据字段——原始值是发给 API 的真名，翻译只作用于显示层。 */
+"tab.nomily" = "Nomily";
+
+/* 定时录音 → 手表 */
+"timed.watch_command_sent" = "Watch told to start recording — raise your wrist and open the watch app.";
+"timed.watch_not_recording" = "The watch hasn't started yet: raise your wrist and open Nomily on it.";
+"timed.watch_stopped" = "Watch told to stop; the clip will sync back and transcribe automatically.";
+
+/* Nomily 问答页 */
+"nomily.tagline" = "Ask your recordings, like asking an assistant";
+"nomily.explain" = "Nomily searches your recording library before answering and cites which recording each point came from. If it isn't in there, it says so — it never makes things up.";
+"nomily.placeholder" = "Ask about recordings, to-dos, agreements…";
+"nomily.no_match" = "Nothing in the library matches this question. Try rephrasing and ask again.";
+"nomily.thinking" = "Nomily is going through your recordings…";
+"nomily.clear" = "Clear conversation";
+"nomily.recent_title" = "Asked recently";
+"nomily.timeout" = "The answer timed out. Check the network or the LLM settings and try again.";
+"nomily.suggest_recent" = "What have I recorded recently?";
+"nomily.suggest_todos" = "Which of my to-dos are still open?";
+"nomily.suggest_last_meeting" = "What did we decide in the last meeting?";
+"nomily.suggest_recording" = "What is \"%@\" about?";
+"nomily.card_todos" = "To-dos";
+"nomily.card_overdue" = "%d overdue";
+"nomily.card_others" = "%d waiting on others";
+"nomily.card_recent" = "Recent recordings";
+
+/* ★ 2026-11-05 十五轮：手表触感等级 / 中断续录 / 全天候开关（手机侧） */
+"watch.haptic_level_title" = "Record haptics";
+"watch.haptic_level_hint" = "Pick 1–5; a sample plays when you change it";
+"watch.haptic_1" = "1 · Light tap";
+"watch.haptic_2" = "2 · Gentle";
+"watch.haptic_3" = "3 · Firm";
+"watch.haptic_4" = "4 · Strong";
+"watch.haptic_5" = "5 · Maximum";
+"watch.resume_prompt_title" = "Recording was interrupted";
+"watch.resume_prompt_body" = "All-day recording is on. Pick up where it left off?";
+"watch.resume_prompt_continue" = "Keep recording";
+"watch.resume_prompt_dismiss" = "Not now";
+"watch.allday_phone_footer" = "Same switch as on the watch. Turning it on starts recording on the watch right away.";
+
+/* ★ 2026-11-05 十六轮：起止录音的震动花样（力度之外的节奏档；十七轮拆成启动/结束两组） */
+"watch.haptic_start_title" = "Start buzz";
+"watch.haptic_stop_title" = "Stop buzz";
+"watch.haptic_pattern_hint" = "Plays once when you pick one";
+"watch.haptic_pattern_name.single" = "Single tap";
+"watch.haptic_pattern_name.double" = "Double knock";
+"watch.haptic_pattern_name.triple" = "Triple tap";
+"watch.haptic_pattern_name.single_long" = "One long buzz";
+"watch.haptic_pattern_name.heartbeat" = "Heartbeat";
+"watch.haptic_pattern_name.crescendo" = "Crescendo";
+
+/* ★ 2026-11-05 十七轮：全天候录音中的环境态（波形退场，只剩指示灯 + 计时） */
+"watch.ambient_rec" = "REC";
+
+/* ★ 2026-11-05 十五轮：录音质量档位的体积/建议标（英文界面不再漏中文） */
+"rec_settings.quality_size_as_is" = "≈ 29MB/hour";
+"rec_settings.quality_size_standard" = "≈ 15MB/hour";
+"rec_settings.quality_size_compact" = "≈ 11MB/hour";
+"rec_settings.quality_size_minimal" = "≈ 8MB/hour";
+"rec_settings.quality_rec_compact" = "not recommended";
+"rec_settings.quality_rec_minimal" = "strongly not recommended";
+"rec_settings.quality_rec_parens" = " (%@)";
+
+/* ★ 2026-11-05 十五轮：LLM 摘要一小时录音的大概花费（英文显示 USD） */
+"llm.openai.cost" = "≈ $0.02–0.10 per hour of recording summarized (less with mini tiers)";
+"llm.claude.cost" = "≈ $0.05–0.25 per hour of recording summarized (less with Haiku)";
+"llm.gemini.cost" = "≈ $0.01–0.15 per hour of recording summarized (less with Flash)";
+"llm.openRouter.cost" = "Depends on the model picked, usually $0.01–0.30 per hour of recording";
+"llm.ollama.cost" = "Runs locally — no API cost";
+"llm.qwen.cost" = "≈ $0.003–0.015 per hour of recording summarized";
+"llm.deepseek.cost" = "≈ $0.002–0.007 per hour of recording summarized";
+"llm.doubao.cost" = "≈ $0.002–0.011 per hour of recording summarized";
+"llm.kimi.cost" = "≈ $0.007–0.03 per hour of recording summarized";
+"llm.zhipu.cost" = "≈ $0.003–0.015 per hour of recording summarized";
+"llm.minimax.cost" = "≈ $0.003–0.015 per hour of recording summarized";
+
+/* 声纹 */
+"voiceprint.title" = "Voiceprint";
+"voiceprint.self_label" = "Me";
+"voiceprint.status_enrolled" = "Voiceprint enrolled";
+"voiceprint.status_missing" = "No voiceprint yet";
+"voiceprint.enroll_hint" = "In a quiet place, read it aloud at your normal pace.";
+"voiceprint.enroll_start" = "Start recording";
+"voiceprint.enroll_stop" = "Done";
+"voiceprint.enrolling" = "Recording…";
+"voiceprint.sent" = "Sent to the iPhone — enrollment finishes there";
+"voiceprint.done" = "Voiceprint updated";
+"voiceprint.removed" = "Voiceprint removed";
+"voiceprint.remove" = "Remove voiceprint";
+"voiceprint.explain" = "Record your voice once, and transcription will recognise you and label you as \"Me\". Other people in the same recording are not affected.";
+"voiceprint.sample_info" = "%@ · %d s of usable speech";
+"voiceprint.device_watch" = "Recorded on the watch";
+"voiceprint.device_phone" = "Recorded on the phone";
+"voiceprint.error_unreadable" = "This audio can't be read — try a different format.";
+"voiceprint.error_short" = "The sample is too short — at least three seconds of speech.";
+"voiceprint.error_nospeech" = "No clear voice heard — try again somewhere quieter.";
+"voiceprint.identity_footer" = "Recognition runs on-device; the voice sample never leaves this device.";
+
+/* 杂项 */
+"social.rednote" = "Nomily on RedNote (小红书)";
+"plaud.resume_failed" = "The card didn't resume. Tap Resume again — if it still refuses, stop the take and start a new one.";
+"asr.custom_language_zh" = "Chinese (中文)";
+"asr.custom_language_ja" = "Japanese (日本語)";
+"asr.custom_language_yue" = "Cantonese (粤语)";
+
+/* ASR 模型名（显示层；存进 config 的仍是原值，直接发给对应厂商 API） */
+"asr.cloud.aliyun.models.0" = "File transcription (Paraformer)";
+"asr.cloud.aliyun.models.1" = "One-sentence recognition";
+"asr.cloud.aliyun.models.2" = "Real-time speech recognition";
+"asr.cloud.baidu.models.0" = "Short speech — standard";
+"asr.cloud.baidu.models.1" = "Short speech — express";
+"asr.cloud.baidu.models.2" = "Far-field speech";
+"asr.cloud.xfyun.models.0" = "Dictation iat (short / live)";
+"asr.cloud.xfyun.models.1" = "Transcription asr (long audio)";
+"asr.cloud.tencent.models.0" = "16k_zh Mandarin";
+"asr.cloud.tencent.models.1" = "16k_en English";
+"asr.cloud.tencent.models.2" = "16k_yue Cantonese";
+"asr.cloud.tencent.models.3" = "16k_zh_medical Medical";
+
+/* ASR 凭据字段（只给原值是中文的条目建键，其余回落到 spec 里本来就是英文的值） */
+"asr.cloud.aliyun.fields.appKey.label" = "Project Appkey";
+"asr.cloud.aliyun.fields.appKey.placeholder" = "The Appkey from the nls-portal project list";
+"asr.cloud.aliyun.fields.ossBucket.placeholder" = "Bucket name that matches the region";
+"asr.cloud.aliyun.fields.region.placeholder" = "cn-hangzhou (follows the bucket)";
+"asr.cloud.baidu.fields.apiKey.placeholder" = "The app's API key";
+"asr.cloud.xfyun.fields.appId.placeholder" = "The APPID from the console";
+
+/* ★ 2026-11-06 Settings search */
+"settings.search_placeholder" = "Search settings";
+"settings.search_empty" = "Nothing matches — try a shorter word";
+"settings.search_hint" = "Finds entries by name, not switch values";
+
+/* ★ 2026-11-06 Mic permission pre-explainer */
+"phone.mic_primer_title" = "Record with the phone microphone";
+"phone.mic_primer_body" = "Nomily records audio to transcribe it. Audio stays on this phone unless you have configured a cloud speech service.";
+
+/* ★ 2026-11-06 Voiceprint enroll receipt */
+"voiceprint.rerecord" = "Record again";
+"voiceprint.failed" = "The iPhone couldn't enroll this sample. Please record again.";
+
+/* ★ 2026-11-06 Two tiers borrowed from the agent-avatars library */
+"face.wink" = "Wink";
+"face.love" = "Love";
+"face.sorry" = "Sorry";
+"face.confused" = "Confused";
+"face.shape_tall" = "Tall";
+"face.shape_round" = "Round";
+"face.shape_calm" = "Calm";
+"face.shape_curious" = "Curious";
+"watch.facelife_header" = "Face Life";
+"watch.facelife_footer" = "These settings apply to the face on your Apple Watch: it dozes when untouched, and its pupils follow your finger while you press the screen.";
+"watch.eyeshape_title" = "Eye Shape";
+"watch.drowsy_title" = "Doze When Idle";
+"watch.drowsy_hint" = "After a while without touching, the face gets sleepy and closes its eyes. Any tap wakes it up.";
+"watch.drowsy_after_title" = "Start Dozing After";
+"watch.drowsy_delay" = "%d s";
+"watch.pupil_title" = "Pupil Follows Finger";
+"watch.pupil_hint" = "While pressing the screen, the eyes look where your finger goes.";
+
+/* ---- To-do board (2026-11-06 · ported from the competitor analysis) ---- */
+"todo.title" = "To-dos";
+"todo.settings_row" = "To-do Board";
+"todo.segment_list" = "List";
+"todo.segment_schedule" = "Schedule";
+"todo.status_pending" = "New";
+"todo.status_accepted" = "To do";
+"todo.status_done" = "Done";
+"todo.status_wont" = "Skip";
+"todo.status_deferred" = "Later";
+"todo.section_inbox" = "Waiting for your call";
+"todo.section_active" = "To do";
+"todo.section_later" = "Remind me later";
+"todo.section_closed" = "Closed";
+"todo.empty_inbox" = "All caught up · nothing waiting on you";
+"todo.empty_board" = "No to-dos yet. Finish a recording's summary and its action items land here automatically.";
+"todo.empty_day" = "Nothing due on this day";
+"todo.decide_title" = "A backlog has piled up — clear it";
+"todo.decide_hint" = "Swipe right: done / skip · Swipe left: to do / later";
+"todo.decide_done" = "Done";
+"todo.decide_wont" = "Skip it";
+"todo.decide_accept" = "To do";
+"todo.decide_later" = "Remind me later";
+"todo.decide_skip" = "Not now";
+"todo.decide_progress" = "%1$d of %2$d";
+"todo.decide_finished" = "Cleared. Nice.";
+"todo.swipe_done" = "Done";
+"todo.swipe_wont" = "Skip";
+"todo.swipe_later" = "Later";
+"todo.swipe_delete" = "Delete";
+"todo.open_source" = "Open recording";
+"todo.source_missing" = "Source recording was deleted";
+"todo.done_today" = "Nothing left · %d done today";
+"todo.overdue" = "%d overdue";
+"todo.notify_body" = "From “%@”";
+"todo.reminder_footer" = "Reminders fire at 8:30 tomorrow morning by default. Swipe a card to decide faster.";
+
+/* ---- Reasoning effort (2026-11-06 · ported from the competitor analysis) ---- */
+"llm.effort_title" = "Reasoning Effort";
+"llm.effort_auto" = "Auto";
+"llm.effort_low" = "Fast";
+"llm.effort_medium" = "Balanced";
+"llm.effort_high" = "Deep";
+"llm.effort_auto_hint" = "Don't send the parameter — keeps the widest compatibility.";
+"llm.effort_low_hint" = "Answer sooner. Good for short recordings and live questions.";
+"llm.effort_medium_hint" = "A middle ground for everyday summaries.";
+"llm.effort_high_hint" = "Think longer. Better for long meetings and messy transcripts.";
+"llm.effort_footer" = "Sent as reasoning_effort to OpenAI-compatible models that support it (o-series, gpt-5 family, some relays). If a model rejects the request with HTTP 400, switch back to Auto — that means it doesn't know this parameter.";
+
+/* 2026-11-09 multi-account WebDAV */
+"webdav.saved_servers" = "Saved Servers";
+"webdav.add_server" = "Add a Server";
+"webdav.in_use" = "In use";
+"webdav.set_active" = "Use This Server for Backup";
+"webdav.set_active_done" = "This server is now the backup target.";
+"webdav.remove_server" = "Remove This Server";
+"webdav.accounts_footer" = "Each server keeps its own host, account and password — adding a second NAS no longer overwrites the first. Backup and sync go to the server marked In use; switch any time from this page.";
+"webdav.remote.todos" = "To-dos.md";
+
+"webdav.server_count" = "%d servers";

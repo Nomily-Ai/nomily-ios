@@ -139,6 +139,14 @@ final class AppEnvironment: ObservableObject {
                 // the real queues. Runs before auto-summary so the pipeline can
                 // observe whether a summarize job was actually enqueued.
                 AiTaskCenter.shared.transcribeDidFinish(clipName: clip)
+                // ★ 2026-11-04（用户："现在没声纹处理你没办法判断我说话"）：
+                // 转写刚落盘就问一句"这些人里哪个是我"。有声纹才会做事，
+                // 没声纹是一次磁盘存在性检查就返回。
+                //
+                // 放在 auto-summary **之前**：摘要读的是说话人名字，先认出本人，
+                // 摘要里那一句才会写成"我"，而不是事后再改一次名字重跑摘要。
+                let userName = AppEnvironment.shared?.config.config.userName
+                await VoiceprintService.shared.identify(clip: clip, userName: userName)
                 AppEnvironment.shared?.maybeAutoSummarize(clipName: clip)
                 // ★ 2026-10-20: the top banner telling the user the transcript has landed.
                 // Same hook as auto-summary — manual, auto-after-download and the resumed
@@ -251,6 +259,15 @@ final class AppEnvironment: ObservableObject {
     @MainActor
     func autoTranscribeAfterImport(fileURL: URL) async {
         guard config.config.autoTranscribeAfterDownload else { return }
+        // ★ 2026-11-06：自动路径**永不覆盖已有转写**。
+        // 实时字幕在停止时已经把文本写进 `{clip}.txt`（带时间戳/打点，用户当场
+        // 看过的那份）；导入补转、夜间补转这些"自动"入口若没有这道闸，迟到的
+        // 任务会把那份整段替换掉——字面意义上的"实时字幕被自动转写覆盖"，
+        // 而且还向 ASR 付第二次费。与 `maybeAutoSummarize` 的"不覆盖手改摘要"
+        // 是同一条原则：自动生成的产物永远让位于已经存在的结果。
+        // 显式重新转写（详情页按钮）不经这里，用户明确要求的覆盖仍然允许。
+        let txt = StorageLocations.transcriptURLs(for: fileURL.lastPathComponent).txt
+        guard !FileManager.default.fileExists(atPath: txt.path) else { return }
         // ★ 2026-10-22 (任务三): open a ledger row so the pipeline is one
         // observable unit (queued → transcribing → summarizing → done).
         AiTaskCenter.shared.transcribeQueued(clipName: fileURL.lastPathComponent)
@@ -272,18 +289,32 @@ final class AppEnvironment: ObservableObject {
     func maybeAutoSummarize(clipName: String) {
         let cfg = config.config
         guard cfg.autoSummarizeAfterTranscription,
-              !cfg.llmProviders.configuredProviders.isEmpty,
-              let template = autoSummaryTemplate
+              !cfg.llmProviders.configuredProviders.isEmpty
         else { return }
         // Never overwrite a summary the user already has. Transcribing the same clip twice
         // (manual retry, resumed queue, a provider switch) would otherwise silently replace
         // a hand-edited result with a fresh machine one.
         guard !FileManager.default.fileExists(atPath: StorageLocations.summaryURL(for: clipName).path)
         else { return }
+        // ★ 2026-11-05（用户："打开全天候录音开关…生成 ADHD 的模板，参考 Plaud，
+        // 丢弃一些无关紧要的不转写需要抓重点"）：全天候开着 + 这条录音来自手表
+        // → 自动摘要改走 **ADHD 友好笔记** 模板。配合 JobRunners 里已有的
+        // SalienceFilter（寒暄/语气词在进 prompt 前就被剪掉），成文就是
+        // "短块、结论前置、行动优先"——正好是全天候场景要的"抓重点"。
+        // 用户自己选过模板的不覆盖不了——这里本来就是"没人选模板"的自动路径。
+        let allDayOn = (watch.watchAllDayState ?? false) || (watch.phoneAllDay ?? false)
+        let resolved: SummarizeTemplate
+        if allDayOn, ClipOrigin.isWatch(clipName),
+           let adhd = SummarizeTemplateStore.defaults.first(where: { $0.name == "ADHD Friendly Summary" }) {
+            resolved = adhd
+        } else {
+            guard let autoSummaryTemplate else { return }
+            resolved = autoSummaryTemplate
+        }
         jobs.enqueue(.summarize(
             clip: clipName,
-            prompt: template.localizedPrompt,
-            templateName: template.name
+            prompt: resolved.localizedPrompt,
+            templateName: resolved.name
         ))
     }
 }
