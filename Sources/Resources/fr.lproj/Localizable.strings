@@ -427,7 +427,7 @@
 "encryption.action.rotate" = "Renouveler";
 "encryption.action.cancel" = "Annuler";
 "encryption.progress.working" = "Traitement…";
-"encryption.footer.rotate" = "Le renouvellement écrit une clé totalement nouvelle sur l'appareil. Tous les enregistrements chiffrés déjà présents deviennent définitivement indéchiffrables. À utiliser uniquement pour reprendre un appareil d'occasion ou si vous avez oublié l'ancienne phrase.";
+"encryption.footer.rotate" = "« Renouveler » écrit une clé entièrement nouvelle sur l'appareil. Les enregistrements encore dessus restent liés à l'ancienne clé et ne s'ouvriront plus sur cet iPhone — téléchargez-les avant. L'appareil ne cède sa clé actuelle qu'à qui la détient : le renouvellement ne réussit que si cet iPhone (ou la phrase saisie) la détient. Une clé définie par l'app du fabricant doit d'abord y être désactivée.";
 "encryption.footer.set_encrypted" = "Cet appareil est chiffré. Nous allons enregistrer un court extrait de test, le télécharger et tenter de le déchiffrer avec la phrase que vous avez saisie. L'extrait de test est supprimé automatiquement ensuite.";
 "encryption.footer.set_unencrypted" = "Enregistre la clé dérivée localement dans le trousseau iOS. L'appareil n'est pas modifié — choisissez une phrase robuste et activez le chiffrement depuis l'écran de l'appareil quand vous serez prêt·e.";
 "encryption.progress.deriving" = "Dérivation de la clé…";
@@ -440,7 +440,7 @@
 "encryption.progress.checking_device" = "Vérification des enregistrements sur l'appareil…";
 "encryption.rotate_confirm.title" = "Renouveler la clé de l'appareil ?";
 "encryption.rotate_confirm.message_empty" = "L'appareil ne contient plus d'enregistrements, rien ne sera perdu. Notez la nouvelle phrase secrète : c'est le seul moyen d'ouvrir les futurs enregistrements, aucune récupération n'est possible.";
-"encryption.rotate_confirm.message" = "%d enregistrement(s) sont encore sur l'appareil. Créés avec l'ancienne clé, ils deviendront définitivement illisibles — transférez-les d'abord si vous y tenez. Notez la nouvelle phrase secrète : aucune récupération n'est possible.";
+"encryption.rotate_confirm.message" = "%d enregistrement(s) sont encore sur l'appareil et liés à la clé actuelle — après le renouvellement, ils ne s'ouvriront plus sur cet iPhone : téléchargez-les avant. Notez la nouvelle phrase secrète : c'est le seul moyen d'ouvrir les enregistrements à venir, sans récupération possible.";
 "encryption.progress.probe_subtitle" = "Un court extrait de test est en cours d'enregistrement pour vérifier la phrase. Il sera supprimé automatiquement.";
 "encryption.mismatch.title" = "La phrase ne correspond pas";
 "encryption.mismatch.message" = "Impossible de déchiffrer l'extrait de test avec cette phrase. Vérifiez-la et réessayez. Si vous l'avez vraiment oubliée, utilisez « Renouveler » pour écraser la clé de l'appareil — mais cela détruit définitivement tous les enregistrements chiffrés déjà présents.";
@@ -450,7 +450,9 @@
 "encryption.error.probe_not_found" = "Impossible de trouver l'extrait de test sur l'appareil.";
 "encryption.error.device_busy" = "L'appareil n'a pas pu enregistrer : %@";
 "encryption.banner.title" = "Appareil chiffré";
-"encryption.banner.message" = "Saisissez la phrase secrète configurée sur cet appareil pour déverrouiller ses enregistrements sur cet iPhone. Si vous l'avez oubliée, vous pouvez renouveler la clé (cela efface les enregistrements chiffrés déjà présents sur l'appareil).";
+"encryption.switch_to_unlock_hint" = "Si vous connaissez la phrase secrète qui a créé cette clé, vérifiez-la ici : les enregistrements deviennent lisibles et rien n'est écrasé sur l'appareil. L'écrasement ne fonctionne que lorsque cet iPhone détient la clé actuelle.";
+"encryption.switch_to_unlock" = "Vérifier plutôt la phrase secrète actuelle";
+"encryption.banner.message" = "Saisissez la phrase secrète configurée sur cet appareil pour déverrouiller ses enregistrements sur cet iPhone. Une clé créée par une autre app doit d'abord y être désactivée — cet iPhone ne peut pas écraser une clé qu'il ne détient pas.";
 "encryption.banner.cta" = "Vérifier la phrase…";
 "encryption.download.key_missing" = "%@ : cet enregistrement est chiffré, mais aucune phrase n'est définie sur cet iPhone. Ouvrez Réglages → Phrase de chiffrement → Vérifier la phrase de l'appareil… pour le déverrouiller.";
 "encryption.download.wrong_key" = "%1$@ : déchiffrement impossible — la phrase ne correspond pas à cet enregistrement. Ouvrez Réglages → Phrase de chiffrement, effacez la phrase actuelle et définissez la bonne. (Détails : %2$@)";

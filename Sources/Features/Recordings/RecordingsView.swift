@@ -442,7 +442,11 @@ private struct DeviceFilesView: View {
                     PassphraseOnboardingBanner(
                         recordingsAtRisk: model.files.count,
                         onOpenSettings: {
+                            // ★ 2026-11-09：直接落进「验证口令」表单。原先只切到设置页，
+                            //   用户还要自己找到那一段再点一次——而这本来就是"传完了打不开"
+                            //   的救火入口，多一步就是多一次放弃。
                             env.navigateToRecordingsSettings = true
+                            env.openPassphraseSheet = true
                             NotificationCenter.default.post(name: .navigateToSettings, object: nil)
                         },
                         titleOverride: L10n.KeyHealth.bannerTitle,
@@ -603,11 +607,21 @@ private struct DeviceFilesView: View {
             L10n.DeviceFiles.operationFailed,
             isPresented: Binding(
                 get: { model.alertMessage != nil },
-                set: { if !$0 { model.alertMessage = nil } }
+                set: { if !$0 { model.alertMessage = nil; model.alertOffersPassphrase = false } }
             ),
             presenting: model.alertMessage
         ) { _ in
-            Button(L10n.Common.ok, role: .cancel) {}
+            if model.alertOffersPassphrase {
+                Button(L10n.EncryptionOnboarding.verifyButton) {
+                    model.alertOffersPassphrase = false
+                    env.navigateToRecordingsSettings = true
+                    env.openPassphraseSheet = true
+                    NotificationCenter.default.post(name: .navigateToSettings, object: nil)
+                }
+                Button(L10n.Common.ok, role: .cancel) { model.alertOffersPassphrase = false }
+            } else {
+                Button(L10n.Common.ok, role: .cancel) {}
+            }
         } message: { msg in
             Text(msg)
         }
@@ -892,6 +906,10 @@ final class DeviceFilesModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
     @Published var alertMessage: String?
+    /// ★ 2026-11-09：解密失败的那条提示额外给一个「验证口令」按钮。用户报的
+    ///   "录音传下来了、就是打不开" 绝大多数是本地钥匙跟设备对不上——从报错
+    ///   直接落到验证表单，比让他自己去翻设置少一次放弃。
+    @Published var alertOffersPassphrase = false
     @Published var completedTransfer: String?
     @Published private var states: [String: FileTransferState] = [:]
     @Published private var transcripts: [String: TranscriptionState] = [:]
@@ -1132,9 +1150,11 @@ final class DeviceFilesModel: ObservableObject {
             return .ready(url, source: .wrappedRawFrames)
         case .raw(let url, .decryptFailed(let msg)):
             self.alertMessage = L10n.EncryptionOnboarding.downloadFailedWrongKey(name, msg)
+            self.alertOffersPassphrase = true
             return .raw(url, reason: .decryptFailed(msg))
         case .raw(let url, .keyMissing):
             self.alertMessage = L10n.EncryptionOnboarding.downloadFailedKeyMissing(name)
+            self.alertOffersPassphrase = true
             return .raw(url, reason: .decryptFailed("no key configured"))
         case .raw(let url, .wavWithoutHeader):
             return .raw(url, reason: .wavWithoutHeader)

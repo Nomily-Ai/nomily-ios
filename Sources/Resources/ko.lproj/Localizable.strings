@@ -427,7 +427,7 @@
 "encryption.action.rotate" = "회전";
 "encryption.action.cancel" = "취소";
 "encryption.progress.working" = "처리 중…";
-"encryption.footer.rotate" = "회전하면 기기에 완전히 새로운 키가 기록됩니다. 기기에 있는 모든 기존 암호화 녹음은 영구적으로 복호화할 수 없게 됩니다. 중고 기기를 인수하거나 이전 비밀구문을 잊은 경우에만 사용하세요.";
+"encryption.footer.rotate" = "'회전'은 기기에 완전히 새로운 키를 기록합니다. 기기에 남아 있는 녹음은 이전 키에 묶인 채로 남아 이 iPhone에서 열리지 않습니다. 보관하려면 먼저 내려받으세요. 기기는 현재 키를 그것을 보유한 쪽에만 넘겨주므로, 이 iPhone(또는 입력한 비밀구문)이 현재 키를 보유할 때만 회전이 성공합니다. 제조사 앱에서 설정한 키는 그 앱에서 먼저 암호화를 해제해야 합니다.";
 "encryption.footer.set_encrypted" = "이 기기는 암호화되어 있습니다. 짧은 검증용 녹음을 만들어 다운로드한 뒤 입력한 비밀구문으로 복호화를 시도합니다. 검증용 녹음은 이후 자동으로 삭제됩니다.";
 "encryption.footer.set_unencrypted" = "로컬에서 유도한 키를 iOS 키체인에 저장합니다. 기기에는 변경이 없습니다 — 강력한 비밀구문을 선택한 뒤, 준비되면 기기 화면에서 암호화를 활성화하세요.";
 "encryption.progress.deriving" = "키 유도 중…";
@@ -440,7 +440,7 @@
 "encryption.progress.checking_device" = "기기에 있는 녹음을 확인하는 중…";
 "encryption.rotate_confirm.title" = "기기 키를 교체할까요?";
 "encryption.rotate_confirm.message_empty" = "기기에 남은 녹음이 없어 잃을 것이 없습니다. 새 암호를 꼭 적어 두세요. 앞으로의 녹음을 열 수 있는 유일한 방법이며 복구는 불가능합니다.";
-"encryption.rotate_confirm.message" = "기기에 녹음 %d개가 남아 있습니다. 이전 키로 만들어져 교체 후에는 영구히 열 수 없습니다. 보관하려면 먼저 내려받으세요. 새 암호를 꼭 적어 두세요. 복구는 불가능합니다.";
+"encryption.rotate_confirm.message" = "기기에 아직 녹음 %d개가 남아 있으며 현재 키에 묶여 있습니다. 회전 후에는 이 iPhone에서 열리지 않으니 보관하려면 먼저 내려받으세요. 새 비밀구문을 반드시 적어 두세요. 앞으로의 녹음은 그것으로만 열 수 있고 복구는 불가능합니다.";
 "encryption.progress.probe_subtitle" = "비밀구문 검증을 위해 짧은 녹음을 만드는 중입니다. 검증 후 자동으로 삭제됩니다.";
 "encryption.mismatch.title" = "비밀구문이 일치하지 않습니다";
 "encryption.mismatch.message" = "그 비밀구문으로는 검증용 녹음을 복호화할 수 없었습니다. 다시 확인 후 시도해 주세요. 정말 잊으셨다면 \"회전\"으로 기기 키를 덮어쓸 수 있지만 — 기기에 있는 모든 기존 암호화 녹음이 영구적으로 손실됩니다.";
@@ -450,7 +450,9 @@
 "encryption.error.probe_not_found" = "기기에서 검증용 녹음을 찾지 못했습니다.";
 "encryption.error.device_busy" = "기기가 녹음을 시작하지 못했습니다: %@";
 "encryption.banner.title" = "기기가 암호화되어 있습니다";
-"encryption.banner.message" = "이 기기에 설정된 비밀구문을 입력하면 이 iPhone에서 녹음을 해제할 수 있습니다. 잊었다면 키를 회전할 수 있습니다(기기에 있는 기존 암호화 녹음이 지워집니다).";
+"encryption.switch_to_unlock_hint" = "이 키를 만든 비밀구문을 알고 있다면 여기서 확인하세요. 녹음이 바로 열리고 기기의 데이터는 덮어쓰지 않습니다. 덮어쓰기(회전)는 이 iPhone이 현재 키를 보유할 때만 성공합니다.";
+"encryption.switch_to_unlock" = "대신 현재 비밀구문 확인";
+"encryption.banner.message" = "이 기기에 설정한 비밀구문을 입력하면 이 iPhone에서 녹음을 해제할 수 있습니다. 다른 앱에서 만든 키는 그 앱에서 먼저 암호화를 해제해야 합니다. 이 iPhone은 보유하지 않은 키를 덮어쓸 수 없습니다.";
 "encryption.banner.cta" = "비밀구문 확인…";
 "encryption.download.key_missing" = "%@: 이 녹음은 암호화되어 있지만 이 iPhone에 비밀구문이 설정되어 있지 않습니다. 설정 → 암호화 비밀구문 → 기기 비밀구문 확인…에서 해제하세요.";
 "encryption.download.wrong_key" = "%1$@: 복호화하지 못했습니다 — 비밀구문이 이 녹음과 일치하지 않습니다. 설정 → 암호화 비밀구문에서 현재 비밀구문을 지우고 올바른 것을 설정하세요. (상세: %2$@)";

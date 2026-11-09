@@ -427,7 +427,7 @@
 "encryption.action.rotate" = "Rotar";
 "encryption.action.cancel" = "Cancelar";
 "encryption.progress.working" = "Trabajando…";
-"encryption.footer.rotate" = "Rotar escribe una clave totalmente nueva en el dispositivo. Todas las grabaciones cifradas existentes pasarán a ser imposibles de descifrar. Úsalo solo si te haces cargo de un dispositivo de segunda mano o has olvidado la frase anterior.";
+"encryption.footer.rotate" = "«Rotar» escribe una clave completamente nueva en el dispositivo. Las grabaciones que sigan en él quedan ligadas a la clave antigua y dejarán de abrirse en este iPhone: descárgalas antes. El dispositivo solo entrega su clave actual a quien la posee, así que la rotación solo funciona si este iPhone (o la frase que escribas) la posee; una clave puesta por la app del fabricante debe desactivarse allí primero.";
 "encryption.footer.set_encrypted" = "Este dispositivo está cifrado. Grabaremos un clip breve de prueba, lo descargaremos y probaremos a descifrarlo con la frase que has escrito. El clip de prueba se elimina automáticamente después.";
 "encryption.footer.set_unencrypted" = "Guarda la clave derivada localmente en el Llavero de iOS. El dispositivo no se toca — elige una frase robusta y activa el cifrado desde la pantalla del dispositivo cuando quieras.";
 "encryption.progress.deriving" = "Derivando clave…";
@@ -440,7 +440,7 @@
 "encryption.progress.checking_device" = "Comprobando las grabaciones del dispositivo…";
 "encryption.rotate_confirm.title" = "¿Rotar la clave del dispositivo?";
 "encryption.rotate_confirm.message_empty" = "El dispositivo ya no tiene grabaciones, no se perderá nada. Anota la nueva contraseña: es la única forma de abrir las grabaciones futuras y no hay recuperación.";
-"encryption.rotate_confirm.message" = "Aún hay %d grabación(es) en el dispositivo. Se hicieron con la clave anterior y quedarán ilegibles para siempre; descárgalas antes si quieres conservarlas. Anota la nueva contraseña: no hay recuperación.";
+"encryption.rotate_confirm.message" = "Quedan %d grabación(es) en el dispositivo y están ligadas a la clave actual: tras la rotación no se abrirán en este iPhone, así que descárgalas antes si quieres conservarlas. Anota la nueva frase: es la única forma de abrir las grabaciones futuras y no hay recuperación.";
 "encryption.progress.probe_subtitle" = "Se está grabando un clip breve para verificar la frase. Se eliminará automáticamente.";
 "encryption.mismatch.title" = "La frase no coincide";
 "encryption.mismatch.message" = "El clip de prueba no se pudo descifrar con esa frase. Compruébala con cuidado e inténtalo de nuevo. Si realmente la has olvidado, usa \"Rotar\" para sobrescribir la clave del dispositivo — pero eso destruye de forma permanente todas las grabaciones cifradas existentes.";
@@ -450,7 +450,9 @@
 "encryption.error.probe_not_found" = "No se encontró el clip de prueba en el dispositivo.";
 "encryption.error.device_busy" = "El dispositivo no pudo grabar: %@";
 "encryption.banner.title" = "El dispositivo está cifrado";
-"encryption.banner.message" = "Introduce la frase con la que se configuró este dispositivo para desbloquear sus grabaciones en este iPhone. Si la has olvidado, puedes rotar la clave (esto borra las grabaciones cifradas existentes en el dispositivo).";
+"encryption.switch_to_unlock_hint" = "Si conoces la frase con la que se creó esta clave, verifícala aquí: las grabaciones se podrán abrir y no se sobrescribe nada en el dispositivo. Sobrescribir solo funciona cuando este iPhone tiene la clave actual.";
+"encryption.switch_to_unlock" = "Verificar la frase actual en su lugar";
+"encryption.banner.message" = "Introduce la frase con la que se configuró este dispositivo para desbloquear sus grabaciones en este iPhone. Una clave creada por otra app debe desactivarse allí primero: este iPhone no puede sobrescribir una clave que no posee.";
 "encryption.banner.cta" = "Verificar la frase…";
 "encryption.download.key_missing" = "%@: esta grabación está cifrada, pero no hay frase configurada en este iPhone. Abre Ajustes → Frase de cifrado → Verificar la frase del dispositivo… para desbloquearla.";
 "encryption.download.wrong_key" = "%1$@: no se pudo descifrar — la frase no coincide con esta grabación. Abre Ajustes → Frase de cifrado, borra la actual y define la correcta. (Detalles: %2$@)";

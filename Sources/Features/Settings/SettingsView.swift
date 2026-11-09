@@ -3510,7 +3510,10 @@ struct DevicesLibraryView: View {
 // MARK: - Passphrase entry sheet
 
 struct PassphraseEntrySheet: View {
-    let mode: RecordingsSettingsView.PassphraseSheetMode
+    /// 可变：轮换被固件拒绝时，允许在**不关掉这张表单**的前提下切到「验证并解锁」，
+    /// 见 `foreignKeyBlocked`。用户 2026-11-09："轮换密钥覆盖都无法正常覆盖了"——
+    /// 拒绝之后原先只剩一条死路（关掉表单、自己去猜该去哪儿解锁）。
+    @State var mode: RecordingsSettingsView.PassphraseSheetMode
     let sn: String
     let client: DnoteClient?
     let onError: (String) -> Void
@@ -3533,6 +3536,9 @@ struct PassphraseEntrySheet: View {
     /// See `runSet` — at that point adopting the typed passphrase costs
     /// nothing, so the user is offered that instead of "wrong passphrase".
     @State private var adoptOffer: RotatePlan?
+    /// 固件拒绝放开旧钥匙（说明这把钥匙不是这句口令派生的）。留着表单，
+    /// 直接给一条「改用解锁模式」的出口，而不是让用户对着一段报错自行找路。
+    @State private var foreignKeyBlocked = false
 
     struct RotatePlan: Identifiable, Equatable {
         let passphrase: String
@@ -3548,6 +3554,17 @@ struct PassphraseEntrySheet: View {
         // their next download. When the device says OFF, no verify is
         // possible (and not useful: there are no encrypted files yet).
         client?.deviceEncryptionOn == true
+    }
+
+    /// 现问一次设备（0xA3）。`deviceIsEncrypted` 读的是缓存：连接刚建立、0xA3 还没
+    /// 回来时它是 **nil**，会被当成"设备未加密"——那就走进"直接存钥匙"的分支，
+    /// 存下一把从没验证过的钥匙。之后录音传得下来、解密全失败，正是这个洞。
+    private var deviceEncryptedLive: Bool {
+        get async {
+            guard let client else { return false }
+            if let live = try? await client.getEncryptionState() { return live }
+            return client.deviceEncryptionOn == true
+        }
     }
 
     private var primaryActionLabel: String {
@@ -3596,7 +3613,23 @@ struct PassphraseEntrySheet: View {
                         Text(footerCopy).font(.caption)
                     }
                     if let msg = localError {
-                        Section { Text(msg).foregroundStyle(.red).font(.caption) }
+                        Section {
+                            Text(msg).foregroundStyle(.red).font(.caption)
+                            if foreignKeyBlocked {
+                                Button(L10n.EncryptionOnboarding.switchToUnlock) {
+                                    foreignKeyBlocked = false
+                                    localError = nil
+                                    // 保留刚输入的口令：要验证的往往就是它
+                                    // （用户以为这是旧口令、才来轮换的）。
+                                    mode = .set
+                                }
+                                .font(.callout.weight(.medium))
+                            }
+                        } footer: {
+                            if foreignKeyBlocked {
+                                Text(L10n.EncryptionOnboarding.switchToUnlockHint).font(.caption)
+                            }
+                        }
                     }
                     Section {
                         Button(action: submit) {
@@ -3669,6 +3702,7 @@ struct PassphraseEntrySheet: View {
                     Task {
                         busy = true
                         localError = nil
+                        foreignKeyBlocked = false
                         defer { busy = false; progressMessage = "" }
                         do {
                             try await runRotate(passphrase: plan.passphrase, salt: plan.salt)
@@ -3694,6 +3728,7 @@ struct PassphraseEntrySheet: View {
                     Task {
                         busy = true
                         localError = nil
+                        foreignKeyBlocked = false
                         defer { busy = false; progressMessage = "" }
                         do {
                             try await runRotate(passphrase: plan.passphrase, salt: plan.salt)
@@ -3717,6 +3752,7 @@ struct PassphraseEntrySheet: View {
         Task {
             busy = true
             localError = nil
+            foreignKeyBlocked = false
             defer {
                 busy = false
                 progressMessage = ""
@@ -3741,7 +3777,10 @@ struct PassphraseEntrySheet: View {
     ///     the user enables encryption later; this is the case for a
     ///     freshly-purchased device that hasn't been turned on yet)
     private func runSet(passphrase: String, salt: String) async throws {
-        if deviceIsEncrypted {
+        // ★ 2026-11-09：先向设备问一次真实状态，别信缓存。缓存是 nil（0xA3 还没回来）
+        //   时会被判成"未加密"，于是把一句**从未验证过**的口令存进 Keychain —— 之后
+        //   录音传得下来、解密全失败（用户报的正是这个现象）。
+        if await deviceEncryptedLive {
             guard let client else {
                 localError = L10n.EncryptionOnboarding.errorConnectFirst
                 return
@@ -3827,30 +3866,53 @@ struct PassphraseEntrySheet: View {
         try PassphraseStore.save(key, sn: salt)
 
         progressMessage = L10n.EncryptionOnboarding.progressWritingKey
+        // 设备是否已被我们解除过——失败回滚时要把加密重新打开（见 catch）。
+        var deviceWasReleased = false
         do {
-            // ★ 2026-11-03（混合使用兼容，用户："给其他手机跟 Vobot Recorder 用过"）：
+            // ★ 2026-11-09（用户："轮换密钥覆盖都无法正常覆盖了…录音能传输但解密失败"）：
             //   固件 0xA2 的硬规则（官方协议 PDF §0xa2）——
             //   「已有密钥且开启状态下，必须**先解除**才能设新密钥；解除必须
             //   **带对旧密钥**，固件比对不一致不予解除」。
-            //   所以开启状态下先试"用刚派生的密钥解除"：
-            //   · 口令对得上（密钥就是它——本机 Keychain 丢了/在别的手机设的）
-            //     → 解除成功 → 重新写入，接管完成，**已录内容一个字节都没动**；
-            //   · 对不上（密钥来自官方 App 等，不是这句口令派生的）→ 固件拒绝，
-            //     给出明确指引而不是含糊的 BLE 错误。
+            //
+            //   所以解除这一步**必须拿旧钥匙**去做。旧实现用的是刚派生出来的新钥匙
+            //   （`key`），那等于要求"新旧口令一模一样"——只要用户真想换个口令，
+            //   固件必然拒绝，于是"轮换"永久失效。修复：先拿本机 Keychain 里那把
+            //   已知能开的旧钥匙（`previous`）去解，解开再写新钥匙。
             if try await client.getEncryptionState() {
-                do {
-                    try await client.setEncryption(on: false, key: key)
-                } catch {
-                    throw ForeignKeyKeyError()
+                var released = false
+                // ① 本机保存的旧钥匙：正常路径（钥匙就是在这台手机上设的）
+                if let previous {
+                    if (try? await client.setEncryption(on: false, key: previous)) != nil {
+                        released = true
+                    }
                 }
+                // ② 用户刚输入的口令：本机 Keychain 丢过、或钥匙是别的手机设的，
+                //    但用户知道那句旧口令 → 新钥匙恰好等于旧钥匙，也能解开。
+                if !released {
+                    do {
+                        try await client.setEncryption(on: false, key: key)
+                    } catch let e as DnoteError {
+                        // 只有固件明确回 NAK 才算"拒绝解除"；超时、断链要如实报出来，
+                        // 否则用户会照着"去厂商 App 关加密"的指引白折腾一遍。
+                        if case .ackFailed = e { throw ForeignKeyKeyError() }
+                        throw e
+                    }
+                }
+                deviceWasReleased = true
             }
             try await client.setEncryption(on: true, key: key)
         } catch {
+            if deviceWasReleased, let previous {
+                // 设备已经被解除、新钥匙却没写成 → 把加密按旧钥匙重新打开，
+                // 否则设备停在"加密关闭 + 旧文件"的状态，旧录音会被当明文处理。
+                try? await client.setEncryption(on: true, key: previous)
+            }
             if let previous {
                 try? PassphraseStore.save(previous, sn: salt)
             } else {
                 PassphraseStore.clear(sn: salt)
             }
+            if error is ForeignKeyKeyError { foreignKeyBlocked = true }
             throw error
         }
         // ★ 2026-11-04：钥匙换了，旧的 KCV 立刻失效。

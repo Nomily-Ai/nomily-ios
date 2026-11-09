@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Modal device sheet — connection, identity, audio, behavior, danger zone.
 struct DeviceSheet: View {
@@ -18,6 +19,19 @@ struct DeviceSheet: View {
     @State private var showRename = false
     @State private var renameText = ""
 
+    // ★ 2026-11-09 固件 OTA（0xB0/0xB1）。流程一旦开始不允许中途取消——
+    //   升级模式里退出连接才是真正危险的（官方升级页同样"请勿关闭"）。
+    @State private var otaPhase: DnoteClient.OtaPhase?
+    @State private var otaError: String?
+    @State private var otaData: Data?
+    @State private var otaFileName: String?
+    @State private var showOTAImporter = false
+    @State private var showOTAConfirm = false
+
+    private var otaRunning: Bool {
+        otaPhase != nil && otaPhase != .done
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -29,6 +43,9 @@ struct DeviceSheet: View {
                 if let info = client.lastDeviceInfo {
                     identitySection(info)
                         .disabled(isRecording)
+                    // OTA 只有在真连着的时候才有意义；录音中整段禁用。
+                    otaSection(info)
+                        .disabled(isRecording || !client.isConnected)
                 }
                 if let switches = client.lastSwitchInfo {
                     audioSection(switches)
@@ -52,9 +69,11 @@ struct DeviceSheet: View {
             }
             .navigationTitle(client.displayName)
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(otaRunning)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(L10n.Common.done) { dismiss() }
+                        .disabled(otaRunning)
                 }
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
@@ -62,8 +81,33 @@ struct DeviceSheet: View {
                     } label: {
                         if refreshing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
                     }
-                    .disabled(refreshing)
+                    .disabled(refreshing || otaRunning)
                 }
+            }
+            .fileImporter(
+                isPresented: $showOTAImporter,
+                allowedContentTypes: [.data],
+                allowsMultipleSelection: false
+            ) { result in
+                handleOTAPick(result)
+            }
+            .confirmationDialog(
+                L10n.DeviceOta.confirmTitle,
+                isPresented: $showOTAConfirm,
+                titleVisibility: .visible
+            ) {
+                Button(L10n.DeviceOta.start, role: .destructive) { startOTA() }
+                Button(L10n.Common.cancel, role: .cancel) {}
+            } message: {
+                Text(L10n.DeviceOta.confirmMessage)
+            }
+            .alert(L10n.DeviceOta.errorTitle, isPresented: Binding(
+                get: { otaError != nil },
+                set: { if !$0 { otaError = nil } }
+            )) {
+                Button(L10n.Common.ok, role: .cancel) {}
+            } message: {
+                Text(otaError ?? "")
             }
             .overlay(alignment: .bottom) { busyOverlay }
             .alert(L10n.Device.couldntUpdate, isPresented: errorBinding) {
@@ -158,6 +202,102 @@ struct DeviceSheet: View {
     }
 
     // MARK: sections
+
+    /// ★ 2026-11-09 固件 OTA。选择厂商给的 Firmware.lz → 确认 → 0xB0/0xB1 全流程。
+    @ViewBuilder
+    private func otaSection(_ info: DeviceInfo) -> some View {
+        Section {
+            if let phase = otaPhase {
+                switch phase {
+                case .transferring(let sent, let total):
+                    ProgressView(value: Double(sent), total: Double(max(total, 1))) {
+                        Text(L10n.DeviceOta.transferring).font(.subheadline)
+                    } currentValueLabel: {
+                        Text("\(sent * 100 / max(total, 1))%")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                case .flashing(let kb):
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(L10n.DeviceOta.flashing).font(.subheadline)
+                        Spacer()
+                        if let kb {
+                            Text("\(kb) KB")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                case .done:
+                    Label(L10n.DeviceOta.success, systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.subheadline)
+                }
+            } else if let name = otaFileName, let data = otaData {
+                Button { showOTAConfirm = true } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L10n.DeviceOta.readyFile(name, data.count / 1024))
+                            .font(.subheadline)
+                        Text(L10n.DeviceOta.readyHint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Button(L10n.DeviceOta.clearFile, role: .destructive) {
+                    otaData = nil
+                    otaFileName = nil
+                }
+            } else {
+                Button(L10n.DeviceOta.pickFile) { showOTAImporter = true }
+            }
+        } header: {
+            HStack(spacing: 4) {
+                Text(L10n.DeviceOta.sectionHeader)
+                InfoTip(text: L10n.DeviceOta.footer)
+            }
+        } footer: {
+            if let fw = info.firmware {
+                Text(L10n.DeviceOta.currentVersion(fw)).font(.caption)
+            }
+        }
+    }
+
+    /// 只接受"长得像固件包"的文件：体积过小或 zlib 头不对就拒掉，
+    /// 避免把一份随手选的文件推进升级模式。
+    private func handleOTAPick(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else {
+            otaError = L10n.DeviceOta.unreadableFile
+            return
+        }
+        // zlib CMF 字节低 4 位必须是 8（0x78 是最常见的 deflate 窗口）。
+        guard data.count > 100_000, (data.first ?? 0) & 0x0F == 0x08 else {
+            otaError = L10n.DeviceOta.unsupportedFile
+            return
+        }
+        otaData = data
+        otaFileName = url.lastPathComponent
+    }
+
+    private func startOTA() {
+        guard let data = otaData, !otaRunning else { return }
+        otaPhase = .transferring(sent: 0, total: data.count)
+        Task {
+            do {
+                try await client.runFirmwareUpgrade(data) { phase in
+                    otaPhase = phase
+                }
+                otaPhase = .done
+                // 升级完设备会重启；重连后刷新版本号，让用户直接对着 footer 核对。
+                _ = try? await client.getDeviceInfo()
+            } catch {
+                otaPhase = nil
+                otaError = error.localizedDescription
+            }
+        }
+    }
 
     private var isRecording: Bool {
         client.lastDeviceInfo?.isRecording == true

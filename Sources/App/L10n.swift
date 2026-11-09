@@ -5435,6 +5435,40 @@ enum L10n {
         ) }
     }
 
+    /// ★ 2026-11-09 固件 OTA（0xB0/0xB1）。文案对齐官方升级页的口径
+    ///   （"升级预计 5-10 分钟，请勿关闭 App / 断开连接"）。
+    enum DeviceOta {
+        static var sectionHeader: String { NSLocalizedString("device_ota.section_header", value: "Firmware update", comment: "Device sheet section for OTA") }
+        static var footer: String { NSLocalizedString("device_ota.footer", value: "Only load firmware packages (.lz) provided by the factory. The whole update takes about 5–10 minutes: keep the device connected and powered, and don't leave this page. Recordings already on the device are not affected.", comment: "OTA section footer") }
+        static var pickFile: String { NSLocalizedString("device_ota.pick_file", value: "Choose firmware file…", comment: "Open the file picker for a .lz firmware package") }
+        static func readyFile(_ name: String, _ kb: Int) -> String {
+            String(format: NSLocalizedString("device_ota.ready_file", value: "%1$@ (%2$d KB) — tap to start", comment: "Selected firmware package name + size"), name, kb)
+        }
+        static var readyHint: String { NSLocalizedString("device_ota.ready_hint", value: "The device will enter upgrade mode immediately after you confirm.", comment: "Hint above the start button") }
+        static var clearFile: String { NSLocalizedString("device_ota.clear_file", value: "Remove selected file", comment: "Drop the picked firmware package") }
+        static var confirmTitle: String { NSLocalizedString("device_ota.confirm_title", value: "Update firmware now?", comment: "Confirmation before entering upgrade mode") }
+        static var confirmMessage: String { NSLocalizedString("device_ota.confirm_message", value: "The device enters upgrade mode and stops taking commands. Keep it within range and powered, and don't close this page. Don't do this while recording.", comment: "OTA confirmation body") }
+        static var start: String { NSLocalizedString("device_ota.start", value: "Start update", comment: "Confirm button") }
+        static var transferring: String { NSLocalizedString("device_ota.transferring", value: "Transferring firmware…", comment: "Upload phase") }
+        static var flashing: String { NSLocalizedString("device_ota.flashing", value: "Device is flashing the firmware…", comment: "Self-upgrade phase") }
+        static var success: String { NSLocalizedString("device_ota.success", value: "Update complete. The device is restarting — reconnect and check the version below.", comment: "OTA finished") }
+        static var errorTitle: String { NSLocalizedString("device_ota.error_title", value: "Update didn't finish", comment: "OTA failure alert title") }
+        static var errorRefused: String { NSLocalizedString("device_ota.error_refused", value: "The device refused to enter upgrade mode. Stop any recording, make sure it's connected, and try again.", comment: "0xB0 returned 0x00") }
+        static var errorStopped: String { NSLocalizedString("device_ota.error_stopped", value: "The device left upgrade mode.", comment: "Device aborted (status 0011)") }
+        static var errorDeviceFailed: String { NSLocalizedString("device_ota.error_device_failed", value: "The device reported a failed update. Retry with the same package; if it fails again, contact the factory.", comment: "Device flashed and failed (status 0110)") }
+        static var errorCannotResync: String { NSLocalizedString("device_ota.error_cannot_resync", value: "The transfer lost sync and couldn't resume safely. Nothing was written — you can retry the update.", comment: "Resend request couldn't be located") }
+        static var unsupportedFile: String { NSLocalizedString("device_ota.unsupported_file", value: "That doesn't look like a firmware package (.lz). Use the file from the factory folder.", comment: "Picked file failed the zlib/size sanity check") }
+        static var unreadableFile: String { NSLocalizedString("device_ota.unreadable_file", value: "Couldn't read that file.", comment: "Picker file couldn't be loaded") }
+        static func currentVersion(_ v: String) -> String {
+            String(format: NSLocalizedString("device_ota.current_version", value: "Current version: %@", comment: "Footer showing the firmware version read from the device"), v)
+        }
+        // 阶段化报错（首跑失败后加的：让弹窗直接说出"断在哪一步"）
+        static var errorAtStage: String { NSLocalizedString("device_ota.error_at_stage", value: "The update stopped at '%1$@': %2$@", comment: "OTA failure with the phase it died in") }
+        static var stageEnter: String { NSLocalizedString("device_ota.stage_enter", value: "Entering upgrade mode", comment: "OTA phase: 0xB0 start") }
+        static var stageTransfer: String { NSLocalizedString("device_ota.stage_transfer", value: "Transferring firmware", comment: "OTA phase: 0xB1 upload") }
+        static var stageFlash: String { NSLocalizedString("device_ota.stage_flash", value: "Waiting for the device to flash", comment: "OTA phase: device self-upgrade") }
+    }
+
     // MARK: - Developer mode (hidden toggle behind the version-tap easter egg)
 
     enum DeveloperMode {
@@ -5530,7 +5564,7 @@ enum L10n {
         static var working: String { NSLocalizedString("encryption.progress.working", value: "Working…", comment: "Generic progress label fallback") }
 
         // Sheet — context-aware footer copy
-        static var footerRotate: String { NSLocalizedString("encryption.footer.rotate", value: "Rotate writes a brand-new key to the device. Every existing encrypted recording on the device becomes permanently undecryptable. Use this only when you're taking ownership of a pre-owned device or have forgotten the old passphrase.", comment: "Footer when the user is rotating") }
+        static var footerRotate: String { NSLocalizedString("encryption.footer.rotate", value: "Rotate writes a brand-new key to the device. Recordings still on it stay locked to the old key and stop opening on this iPhone — download them first. The device only lets go of its current key for whoever holds it, so rotate succeeds when this iPhone (or the passphrase you type) owns it; a key set by the vendor's app has to be turned off there first.", comment: "Footer when the user is rotating") }
         static var footerSetEncrypted: String { NSLocalizedString("encryption.footer.set_encrypted", value: "This device is encrypted. We'll record a short probe clip, download it, and trial-decrypt with the passphrase you typed. The probe is auto-deleted afterwards.", comment: "Footer when Set will verify against an existing encrypted clip") }
         static var footerSetUnencrypted: String { NSLocalizedString("encryption.footer.set_unencrypted", value: "Saves the locally-derived key to the iOS Keychain. The device isn't touched — pick a strong passphrase and enable encryption from the Device sheet when you're ready.", comment: "Footer when Set is saving a dormant key (device encryption off)") }
 
@@ -5551,7 +5585,7 @@ enum L10n {
             if count == 0 {
                 return NSLocalizedString("encryption.rotate_confirm.message_empty", value: "The device has no recordings left, so nothing will be lost. Write down the new passphrase — it's the only way to open recordings made from now on, and there is no recovery.", comment: "Rotate confirmation, nothing at risk")
             }
-            return String(format: NSLocalizedString("encryption.rotate_confirm.message", value: "%d recording(s) are still on the device. They were made with the old key and will become permanently unreadable — download them first if you want to keep them. Write down the new passphrase: it's the only way to open recordings made from now on, and there is no recovery.", comment: "Rotate confirmation, N recordings at risk"), count)
+            return String(format: NSLocalizedString("encryption.rotate_confirm.message", value: "%d recording(s) are still on the device and are locked to the current key — after rotation they won't open on this iPhone, so download them first to keep them. Write down the new passphrase: it's the only way to open recordings made from now on, and there is no recovery.", comment: "Rotate confirmation, N recordings at risk"), count)
         }
 
         // Mismatch alert
@@ -5560,7 +5594,10 @@ enum L10n {
         static var mismatchTryAgain: String { NSLocalizedString("encryption.mismatch.try_again", value: "Try again", comment: "Alert button to retry") }
         /// ★ 2026-11-03（混合使用兼容）：轮换时设备现役密钥不是这句口令派生的，
         ///   固件拒绝解除（协议 0xA2 规则 2）——必须先去设置该密钥的 App 里解除加密。
-        static var foreignKeyBlocked: String { NSLocalizedString("encryption.foreign_key.blocked", value: "The device's current key wasn't set with this passphrase (it was likely created by the vendor's app or another phone). Firmware refuses to overwrite it. Open the app that set the key and turn encryption OFF there first — then come back and set the passphrase here. Recordings already on the device stay safe either way.", comment: "Rotate failed because the device holds a foreign key") }
+        static var foreignKeyBlocked: String { NSLocalizedString("encryption.foreign_key.blocked", value: "The device's current key wasn't set with this passphrase (it was likely created by the vendor's app or another phone), and the firmware refuses to overwrite it. Turn encryption OFF in the app that set the key first, then set the passphrase here. Recordings already on the device stay safe either way.", comment: "Rotate failed because the device holds a foreign key") }
+        /// 轮换被拒后的出口：改走「验证并解锁」，不再要求覆盖设备密钥。
+        static var switchToUnlock: String { NSLocalizedString("encryption.switch_to_unlock", value: "Verify the current passphrase instead", comment: "Button offered after a rejected rotate — flips the sheet to verify mode") }
+        static var switchToUnlockHint: String { NSLocalizedString("encryption.switch_to_unlock_hint", value: "If you know the passphrase this key was created with, verify it here: recordings become readable and nothing on the device is overwritten. Overwriting only works once this iPhone holds the current key.", comment: "Caption under the switch-to-verify button") }
 
         // Inline errors
         static var errorDeviceNotConnected: String { NSLocalizedString("encryption.error.device_not_connected", value: "Device not connected.", comment: "Error: Rotate attempted with no connection") }
