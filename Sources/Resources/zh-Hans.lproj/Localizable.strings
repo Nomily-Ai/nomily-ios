@@ -1327,12 +1327,6 @@
 "a1.step1.body" = "二手买来的话，先让卖家解绑，然后你在钉钉里扫码绑定。这一步只能你自己做——它决定了这张卡把密钥交给哪个账号。";
 "a1.step2.title" = "在电脑版钉钉打开一次「AI 听记」";
 "a1.step2.body" = "随便点一个模板就行。钉钉会把设备列表（含密钥）写进那台电脑上的日志。";
-"a1.step3.title" = "在那台 Mac 上打开「A1 密钥提取器」";
-"a1.step3.body" = "在这台 Mac 的浏览器打开下载页：https://a1-key-extractor.app.workbuddy.host/?sharecode=QDT5ZC4DMF ，下载「A1 密钥提取器」（免安装，首次打开右键→打开），点「重新扫描」后用本机扫屏幕上的二维码。命令行后备：python3 extract_secret_from_dingtalk_mac.py --copy --qr";
-"a1.copy_command" = "复制这条命令";
-"a1.command_footer" = "提取器只读这台 Mac 上钉钉自己的日志，不碰卡片、不改固件、不动你的钉钉账号。";
-"a1.command.editor_title" = "提取命令";
-"a1.command.editor_footer" = "脚本随 Nomily 工具包附带，把它改成你 Mac 上的实际位置即可。加上 --qr 会同时打出一个二维码，手机直接扫，不用粘贴。示例：cd <脚本目录> && python3 extract_secret_from_dingtalk_mac.py --copy --qr";
 "a1.open_import" = "导入这张卡的密钥…";
 "a1.error.no_credential" = "这台手机上还没有这张卡的密钥。打开这张卡的设备信息页 →「卡片密钥」扫码或粘贴导入——只需一次，之后全部离线使用。";
 "a1.error.rejected" = "卡拒绝了已存的凭据（501）。每张卡的 secret 只对它自己有效——请到「设置 → 钉钉 A1」导入这张卡自己的凭据。";

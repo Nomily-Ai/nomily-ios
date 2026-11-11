@@ -1,20 +1,26 @@
 # Nomily iOS
 
-Native iOS companion for AI recorder cards — connects over BLE, browses and transfers recordings, drives device settings, and runs ASR (Azure, local Whisper, or fully on-device). Project overview and licence: [nomily-app](https://github.com/Nomily-Ai/nomily-app).
+Native iOS companion for Vobot V05E and Apple Watch recording workflows. It
+connects to V05E over BLE, manages recordings, and runs ASR (Azure, local
+Whisper, or fully on-device). Project overview and licence:
+[nomily-app](https://github.com/Nomily-Ai/nomily-app).
 
 ## Supported devices
 
 | Device | Link | What works |
 |---|---|---|
-| **D·NOTE (TicNote)** | BLE, native protocol | Full control: scan/connect, device settings sheet, recordings with ChaCha20 decryption, Wi-Fi Fast Transfer, live OPUS stream |
-| **钉钉 A1（DingTalk A1 听记卡片）** | BLE, reversed protocol (`FE3C`/`FE1C`/`FE1B`) | Card-secret import from the Mac DingTalk client, recording / stop / marks / battery / storage, encrypted audio pull, UT diagnostic log (`0x000C`) for precise timing |
-| **PLAUD Note Pro** | Official PLAUD Embedded SDK (takeover) + PLAUD cloud | Direct connect pulls the **original audio** off the card over BLE — no PLAUD account involved; live recording control, mark count, batch pull/delete, transfer watchdog; optional **cloud mode** signs in with a PLAUD account (email OTP) and pulls cloud recordings |
+| **Vobot V05E** | BLE | Native recording transfer workflow; compatibility depends on the tested device and firmware. |
+| **Apple Watch** | watchOS companion | Records on the watch and transfers to the paired iPhone. |
+| **Audio files already on iPhone** | File import | Import into the library for transcription and summary workflows. This is not a device-integration claim. |
 
-PLAUD notes: takeover requires the partner Client ID / Secret from [dev.plaud.ai](https://dev.plaud.ai) (your PLAUD app account is never used for direct connect). The card can be handed back — one tap unbinds it (`depair` + cloud unbind) so the official PLAUD app (China or global build) can pair it again, and a built-in **device recovery** force-clears the on-device ownership lock when a card is locked out of every app.
+No other recorder model is publicly represented as compatible with Nomily merely
+because it records audio, exposes Bluetooth, or provides an export function.
 
 ## Status
 
-Full-featured companion app for three recorder cards (D·NOTE, DingTalk A1, PLAUD Note Pro): BLE scan/connect, complete device control, recording browse / transfer / decrypt, on-device and Apple Watch recording, live and file transcription (Azure, local Whisper, or on-device), and Fast Transfer over Wi-Fi.
+Native companion app for the Vobot V05E workflow, Apple Watch recording, local
+library management, live and file transcription (Azure, local Whisper, or
+on-device), and Wi-Fi transfer where supported by the V05E workflow.
 
 - Scan + connect with escalating-timeout retries.
 - Full Device sheet: switches, mic-gain / NR sliders, idle-off picker, Bluetooth-name editor with live byte counter, sync-time, and Format / Factory-reset / Shut-down with destructive confirmations.

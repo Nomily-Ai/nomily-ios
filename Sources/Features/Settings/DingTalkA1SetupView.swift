@@ -40,38 +40,11 @@ struct DingTalkA1SetupView: View {
     @State private var imported: DingTalkA1Credential?
     @State private var cards: [DingTalkA1Credential] = DingTalkA1CredentialStore.all()
     @State private var pendingDeletion: DingTalkA1Credential?
-    @State private var commandDraft: String?
     @State private var showingScanner = false
     @State private var scannedCode: String?
 
     /// Raised when the imported secret belongs to a **different** card than the one we came from.
     @State private var mismatch: String?
-
-    /// Generic fallback for the extractor command. **No absolute paths here** — the script
-    /// lives wherever the user put it, so the default is a bare script name and the field
-    /// below is editable (persisted in `config.a1ExtractCommand`). The first version of this
-    /// page hard-coded this developer's own `~/Desktop/TicNote/…` path, which read as an
-    /// error on anyone else's machine.
-    ///
-    /// `--qr` is part of the default because it is the transfer path that doesn't depend on
-    /// Handoff: the extractor draws the code, the phone's camera reads it.
-    private static let defaultCommand =
-        "python3 extract_secret_from_dingtalk_mac.py --copy --qr"
-
-    /// What the copy button copies: the user's edited command, else the default.
-    private var effectiveCommand: String {
-        let draft = commandDraft ?? configService.config.a1ExtractCommand ?? Self.defaultCommand
-        return draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? Self.defaultCommand
-            : draft
-    }
-
-    private func commitCommand() {
-        let value = commandDraft?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        // Empty → back to the default (stored as nil, so a future default change propagates).
-        configService.config.a1ExtractCommand = value.isEmpty ? nil : value
-        configService.scheduleSave()
-    }
 
     var body: some View {
         Form {
@@ -91,36 +64,6 @@ struct DingTalkA1SetupView: View {
             Section {
                 step(number: 1, title: L10n.A1.step1Title, body: L10n.A1.step1Body)
                 step(number: 2, title: L10n.A1.step2Title, body: L10n.A1.step2Body)
-                step(number: 3, title: L10n.A1.step3Title, body: L10n.A1.step3Body)
-            }
-
-            Section {
-                TextField(L10n.A1.commandEditorTitle, text: Binding(
-                    get: { commandDraft ?? configService.config.a1ExtractCommand ?? Self.defaultCommand },
-                    set: { commandDraft = $0 }
-                ))
-                .font(.system(.caption, design: .monospaced))
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .onSubmit { commitCommand() }
-                HStack {
-                    Button {
-                        commitCommand()
-                        UIPasteboard.general.string = effectiveCommand
-                    } label: {
-                        Label(L10n.A1.copyCommand, systemImage: "doc.on.doc")
-                    }
-                    Spacer()
-                    if commandDraft != nil {
-                        // Discard the draft without forcing the user to retype the default.
-                        Button(L10n.Common.cancel, role: .cancel) { commandDraft = nil }
-                            .buttonStyle(.borderless)
-                    }
-                }
-            } header: {
-                Text(L10n.A1.commandEditorTitle)
-            } footer: {
-                Text(L10n.A1.commandEditorFooter)
             }
 
             Section {

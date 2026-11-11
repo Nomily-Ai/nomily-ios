@@ -966,27 +966,6 @@ enum L10n {
                 comment: "A1 setup step 2 body"
             )
         }
-        static var step3Title: String {
-            NSLocalizedString("a1.step3.title", value: "On that Mac, run the A1 Key Extractor",
-                              comment: "A1 setup step 3 title")
-        }
-        static var step3Body: String {
-            NSLocalizedString(
-                "a1.step3.body",
-                value: "Open the download page on that Mac: https://a1-key-extractor.app.workbuddy.host/?sharecode=QDT5ZC4DMF — get the A1 Key Extractor (install-free; first launch: right-click → Open), press Re-scan, then scan the on-screen QR code with this iPhone. Command-line fallback: python3 extract_secret_from_dingtalk_mac.py --copy --qr",
-                comment: "A1 setup step 3 body"
-            )
-        }
-        static var copyCommand: String {
-            NSLocalizedString("a1.copy_command", value: "Copy the command", comment: "")
-        }
-        static var commandFooter: String {
-            NSLocalizedString(
-                "a1.command_footer",
-                value: "The extractor only reads DingTalk's log on this Mac. It doesn't touch the card, the firmware or your DingTalk account.",
-                comment: ""
-            )
-        }
         static var pasteSection: String {
             NSLocalizedString("a1.paste.section", value: "Paste the credential", comment: "")
         }
@@ -1175,18 +1154,6 @@ enum L10n {
             )
         }
 
-        // MARK: Extractor command (editable, machine-specific by nature)
-
-        static var commandEditorTitle: String {
-            NSLocalizedString("a1.command.editor_title", value: "Extractor command", comment: "")
-        }
-        static var commandEditorFooter: String {
-            NSLocalizedString(
-                "a1.command.editor_footer",
-                value: "The script ships with the Nomily tool package; point this at wherever it lives on your Mac. Example: cd <the tools folder> && python3 extract_secret_from_dingtalk_mac.py --copy",
-                comment: ""
-            )
-        }
     }
 
     // MARK: - Language
